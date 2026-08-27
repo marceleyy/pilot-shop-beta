@@ -1118,7 +1118,7 @@ function regleDLC(nom, type) {
   return m ? m.regle : 'defaut';
 }
 
-/* VRAI Scanner OCR avec Tesseract.js (Version Robuste iPad + Redimensionnement) */
+/* VRAI Scanner OCR avec Tesseract.js (Filtre N&B Anti-Reflets) */
 function scannerPhoto(type) {
   return new Promise(resolve => {
     const cam = $('#cam');
@@ -1131,24 +1131,35 @@ function scannerPhoto(type) {
         '<p class="sub" id="ocr-status">Préparation de l’image...</p>' +
         '<div class="vide"><span class="vi">🔍</span>L’IA déchiffre l’étiquette...</div>');
 
-      // 1. Convertir et redimensionner l'image pour éviter de saturer l'iPad
       const img = new Image();
       img.onload = async () => {
         try {
           if (typeof Tesseract === 'undefined') throw new Error("Lecteur OCR indisponible");
 
-          // Création d'une toile invisible pour réduire la photo
+          // 1. Toile de redimensionnement
           const canvas = document.createElement('canvas');
           const ctx = canvas.getContext('2d');
-          const MAX_WIDTH = 1200; // Taille idéale pour l'OCR sans bug
+          const MAX_WIDTH = 1000;
           let w = img.width, h = img.height;
           if (w > MAX_WIDTH) { h = Math.round((h * MAX_WIDTH) / w); w = MAX_WIDTH; }
           canvas.width = w; canvas.height = h;
           ctx.drawImage(img, 0, 0, w, h);
 
-          $('#ocr-status').textContent = "Téléchargement du moteur IA...";
+          // 2. Filtre N&B pour tuer les reflets métalliques
+          const imgData = ctx.getImageData(0, 0, w, h);
+          const data = imgData.data;
+          for (let i = 0; i < data.length; i += 4) {
+            // Conversion en gris
+            const gris = data[i] * 0.3 + data[i+1] * 0.59 + data[i+2] * 0.11;
+            // Augmentation drastique du contraste (seuil)
+            const couleur = gris < 130 ? 0 : 255;
+            data[i] = data[i+1] = data[i+2] = couleur;
+          }
+          ctx.putImageData(imgData, 0, 0);
 
-          // 2. Lancer Tesseract sur l'image nettoyée avec barre de progression
+          $('#ocr-status').textContent = "Analyse IA...";
+
+          // 3. Décodage Tesseract
           const result = await Tesseract.recognize(canvas, 'eng+fra', {
             logger: m => {
               if (m.status === 'recognizing text') {
@@ -1165,7 +1176,7 @@ function scannerPhoto(type) {
             let cleProduit = null;
             let nomProduit = 'Inconnu';
 
-            // 3. Détection tolérante (O=0, S=5, etc.)
+            // Détection du Batch
             const matchBatch = txtPropre.match(/([0-9IlOoS]{5})\s*([A-Z])/i);
             if (matchBatch) {
               let chiffres = matchBatch[1].toUpperCase().replace(/I|L/g, '1').replace(/O/g, '0').replace(/S/g, '5');
@@ -1173,7 +1184,7 @@ function scannerPhoto(type) {
               lotDetecte = chiffres + lettre;
             }
 
-            // 4. Détection du parfum
+            // Détection du produit
             const txtMin = txtPropre.toLowerCase();
             const src = PARFUMS.map(p => ({ cle:'g_' + p, nom:p }))
               .concat(Object.keys(DLC_RULES).filter(k => k !== 'defaut' && k !== 'gelato').map(k => ({ cle:'c_' + k, nom:DLC_RULES[k].label })));
@@ -1206,17 +1217,11 @@ function scannerPhoto(type) {
 
             $('#sc-x').onclick  = () => { closeSheet(); resolve(null); };
             $('#sc-ok').onclick = () => { closeSheet(); resolve(r); };
-          } else if (type === 'bl') {
-             // Mode Bon de livraison conservé tel quel (à développer plus tard si besoin)
-             closeSheet();
-             toast('OCR sur Bon de livraison non configuré', 'warn');
-             resolve(null);
           }
         } catch (e) {
           closeSheet(); toast('Erreur IA : ' + e.message, 'erreur'); resolve(null);
         }
       };
-      // Déclenche le chargement de l'image
       img.src = URL.createObjectURL(file);
     };
     cam.click();
