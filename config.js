@@ -27,13 +27,13 @@ const APP = {
    policies RLS côté Supabase, jamais sur ce fichier.
    -------------------------------------------------------------------------- */
 const SUPABASE = {
-  url:     (typeof window !== 'undefined' && window.__ENV__ && window.__ENV__.SUPABASE_URL)      || '',
-  anonKey: (typeof window !== 'undefined' && window.__ENV__ && window.__ENV__.SUPABASE_ANON_KEY) || '',
-  schema:  'public',
+  url: 'https://yphqsppysxhseqmmlfia.supabase.co', 
+  anonKey: 'sb_publishable_39wRfKoBFjmpYiU7R1ezMw_OAv4zCp2',
+  schema: 'public',
   tables: {
     sites:        'sites',
     employes:     'employes',
-    sessions:     'sessions',        // pointeuse : début / fin de service
+    sessions:     'sessions',
     temperatures: 'releves_temperature',
     nettoyage:    'taches_nettoyage',
     reassort:     'reassort',
@@ -44,12 +44,11 @@ const SUPABASE = {
     caisse:       'caisse',
     ventes:       'ventes',
     periodes:     'periodes',
-    releve:       'carnet_releve',   // messages de passation
+    releve:       'carnet_releve',
     feed:         'journal',
     feedback:     'feedback'
   },
   realtime: ['journal', 'ruptures', 'carnet_releve'],
-  /* Colonnes de scoping multi-boutique — présentes sur chaque table */
   scope: { site: 'site_id', horodatage: 'created_at', auteur: 'employe_id' }
 };
 
