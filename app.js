@@ -1118,7 +1118,7 @@ function regleDLC(nom, type) {
   return m ? m.regle : 'defaut';
 }
 
-/* VRAI Scanner OCR avec Tesseract.js */
+/* VRAI Scanner OCR avec Tesseract.js (Version tolérante + Debug) */
 function scannerPhoto(type) {
   return new Promise(resolve => {
     const cam = $('#cam');
@@ -1136,34 +1136,41 @@ function scannerPhoto(type) {
 
         const result = await Tesseract.recognize(file, 'eng+fra');
         const texte = result.data.text;
+        
+        // Nettoyage du texte pour faciliter la recherche (on enlève les sauts de ligne)
+        const txtPropre = texte.replace(/\n/g, ' ').replace(/\s+/g, ' ');
 
         if (type === 'etiquette') {
           let lotDetecte = '';
           let cleProduit = null;
           let nomProduit = 'Inconnu';
 
-          // 1. Détection du Batch : 5 chiffres suivis d'une lettre (ex: 13845A)
-          const matchBatch = texte.match(/\b\d{5}[A-Z]\b/);
+          // 1. Détection du Batch tolérante (5 chiffres/lettres ressemblantes + 1 lettre)
+          // Ex: On autorise que le 5 soit lu "S", le 0 lu "O", le 1 lu "l" ou "I"
+          const matchBatch = txtPropre.match(/([0-9IlOoS]{5})\s*([A-Z])/i);
+          
           if (matchBatch) {
-            lotDetecte = matchBatch[0];
-          } else {
-            const matchFallback = texte.match(/Batch.*?([A-Z0-9]{5,8})/i);
-            if (matchFallback) lotDetecte = matchFallback[1];
+            // On corrige les erreurs OCR fréquentes sur les chiffres
+            let chiffres = matchBatch[1].toUpperCase()
+              .replace(/I|L/g, '1')
+              .replace(/O/g, '0')
+              .replace(/S/g, '5');
+            let lettre = matchBatch[2].toUpperCase();
+            lotDetecte = chiffres + lettre;
           }
 
           // 2. Détection du produit (Croisement avec le catalogue)
-          const txtPropre = texte.toLowerCase().replace(/\n/g, ' ');
+          const txtMin = txtPropre.toLowerCase();
           const src = PARFUMS.map(p => ({ cle:'g_' + p, nom:p }))
             .concat(Object.keys(DLC_RULES).filter(k => k !== 'defaut' && k !== 'gelato')
             .map(k => ({ cle:'c_' + k, nom:DLC_RULES[k].label })));
 
-          // Mots-clés des étiquettes (Tiramisu, Yoghurt, Caramello) vers le catalogue
-          if (txtPropre.includes('tiramisu')) { nomProduit = 'Tiramisu'; cleProduit = 'g_Tiramisu'; }
-          else if (txtPropre.includes('yoghurt') || txtPropre.includes('yaourt')) { nomProduit = 'Yaourt'; cleProduit = 'g_Yaourt'; }
-          else if (txtPropre.includes('caramel') || txtPropre.includes('caramello')) { nomProduit = 'Caramel'; cleProduit = 'g_Caramel'; }
+          if (txtMin.includes('tiramisu')) { nomProduit = 'Tiramisu'; cleProduit = 'g_Tiramisu'; }
+          else if (txtMin.includes('yoghurt') || txtMin.includes('yaourt')) { nomProduit = 'Yaourt'; cleProduit = 'g_Yaourt'; }
+          else if (txtMin.includes('caramel') || txtMin.includes('caramello')) { nomProduit = 'Caramel'; cleProduit = 'g_Caramel'; }
           else {
             for (const s of src) {
-              if (s.nom.length > 4 && txtPropre.includes(s.nom.toLowerCase())) {
+              if (s.nom.length > 4 && txtMin.includes(s.nom.toLowerCase())) {
                 nomProduit = s.nom;
                 cleProduit = s.cle;
                 break;
@@ -1181,20 +1188,18 @@ function scannerPhoto(type) {
             '<div class="dl"><span class="c1">Batch lu</span><span class="c ww"><b>' + esc(r.lot) + '</b></span></div>' +
             '<div class="dl"><span class="c1">Produit détecté</span><span class="c ww"><b>' + esc(nomProduit) + '</b></span></div>' +
             '</div>' +
+            // ZONE DE DEBUG : Affiche ce que l'IA a vraiment vu
+            '<div class="champ" style="margin-top:14px"><label class="f">Texte brut vu par l\'IA (Debug)</label>' +
+            '<textarea readonly style="font-size:11px; min-height:60px;">' + esc(txtPropre) + '</textarea></div>' +
             '<div class="actions"><button class="btn clair" id="sc-x">Annuler</button>' +
             '<button class="btn menthe" id="sc-ok">Utiliser ces valeurs</button></div>');
 
           $('#sc-x').onclick  = () => { closeSheet(); resolve(null); };
           $('#sc-ok').onclick = () => { closeSheet(); resolve(r); };
           
-        } else if (type === 'bl') {
-           // Mode Bon de livraison conservé tel quel (à développer plus tard si besoin)
-           closeSheet();
-           toast('OCR sur Bon de livraison non configuré', 'warn');
-           resolve(null);
         }
       } catch (e) {
-        closeSheet(); toast('Erreur IA. Tesseract.js est-il bien dans index.html ?', 'erreur'); resolve(null);
+        closeSheet(); toast('Erreur IA.', 'erreur'); resolve(null);
       }
     };
     cam.click();
