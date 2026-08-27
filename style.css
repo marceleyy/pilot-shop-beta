@@ -347,7 +347,7 @@ select{background-image:linear-gradient(45deg,transparent 50%,var(--brume) 50%),
 #sheet{position:fixed;inset:0;z-index:200;display:flex;align-items:flex-end;justify-content:center}
 #sheet[hidden]{display:none!important}
 #sheet .voile{position:absolute;inset:0;background:rgba(15,32,39,.42);backdrop-filter:blur(6px);animation:fade .2s ease}
-#sheet .box{
+#sheet > .box{
   position:relative;width:100%;max-width:560px;max-height:88dvh;overflow-y:auto;
   background:var(--fond);border-radius:var(--r-sheet) var(--r-sheet) 0 0;
   padding:10px 20px calc(24px + var(--safe-b));box-shadow:0 -8px 40px rgba(15,32,39,.24);
@@ -360,7 +360,7 @@ select{background-image:linear-gradient(45deg,transparent 50%,var(--brume) 50%),
 #sheet .actions .btn{flex:1}
 @media(min-width:720px){
   #sheet{align-items:center}
-  #sheet .box{border-radius:var(--r-sheet);max-height:82dvh;animation:pop .26s cubic-bezier(.32,.72,0,1)}
+  #sheet > .box{border-radius:var(--r-sheet);max-height:82dvh;animation:pop .26s cubic-bezier(.32,.72,0,1)}
 }
 
 /* --- 16. Toast, bandeau hors-ligne, retour bêta ------------------------- */
