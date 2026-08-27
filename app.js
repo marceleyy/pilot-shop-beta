@@ -58,11 +58,38 @@ const STATE = {
 };
 
 /* =============================================================================
-   2. BASE DE DONNÉES
-   Interface volontairement identique à celle de Supabase pour que le passage
-   se fasse sans toucher aux vues : get / set / push / list / del, tout async.
-   Bêta : localStorage. Production : SUPABASE.tables + file d'attente OFFLINE.
+   2. BASE DE DONNÉES — Supabase REST + cache local + file d'attente
+   Interface inchangée : get / set / push / patch / list / del, tout async.
+   Aucune vue n'a été modifiée.
+
+   En ligne  : lecture réseau, écriture réseau, miroir systématique en local.
+   Hors ligne: lecture depuis le miroir, écriture empilée dans la file, rejouée
+               dès le retour du réseau. La chambre froide ne bloque rien.
    ========================================================================== */
+
+/* Chaque clé de l'application pointe vers une table. Le préfixe décide. */
+const ROUTES = [
+  ['temp:',        SUPABASE.tables.temperatures],
+  ['clean:',       SUPABASE.tables.nettoyage],
+  ['reassort:',    SUPABASE.tables.reassort],
+  ['ruptures',     SUPABASE.tables.ruptures],
+  ['pertes:',      SUPABASE.tables.pertes],
+  ['lots:',        SUPABASE.tables.lots],
+  ['invglace:',    SUPABASE.tables.inventaires],
+  ['invsec:',      SUPABASE.tables.inventaires],
+  ['caisse:',      SUPABASE.tables.caisse],
+  ['ecart:',       SUPABASE.tables.ventes],
+  ['periode:',     SUPABASE.tables.periodes],
+  ['periodes',     SUPABASE.tables.periodes],
+  ['pointage:',    SUPABASE.tables.sessions],
+  ['releve',       SUPABASE.tables.releve],
+  ['feed:',        SUPABASE.tables.feed],
+  ['feedback',     SUPABASE.tables.feedback]
+];
+
+/* Clés propres à l'appareil : elles ne partent jamais sur le réseau. */
+const LOCALES = ['session', 'seuils', 'meteo', 'async:', OFFLINE.fileAttente];
+
 const DB = (function () {
   const P = OFFLINE.storeLocal + ':';
   let dispo = true;
@@ -70,24 +97,80 @@ const DB = (function () {
   catch (e) { dispo = false; }
   const mem = {};
 
-  const lire  = k => dispo ? localStorage.getItem(P + k) : (mem[k] === undefined ? null : mem[k]);
+  const lire   = k => dispo ? localStorage.getItem(P + k) : (mem[k] === undefined ? null : mem[k]);
   const ecrire = (k, v) => { dispo ? localStorage.setItem(P + k, v) : (mem[k] = v); };
+  const oter   = k => { dispo ? localStorage.removeItem(P + k) : delete mem[k]; };
+  const clesLocales = () => (dispo
+    ? Object.keys(localStorage).filter(k => k.indexOf(P) === 0).map(k => k.slice(P.length))
+    : Object.keys(mem));
+
+  const table = cle => {
+    const r = ROUTES.filter(x => cle.indexOf(x[0]) === 0)[0];
+    return r ? r[1] : null;
+  };
+  const estLocale = cle => LOCALES.some(l => cle === l || cle.indexOf(l) === 0);
+  const configuré = () => !!(SUPABASE.url && SUPABASE.anonKey);
+  const distant = cle => configuré() && !estLocale(cle) && !!table(cle);
+
+  async function appel(chemin, options) {
+    const ctrl = new AbortController();
+    const to = setTimeout(() => ctrl.abort(), OFFLINE.timeoutReseauMs);
+    try {
+      const r = await fetch(SUPABASE.url + '/rest/v1/' + chemin, Object.assign({
+        signal: ctrl.signal,
+        headers: Object.assign({
+          'apikey': SUPABASE.anonKey,
+          'Authorization': 'Bearer ' + SUPABASE.anonKey,
+          'Content-Type': 'application/json',
+          'Accept-Profile': SUPABASE.schema,
+          'Content-Profile': SUPABASE.schema
+        }, (options && options.headers) || {})
+      }, options || {}));
+      clearTimeout(to);
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      const txt = await r.text();
+      return txt ? JSON.parse(txt) : null;
+    } catch (e) {
+      clearTimeout(to);
+      if (STATE.enLigne && e.name !== 'AbortError') { STATE.enLigne = false; majBandeau(); }
+      throw e;
+    }
+  }
 
   return {
-    mode: dispo ? 'local' : 'memoire',
+    mode: 'supabase',
+    get local() { return dispo ? 'local' : 'memoire'; },
+    get configure() { return configuré(); },
 
     async get(cle, defaut) {
       if (defaut === undefined) defaut = null;
-      try { const v = lire(cle); return v === null ? defaut : JSON.parse(v); }
-      catch (e) { return defaut; }
+      const cache = () => { try { const v = lire(cle); return v === null ? defaut : JSON.parse(v); } catch (e) { return defaut; } };
+      if (!distant(cle) || !STATE.enLigne) return cache();
+      try {
+        const l = await appel(table(cle) + '?id=eq.' + encodeURIComponent(cle) + '&select=data&limit=1');
+        if (!l || !l.length) return cache();
+        ecrire(cle, JSON.stringify(l[0].data));
+        return l[0].data === null ? defaut : l[0].data;
+      } catch (e) { return cache(); }
     },
 
     async set(cle, valeur) {
-      try { ecrire(cle, JSON.stringify(valeur)); await journaliserSync(cle); return true; }
-      catch (e) { toast('Mémoire pleine — libérez de l’espace sur l’iPad'); return false; }
+      try { ecrire(cle, JSON.stringify(valeur)); }
+      catch (e) { toast('Mémoire pleine — libérez de l’espace sur l’iPad', 'erreur'); return false; }
+
+      if (!distant(cle)) return true;
+      if (!STATE.enLigne) { await empiler('set', cle, valeur); return true; }
+
+      try {
+        await appel(table(cle), {
+          method: 'POST',
+          headers: { 'Prefer': 'resolution=merge-duplicates,return=minimal' },
+          body: JSON.stringify({ id:cle, site:APP.site, data:valeur })
+        });
+        return true;
+      } catch (e) { await empiler('set', cle, valeur); return true; }
     },
 
-    /* Ajoute un élément à une collection et renvoie la liste complète */
     async push(cle, element) {
       const l = await this.get(cle, []);
       l.push(element);
@@ -103,29 +186,98 @@ const DB = (function () {
     },
 
     async list(prefixe) {
-      try {
-        const src = dispo ? Object.keys(localStorage).map(k => k.slice(P.length)).filter((k, i) => Object.keys(localStorage)[i].indexOf(P) === 0)
-                          : Object.keys(mem);
-        const brut = dispo ? Object.keys(localStorage).filter(k => k.indexOf(P) === 0).map(k => k.slice(P.length)) : Object.keys(mem);
-        return brut.filter(k => k.indexOf(prefixe) === 0).sort();
-      } catch (e) { return []; }
+      const locales = clesLocales().filter(k => k.indexOf(prefixe) === 0);
+      if (!configuré() || !STATE.enLigne) return locales.sort();
+
+      const tables = prefixe
+        ? ROUTES.filter(r => r[0].indexOf(prefixe) === 0 || prefixe.indexOf(r[0]) === 0).map(r => r[1])
+        : ROUTES.map(r => r[1]);
+      const vues = {}, out = locales.slice();
+      for (const t of tables.filter(t => { if (vues[t]) return false; vues[t] = 1; return true; })) {
+        try {
+          const l = await appel(t + '?id=like.' + encodeURIComponent(prefixe + '%') + '&select=id&limit=2000');
+          (l || []).forEach(r => { if (out.indexOf(r.id) < 0) out.push(r.id); });
+        } catch (e) { /* le cache local a déjà été pris */ }
+      }
+      return out.sort();
     },
 
-    async del(cle) { try { dispo ? localStorage.removeItem(P + cle) : delete mem[cle]; } catch (e) {} }
+    async del(cle) {
+      try { oter(cle); } catch (e) {}
+      if (!distant(cle)) return;
+      if (!STATE.enLigne) return empiler('del', cle, null);
+      try { await appel(table(cle) + '?id=eq.' + encodeURIComponent(cle), { method:'DELETE' }); }
+      catch (e) { await empiler('del', cle, null); }
+    },
+
+    /* Exposés pour la file d'attente et l'écran de réglages */
+    _appel: appel, _table: table, _distant: distant, _clesLocales: clesLocales,
+    _lire: lire, _ecrire: ecrire, _oter: oter
   };
 })();
 
-/* File d'attente de synchronisation — inerte en bêta, prête pour Supabase */
-async function journaliserSync(cle) {
-  if (!OFFLINE.actif || STATE.enLigne) return;
-  try {
-    const f = await DB.get(OFFLINE.fileAttente, []);
-    if (f.indexOf(cle) < 0) f.push(cle);
-    localStorage.setItem(OFFLINE.storeLocal + ':' + OFFLINE.fileAttente, JSON.stringify(f));
-    STATE.fileAttente = f.length;
-    majBandeau();
-  } catch (e) {}
+/* -----------------------------------------------------------------------------
+   FILE D'ATTENTE HORS-LIGNE
+   Une écriture ratée n'est jamais perdue : elle est empilée avec son horodatage
+   et rejouée dans l'ordre au retour du réseau. La dernière écriture d'une même
+   clé écrase les précédentes, inutile de rejouer dix fois la même saisie.
+   -------------------------------------------------------------------------- */
+function fileLire() {
+  try { const v = DB._lire(OFFLINE.fileAttente); return v ? JSON.parse(v) : []; }
+  catch (e) { return []; }
 }
+function fileEcrire(f) {
+  try { DB._ecrire(OFFLINE.fileAttente, JSON.stringify(f)); } catch (e) {}
+  STATE.fileAttente = f.length;
+  majBandeau();
+}
+
+async function empiler(op, cle, valeur) {
+  const f = fileLire().filter(x => !(x.cle === cle && x.op === op));
+  f.push({ op:op, cle:cle, valeur:valeur, at:nowISO(), essais:0 });
+  fileEcrire(f);
+}
+
+let syncEnCours = false;
+let derniereSync = null;
+async function journaliserSync() {
+  if (syncEnCours || !STATE.enLigne || !DB.configure) return;
+  let f = fileLire();
+  if (!f.length) return;
+
+  syncEnCours = true;
+  const restants = [];
+  for (const item of f) {
+    try {
+      if (item.op === 'del') {
+        await DB._appel(DB._table(item.cle) + '?id=eq.' + encodeURIComponent(item.cle), { method:'DELETE' });
+      } else {
+        await DB._appel(DB._table(item.cle), {
+          method: 'POST',
+          headers: { 'Prefer': 'resolution=merge-duplicates,return=minimal' },
+          body: JSON.stringify({ id:item.cle, site:APP.site, data:item.valeur })
+        });
+      }
+    } catch (e) {
+      item.essais = (item.essais || 0) + 1;
+      if (item.essais < OFFLINE.tentatives) restants.push(item);
+      else console.warn('Écriture abandonnée après ' + item.essais + ' essais :', item.cle);
+    }
+  }
+  fileEcrire(restants);
+  syncEnCours = false;
+
+  const partis = f.length - restants.length;
+  if (partis > 0) {
+    derniereSync = nowISO();
+    if (STATE.user) toast(partis + ' saisie(s) synchronisée(s)');
+  }
+}
+
+/* Le réseau revient, ou l'onglet reprend le focus : on vide la file. */
+window.addEventListener('online', () => setTimeout(journaliserSync, 800));
+document.addEventListener('visibilitychange', () => { if (!document.hidden) journaliserSync(); });
+setInterval(journaliserSync, OFFLINE.intervalleSyncMs);
 
 /* =============================================================================
    3. UI DE BASE
@@ -359,6 +511,8 @@ function ouvrirPlus() {
 
 async function rendre(id) {
   if (!V[id]) { toast('Vue indisponible'); return; }
+  /* On quitte les réglages : on arrête le rafraîchissement de l'indicateur */
+  if (V.reglages && V.reglages._t) { clearInterval(V.reglages._t); V.reglages._t = null; }
   STATE.view = id;
   STATE.jour = today();
   const p = PAGES[id] || { titre:id, sous:'' };
@@ -2414,11 +2568,72 @@ V.reglages = async function () {
         '<span class="c ww">' + esc(f.par) + ' ' + fmtDC(f.at.slice(0, 10)) + '</span></div>').join('') +
       '</div></div>' : '') +
 
-    carte(entete('🗄️', 'Données', 'Stockage ' + DB.mode + ' · ' + APP.version) +
-      '<p class="mini">En bêta, tout est enregistré sur cet appareil. Le passage à Supabase rendra les données ' +
-      'accessibles depuis n’importe quel iPad et à l’abri d’un vidage de cache.</p>' +
-      '<button class="btn clair bloc" id="ex" style="margin-top:14px">Exporter toutes les données</button>' +
+    carte(entete('🗄️', 'Données',
+        (DB.configure ? 'Supabase · ' + APP.site : 'Cet appareil uniquement') + ' · ' + APP.version) +
+
+      '<div id="sync-status" class="alerte info" style="margin-bottom:14px">' +
+      '<span class="ai" id="sync-ic">⏳</span><div><b id="sync-tx">Vérification…</b>' +
+      '<p id="sync-sub"></p></div></div>' +
+
+      '<p class="mini">' + (DB.configure
+        ? 'Les saisies partent sur Supabase dès qu’il y a du réseau. Sans réseau, elles sont gardées ' +
+          'sur l’iPad et repartent toutes seules ensuite : la chambre froide ne fait rien perdre.'
+        : 'Aucune clé Supabase n’est configurée : tout reste sur cet appareil et disparaîtrait avec le cache. ' +
+          'Renseignez env.js pour activer la sauvegarde en ligne.') + '</p>' +
+
+      '<button class="btn clair bloc" id="sync-now" style="margin-top:14px">Forcer la synchronisation</button>' +
+      '<button class="btn clair bloc" id="ex" style="margin-top:8px">Exporter toutes les données</button>' +
       '<button class="btn fantome bloc" id="rz" style="margin-top:8px">Réinitialiser cet appareil</button>', 'plat');
+
+  /* --- Indicateur de synchronisation, rafraîchi chaque seconde --- */
+  if (V.reglages._t) { clearInterval(V.reglages._t); V.reglages._t = null; }
+
+  const majSync = () => {
+    const box = $('#sync-status');
+    if (!box) { clearInterval(V.reglages._t); V.reglages._t = null; return; }
+
+    const ic = $('#sync-ic'), tx = $('#sync-tx'), sub = $('#sync-sub'), btn = $('#sync-now');
+    let classe, icone, texte, detail, couleur;
+
+    if (!DB.configure) {
+      classe = 'warn'; icone = '⚪'; couleur = 'var(--brume)';
+      texte = 'Sauvegarde en ligne inactive';
+      detail = 'Les données restent sur cet iPad. Renseignez env.js pour activer Supabase.';
+    } else if (!STATE.enLigne) {
+      classe = 'bad'; icone = '🔴'; couleur = 'var(--corail-d)';
+      texte = 'Hors-ligne — En attente de réseau';
+      detail = STATE.fileAttente
+        ? STATE.fileAttente + ' saisie(s) gardée(s) sur l’iPad, elles partiront au retour du réseau.'
+        : 'Vos saisies continuent d’être enregistrées sur l’iPad.';
+    } else if (STATE.fileAttente > 0) {
+      classe = 'warn'; icone = '🟠'; couleur = 'var(--ambre-d)';
+      texte = STATE.fileAttente + ' saisie(s) en attente d’envoi';
+      detail = 'Laissez l’application ouverte le temps de l’envoi.';
+    } else {
+      classe = 'ok'; icone = '🟢'; couleur = 'var(--menthe-d)';
+      texte = 'Toutes les données sont synchronisées sur le Cloud';
+      detail = derniereSync
+        ? 'Dernier envoi réussi à ' + heure(derniereSync) + '.'
+        : 'Rien en attente.';
+    }
+
+    box.className = 'alerte ' + classe;
+    ic.textContent = icone;
+    tx.textContent = texte;
+    tx.style.color = couleur;
+    sub.textContent = detail;
+    if (btn) btn.disabled = !DB.configure || !STATE.enLigne || STATE.fileAttente === 0;
+  };
+
+  majSync();
+  V.reglages._t = setInterval(majSync, 1000);
+
+  $('#sync-now').onclick = async () => {
+    if (!STATE.enLigne) return toast('Pas de réseau pour l’instant', 'erreur');
+    toast('Envoi en cours…');
+    await journaliserSync();
+    majSync();
+  };
 
   $('#sv').onclick = async () => {
     const o = { ecartGlacePct:num($('#s1').value) || 3, caisseJourEur:num($('#s2').value) || 10,
