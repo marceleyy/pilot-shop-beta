@@ -1,0 +1,75 @@
+{
+  "id": "/",
+  "name": "Pilot-Shop — Chamonix",
+  "short_name": "Pilot-Shop",
+  "description": "Registres et pilotage du point de vente",
+  "lang": "fr-FR",
+  "dir": "ltr",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "display_override": ["standalone", "minimal-ui", "browser"],
+  "orientation": "any",
+  "background_color": "#F2F6F7",
+  "theme_color": "#0F2027",
+  "categories": ["business", "productivity", "food"],
+  "prefer_related_applications": false,
+  "icons": [
+    {
+      "src": "/icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/icon-192-maskable.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
+      "src": "/icons/icon-512-maskable.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
+      "src": "/icons/icon-180.png",
+      "sizes": "180x180",
+      "type": "image/png",
+      "purpose": "any"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Relever les frigos",
+      "short_name": "Frigos",
+      "url": "/?vue=temp",
+      "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png" }]
+    },
+    {
+      "name": "Nettoyage du jour",
+      "short_name": "Nettoyage",
+      "url": "/?vue=clean",
+      "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png" }]
+    },
+    {
+      "name": "Déclarer une perte",
+      "short_name": "Perte",
+      "url": "/?vue=pertes",
+      "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png" }]
+    },
+    {
+      "name": "Tour de contrôle",
+      "short_name": "Contrôle",
+      "url": "/?vue=controle",
+      "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png" }]
+    }
+  ]
+}

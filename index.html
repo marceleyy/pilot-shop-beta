@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1, user-scalable=no">
+<title>Pilot-Shop — Chamonix</title>
+
+<meta name="description" content="Registres et pilotage du point de vente">
+<meta name="theme-color" content="#0F2027">
+<meta name="color-scheme" content="light">
+<meta name="format-detection" content="telephone=no">
+
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="Pilot-Shop">
+<link rel="apple-touch-icon" href="icons/icon-180.png">
+<link rel="icon" href="icons/icon-192.png" sizes="192x192">
+<link rel="manifest" href="manifest.webmanifest">
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="preconnect" href="https://cdnjs.cloudflare.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+
+<body>
+
+<!-- ===================== BANDEAU HORS-LIGNE ===================== -->
+<div id="offline" role="status" aria-live="polite">
+  <span class="msg">Hors ligne — vos saisies sont gardées et partiront toutes seules</span>
+  <span class="sync" id="offline-n"></span>
+</div>
+
+
+<!-- ===================== CONNEXION ===================== -->
+<div id="login">
+  <div class="in">
+
+    <div class="lg">
+      <h1>Pilot-Shop</h1>
+      <p id="login-site">Chamonix</p>
+    </div>
+
+    <!-- Étape 1 : qui es-tu -->
+    <section id="login-qui">
+      <div class="entete"><h3>Qui prend le service&nbsp;?</h3></div>
+      <div class="qui" id="qui-liste"><!-- rempli par app.js depuis EQUIPE --></div>
+    </section>
+
+    <!-- Étape 2 : code personnel -->
+    <section id="login-pin" hidden>
+      <div class="card solide" style="text-align:center">
+        <div class="ch" style="justify-content:center">
+          <span class="av" id="pin-av" aria-hidden="true"></span>
+        </div>
+        <h2 id="pin-nom">—</h2>
+        <p class="cs" id="pin-aide" style="margin-bottom:0">Composez votre code à 4 chiffres</p>
+
+        <div class="pins" id="pin-points" role="status" aria-live="polite">
+          <i></i><i></i><i></i><i></i>
+        </div>
+
+        <div class="pave" id="pin-pave">
+          <button type="button" data-k="1">1</button>
+          <button type="button" data-k="2">2</button>
+          <button type="button" data-k="3">3</button>
+          <button type="button" data-k="4">4</button>
+          <button type="button" data-k="5">5</button>
+          <button type="button" data-k="6">6</button>
+          <button type="button" data-k="7">7</button>
+          <button type="button" data-k="8">8</button>
+          <button type="button" data-k="9">9</button>
+          <button type="button" class="fn" data-k="annuler">Retour</button>
+          <button type="button" data-k="0">0</button>
+          <button type="button" class="fn" data-k="effacer" aria-label="Effacer un chiffre">⌫</button>
+        </div>
+      </div>
+
+      <button type="button" class="btn fantome bloc" id="pin-retour" style="margin-top:14px">
+        Ce n’est pas moi
+      </button>
+    </section>
+
+    <p class="mini" id="login-etat" style="text-align:center;margin-top:22px"></p>
+  </div>
+</div>
+
+
+<!-- ===================== APPLICATION ===================== -->
+<div id="app" hidden>
+
+  <header id="topbar">
+    <div class="tt">
+      <h1 id="vue-titre">—</h1>
+      <div class="ts" id="vue-sous"></div>
+    </div>
+    <div class="ta" id="vue-actions"><!-- boutons contextuels injectés par app.js --></div>
+  </header>
+
+  <main id="page" role="main"><!-- vues injectées par app.js --></main>
+
+  <nav id="tabbar" role="navigation" aria-label="Navigation principale">
+    <!-- onglets injectés par app.js depuis TABS[role] -->
+  </nav>
+
+</div>
+
+
+<!-- ===================== OUTILS ===================== -->
+<button type="button" id="fb" class="noprint" hidden>
+  <span class="pt" aria-hidden="true"></span>Signaler
+</button>
+
+<div id="sheet" hidden role="dialog" aria-modal="true" aria-labelledby="sheet-titre">
+  <div class="voile" data-fermer></div>
+  <div class="box">
+    <div class="poignee" aria-hidden="true"></div>
+    <div id="sheet-corps"><!-- contenu injecté par app.js --></div>
+  </div>
+</div>
+
+<div id="toast" role="status" aria-live="polite"></div>
+
+<div id="printview" aria-hidden="true"></div>
+
+<!-- Cible cachée réutilisée par les scanners photo -->
+<input type="file" id="cam" accept="image/*" capture="environment" hidden>
+
+
+<!-- ===================== SCRIPTS ===================== -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js" defer></script>
+<script src="config.js" defer></script>
+<script src="app.js" defer></script>
+
+</body>
+</html>

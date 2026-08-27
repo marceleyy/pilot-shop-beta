@@ -1,0 +1,471 @@
+/* =============================================================================
+   PILOT-SHOP — style.css
+   Cible : iPad tactile en boutique. Doigts froids, gras, pressés.
+   ============================================================================= */
+
+/* --- 1. Jetons ---------------------------------------------------------- */
+:root{
+  --encre:#0F2027; --ardoise:#41585F; --brume:#8AA0A8; --brume-2:#B6C6CC;
+  --fond:#EEF3F5; --fond-2:#E4EBEE; --blanc:#FFFFFF;
+  --voile:rgba(255,255,255,.72); --voile-fort:rgba(255,255,255,.86); --voile-nuit:rgba(15,32,39,.72);
+
+  --menthe:#7FB8A4; --menthe-l:#E4F1EC; --menthe-d:#4E8C77;
+  --corail:#E8837C; --corail-l:#FBEAE9; --corail-d:#C25850;
+  --ambre:#E0A85C;  --ambre-l:#FBF1E1;  --ambre-d:#B27C31;
+  --ciel:#8FB4CE;   --ciel-l:#E9F1F7;   --ciel-d:#5D89A6;
+  --sable:#D9C3A5;  --sable-l:#F6EFE5;  --nuit:#2A3F4D;
+
+  --r-carte:16px; --r-btn:14px; --r-pill:100px; --r-sheet:24px;
+  --tap:56px; --gap:12px;
+  --pad-x:16px;
+  --ombre:0 1px 2px rgba(15,32,39,.05), 0 6px 20px rgba(15,32,39,.06);
+  --ombre-lev:0 2px 6px rgba(15,32,39,.08), 0 16px 40px rgba(15,32,39,.12);
+  --flou-carte:blur(18px) saturate(1.6);
+  --flou-barre:blur(24px) saturate(1.8);
+  --safe-b:env(safe-area-inset-bottom,0px);
+  --safe-t:env(safe-area-inset-top,0px);
+  --barre-h:calc(66px + var(--safe-b));
+  --tr:.22s cubic-bezier(.32,.72,0,1);
+}
+
+/* --- 2. Base ------------------------------------------------------------ */
+*,*::before,*::after{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+html,body{margin:0;padding:0;height:100%}
+body{
+  font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text",Inter,"Segoe UI",Roboto,sans-serif;
+  background:var(--fond); color:var(--encre);
+  font-size:16px; line-height:1.45; letter-spacing:-.011em;
+  -webkit-font-smoothing:antialiased;
+  overscroll-behavior-y:none;
+  -webkit-tap-highlight-color:transparent;
+}
+body::before{
+  content:''; position:fixed; inset:0; z-index:-1; pointer-events:none;
+  background:
+    radial-gradient(60vw 40vh at 12% -6%, rgba(143,180,206,.30), transparent 62%),
+    radial-gradient(52vw 38vh at 92% 4%, rgba(127,184,164,.26), transparent 60%),
+    radial-gradient(50vw 40vh at 60% 104%, rgba(217,195,165,.24), transparent 62%);
+}
+h1,h2,h3,h4{margin:0;font-weight:650;letter-spacing:-.02em;line-height:1.2}
+h1{font-size:26px} h2{font-size:19px} h3{font-size:16px}
+p{margin:0}
+button,input,select,textarea{font:inherit;color:inherit}
+button{cursor:pointer;border:0;background:none}
+::-webkit-scrollbar{width:0;height:0}
+.num{font-variant-numeric:tabular-nums;font-feature-settings:"tnum"}
+.mini{font-size:13px;color:var(--brume)}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
+[hidden]{display:none!important}
+
+/* --- 3. Ossature -------------------------------------------------------- */
+#app{min-height:100dvh;display:flex;flex-direction:column;padding-bottom:var(--barre-h)}
+#topbar{
+  position:sticky;top:0;z-index:60;padding:calc(var(--safe-t) + 10px) var(--pad-x) 10px;
+  background:var(--voile-fort);backdrop-filter:var(--flou-barre);-webkit-backdrop-filter:var(--flou-barre);
+  border-bottom:.5px solid rgba(15,32,39,.09);
+  display:flex;align-items:center;gap:12px;
+}
+#topbar .tt{flex:1;min-width:0}
+#topbar h1{font-size:22px}
+#topbar .ts{font-size:13px;color:var(--brume);margin-top:1px}
+#topbar .ta{display:flex;gap:8px;flex:0 0 auto}
+#page{flex:1;padding:16px var(--pad-x) 28px;max-width:1100px;width:100%;margin:0 auto}
+.stack{display:flex;flex-direction:column;gap:var(--gap)}
+.grid{display:grid;gap:var(--gap)}
+.g2{grid-template-columns:repeat(2,minmax(0,1fr))}
+.g3{grid-template-columns:repeat(3,minmax(0,1fr))}
+.g4{grid-template-columns:repeat(4,minmax(0,1fr))}
+@media(max-width:760px){.g3,.g4{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:460px){.g2,.g3,.g4{grid-template-columns:1fr}}
+
+/* --- 4. Barre d'onglets basse ------------------------------------------ */
+#tabbar{
+  position:fixed;left:0;right:0;bottom:0;z-index:80;
+  padding:6px 8px calc(6px + var(--safe-b));
+  background:var(--voile-fort);backdrop-filter:var(--flou-barre);-webkit-backdrop-filter:var(--flou-barre);
+  border-top:.5px solid rgba(15,32,39,.10);
+  display:flex;justify-content:space-around;align-items:stretch;
+}
+#tabbar .tab{
+  flex:1;min-width:0;display:flex;flex-direction:column;align-items:center;justify-content:center;
+  gap:3px;padding:6px 4px;border-radius:var(--r-btn);color:var(--brume);
+  font-size:11px;font-weight:600;letter-spacing:-.01em;transition:var(--tr);position:relative;
+}
+#tabbar .tab .ic{font-size:23px;line-height:1;transition:transform var(--tr)}
+#tabbar .tab.on{color:var(--encre)}
+#tabbar .tab.on .ic{transform:translateY(-1px) scale(1.06)}
+#tabbar .tab:active{background:rgba(15,32,39,.06)}
+#tabbar .tab .badge{
+  position:absolute;top:2px;right:calc(50% - 22px);min-width:18px;height:18px;padding:0 5px;
+  border-radius:var(--r-pill);background:var(--corail-d);color:#fff;
+  font-size:11px;font-weight:700;display:grid;place-items:center;
+  box-shadow:0 0 0 2px var(--voile-fort);
+}
+#tabbar .tab .badge.pulse{animation:pulse 1.5s ease-in-out infinite}
+
+/* --- 5. Cartes ---------------------------------------------------------- */
+.card{
+  background:var(--voile);backdrop-filter:var(--flou-carte);-webkit-backdrop-filter:var(--flou-carte);
+  border:.5px solid rgba(255,255,255,.9); border-radius:var(--r-carte);
+  box-shadow:var(--ombre); padding:16px; transition:var(--tr);
+}
+.card.solide{background:var(--blanc)}
+.card.plat{box-shadow:none;background:rgba(255,255,255,.55)}
+.card > .ch{display:flex;align-items:center;gap:10px;margin-bottom:4px}
+.card > .ch .ci{font-size:20px;line-height:1}
+.card > .ch h2,.card > .ch h3{flex:1;min-width:0}
+.card > .cs{font-size:13.5px;color:var(--brume);margin-bottom:14px}
+.card > .cs:last-child{margin-bottom:0}
+.card.tap{cursor:pointer}
+.card.tap:active{transform:scale(.985);box-shadow:var(--ombre)}
+.card.menthe{background:linear-gradient(180deg,rgba(228,241,236,.92),rgba(228,241,236,.72));border-color:rgba(127,184,164,.34)}
+.card.corail{background:linear-gradient(180deg,rgba(251,234,233,.94),rgba(251,234,233,.74));border-color:rgba(232,131,124,.36)}
+.card.ambre {background:linear-gradient(180deg,rgba(251,241,225,.94),rgba(251,241,225,.74));border-color:rgba(224,168,92,.36)}
+.card.ciel  {background:linear-gradient(180deg,rgba(233,241,247,.94),rgba(233,241,247,.74));border-color:rgba(143,180,206,.36)}
+.card.sable {background:linear-gradient(180deg,rgba(246,239,229,.94),rgba(246,239,229,.74));border-color:rgba(217,195,165,.44)}
+.card.nuit{background:linear-gradient(165deg,var(--nuit),var(--encre));border-color:rgba(255,255,255,.10);color:#EAF1F3}
+.card.nuit .cs,.card.nuit .mini{color:rgba(234,241,243,.62)}
+.card.urgence{border:1.5px solid var(--corail-d);animation:clignote 1.9s ease-in-out infinite}
+
+/* --- 6. Boutons --------------------------------------------------------- */
+.btn{
+  min-height:var(--tap);padding:0 20px;border-radius:var(--r-btn);
+  background:var(--encre);color:#fff;font-size:16px;font-weight:600;letter-spacing:-.012em;
+  display:inline-flex;align-items:center;justify-content:center;gap:9px;
+  transition:transform var(--tr),background var(--tr),opacity var(--tr);
+  box-shadow:0 1px 2px rgba(15,32,39,.14);
+}
+.btn:active{transform:scale(.96)}
+.btn.bloc{width:100%}
+.btn.menthe{background:var(--menthe-d)}
+.btn.corail{background:var(--corail-d)}
+.btn.ambre{background:var(--ambre-d)}
+.btn.ciel{background:var(--ciel-d)}
+.btn.clair{background:rgba(255,255,255,.9);color:var(--encre);border:.5px solid rgba(15,32,39,.12);box-shadow:none}
+.btn.clair:active{background:var(--fond-2)}
+.btn.fantome{background:transparent;color:var(--ardoise);box-shadow:none}
+.btn.fantome:active{background:rgba(15,32,39,.06)}
+.btn.sm{min-height:42px;padding:0 14px;font-size:14px;border-radius:11px}
+.btn.xl{min-height:68px;font-size:18px;border-radius:18px}
+.btn[disabled]{opacity:.38;pointer-events:none}
+.btn .ic{font-size:19px}
+.btn-row{display:flex;gap:var(--gap);flex-wrap:wrap}
+.btn-row > .btn{flex:1;min-width:140px}
+
+/* Duo Fait / Rupture — cible large, séparation nette */
+.duo{display:grid;grid-template-columns:1fr 1fr;gap:var(--gap)}
+.duo .btn{min-height:60px;font-size:16px}
+.duo .ok{background:var(--menthe-l);color:var(--menthe-d);border:1.5px solid rgba(127,184,164,.5);box-shadow:none}
+.duo .ok.on{background:var(--menthe-d);color:#fff;border-color:transparent}
+.duo .ko{background:var(--corail-l);color:var(--corail-d);border:1.5px solid rgba(232,131,124,.5);box-shadow:none}
+.duo .ko.on{background:var(--corail-d);color:#fff;border-color:transparent}
+
+/* --- 7. Formulaires ----------------------------------------------------- */
+label.f{display:block;font-size:12px;font-weight:700;letter-spacing:.02em;text-transform:uppercase;color:var(--brume);margin-bottom:7px}
+input[type=text],input[type=number],input[type=date],input[type=month],input[type=password],input[type=search],select,textarea{
+  width:100%;min-height:var(--tap);padding:12px 14px;font-size:16px;
+  background:rgba(255,255,255,.92);border:1px solid rgba(15,32,39,.12);border-radius:var(--r-btn);
+  transition:var(--tr);appearance:none;-webkit-appearance:none;
+}
+textarea{min-height:96px;resize:vertical;line-height:1.5}
+input:focus,select:focus,textarea:focus{outline:0;border-color:var(--ciel-d);box-shadow:0 0 0 4px rgba(143,180,206,.24);background:#fff}
+input[type=number]{text-align:right;font-variant-numeric:tabular-nums}
+select{background-image:linear-gradient(45deg,transparent 50%,var(--brume) 50%),linear-gradient(135deg,var(--brume) 50%,transparent 50%);
+  background-position:calc(100% - 20px) 50%,calc(100% - 14px) 50%;background-size:6px 6px;background-repeat:no-repeat;padding-right:42px}
+.champ{display:flex;flex-direction:column}
+.champ + .champ{margin-top:14px}
+
+/* Sélecteurs à gros boutons — remplacent les listes déroulantes en rush */
+.chips{display:flex;gap:9px;flex-wrap:wrap}
+.chip{
+  min-height:48px;padding:0 16px;border-radius:var(--r-pill);
+  background:rgba(255,255,255,.9);border:1.5px solid rgba(15,32,39,.10);
+  font-size:15px;font-weight:600;display:inline-flex;align-items:center;gap:7px;
+  transition:var(--tr);
+}
+.chip:active{transform:scale(.95)}
+.chip.on{background:var(--encre);color:#fff;border-color:transparent}
+.chip.menthe.on{background:var(--menthe-d)}
+.chip.corail.on{background:var(--corail-d)}
+.chip.ambre.on{background:var(--ambre-d)}
+
+/* Pavé numérique — PIN et quantités */
+.pave{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;max-width:300px;margin:0 auto}
+.pave button{
+  height:72px;border-radius:20px;background:rgba(255,255,255,.94);
+  font-size:27px;font-weight:600;box-shadow:var(--ombre);transition:var(--tr);
+}
+.pave button:active{transform:scale(.93);background:var(--fond-2)}
+.pave .fn{font-size:19px;font-weight:600;background:transparent;box-shadow:none;color:var(--ardoise)}
+.pins{display:flex;gap:14px;justify-content:center;margin:22px 0 26px}
+.pins i{width:16px;height:16px;border-radius:50%;background:rgba(15,32,39,.14);transition:var(--tr)}
+.pins i.on{background:var(--encre);transform:scale(1.14)}
+.pins.err i{background:var(--corail-d);animation:secousse .42s}
+
+/* Sélection de l'employé */
+.qui{display:grid;grid-template-columns:repeat(2,1fr);gap:14px}
+.qui button{
+  min-height:112px;border-radius:20px;background:var(--voile);backdrop-filter:var(--flou-carte);
+  border:1.5px solid rgba(255,255,255,.9);box-shadow:var(--ombre);
+  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:9px;transition:var(--tr);
+}
+.qui button:active{transform:scale(.96)}
+.qui .av{width:52px;height:52px;border-radius:50%;display:grid;place-items:center;color:#fff;font-size:18px;font-weight:700}
+.qui .nm{font-size:17px;font-weight:650}
+.qui .rl{font-size:12px;color:var(--brume)}
+
+/* --- 8. Listes de tâches ------------------------------------------------ */
+.tache{
+  display:flex;align-items:center;gap:14px;min-height:var(--tap);
+  padding:12px 14px;border-radius:var(--r-btn);
+  background:rgba(255,255,255,.68);border:.5px solid rgba(255,255,255,.9);
+  transition:var(--tr);
+}
+.tache + .tache{margin-top:9px}
+.tache:active{transform:scale(.99)}
+.tache .box{
+  width:34px;height:34px;flex:0 0 auto;border-radius:11px;
+  border:2px solid rgba(15,32,39,.16);background:#fff;
+  display:grid;place-items:center;color:transparent;font-size:17px;font-weight:700;transition:var(--tr);
+}
+.tache .tx{flex:1;min-width:0}
+.tache .tn{font-size:15.5px;font-weight:550;line-height:1.3}
+.tache .tm{font-size:12.5px;color:var(--brume);margin-top:2px}
+.tache.on{background:var(--menthe-l);border-color:rgba(127,184,164,.5)}
+.tache.on .box{background:var(--menthe-d);border-color:var(--menthe-d);color:#fff}
+.tache.on .tn{color:var(--menthe-d)}
+.tache.retard{background:var(--corail-l);border-color:rgba(232,131,124,.45)}
+.tache.retard .box{border-color:var(--corail-d)}
+
+/* --- 9. Indicateurs ----------------------------------------------------- */
+.kpi{
+  background:var(--voile);backdrop-filter:var(--flou-carte);-webkit-backdrop-filter:var(--flou-carte);
+  border:.5px solid rgba(255,255,255,.9);border-radius:var(--r-carte);padding:15px;box-shadow:var(--ombre);
+}
+.kpi .k{font-size:12px;font-weight:700;letter-spacing:.02em;text-transform:uppercase;color:var(--brume)}
+.kpi .v{font-size:30px;font-weight:680;letter-spacing:-.03em;line-height:1.1;margin-top:7px;font-variant-numeric:tabular-nums}
+.kpi .u{font-size:14px;font-weight:500;color:var(--brume);margin-left:3px}
+.kpi .d{font-size:12.5px;color:var(--brume);margin-top:5px}
+.kpi.ok .v{color:var(--menthe-d)}
+.kpi.warn .v{color:var(--ambre-d)}
+.kpi.bad .v{color:var(--corail-d)}
+
+.pill{display:inline-flex;align-items:center;gap:5px;padding:4px 11px;border-radius:var(--r-pill);font-size:12.5px;font-weight:650}
+.pill.ok{background:var(--menthe-l);color:var(--menthe-d)}
+.pill.warn{background:var(--ambre-l);color:var(--ambre-d)}
+.pill.bad{background:var(--corail-l);color:var(--corail-d)}
+.pill.n{background:rgba(15,32,39,.06);color:var(--brume)}
+.pill.ciel{background:var(--ciel-l);color:var(--ciel-d)}
+
+.jauge{height:10px;border-radius:var(--r-pill);background:rgba(15,32,39,.08);overflow:hidden}
+.jauge i{display:block;height:100%;border-radius:var(--r-pill);background:var(--menthe-d);transition:width .5s cubic-bezier(.32,.72,0,1)}
+.jauge i.warn{background:var(--ambre-d)} .jauge i.bad{background:var(--corail-d)}
+
+/* Jauge d'écart glace */
+.ecart .piste{position:relative;height:38px;border-radius:12px;overflow:hidden;
+  background:linear-gradient(90deg,var(--corail-l),rgba(255,255,255,.9) 46%,rgba(255,255,255,.9) 54%,var(--corail-l));
+  border:.5px solid rgba(15,32,39,.10)}
+.ecart .cible{position:absolute;top:0;bottom:0;background:var(--menthe-l);border-left:1.5px dashed var(--menthe-d);border-right:1.5px dashed var(--menthe-d)}
+.ecart .aig{position:absolute;top:-4px;bottom:-4px;width:4px;border-radius:3px;background:var(--encre);transition:left .5s cubic-bezier(.32,.72,0,1)}
+.ecart .lg{display:flex;justify-content:space-between;font-size:12px;color:var(--brume);margin-top:8px}
+
+/* --- 10. Alertes -------------------------------------------------------- */
+.alerte{display:flex;gap:13px;align-items:flex-start;padding:14px 16px;border-radius:var(--r-carte);border-left:4px solid}
+.alerte + .alerte{margin-top:10px}
+.alerte .ai{font-size:19px;line-height:1.15;flex:0 0 auto}
+.alerte b{display:block;font-size:15px;font-weight:650}
+.alerte p{font-size:13.5px;opacity:.86;margin-top:2px}
+.alerte .go{margin-left:auto;flex:0 0 auto}
+.alerte.bad{background:var(--corail-l);border-color:var(--corail-d);color:#8E3A34}
+.alerte.warn{background:var(--ambre-l);border-color:var(--ambre-d);color:#7E551B}
+.alerte.ok{background:var(--menthe-l);border-color:var(--menthe-d);color:#3B6857}
+.alerte.info{background:var(--ciel-l);border-color:var(--ciel-d);color:#3E6480}
+
+/* --- 11. Fil d'activité ------------------------------------------------- */
+.feed{max-height:420px;overflow-y:auto;-webkit-overflow-scrolling:touch}
+.fi{display:flex;gap:13px;padding:11px 0}
+.fi + .fi{border-top:.5px solid rgba(15,32,39,.07)}
+.fi .fh{width:52px;flex:0 0 auto;font-size:13px;font-weight:600;color:var(--brume);font-variant-numeric:tabular-nums}
+.fi .fp{width:32px;height:32px;flex:0 0 auto;border-radius:50%;display:grid;place-items:center;color:#fff;font-size:11.5px;font-weight:700}
+.fi .fc{flex:1;min-width:0}
+.fi .fx{font-size:14.5px;line-height:1.35}
+.fi .fm{font-size:12px;color:var(--brume);margin-top:2px}
+.fi.warn .fx{color:var(--ambre-d)} .fi.bad .fx{color:var(--corail-d);font-weight:600}
+
+/* --- 12. Frigo virtuel (FIFO) ------------------------------------------- */
+.fifo{display:flex;align-items:center;gap:13px;padding:14px 16px;border-radius:var(--r-carte);border-left:5px solid;transition:var(--tr)}
+.fifo + .fifo{margin-top:10px}
+.fifo .fn{flex:1;min-width:0}
+.fifo .fn b{font-size:15.5px;font-weight:650;display:block}
+.fifo .fd{font-size:12.5px;color:var(--brume);margin-top:2px}
+.fifo .fr{text-align:right;flex:0 0 auto}
+.fifo .fr b{font-size:15px;font-weight:700;display:block;font-variant-numeric:tabular-nums}
+.fifo .fr span{font-size:11.5px;color:var(--brume)}
+.fifo.vert{background:var(--menthe-l);border-color:var(--menthe-d)}
+.fifo.vert .fr b{color:var(--menthe-d)}
+.fifo.orange{background:var(--ambre-l);border-color:var(--ambre-d)}
+.fifo.orange .fr b{color:var(--ambre-d)}
+.fifo.rouge{background:var(--corail-l);border-color:var(--corail-d)}
+.fifo.rouge .fr b{color:var(--corail-d)}
+
+/* --- 13. Thermomètre à boutons ------------------------------------------ */
+.temp{padding:14px 0}
+.temp + .temp{border-top:.5px solid rgba(15,32,39,.07)}
+.temp .th{display:flex;align-items:center;gap:10px;margin-bottom:11px}
+.temp .th b{flex:1;font-size:15.5px;font-weight:650}
+.temp .tl{font-size:12px;color:var(--brume);margin-bottom:7px;font-weight:600}
+.degres{display:flex;gap:8px;overflow-x:auto;padding:3px 1px 7px;scroll-snap-type:x proximity;-webkit-overflow-scrolling:touch}
+.deg{
+  flex:0 0 auto;min-width:60px;height:56px;border-radius:var(--r-btn);
+  background:rgba(255,255,255,.92);border:1.5px solid rgba(15,32,39,.10);
+  font-size:17px;font-weight:650;font-variant-numeric:tabular-nums;scroll-snap-align:center;transition:var(--tr);
+}
+.deg:active{transform:scale(.93)}
+.deg.vert{background:var(--menthe-l);border-color:rgba(127,184,164,.55);color:var(--menthe-d)}
+.deg.rouge{background:var(--corail-l);border-color:rgba(232,131,124,.55);color:var(--corail-d)}
+.deg.crit{background:var(--corail-d);border-color:var(--corail-d);color:#fff}
+.deg.on{box-shadow:inset 0 0 0 3px var(--encre);font-weight:800}
+
+/* --- 14. Liste dense (manager : historique, réglages) ------------------- */
+.dense{background:rgba(255,255,255,.72);border-radius:var(--r-carte);overflow:hidden;border:.5px solid rgba(255,255,255,.9)}
+.dl{display:flex;align-items:center;gap:12px;padding:11px 14px;min-height:50px;font-size:14px}
+.dl + .dl{border-top:.5px solid rgba(15,32,39,.06)}
+.dl:nth-child(even){background:rgba(255,255,255,.42)}
+.dl .c1{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:550}
+.dl .c{flex:0 0 auto;font-variant-numeric:tabular-nums;color:var(--ardoise);font-size:13.5px}
+.dl .c.w{width:88px;text-align:right}
+.dl .c.ww{width:130px;text-align:right}
+.dense-h{display:flex;gap:12px;padding:9px 14px;background:rgba(15,32,39,.045);
+  font-size:11.5px;font-weight:700;letter-spacing:.03em;text-transform:uppercase;color:var(--brume)}
+.dense-h .c1{flex:1}
+.dense-h .c.w{width:88px;text-align:right}
+.dense-h .c.ww{width:130px;text-align:right}
+.dense-scroll{max-height:62vh;overflow-y:auto;-webkit-overflow-scrolling:touch}
+
+/* --- 15. Feuille modale ------------------------------------------------- */
+#sheet{position:fixed;inset:0;z-index:200;display:flex;align-items:flex-end;justify-content:center}
+#sheet[hidden]{display:none!important}
+#sheet .voile{position:absolute;inset:0;background:rgba(15,32,39,.42);backdrop-filter:blur(6px);animation:fade .2s ease}
+#sheet .box{
+  position:relative;width:100%;max-width:560px;max-height:88dvh;overflow-y:auto;
+  background:var(--fond);border-radius:var(--r-sheet) var(--r-sheet) 0 0;
+  padding:10px 20px calc(24px + var(--safe-b));box-shadow:0 -8px 40px rgba(15,32,39,.24);
+  animation:monte .3s cubic-bezier(.32,.72,0,1);
+}
+#sheet .poignee{width:38px;height:5px;border-radius:3px;background:rgba(15,32,39,.16);margin:0 auto 16px}
+#sheet h2{margin-bottom:6px}
+#sheet .sub{font-size:13.5px;color:var(--brume);margin-bottom:18px}
+#sheet .actions{display:flex;gap:var(--gap);margin-top:22px}
+#sheet .actions .btn{flex:1}
+@media(min-width:720px){
+  #sheet{align-items:center}
+  #sheet .box{border-radius:var(--r-sheet);max-height:82dvh;animation:pop .26s cubic-bezier(.32,.72,0,1)}
+}
+
+/* --- 16. Toast, bandeau hors-ligne, retour bêta ------------------------- */
+#toast{
+  position:fixed;left:50%;bottom:calc(var(--barre-h) + 16px);transform:translateX(-50%) translateY(26px);
+  z-index:300;padding:13px 20px;border-radius:var(--r-pill);
+  background:var(--voile-nuit);backdrop-filter:var(--flou-barre);color:#fff;
+  font-size:14.5px;font-weight:550;opacity:0;pointer-events:none;transition:var(--tr);
+  box-shadow:var(--ombre-lev);max-width:88vw;text-align:center;
+}
+#toast.on{opacity:1;transform:translateX(-50%)}
+#offline{
+  position:fixed;top:0;left:0;right:0;z-index:90;padding:calc(var(--safe-t) + 8px) 16px 8px;
+  background:var(--ambre-d);color:#fff;font-size:13.5px;font-weight:600;text-align:center;
+  transform:translateY(-100%);transition:var(--tr);
+}
+#offline.on{transform:none}
+#offline .sync{opacity:.82;font-weight:500}
+#fb{
+  position:fixed;right:16px;bottom:calc(var(--barre-h) + 14px);z-index:110;
+  min-height:48px;padding:0 17px;border-radius:var(--r-pill);
+  background:var(--voile-nuit);backdrop-filter:var(--flou-barre);color:#fff;
+  font-size:14px;font-weight:600;display:inline-flex;align-items:center;gap:8px;
+  box-shadow:var(--ombre-lev);transition:var(--tr);
+}
+#fb:active{transform:scale(.94)}
+#fb .pt{width:8px;height:8px;border-radius:50%;background:var(--ambre)}
+
+/* --- 17. Écran de connexion --------------------------------------------- */
+#login{position:fixed;inset:0;z-index:250;display:flex;flex-direction:column;justify-content:center;
+  padding:26px 22px calc(26px + var(--safe-b));background:var(--fond);overflow-y:auto}
+#login[hidden]{display:none!important}
+#login::before{
+  content:'';position:absolute;inset:0;pointer-events:none;
+  background:radial-gradient(70vw 46vh at 20% 0%,rgba(143,180,206,.34),transparent 60%),
+             radial-gradient(60vw 46vh at 88% 100%,rgba(127,184,164,.30),transparent 62%);
+}
+#login .in{position:relative;width:100%;max-width:430px;margin:0 auto}
+#login .lg{text-align:center;margin-bottom:30px}
+#login .lg h1{font-size:32px;letter-spacing:-.03em}
+#login .lg p{font-size:14px;color:var(--brume);margin-top:5px}
+
+/* --- 18. Météo ---------------------------------------------------------- */
+.meteo{display:flex;align-items:center;gap:15px}
+.meteo .mi{font-size:38px;line-height:1}
+.meteo .mt{font-size:30px;font-weight:680;letter-spacing:-.03em;font-variant-numeric:tabular-nums}
+.meteo .md{font-size:13.5px;color:var(--brume)}
+
+/* --- 19. Divers --------------------------------------------------------- */
+.demo{display:inline-flex;align-items:center;gap:5px;padding:3px 10px;border-radius:var(--r-pill);
+  background:var(--ambre-l);color:var(--ambre-d);border:1px dashed var(--ambre);
+  font-size:11px;font-weight:800;letter-spacing:.04em}
+.vide{text-align:center;padding:36px 20px;color:var(--brume);font-size:14px}
+.vide .vi{font-size:34px;display:block;margin-bottom:10px;opacity:.5}
+.sep{height:.5px;background:rgba(15,32,39,.09);margin:16px 0;border:0}
+.entete{display:flex;align-items:center;gap:10px;margin:22px 0 10px}
+.entete h3{flex:1;font-size:13px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--brume)}
+.rang{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.pousse{margin-left:auto}
+.mic.rec{background:var(--corail-d)!important;animation:pulse 1.15s ease-in-out infinite}
+.phase-nav{display:flex;gap:9px;margin-bottom:16px}
+.phase-nav button{flex:1;min-height:60px;border-radius:var(--r-btn);background:rgba(255,255,255,.68);
+  border:1.5px solid transparent;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;
+  font-size:12.5px;font-weight:650;color:var(--brume);transition:var(--tr)}
+.phase-nav button .pi{font-size:21px}
+.phase-nav button.on{background:var(--blanc);color:var(--encre);border-color:rgba(15,32,39,.10);box-shadow:var(--ombre)}
+.phase-nav button.fait{color:var(--menthe-d)}
+
+/* --- 20. Animations ----------------------------------------------------- */
+@keyframes monte{from{transform:translateY(100%)}to{transform:none}}
+@keyframes pop{from{transform:scale(.94);opacity:0}to{transform:none;opacity:1}}
+@keyframes fade{from{opacity:0}to{opacity:1}}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.5}}
+@keyframes clignote{0%,100%{box-shadow:var(--ombre),0 0 0 0 rgba(194,88,80,.34)}50%{box-shadow:var(--ombre),0 0 0 8px rgba(194,88,80,0)}}
+@keyframes secousse{0%,100%{transform:none}20%{transform:translateX(-9px)}40%{transform:translateX(9px)}60%{transform:translateX(-6px)}80%{transform:translateX(6px)}}
+@media(prefers-reduced-motion:reduce){
+  *,*::before,*::after{animation-duration:.001ms!important;animation-iteration-count:1!important;transition-duration:.001ms!important}
+}
+
+/* --- 21. Impression : registre sanitaire -------------------------------- */
+#printview{display:none}
+@media print{
+  body::before{display:none}
+  body *{visibility:hidden!important}
+  #printview,#printview *{visibility:visible!important}
+  #printview{display:block!important;position:absolute;left:0;top:0;width:100%;padding:0;background:#fff}
+  #app,#tabbar,#fb,#toast,#offline,.noprint{display:none!important}
+  @page{margin:14mm}
+}
+#printview{font-family:-apple-system,Inter,sans-serif;color:#000}
+#printview h1{font-size:19px}
+#printview .pv-h{border-bottom:2px solid #000;padding-bottom:9px;margin-bottom:16px}
+#printview .pv-s{margin:20px 0 7px;font-size:12px;font-weight:800;letter-spacing:.06em;text-transform:uppercase}
+#printview table{width:100%;border-collapse:collapse;font-size:10.5px;margin-bottom:10px}
+#printview th,#printview td{border:.5pt solid #666;padding:3px 5px;text-align:left}
+#printview th{background:#EEE;font-weight:700}
+#printview tr{page-break-inside:avoid}
+#printview .sign{margin-top:26px;font-size:10.5px}
+
+/* --- 22. Large écran ---------------------------------------------------- */
+@media(min-width:900px){
+  :root{--pad-x:24px}
+  #page{padding-top:22px}
+  .qui{grid-template-columns:repeat(4,1fr)}
+}
+@media(prefers-color-scheme:dark){
+  :root{color-scheme:light}
+}
