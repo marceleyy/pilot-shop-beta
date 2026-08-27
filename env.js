@@ -13,6 +13,6 @@
    ============================================================================= */
 
 window.__ENV__ = {
-  SUPABASE_URL:      'https://votreprojet.supabase.co',
-  SUPABASE_ANON_KEY: 'eyJhbGciOi...'
+  SUPABASE_URL: 'https://yphqsppysxhseqmmlfia.supabase.co',
+  SUPABASE_ANON_KEY: 'sb_publishable_39wRfKoBFjmpYiU7R1ezMw_OAv4zCp2'
 };
