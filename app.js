@@ -151,7 +151,9 @@ const DB = (function () {
         majBandeau();
         throw err;
       }
-      STATE.erreurBase = null;
+      /* Requête réussie : on efface l'erreur ET on rafraîchit l'affichage.
+         Sans ce majBandeau(), le bandeau restait à l'écran indéfiniment. */
+      if (STATE.erreurBase) { STATE.erreurBase = null; majBandeau(); }
       const txt = await r.text();
       return txt ? JSON.parse(txt) : null;
     } catch (e) {
@@ -248,8 +250,17 @@ const DB = (function () {
    clé écrase les précédentes, inutile de rejouer dix fois la même saisie.
    -------------------------------------------------------------------------- */
 function fileLire() {
-  try { const v = DB._lire(OFFLINE.fileAttente); return v ? JSON.parse(v) : []; }
-  catch (e) { return []; }
+  try {
+    const v = DB._lire(OFFLINE.fileAttente);
+    const f = v ? JSON.parse(v) : [];
+    /* On écarte à la lecture les entrées dont la clé n'a plus de table :
+       elles dateraient d'une version antérieure et bloqueraient la file. */
+    const propres = f.filter(x => x && x.cle && DB._table(x.cle));
+    if (propres.length !== f.length) {
+      try { DB._ecrire(OFFLINE.fileAttente, JSON.stringify(propres)); } catch (e) {}
+    }
+    return propres;
+  } catch (e) { return []; }
 }
 function fileEcrire(f) {
   try { DB._ecrire(OFFLINE.fileAttente, JSON.stringify(f)); } catch (e) {}
