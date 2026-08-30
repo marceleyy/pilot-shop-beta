@@ -85,11 +85,21 @@ const ROUTES = [
   ['pointage:',    SUPABASE.tables.sessions],
   ['releve',       SUPABASE.tables.releve],
   ['feed:',        SUPABASE.tables.feed],
-  ['feedback',     SUPABASE.tables.feedback]
+  ['feedback',     SUPABASE.tables.feedback],
+  /* Ajouts du lot « réunion d'équipe » : sans ces lignes, les clés
+     n'avaient aucune table et l'URL contenait littéralement « undefined ». */
+  ['checklist:',   'checklists'],
+  ['preuves:',     'preuves'],
+  ['stock:',       'stock'],
+  ['reception:',   'receptions'],
+  ['horaires',     'reglages'],
+  ['enceintes',    'reglages'],
+  ['hebdo',        'reglages'],
+  ['async:',       'reglages']
 ];
 
 /* Clés propres à l'appareil : elles ne partent jamais sur le réseau. */
-const LOCALES = ['session', 'seuils', 'meteo', 'async:', OFFLINE.fileAttente];
+const LOCALES = ['session', 'seuils', 'meteo', OFFLINE.fileAttente];
 
 const DB = (function () {
   const P = OFFLINE.storeLocal + ':';
@@ -266,6 +276,12 @@ async function journaliserSync() {
   syncEnCours = true;
   const restants = [];
   for (const item of f) {
+    /* Une clé sans table ne peut pas partir : on l'abandonne au lieu
+       d'appeler /rest/v1/undefined en boucle. La donnée reste en local. */
+    if (!DB._table(item.cle)) {
+      console.warn('Clé non routée, abandonnée de la file :', item.cle);
+      continue;
+    }
     try {
       if (item.op === 'del') {
         await DB._appel(DB._table(item.cle) + '?id=eq.' + encodeURIComponent(item.cle), { method:'DELETE' });
