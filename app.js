@@ -52,6 +52,7 @@ const STATE = {
   phase: null,         // 'ouverture' | 'service' | 'fermeture'
   service: null,       // session de pointeuse en cours
   enLigne: navigator.onLine,
+  erreurBase: null,
   fileAttente: 0,
   _pin: '',
   _candidat: null
@@ -127,12 +128,26 @@ const DB = (function () {
         }, (options && options.headers) || {})
       }, options || {}));
       clearTimeout(to);
-      if (!r.ok) throw new Error('HTTP ' + r.status);
+      /* Le réseau a répondu : on est en ligne, même si le serveur refuse. */
+      if (!STATE.enLigne) { STATE.enLigne = true; STATE.erreurBase = null; majBandeau(); }
+      if (!r.ok) {
+        const err = new Error('HTTP ' + r.status);
+        err.http = r.status;
+        /* 401/403 : clé ou RLS. 404 : table absente. Ce n'est pas une panne réseau,
+           le signaler comme tel évite de basculer toute l'app en mode hors-ligne. */
+        if (r.status === 401 || r.status === 403) STATE.erreurBase = 'Clé Supabase refusée';
+        else if (r.status === 404) STATE.erreurBase = 'Table introuvable';
+        else STATE.erreurBase = 'Base en erreur (' + r.status + ')';
+        majBandeau();
+        throw err;
+      }
+      STATE.erreurBase = null;
       const txt = await r.text();
       return txt ? JSON.parse(txt) : null;
     } catch (e) {
       clearTimeout(to);
-      if (STATE.enLigne && e.name !== 'AbortError') { STATE.enLigne = false; majBandeau(); }
+      /* Seule une vraie panne réseau bascule l'application hors ligne. */
+      if (!e.http && STATE.enLigne) { STATE.enLigne = false; majBandeau(); }
       throw e;
     }
   }
@@ -241,7 +256,10 @@ async function empiler(op, cle, valeur) {
 let syncEnCours = false;
 let derniereSync = null;
 async function journaliserSync() {
-  if (syncEnCours || !STATE.enLigne || !DB.configure) return;
+  if (syncEnCours || !DB.configure) return;
+  /* On se fie au navigateur, pas à notre propre drapeau : c'est ce qui permet
+     à la file de se débloquer toute seule après une erreur passagère. */
+  if (!navigator.onLine) return;
   let f = fileLire();
   if (!f.length) return;
 
@@ -318,11 +336,43 @@ function confirmer(titre, texte, libelle, onOui) {
 
 function majBandeau() {
   const b = $('#offline');
-  b.classList.toggle('on', !STATE.enLigne);
+  if (!b) return;
+  const msg = b.querySelector('.msg');
+
+  /* Sans clés Supabase, tout est local par choix : pas de bandeau alarmiste. */
+  const configure = (typeof DB !== 'undefined' && DB.configure);
+  if (!configure) { b.classList.remove('on'); return; }
+
+  if (STATE.erreurBase) {
+    b.classList.add('on');
+    if (msg) msg.textContent = STATE.erreurBase + ' — vos saisies restent sur l’iPad';
+  } else if (!STATE.enLigne) {
+    b.classList.add('on');
+    if (msg) msg.textContent = PWA.bannerOffline;
+  } else {
+    b.classList.remove('on');
+  }
   $('#offline-n').textContent = STATE.fileAttente ? '· ' + STATE.fileAttente + ' en attente' : '';
 }
-window.addEventListener('online',  () => { STATE.enLigne = true;  majBandeau(); toast('Connexion revenue'); });
+
+/* Sonde légère : rétablit l'état en ligne dès que la base répond de nouveau. */
+let sondeEnCours = false;
+async function sonderReseau() {
+  if (sondeEnCours || !navigator.onLine || !DB.configure) return;
+  if (STATE.enLigne && !STATE.erreurBase) return;
+  sondeEnCours = true;
+  try {
+    await DB._appel(SUPABASE.tables.journal + '?select=id&limit=1');
+    STATE.enLigne = true; STATE.erreurBase = null;
+    majBandeau();
+    journaliserSync();
+  } catch (e) { /* toujours indisponible */ }
+  sondeEnCours = false;
+}
+
+window.addEventListener('online',  () => { STATE.enLigne = true; STATE.erreurBase = null; majBandeau(); sonderReseau(); });
 window.addEventListener('offline', () => { STATE.enLigne = false; majBandeau(); });
+setInterval(sonderReseau, 15000);
 
 /* Fragments réutilisables */
 const carte = (contenu, cls) => '<div class="card ' + (cls || '') + '">' + contenu + '</div>';
@@ -1017,7 +1067,7 @@ function analyserDictee(txt) {
 }
 
 /* =============================================================================
-   13. VUE — NUMÉROS DE LOT (Scanner OCR IA)
+   13. VUE — NUMÉROS DE LOT (scanner simulé)
    ========================================================================== */
 V.lots = async function () {
   const m = monthKey(STATE.jour);
@@ -1029,7 +1079,8 @@ V.lots = async function () {
   const ouverts = src.filter(s => rec[s.cle] && rec[s.cle].lot).length;
 
   $('#page').innerHTML =
-    carte(entete('📸', 'Scanner l’étiquette', 'L’Intelligence Artificielle lit le lot et détecte le parfum automatiquement.') +
+    carte(entete('📸', 'Scanner l’étiquette', 'Photographiez l’étiquette plutôt que de recopier le numéro.') +
+      '<span class="demo">MODE DÉMONSTRATION</span>' +
       '<button class="btn ciel bloc xl" id="scan" style="margin-top:14px">' +
       '<span class="ic">📸</span>Scanner une étiquette</button>' +
       '<p class="mini" style="margin-top:12px">Le lot se note à l’ouverture du produit, au moment de la mise en vitrine.</p>', 'ciel') +
@@ -1082,13 +1133,6 @@ V.lots = async function () {
   async function lancerScan(cle) {
     const r = await scannerPhoto('etiquette');
     if (!r) return;
-    
-    // Si on a utilisé le gros bouton et que l'IA a reconnu le parfum
-    if (!cle && r.cleProduit) {
-      appliquer(r.cleProduit, r);
-      return;
-    }
-
     if (!cle) {
       showSheet('<h2 id="sheet-titre">À quel produit ce lot appartient-il ?</h2>' +
         '<p class="sub">Lot lu : <b>' + esc(r.lot) + '</b></p>' +
@@ -1102,13 +1146,11 @@ V.lots = async function () {
   }
 
   async function appliquer(cle, r) {
-    const champLot = $('[data-l="' + cle + '.lot"]');
-    const champOuv = $('[data-l="' + cle + '.ouv"]');
-    if (champLot) champLot.value = r.lot;
-    if (champOuv) champOuv.value = r.ouv;
+    $('[data-l="' + cle + '.lot"]').value = r.lot;
+    $('[data-l="' + cle + '.ouv"]').value = r.ouv;
     sauver();
     await feed('ok', STATE.user.prenom + ' a ouvert un lot (' + r.lot + ')');
-    toast('Lot ' + r.lot + ' enregistré');
+    toast('Lot repris — vérifiez sur l’étiquette');
   }
 };
 
@@ -1118,115 +1160,7 @@ function regleDLC(nom, type) {
   return m ? m.regle : 'defaut';
 }
 
-/* VRAI Scanner OCR avec Tesseract.js (Filtre N&B Anti-Reflets) */
-function scannerPhoto(type) {
-  return new Promise(resolve => {
-    const cam = $('#cam');
-    cam.value = '';
-    cam.onchange = () => {
-      if (!cam.files || !cam.files[0]) return resolve(null);
-      const file = cam.files[0];
-
-      showSheet('<h2 id="sheet-titre">Lecture OCR en cours</h2>' +
-        '<p class="sub" id="ocr-status">Préparation de l’image...</p>' +
-        '<div class="vide"><span class="vi">🔍</span>L’IA déchiffre l’étiquette...</div>');
-
-      const img = new Image();
-      img.onload = async () => {
-        try {
-          if (typeof Tesseract === 'undefined') throw new Error("Lecteur OCR indisponible");
-
-          // 1. Toile de redimensionnement
-          const canvas = document.createElement('canvas');
-          const ctx = canvas.getContext('2d');
-          const MAX_WIDTH = 1000;
-          let w = img.width, h = img.height;
-          if (w > MAX_WIDTH) { h = Math.round((h * MAX_WIDTH) / w); w = MAX_WIDTH; }
-          canvas.width = w; canvas.height = h;
-          ctx.drawImage(img, 0, 0, w, h);
-
-          // 2. Filtre N&B pour tuer les reflets métalliques
-          const imgData = ctx.getImageData(0, 0, w, h);
-          const data = imgData.data;
-          for (let i = 0; i < data.length; i += 4) {
-            // Conversion en gris
-            const gris = data[i] * 0.3 + data[i+1] * 0.59 + data[i+2] * 0.11;
-            // Augmentation drastique du contraste (seuil)
-            const couleur = gris < 130 ? 0 : 255;
-            data[i] = data[i+1] = data[i+2] = couleur;
-          }
-          ctx.putImageData(imgData, 0, 0);
-
-          $('#ocr-status').textContent = "Analyse IA...";
-
-          // 3. Décodage Tesseract
-          const result = await Tesseract.recognize(canvas, 'eng+fra', {
-            logger: m => {
-              if (m.status === 'recognizing text') {
-                $('#ocr-status').textContent = "Déchiffrage : " + Math.round(m.progress * 100) + " %";
-              }
-            }
-          });
-          
-          const texte = result.data.text || '';
-          const txtPropre = texte.replace(/\n/g, ' ').replace(/\s+/g, ' ');
-
-          if (type === 'etiquette') {
-            let lotDetecte = '';
-            let cleProduit = null;
-            let nomProduit = 'Inconnu';
-
-            // Détection du Batch
-            const matchBatch = txtPropre.match(/([0-9IlOoS]{5})\s*([A-Z])/i);
-            if (matchBatch) {
-              let chiffres = matchBatch[1].toUpperCase().replace(/I|L/g, '1').replace(/O/g, '0').replace(/S/g, '5');
-              let lettre = matchBatch[2].toUpperCase();
-              lotDetecte = chiffres + lettre;
-            }
-
-            // Détection du produit
-            const txtMin = txtPropre.toLowerCase();
-            const src = PARFUMS.map(p => ({ cle:'g_' + p, nom:p }))
-              .concat(Object.keys(DLC_RULES).filter(k => k !== 'defaut' && k !== 'gelato').map(k => ({ cle:'c_' + k, nom:DLC_RULES[k].label })));
-
-            if (txtMin.includes('tiramisu')) { nomProduit = 'Tiramisu'; cleProduit = 'g_Tiramisu'; }
-            else if (txtMin.includes('yoghurt') || txtMin.includes('yaourt')) { nomProduit = 'Yaourt'; cleProduit = 'g_Yaourt'; }
-            else if (txtMin.includes('caramel') || txtMin.includes('caramello')) { nomProduit = 'Caramel'; cleProduit = 'g_Caramel'; }
-            else {
-              for (const s of src) {
-                if (s.nom.length > 4 && txtMin.includes(s.nom.toLowerCase())) {
-                  nomProduit = s.nom; cleProduit = s.cle; break;
-                }
-              }
-            }
-
-            const r = { lot: lotDetecte || 'Non lu', ouv: today(), cleProduit: cleProduit };
-
-            showSheet(
-              '<div class="rang"><h2 id="sheet-titre">Résultat de la lecture</h2></div>' +
-              (lotDetecte ? '<div class="alerte ok" style="margin:14px 0"><span class="ai">✓</span><div><b>Lecture réussie</b></div></div>'
-                          : '<div class="alerte warn" style="margin:14px 0"><span class="ai">⚠️</span><div><b>Batch introuvable</b><p>Saisissez-le à la main.</p></div></div>') +
-              '<div class="dense">' +
-              '<div class="dl"><span class="c1">Batch lu</span><span class="c ww"><b>' + esc(r.lot) + '</b></span></div>' +
-              '<div class="dl"><span class="c1">Produit détecté</span><span class="c ww"><b>' + esc(nomProduit) + '</b></span></div>' +
-              '</div>' +
-              '<div class="champ" style="margin-top:14px"><label class="f">Texte brut vu par l\'IA (Debug)</label>' +
-              '<textarea readonly style="font-size:11px; min-height:60px;">' + esc(txtPropre) + '</textarea></div>' +
-              '<div class="actions"><button class="btn clair" id="sc-x">Annuler</button>' +
-              '<button class="btn menthe" id="sc-ok">Utiliser ces valeurs</button></div>');
-
-            $('#sc-x').onclick  = () => { closeSheet(); resolve(null); };
-            $('#sc-ok').onclick = () => { closeSheet(); resolve(r); };
-          }
-        } catch (e) {
-          closeSheet(); toast('Erreur IA : ' + e.message, 'erreur'); resolve(null);
-        }
-      };
-      img.src = URL.createObjectURL(file);
-    };
-    cam.click();
-  });
-}
+/* Le scan réel est fourni par ocr.js, chargé après ce fichier. */
 
 /* =============================================================================
    14. VUE — RÉASSORT

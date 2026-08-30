@@ -13,6 +13,8 @@ const PRECACHE = [
   '/style.css',
   '/config.js',
   '/app.js',
+  '/ocr.js',
+  '/modules.js',
   '/manifest.webmanifest',
   '/icons/icon-192.png',
   '/icons/icon-512.png',

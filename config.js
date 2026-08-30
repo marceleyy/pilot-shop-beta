@@ -27,13 +27,13 @@ const APP = {
    policies RLS côté Supabase, jamais sur ce fichier.
    -------------------------------------------------------------------------- */
 const SUPABASE = {
-  url: 'https://yphqsppysxhseqmmlfia.supabase.co', 
-  anonKey: 'sb_publishable_39wRfKoBFjmpYiU7R1ezMw_OAv4zCp2',
-  schema: 'public',
+  url:     (typeof window !== 'undefined' && window.__ENV__ && window.__ENV__.SUPABASE_URL)      || '',
+  anonKey: (typeof window !== 'undefined' && window.__ENV__ && window.__ENV__.SUPABASE_ANON_KEY) || '',
+  schema:  'public',
   tables: {
     sites:        'sites',
     employes:     'employes',
-    sessions:     'sessions',
+    sessions:     'sessions',        // pointeuse : début / fin de service
     temperatures: 'releves_temperature',
     nettoyage:    'taches_nettoyage',
     reassort:     'reassort',
@@ -44,11 +44,12 @@ const SUPABASE = {
     caisse:       'caisse',
     ventes:       'ventes',
     periodes:     'periodes',
-    releve:       'carnet_releve',
+    releve:       'carnet_releve',   // messages de passation
     feed:         'journal',
     feedback:     'feedback'
   },
   realtime: ['journal', 'ruptures', 'carnet_releve'],
+  /* Colonnes de scoping multi-boutique — présentes sur chaque table */
   scope: { site: 'site_id', horodatage: 'created_at', auteur: 'employe_id' }
 };
 
@@ -121,11 +122,19 @@ const POINTEUSE = {
    5. DLC — durée de vie après ouverture
    Exprimée en HEURES pour gérer la chantilly au plus juste.
    -------------------------------------------------------------------------- */
+/* Source : Fiche de traçabilité Amorino 2025, onglet CONSERVATION.
+   Deux régimes selon la zone de stockage : négatif −13 °C ou positif 0/+4 °C. */
 const DLC_RULES = {
-  chantilly:            { h: 48,       label: 'Crème chantilly',            zone: 'positif' },
-  gaufre:               { h: 10 * 24,  label: 'Gaufres',                    zone: 'ambiant' },
-  gelato:               { h: 10 * 24,  label: 'Gelati / sorbets −13 °C',    zone: 'negatif' },
-  macaron_traditionnel: { h: 3 * 24,   label: 'Macarons traditionnels',     zone: 'ambiant' },
+  chantilly:            { h: 48,        label: 'Crème chantilly maison',     zone: 'positif' },
+  gaufre:               { h: 10 * 24,   label: 'Gaufres −13 °C',             zone: 'negatif' },
+  gelato:               { h: 10 * 24,   label: 'Gelati / sorbets −13 °C',    zone: 'negatif' },
+  macaron_gelato:       { h: 10 * 24,   label: 'Macarons al gelato −13 °C',  zone: 'negatif' },
+  gianduiotto:          { h: 10 * 24,   label: 'Gianduiotto al gelato',      zone: 'negatif' },
+  macaron_traditionnel: { h: 90 * 24,   label: 'Macarons traditionnels −13 °C', zone: 'negatif' },
+  macaron_trad_positif: { h: 3 * 24,    label: 'Macarons traditionnels 0/+4 °C', zone: 'positif' },
+  crepe_negatif:        { h: 4 * 24,    label: 'Crêpes −13 °C',              zone: 'negatif' },
+  lait:                 { h: 2 * 24,    label: 'Lait',                       zone: 'positif' },
+  vegetal:              { h: 5 * 24,    label: 'Alternative végétale',       zone: 'positif' },
   /* Compléments repris des registres papier */
   brioche:              { h: 4 * 24,   label: 'Brioche',                    zone: 'ambiant' },
   crepe:                { h: 4 * 24,   label: 'Crêpes',                     zone: 'ambiant' },
@@ -148,7 +157,11 @@ const DLC_SEUILS = {
 const DLC_MATCH = [
   { re: /chantilly|antilly/i,               regle: 'chantilly' },
   { re: /gaufre/i,                          regle: 'gaufre' },
-  { re: /macaron.*(tradi|ambiant)|tradi.*macaron/i, regle: 'macaron_traditionnel' },
+  { re: /macaron.*(gelato|glac)/i,          regle: 'macaron_gelato' },
+  { re: /macaron.*tradi|tradi.*macaron/i,   regle: 'macaron_traditionnel' },
+  { re: /gianduiotto/i,                     regle: 'gianduiotto' },
+  { re: /\blait\b/i,                        regle: 'lait' },
+  { re: /avoine|amande|soja|v[eé]g[eé]tal/i, regle: 'vegetal' },
   { re: /brioche/i,                         regle: 'brioche' },
   { re: /cr(ê|e)pe/i,                       regle: 'crepe' },
   { re: /coulis/i,                          regle: 'coulis' },
@@ -163,18 +176,20 @@ const DLC_MATCH = [
    vert = plage cible. crit = au-delà, dépassement de limite critique.
    pas = incrément des boutons tactiles (pas de clavier en plein rush).
    -------------------------------------------------------------------------- */
-const ENCEINTES = [
-  { id: 'cf',  nom: 'Chambre froide',         cible: '−20 °C',  lo: -24, hi: -14, pas: 1, vert: [-20, -17], crit: -15, zone: 'reserve' },
-  { id: 'ar1', nom: 'Armoire froide 1',       cible: '−20 °C',  lo: -24, hi: -14, pas: 1, vert: [-20, -17], crit: -15, zone: 'reserve' },
-  { id: 'ar2', nom: 'Armoire froide 2',       cible: '−20 °C',  lo: -24, hi: -14, pas: 1, vert: [-20, -17], crit: -15, zone: 'reserve' },
-  { id: 'ar3', nom: 'Armoire froide 3',       cible: '−20 °C',  lo: -24, hi: -14, pas: 1, vert: [-20, -17], crit: -15, zone: 'reserve' },
-  { id: 'vg',  nom: 'Vitrine gelato',         cible: '−13 °C',  lo: -18, hi: -8,  pas: 1, vert: [-16, -11], crit: -10, zone: 'boutique' },
-  { id: 'vs',  nom: 'Vitrine sorbet',         cible: '−13 °C',  lo: -18, hi: -8,  pas: 1, vert: [-16, -11], crit: -10, zone: 'boutique' },
-  { id: 'fn',  nom: 'Frigo négatif comptoir', cible: '−13 °C',  lo: -18, hi: -8,  pas: 1, vert: [-16, -11], crit: -10, zone: 'boutique' },
-  { id: 'fp1', nom: 'Frigo positif comptoir', cible: '0 / +3 °C', lo: -2, hi: 8,  pas: 1, vert: [0, 3],     crit: 5,   zone: 'boutique' },
-  { id: 'fp2', nom: 'Frigo sous comptoir',    cible: '0 / +3 °C', lo: -2, hi: 8,  pas: 1, vert: [0, 3],     crit: 5,   zone: 'boutique' },
-  { id: 'ch',  nom: 'Machine à chantilly',    cible: '0 / +4 °C', lo: -2, hi: 8,  pas: 1, vert: [0, 4],     crit: 6,   zone: 'boutique' }
+/* Modifiable depuis Réglages → Back-office. ENCEINTES_DEF sert de valeur d'usine. */
+const ENCEINTES_DEF = [
+  { id: 'cf',  nom: 'Chambre froide',                    cible: '−20 °C',    lo: -24, hi: -14, pas: 1, vert: [-20, -17], crit: -15, zone: 'reserve' },
+  { id: 'ar1', nom: 'Armoire froide 1',                  cible: '−20 °C',    lo: -24, hi: -14, pas: 1, vert: [-20, -17], crit: -15, zone: 'reserve' },
+  { id: 'ar2', nom: 'Armoire froide 2',                  cible: '−20 °C',    lo: -24, hi: -14, pas: 1, vert: [-20, -17], crit: -15, zone: 'reserve' },
+  { id: 'ar3', nom: 'Armoire froide 3',                  cible: '−20 °C',    lo: -24, hi: -14, pas: 1, vert: [-20, -17], crit: -15, zone: 'reserve' },
+  { id: 'vg',  nom: 'Vitrine gelato',                    cible: '−13 °C',    lo: -18, hi: -8,  pas: 1, vert: [-16, -11], crit: -10, zone: 'boutique' },
+  { id: 'vs',  nom: 'Vitrine sorbet',                    cible: '−13 °C',    lo: -18, hi: -8,  pas: 1, vert: [-16, -11], crit: -10, zone: 'boutique' },
+  { id: 'fn',  nom: 'Congélateur −13 °C',                cible: '−13 °C',    lo: -18, hi: -8,  pas: 1, vert: [-16, -11], crit: -10, zone: 'boutique' },
+  { id: 'pc',  nom: 'Petit congélateur crêpes/gaufres',  cible: 'Congèle petit, négatif', lo: -20, hi: -6, pas: 1, vert: [-16, -11], crit: -10, zone: 'boutique' },
+  { id: 'fp1', nom: 'Frigo positif',                     cible: '0 / +3 °C', lo: -2,  hi: 8,   pas: 1, vert: [0, 3],     crit: 5,   zone: 'boutique' },
+  { id: 'ch',  nom: 'Machine à chantilly',               cible: '0 / +4 °C', lo: -2,  hi: 8,   pas: 1, vert: [0, 4],     crit: 6,   zone: 'boutique' }
 ];
+let ENCEINTES = ENCEINTES_DEF.map(e => Object.assign({}, e));
 
 const RELEVES = {
   moments: [
@@ -722,7 +737,113 @@ const UI = {
 /* -----------------------------------------------------------------------------
    19. EXPORT
    -------------------------------------------------------------------------- */
+
+
+/* =============================================================================
+   20. CHECK-LISTES OFFICIELLES
+   Transcription des MOP Amorino : « CHECK-LIST D'OUVERTURE » et
+   « MOP 04 112 CHECK-LISTE DE FERMETURE ». L'ordre et les durées sont ceux
+   des documents. jours : restriction au jour de semaine (1 = lundi).
+   ========================================================================== */
+const CHECKLISTS = {
+  ouverture: [
+    { bloc: 'Avant l’ouverture aux clients', taches: [
+      { id:'o01', t:'Ouvrir la porte et refermer derrière soi, allumer les lumières', min:5 },
+      { id:'o02', t:'Mettre la tenue Amorino', min:5 },
+      { id:'o03', t:'Se laver les mains au savon antibactérien', min:5 },
+      { id:'o04', t:'Relever les températures des unités froides et les noter sur la fiche', min:5, lien:'temp' },
+      { id:'o05', t:'Vérifier que le congélateur −13 °C et la chambre froide ont bien été fermés', min:5 },
+      { id:'o06', t:'Sortir de nouvelles lavettes rose, jaune et bleue', min:5, jours:[1,3,6], async:'lavettes' },
+      { id:'o07', t:'Rincer les lavettes désinfectées au Bactalim la veille', min:5, joursSauf:[1,3,6] },
+      { id:'o08', t:'Nettoyer les inox visibles des vitrines −13 °C au Bactalim, rincer, sécher, allumer la vitrine', min:5, fiche:'f01' },
+      { id:'o09', t:'Installer tables et chaises, sortir la poubelle et le stoppeur, descendre le store', min:5 },
+      { id:'o10', t:'Nettoyer l’intérieur : balai, serpillière, surfaces visibles', min:5 },
+      { id:'o11', t:'À −13 °C atteints, remettre les bacs et macarons entamés la veille (finir les anciens avant d’en ouvrir)', min:10 },
+      { id:'o12', t:'Rincer à l’eau chaude les ustensiles laissés dans le Bactalim et les ranger', min:5 },
+      { id:'o13', t:'Laver et désinfecter les couvercles des bacs, les placer à −13 °C', min:5 },
+      { id:'o14', t:'Allumer le gaufrier et la crêpière', min:2 },
+      { id:'o15', t:'Allumer la radio Amorino puis compter le fond de caisse', min:5, lien:'caisse', obligatoire:true },
+      { id:'o16', t:'Vérifier la qualité de la chantilly maison (48 h maximum)', min:1, lien:'frigo' }
+    ]},
+    { bloc: 'Après l’ouverture aux clients', taches: [
+      { id:'o17', t:'Vérifier le −13 °C et y remonter bacs et macarons depuis la chambre froide', min:10 },
+      { id:'o18', t:'Faire le réassort : cornets, pots, serviettes, cuillères', min:20, lien:'reas' }
+    ]}
+  ],
+  fermeture: [
+    { bloc: 'Avant la fermeture aux clients', taches: [
+      { id:'f01', t:'Ajouter les quarts de glace possibles', min:8 },
+      { id:'f02', t:'Vérifier le −13 °C et y transférer des bacs depuis la −20 °C si nécessaire', min:8 },
+      { id:'f03', t:'Nettoyer les bacs de glace et de macarons dans les vitrines', min:10 },
+      { id:'f04', t:'Désinfecter marbre et inox au Bactalim dilué, laisser agir 10 minutes, rincer', min:10, minuteur:600, fiche:'f01' },
+      { id:'f05', t:'Nettoyer l’extérieur des frigos : portes, poignées, joints', min:10 },
+      { id:'f06', t:'Vider et nettoyer les poubelles au Bactalim dilué', min:8 }
+    ]},
+    { bloc: 'Après la fermeture aux clients', taches: [
+      { id:'f07', t:'Ranger bacs et macarons dans le −13 °C, étiquette vers le fond', min:8 },
+      { id:'f08', t:'Inscrire les températures sur la feuille de traçabilité', min:2, lien:'temp', obligatoire:true },
+      { id:'f09', t:'Éteindre la vitrine dès qu’elle est vide', min:2 },
+      { id:'f10', t:'Éteindre le gaufrier et la crêpière', min:2 },
+      { id:'f11', t:'Rincer les ustensiles à l’eau chaude puis les immerger dans le Bactalim dilué', min:8 },
+      { id:'f12', t:'Éteindre l’eau des lave-spatules, nettoyer et désinfecter', min:8 },
+      { id:'f13', t:'Nettoyer machine à café (ne pas l’éteindre), machine à frappé et Aeroccino au Bactalim', min:10 },
+      { id:'f14', t:'Nettoyage quotidien de la machine à chantilly — NE PAS L’ÉTEINDRE', min:10, fiche:'f03' },
+      { id:'f15', t:'Nettoyer les inox de la vitrine : comptoir, miroir', min:5 },
+      { id:'f16', t:'Nettoyer l’évier au Bactalim dilué', min:5 },
+      { id:'f17', t:'Éteindre la machine à chocolat chaud, verser le reste dans le pichet, tremper l’évier toute la nuit', min:5 },
+      { id:'f18', t:'Jeter les lavettes', min:5, jours:[2,5,7], async:'lavettes' },
+      { id:'f19', t:'Trier les lavettes par code couleur et les mettre dans le Bactalim dilué', min:5, joursSauf:[2,5,7] },
+      { id:'f20', t:'Rentrer le stoppeur et la terrasse : tables, chaises, parasols', min:8 },
+      { id:'f21', t:'Vérifier les dates de péremption des brioches et des gâteaux', min:2, lien:'frigo' },
+      { id:'f22', t:'Compter et fermer la journée sur la caisse', min:8, lien:'caisse', obligatoire:true },
+      { id:'f23', t:'Vérifier la fermeture des portes des frigos et contrôler les températures', min:5, lien:'temp' },
+      { id:'f24', t:'Éteindre les lumières et la climatisation', min:5 },
+      { id:'f25', t:'Fermer la porte à clé', min:2 }
+    ]}
+  ]
+};
+
+/* Horaires — modifiables depuis le back-office */
+const HORAIRES_DEF = {
+  ouverture: '09:30', fermeture: '23:00',
+  debutOuverture: '08:30', finOuverture: '11:30',
+  debutFermeture: '21:30', finFermeture: '23:59',
+  joursOuverture: [1,2,3,4,5,6,7]
+};
+let HORAIRES = Object.assign({}, HORAIRES_DEF);
+
+/* Preuve photo d'une tâche */
+const PREUVE = {
+  actif: true,
+  cotePx: 640,           // suffisant pour constater, assez léger pour tenir en base
+  qualite: 0.45,
+  maxParJour: 12,        // au-delà, le quota du navigateur explose
+  purgeJours: 60,
+  tachesObligatoires: ['f04', 'f14', 'a12']   // Bactalim, chantilly, chambre froide
+};
+
+/* Réception de livraison — champs du contrôle réception de la fiche 2025 */
+const RECEPTION = {
+  conformites: [
+    { id:'camion',    label:'Conformité du camion' },
+    { id:'emballage', label:'Conformité de l’emballage' },
+    { id:'estampille',label:'Estampille sanitaire présente' }
+  ],
+  tempMax: -15,          // au-delà, la livraison doit être refusée
+  tempLo: -25, tempHi: -8,
+  motifsRefus: ['Température non conforme', 'Emballage endommagé', 'DLC trop courte', 'Produit manquant', 'Erreur de référence']
+};
+
+/* Stock fermé / ouvert */
+const STOCK = {
+  alerteDlcJours: 7,     // « la DLC approche dans une semaine »
+  alerteCritiqueJours: 2,
+  unites: ['bac', 'carton', 'sachet', 'boîte', 'bouteille', 'unité']
+};
+
+
 const CONFIG = {
+  CHECKLISTS, HORAIRES, HORAIRES_DEF, PREUVE, RECEPTION, STOCK, ENCEINTES_DEF,
   APP, SUPABASE, OFFLINE, PWA, ROLES, EQUIPE, POINTEUSE,
   DLC_RULES, DLC_SEUILS, DLC_MATCH, ENCEINTES, RELEVES,
   JOURS_SEMAINE, NETTOYAGE, REASSORT, REASSORT_CATS, RUPTURE,
