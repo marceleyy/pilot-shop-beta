@@ -396,7 +396,7 @@
        return '<div class="tache' + (v.ok ? ' on' : '') + '">' +
          '<button class="box" data-t="' + t.id + '">✓</button>' +
          '<span class="tx"><span class="tn">' + esc(t.t) + '</span>' +
-         '<span class="tm">' + (v.ok ? esc(v.par) + ' · ' + heure(v.at) : t.min + ' min') +
+         '<span class="tm" data-min="' + t.min + '">' + (v.ok ? esc(v.par) + ' · ' + heure(v.at) : t.min + ' min') +
          (besoinPhoto ? ' · photo requise' : '') + '</span></span>' +
          (t.minuteur ? '<button class="btn clair sm" data-min="' + t.minuteur + '" data-nom="' + esc(t.t) + '">⏱️</button>' : '') +
          (besoinPhoto ? '<button class="btn ' + (preuve ? 'menthe' : 'clair') + ' sm" data-photo="' + t.id +
@@ -457,10 +457,30 @@
          return toast('Cette tâche demande une photo de preuve', 'erreur');
        }
        rec[id] = actif ? { ok:1, par:STATE.user.prenom, at:nowISO() } : { ok:0 };
-       await DB.set('checklist:' + j, rec);
-       if (actif) await feed('ok', STATE.user.prenom + ' : ' + b.parentElement.querySelector('.tn').textContent);
-       rendre('accueil');
-     });
+
+       /* Mise à jour sur place : pas de redessin de la page, donc pas de saut
+          ni de clignotement. Sur téléphone, cocher la tâche 20 renvoyait en haut. */
+         const ligne2 = b.parentElement;
+    ligne2.classList.toggle('on', actif);
+    const tm = ligne2.querySelector('.tm');
+    if (tm) tm.textContent = actif
+      ? STATE.user.prenom + ' · ' + heure(nowISO())
+      : (tm.dataset.min || '') + ' min';
+    vibrer(UI.vibration.ok);
+
+    /* Compteur et barre d'avancement, recalculés sans tout reconstruire */
+    const total2 = $$('#page .tache [data-t]').length;
+    const faits2 = $$('#page .tache.on [data-t]').length;
+    const cs = $('#page .card .cs');
+    if (cs && /sur \d+ tâches/.test(cs.textContent)) {
+      cs.textContent = cs.textContent.replace(/^\d+ sur \d+/, faits2 + ' sur ' + total2);
+    }
+    const barre = $('#page .jauge i');
+    if (barre && total2) barre.style.width = Math.round(faits2 / total2 * 100) + '%';
+
+    await DB.set('checklist:' + j, rec);
+    if (actif) await feed('ok', STATE.user.prenom + ' : ' + ligne2.querySelector('.tn').textContent);
+  });
    
      $$('[data-photo]').forEach(b => b.onclick = async () => {
        const p = await attacherPreuve(j, b.dataset.photo, b.dataset.lib);

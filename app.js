@@ -595,10 +595,14 @@
    }
    
    async function rendre(id) {
-     if (!V[id]) { toast('Vue indisponible'); return; }
-     /* On quitte les réglages : on arrête le rafraîchissement de l'indicateur */
-     if (V.reglages && V.reglages._t) { clearInterval(V.reglages._t); V.reglages._t = null; }
-     STATE.view = id;
+   if (!V[id]) { toast('Vue indisponible'); return; }
+   /* On quitte les réglages : on arrête le rafraîchissement de l'indicateur */
+   if (V.reglages && V.reglages._t) { clearInterval(V.reglages._t); V.reglages._t = null; }
+   /* Redessiner la vue courante ne doit pas renvoyer l'équipe en haut de page :
+     cocher la 18e tâche de la check-liste faisait perdre la position à chaque fois. */
+  const memeVue = (STATE.view === id);
+  const scrollAvant = window.scrollY || document.documentElement.scrollTop || 0;
+  STATE.view = id;
      STATE.jour = today();
      const p = PAGES[id] || { titre:id, sous:'' };
      $('#vue-titre').textContent = p.titre;
@@ -614,8 +618,14 @@
        $('#rt').onclick = () => rendre(id);
      }
      $$('#page [data-go]').forEach(b => b.onclick = () => rendre(b.dataset.go));
-     window.scrollTo(0, 0);
-   }
+     if (memeVue) {
+    /* Deux passages : après peinture, puis après les images éventuelles. */
+    window.scrollTo(0, scrollAvant);
+    requestAnimationFrame(() => window.scrollTo(0, scrollAvant));
+  } else {
+    window.scrollTo(0, 0);
+  }
+}
    
    /* Phase courante d'après l'heure */
    function phaseCourante() {
