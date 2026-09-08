@@ -582,11 +582,11 @@
        '<h2 id="sheet-titre">Tout le reste</h2>' +
        '<p class="sub">' + esc(STATE.user.prenom) + ' · ' + ROLES[STATE.user.role].label + '</p>' +
        '<div class="stack">' + liste.map(id =>
-         '<button type="button" class="tache" data-plus="' + id + '">' +
-           '<span class="box" style="border:0;background:rgba(15,32,39,.05);color:var(--ardoise)">›</span>' +
-           '<span class="tx"><span class="tn">' + esc(PAGES[id].titre) + '</span>' +
-           '<span class="tm">' + esc(PAGES[id].sous) + '</span></span>' +
-         '</button>').join('') + '</div>' +
+       '<button type="button" class="menu-item" data-plus="' + id + '">' +
+       '<span class="mi-tx"><span class="mi-t">' + esc(PAGES[id].titre) + '</span>' +
+       '<span class="mi-s">' + esc(PAGES[id].sous) + '</span></span>' +
+       '<span class="mi-fl">›</span>' +
+       '</button>').join('') + '</div>' +
        '<div class="actions"><button class="btn clair" data-fermer>Fermer</button>' +
        '<button class="btn fantome" id="mp-out">Déconnexion</button></div>'
      );

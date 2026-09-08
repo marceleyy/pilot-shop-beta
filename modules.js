@@ -431,12 +431,12 @@
          ? carte(entete('⚡', 'Service', 'Ce qui se déclare au fil de la journée.') +
              '<div class="stack">' +
              ['clean|🧽|Nettoyage en cours de service', 'pertes|🗑️|Déclarer une perte',
-              'lots|#️⃣|Traçabilité pour l’ouverture de tout nouveau produit',
-              'reception|🚚|Réceptionner une livraison', 'reas|📦|Signaler une rupture'].map(x => {
-               const [id, ic, lb] = x.split('|');
-               return '<button class="tache" data-go="' + id + '"><span class="box" style="border:0;' +
-                 'background:rgba(15,32,39,.05);color:var(--ardoise)">' + ic + '</span>' +
-                 '<span class="tx"><span class="tn">' + lb + '</span></span></button>';
+             'lots|#️⃣|Traçabilité à l’ouverture d’un produit',
+             'reception|🚚|Réceptionner une livraison', 'reas|📦|Signaler une rupture'].map(x => {
+             const [id, ic, lb] = x.split('|');
+             return '<button type="button" class="menu-item" data-go="' + id + '">' +
+             '<span class="mi-tx"><span class="mi-t">' + ic + ' ' + lb + '</span></span>' +
+             '<span class="mi-fl">›</span></button>';
              }).join('') + '</div>')
    
          : carte(entete(PHASES.filter(p => p.id === phase)[0].icone,

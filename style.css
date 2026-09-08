@@ -410,6 +410,29 @@ select{background-image:linear-gradient(45deg,transparent 50%,var(--brume) 50%),
 .meteo .md{font-size:13.5px;color:var(--brume)}
 
 /* --- 19. Divers --------------------------------------------------------- */
+/* Entrée de menu — un <button> en display:flex se comporte mal dans Chromium :
+   le contenu débordait hors de la feuille. On force donc une grille explicite
+   avec troncature, plutôt que de compter sur le flex du bouton. */
+.menu-item{
+  display:grid;grid-template-columns:1fr 24px;align-items:center;gap:10px;
+  width:100%;min-height:64px;padding:14px 16px;text-align:left;
+  background:rgba(255,255,255,.9);border:.5px solid rgba(15,32,39,.08);
+  border-radius:var(--r-btn);transition:var(--tr);overflow:hidden;
+}
+.menu-item:active{transform:scale(.985);background:var(--fond-2)}
+.menu-item .mi-tx{min-width:0;display:block;overflow:hidden}
+.menu-item .mi-t{display:block;font-size:16px;font-weight:600;line-height:1.25;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.menu-item .mi-s{display:block;font-size:13px;color:var(--brume);line-height:1.3;margin-top:2px;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.menu-item .mi-fl{font-size:20px;color:var(--brume-2);text-align:center}
+
+/* Garde-fous : plus rien ne peut déborder d'une ligne de tâche */
+.tache{overflow:hidden}
+.tache .tx{overflow:hidden}
+.tache .tn{overflow-wrap:anywhere}
+.tache .tm{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+
 .demo{display:inline-flex;align-items:center;gap:5px;padding:3px 10px;border-radius:var(--r-pill);
   background:var(--ambre-l);color:var(--ambre-d);border:1px dashed var(--ambre);
   font-size:11px;font-weight:800;letter-spacing:.04em}
