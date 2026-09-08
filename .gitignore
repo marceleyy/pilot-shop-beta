@@ -1,1 +1,12 @@
+# Clés Supabase — généré au build par scripts/env.cjs, jamais versionné
 env.js
+
+# Dépendances et artefacts
+node_modules/
+.vercel/
+.DS_Store
+Thumbs.db
+*.log
+
+# Sauvegardes de l'application
+pilot-shop-sauvegarde-*.json
