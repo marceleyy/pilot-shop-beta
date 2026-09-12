@@ -4,8 +4,8 @@
    l'application doit s'ouvrir instantanément, réseau ou pas.
    ============================================================================= */
 
-const CACHE   = 'pilotshop-cache-v3';
-const RUNTIME = 'pilotshop-runtime-v3';
+const CACHE   = 'pilotshop-cache-v4';
+const RUNTIME = 'pilotshop-runtime-v4';
 
 const PRECACHE = [
   '/',
@@ -83,45 +83,44 @@ self.addEventListener('fetch', event => {
     return;
   }
 
-  /* --- Navigation : l'app s'ouvre même sans réseau --- */
+  /* --- Navigation : réseau d'abord, cache en secours ---
+     La stratégie « cache d'abord » faisait qu'un déploiement n'apparaissait
+     qu'au deuxième chargement : la page servie était l'ancienne, la nouvelle
+     n'arrivant qu'en arrière-plan. En boutique, ça veut dire travailler une
+     journée entière sur une version périmée sans le savoir. */
   if (req.mode === 'navigate') {
     event.respondWith((async () => {
       const cache = await caches.open(CACHE);
-      const cachee = await cache.match('/index.html');
-
-      const reseau = (async () => {
-        try {
-          const preload = await event.preloadResponse;
-          const r = preload || await fetch(req);
-          if (r && r.ok) await cache.put('/index.html', r.clone());
-          return r;
-        } catch (e) { return null; }
-      })();
-
-      if (cachee) { event.waitUntil(reseau); return cachee; }
-      const r = await reseau;
-      return r || new Response(pageSecours(), {
-        status: 200,
-        headers: { 'Content-Type': 'text/html; charset=utf-8' }
-      });
+      try {
+        const preload = await event.preloadResponse;
+        const r = preload || await avecDelai(fetch(req), 4000);
+        if (r && r.ok) await cache.put('/index.html', r.clone());
+        return r;
+      } catch (e) {
+        const cachee = await cache.match('/index.html');
+        return cachee || new Response(pageSecours(), {
+          status: 200,
+          headers: { 'Content-Type': 'text/html; charset=utf-8' }
+        });
+      }
     })());
     return;
   }
 
-  /* --- Fichiers de l'application : stale-while-revalidate --- */
+  /* --- Fichiers de l'application : réseau d'abord, repli sur le cache ---
+     Ils pèsent quelques centaines de kilo-octets et sont servis par Vercel :
+     la fraîcheur vaut mieux que les quelques dixièmes de seconde économisées. */
   if (url.origin === self.location.origin) {
     event.respondWith((async () => {
       const cache = await caches.open(CACHE);
-      const cachee = await cache.match(req);
-
-      const reseau = fetch(req).then(async r => {
+      try {
+        const r = await avecDelai(fetch(req), 4000);
         if (r && r.ok && r.type === 'basic') await cache.put(req, r.clone());
         return r;
-      }).catch(() => null);
-
-      if (cachee) { event.waitUntil(reseau); return cachee; }
-      const r = await reseau;
-      return r || new Response('', { status: 504, statusText: 'Hors ligne' });
+      } catch (e) {
+        const cachee = await cache.match(req);
+        return cachee || new Response('', { status: 504, statusText: 'Hors ligne' });
+      }
     })());
     return;
   }
@@ -142,6 +141,18 @@ self.addEventListener('fetch', event => {
     })());
   }
 });
+
+/* -----------------------------------------------------------------------------
+   OUTIL : une promesse qui échoue si le réseau traîne
+   Sans délai maximum, un Wi-Fi présent mais muet — le cas classique de la
+   chambre froide — laisserait l'application bloquée sur un écran blanc.
+   -------------------------------------------------------------------------- */
+function avecDelai(promesse, ms) {
+  return Promise.race([
+    promesse,
+    new Promise((_, ko) => setTimeout(() => ko(new Error('delai depasse')), ms))
+  ]);
+}
 
 /* -----------------------------------------------------------------------------
    MESSAGES — mise à jour pilotée depuis l'application
