@@ -646,44 +646,59 @@
      h.insertBefore(bandeau.firstChild, h.firstChild);
    
      $('#tr-scan').onclick = async () => {
-       const r = await scannerPhoto('etiquette');
-       if (!r) return;
-       choisirProduit(r);
+     /* Mode chaîne : tant que l'équipier demande « le suivant », on renchîne. */
+     let compteur = 0;
+     for (;;) {
+         const r = await scannerPhoto('etiquette');
+         if (!r) break;
+      const enregistre = await choisirProduit(r, r.enchainer === true);
+         if (enregistre) compteur++;
+       if (!r.enchainer || !enregistre) break;
+     }
+     if (compteur) toast(compteur + ' produit(s) tracé(s)');
+     rendre('lots');
      };
      $('#tr-stock').onclick = () => rendre('stock');
-   
-     function choisirProduit(r) {
-       const cibles = PARFUMS.map(p => ({ v:'g_' + p, l:p }))
-         .concat(Object.keys(DLC_RULES).filter(k => k !== 'defaut')
-           .map(k => ({ v:'c_' + k, l:DLC_RULES[k].label })));
-       showSheet(
-         '<h2 id="sheet-titre">Confirmer le produit</h2>' +
-         '<p class="sub">Lot lu : <b>' + esc(r.lot || '—') + '</b>' +
-         (r.parfum ? ' · proposition : ' + esc(r.parfum) : '') + '</p>' +
-         '<div class="champ"><label class="f">Produit ouvert</label><select id="tr-p">' +
-         '<option value="">— choisir —</option>' +
-         cibles.map(c => '<option value="' + c.v + '"' +
-           (r.parfum && c.l === r.parfum ? ' selected' : '') + '>' + esc(c.l) + '</option>').join('') +
-         '</select></div>' +
-         '<div class="champ" style="margin-top:14px"><label class="f">N° de lot</label>' +
-         '<input type="text" id="tr-l" value="' + esc(r.lot || '') + '" autocapitalize="characters"></div>' +
-         '<div class="champ" style="margin-top:14px"><label class="f">Ouvert le</label>' +
-         '<input type="date" id="tr-d" value="' + today() + '"></div>' +
-         '<div class="actions"><button class="btn clair" data-fermer>Annuler</button>' +
-         '<button class="btn menthe" id="tr-ok">Enregistrer</button></div>');
-       $('#tr-ok').onclick = async () => {
-         const cle = $('#tr-p').value, lot = $('#tr-l').value.trim().toUpperCase();
-         if (!cle) return toast('Choisissez le produit', 'erreur');
-         if (!lot) return toast('Le numéro de lot est obligatoire', 'erreur');
-         const m = monthKey(today());
-         const rec = await DB.get('lots:' + m, {});
-         rec[cle] = { lot:lot, ouv:$('#tr-d').value, par:STATE.user.prenom, at:nowISO() };
-         await DB.set('lots:' + m, rec);
-         await feed('ok', STATE.user.prenom + ' a ouvert un produit (lot ' + lot + ')');
-         closeSheet(); toast('Traçabilité enregistrée'); rendre('lots');
-       };
-     }
-   };
+
+     /* Renvoie true si le produit a bien été enregistré. En mode chaîne, le choix
+     du produit est pré-rempli et validable d'un seul appui. */
+     function choisirProduit(r, chaine) {
+     return new Promise(resolve => {
+     const cibles = PARFUMS.map(p => ({ v:'g_' + p, l:p }))
+       .concat(Object.keys(DLC_RULES).filter(k => k !== 'defaut')
+         .map(k => ({ v:'c_' + k, l:DLC_RULES[k].label })));
+     showSheet(
+       '<h2 id="sheet-titre">Confirmer le produit</h2>' +
+       '<p class="sub">Lot lu : <b>' + esc(r.lot || '—') + '</b>' +
+       (r.parfum ? ' · proposition : ' + esc(r.parfum) : '') +
+         (chaine ? ' · <b>mode chaîne</b>' : '') + '</p>' +
+       '<div class="champ"><label class="f">Produit ouvert</label><select id="tr-p">' +
+       '<option value="">— choisir —</option>' +
+       cibles.map(c => '<option value="' + c.v + '"' +
+         (r.parfum && c.l === r.parfum ? ' selected' : '') + '>' + esc(c.l) + '</option>').join('') +
+       '</select></div>' +
+       '<div class="champ" style="margin-top:14px"><label class="f">N° de lot</label>' +
+       '<input type="text" id="tr-l" value="' + esc(r.lot || '') + '" autocapitalize="characters"></div>' +
+       '<div class="champ" style="margin-top:14px"><label class="f">Ouvert le</label>' +
+       '<input type="date" id="tr-d" value="' + today() + '"></div>' +
+         '<div class="actions"><button class="btn clair" id="tr-x">Annuler</button>' +
+           '<button class="btn menthe" id="tr-ok">Enregistrer</button></div>');
+      $('#tr-x').onclick = () => { closeSheet(); resolve(false); };
+      $('#tr-ok').onclick = async () => {
+        const cle = $('#tr-p').value, lot = $('#tr-l').value.trim().toUpperCase();
+        if (!cle) return toast('Choisissez le produit', 'erreur');
+        if (!lot) return toast('Le numéro de lot est obligatoire', 'erreur');
+        const m = monthKey(today());
+        const rec = await DB.get('lots:' + m, {});
+        rec[cle] = { lot:lot, ouv:$('#tr-d').value, par:STATE.user.prenom, at:nowISO() };
+        await DB.set('lots:' + m, rec);
+        await feed('ok', STATE.user.prenom + ' a ouvert un produit (lot ' + lot + ')');
+        closeSheet();
+        resolve(true);
+      };
+    });
+  }
+};
    
    /* =============================================================================
       I. BACK-OFFICE
@@ -992,11 +1007,14 @@
          try { await DB._appel(t + '?select=id&limit=1'); lect = '200'; }
          catch (e) { lect = e.http || 'réseau'; }
          try {
-           await DB._appel(t, { method:'POST',
-             headers:{ 'Prefer':'resolution=merge-duplicates,return=minimal' },
-             body: JSON.stringify({ id:'diagnostic:test', site:APP.site, data:{ at:nowISO() } }) });
-           ecr = '200';
-         } catch (e) { ecr = e.http || 'réseau'; }
+         await DB._appel(t, { method:'POST',
+         headers:{ 'Prefer':'resolution=merge-duplicates,return=minimal' },
+         body: JSON.stringify({ id:'diagnostic:test', site:APP.site, data:{ at:nowISO() } }) });
+         ecr = '200';
+           /* On retire immédiatement la ligne de test : un registre sanitaire ne
+           doit pas conserver les traces de nos propres essais techniques. */
+        try { await DB._appel(t + '?id=eq.diagnostic%3Atest', { method:'DELETE' }); } catch (x) {}
+      } catch (e) { ecr = e.http || 'réseau'; }
          lignes.push([t, lect, ecr]);
        }
        const ok = lignes.every(l => l[1] === '200' && l[2] === '200');

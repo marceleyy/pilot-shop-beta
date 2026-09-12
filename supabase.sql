@@ -108,12 +108,13 @@ create table if not exists public.employes (
   actif boolean not null default true, data jsonb not null default '{}'::jsonb
 );
 
-insert into public.sites (id, nom) values ('chamonix', 'Chamonix')
+insert into public.sites (id, nom) values ('paccard', 'Paccard')
   on conflict (id) do nothing;
 
 insert into public.employes (id, prenom, role) values
   ('e1','Marianna','equipe'), ('e2','Samara','equipe'),
-  ('e3','Kenza','equipe'),    ('e4','Eve','manager')
+  ('e3','Kenza','equipe'),    ('e4','Lucas','equipe'),
+  ('e5','Eve','manager')
   on conflict (id) do nothing;
 
 -- -----------------------------------------------------------------------------

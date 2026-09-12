@@ -425,7 +425,12 @@ function scannerPhoto(type) {
               confiance: confiance, corrige: !!(batch && batch.corrige),
               texte: (code.texte + '\n' + parfum.texte).trim() }
           : { fournisseur: FOURNISSEUR.nom, numero: batch ? batch.code : '', date: today(),
-              lignes: [], confiance: confiance, texte: (code.texte + '\n' + parfum.texte).trim() };
+              /* La lecture des lignes d'un bon de livraison n'est pas implémentée :
+                 l'OCR ne sait extraire qu'un code lot, pas un tableau de références.
+                 On le déclare, au lieu de renvoyer un tableau vide qui s'ajouterait
+                 aux achats comme zéro litre, en silence. */
+              lignes: [], lignesNonLues: true,
+              confiance: confiance, texte: (code.texte + '\n' + parfum.texte).trim() };
 
         confirmerLecture(type, r, apercu, resolve);
       } catch (err) {
@@ -482,21 +487,34 @@ function confirmerLecture(type, r, apercu, resolve) {
       '</details>' : '') +
 
     '<div class="actions"><button class="btn clair" id="oc-x">Reprendre la photo</button>' +
-    '<button class="btn menthe" id="oc-ok">Valider</button></div>');
+    '<button class="btn menthe" id="oc-ok">Valider</button></div>' +
+    '<button class="btn ciel bloc" id="oc-suite" style="margin-top:10px">' +
+    '✅ Valider et scanner le suivant</button>');
 
-  document.getElementById('oc-x').onclick  = () => { closeSheet(); resolve(null); };
-  document.getElementById('oc-ok').onclick = () => {
+  const recolter = () => {
     const lot = document.getElementById('oc-lot').value.trim().toUpperCase();
-    if (!lot) return toast('Le numéro de lot est obligatoire', 'erreur');
+    if (!lot) { toast('Le numéro de lot est obligatoire', 'erreur'); return null; }
     const pf = document.getElementById('oc-parfum');
     const dt = document.getElementById('oc-date');
-    closeSheet();
-    resolve(Object.assign({}, r, {
+    return Object.assign({}, r, {
       lot: lot, numero: lot,
       parfum: pf ? pf.value : r.parfum,
       ouv: dt ? dt.value : r.ouv,
       valide: true, par: STATE.user ? STATE.user.prenom : null
-    }));
+    });
+  };
+
+  document.getElementById('oc-x').onclick  = () => { closeSheet(); resolve(null); };
+  document.getElementById('oc-ok').onclick = () => {
+    const v = recolter(); if (!v) return;
+    closeSheet(); resolve(v);
+  };
+  /* Mode chaîne : on enregistre et l'appareil photo repart immédiatement.
+     Une livraison, c'est cinquante étiquettes — refermer la fiche et rouvrir
+     le menu à chaque fois n'est pas tenable un jour de rush. */
+  document.getElementById('oc-suite').onclick = () => {
+    const v = recolter(); if (!v) return;
+    closeSheet(); resolve(Object.assign(v, { enchainer: true }));
   };
 }
 
@@ -515,16 +533,21 @@ function saisieManuelle(type, raison, resolve) {
         PARFUMS.map(p => '<option value="' + esc(p) + '">' + esc(p) + '</option>').join('') + '</select></div>'
       : '') +
     '<div class="actions"><button class="btn clair" id="sm-x">Annuler</button>' +
-    '<button class="btn menthe" id="sm-ok">Enregistrer</button></div>');
+    '<button class="btn menthe" id="sm-ok">Enregistrer</button></div>' +
+    '<button class="btn ciel bloc" id="sm-suite" style="margin-top:10px">' +
+    '✅ Enregistrer et scanner le suivant</button>');
 
   document.getElementById('sm-x').onclick  = () => { closeSheet(); resolve(null); };
-  document.getElementById('sm-ok').onclick = () => {
+  const valider = enchainer => {
     const lot = document.getElementById('sm-lot').value.trim().toUpperCase();
     if (!lot) return toast('Saisissez le numéro de lot', 'erreur');
     const pf = document.getElementById('sm-parfum');
     closeSheet();
     resolve({ lot: lot, numero: lot, ouv: today(), date: today(),
-              parfum: pf ? pf.value : '', fournisseur: FOURNISSEUR.nom, lignes: [],
-              confiance: 1, saisieManuelle: true, texte: '' });
+              parfum: pf ? pf.value : '', fournisseur: FOURNISSEUR.nom,
+              lignes: [], lignesNonLues: true,
+              confiance: 1, saisieManuelle: true, texte: '', enchainer: !!enchainer });
   };
+  document.getElementById('sm-ok').onclick    = () => valider(false);
+  document.getElementById('sm-suite').onclick = () => valider(true);
 }

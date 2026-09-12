@@ -11,9 +11,9 @@
    -------------------------------------------------------------------------- */
 const APP = {
   nom:        'Pilot-Shop',
-  site:       'Chamonix',
-  version:    '3.0.0-beta',
-  build:      '2026-08-27',
+  site:       'Paccard',
+  version:    '3.1.0-beta',
+  build:      '2026-09-12',
   locale:     'fr-FR',
   fuseau:     'Europe/Paris',
   devise:     'EUR',
@@ -102,10 +102,11 @@ const ROLES = {
 };
 
 const EQUIPE = [
-  { id: 'e1', prenom: 'Marianna', role: 'equipe',  pin: '1111', couleur: '#7FA6A0', initiales: 'MA' },
-  { id: 'e2', prenom: 'Samara',   role: 'equipe',  pin: '2222', couleur: '#C4907A', initiales: 'SA' },
-  { id: 'e3', prenom: 'Kenza',    role: 'equipe',  pin: '3333', couleur: '#9AA87F', initiales: 'KE' },
-  { id: 'e4', prenom: 'Eve',      role: 'manager', pin: '9999', couleur: '#0F2027', initiales: 'EV' }
+  { id: 'e1', prenom: 'Marianna', role: 'equipe',  pin: '1234', couleur: '#7FA6A0', initiales: 'MA' },
+  { id: 'e2', prenom: 'Samara',   role: 'equipe',  pin: '5678', couleur: '#C4907A', initiales: 'SA' },
+  { id: 'e3', prenom: 'Kenza',    role: 'equipe',  pin: '4321', couleur: '#9AA87F', initiales: 'KE' },
+  { id: 'e4', prenom: 'Lucas',    role: 'equipe',  pin: '2580', couleur: '#8FB4CE', initiales: 'LU' },
+  { id: 'e5', prenom: 'Eve',      role: 'manager', pin: '9999', couleur: '#0F2027', initiales: 'EV' }
 ];
 
 const POINTEUSE = {

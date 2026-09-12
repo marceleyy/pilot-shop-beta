@@ -594,6 +594,9 @@
      $('#mp-out').onclick = () => { closeSheet(); deconnexion(); };
    }
    
+/* Vues dont le contenu n'a aucun sens sans période définie */
+   const VUES_PERIODE = ['ecarts', 'periodes', 'inv'];
+
    async function rendre(id) {
    if (!V[id]) { toast('Vue indisponible'); return; }
    /* On quitte les réglages : on arrête le rafraîchissement de l'indicateur */
@@ -610,6 +613,25 @@
      $('#vue-actions').innerHTML = '';
      $('#page').innerHTML = '<div class="vide"><span class="vi">⏳</span>Un instant…</div>';
      renderNav();
+
+     /* Aucune période ouverte : un équipier ne doit pas voir des chiffres calculés
+        sur une fenêtre de temps inventée. On l'arrête ici, avec l'explication. */
+     if (VUES_PERIODE.indexOf(id) >= 0 && STATE.user.role !== 'manager') {
+       const dejaOuverte = await DB.get('periode:courante', null);
+       if (!dejaOuverte) {
+         $('#page').innerHTML = carte(
+           entete('⏸️', 'En attente du manager',
+             'Aucune période de calcul n’est ouverte pour la boutique.') +
+           '<p class="mini">Eve doit d’abord fixer la date de départ et le type de période. ' +
+           'D’ici là, cet écran serait faux : les écarts se calculeraient sur une fenêtre de temps ' +
+           'arbitraire. Les autres pages restent utilisables normalement.</p>' +
+           '<button class="btn clair bloc" data-go="accueil" style="margin-top:14px">Revenir à ma journée</button>',
+           'ambre');
+         $$('#page [data-go]').forEach(b => b.onclick = () => rendre(b.dataset.go));
+         window.scrollTo(0, 0);
+         return;
+       }
+     }
      try { await V[id](); }
      catch (err) {
        $('#page').innerHTML = carte(
@@ -1521,14 +1543,84 @@
       20. PÉRIODES — fenêtre de calcul courante
       ========================================================================== */
    async function periodeCourante() {
-     let p = await DB.get('periode:courante', null);
-     if (!p) {
-       p = { id:uid(), type:PERIODES.parDefaut, debut:debutNaturel(PERIODES.parDefaut, today()),
-             fin:finNaturelle(PERIODES.parDefaut, today()), ouverte:true, creee:nowISO() };
-       await DB.set('periode:courante', p);
-     }
-     return p;
-   }
+   let p = await DB.get('periode:courante', null);
+   if (!p) {
+   /* Plus de création silencieuse : sans période définie, aucun écart n'a de
+   sens. Le manager choisit lui-même la ligne de départ, l'équipier est
+      informé qu'il doit attendre. */
+     if (STATE.user && STATE.user.role === 'manager') {
+       p = await ouvrirPremierePeriode();
+    } else {
+      p = { id:'attente', type:PERIODES.parDefaut, debut:today(), fin:today(),
+            ouverte:false, nonInitialisee:true };
+    }
+  }
+  return p;
+}
+
+/* Modale bloquante : rendue à l'écran tant que le manager n'a pas tranché. */
+function ouvrirPremierePeriode() {
+  return new Promise(resolve => {
+    const aujourdhui = today();
+    showSheet(
+      '<h2 id="sheet-titre">Définir la première période</h2>' +
+      '<p class="sub">Aucune période n’est ouverte. Tous les écarts, inventaires et ' +
+      'statistiques se calculeront sur la fenêtre que vous fixez ici.</p>' +
+
+      '<div class="alerte info"><span class="ai">ℹ️</span><div><b>Ce choix est structurant</b>' +
+      '<p>La date de début détermine le stock de départ. Prenez le jour où vous avez ' +
+      'compté la glace, pas la date du jour si elle est différente.</p></div></div>' +
+
+      '<div class="entete"><h3>Type de période</h3></div>' +
+      '<div class="chips" id="pp-type">' + PERIODES.types.map(t =>
+        '<button type="button" class="chip' + (t.id === PERIODES.parDefaut ? ' on' : '') +
+        '" data-t="' + t.id + '">' + esc(t.label) + '</button>').join('') + '</div>' +
+
+      '<div class="grid g2" style="margin-top:16px">' +
+      '<div class="champ"><label class="f">Début</label>' +
+      '<input type="date" id="pp-d" value="' + aujourdhui + '"></div>' +
+      '<div class="champ"><label class="f">Fin</label>' +
+      '<input type="date" id="pp-f" value="' + finNaturelle(PERIODES.parDefaut, aujourdhui) + '"></div></div>' +
+      '<p class="mini" id="pp-info" style="margin-top:10px"></p>' +
+
+      '<div class="actions"><button class="btn menthe bloc" id="pp-ok">Ouvrir la période</button></div>');
+
+    /* Ni croix, ni voile cliquable, ni Échap : la décision est obligatoire. */
+    $$('[data-fermer]').forEach(b => b.style.display = 'none');
+    const voile = $('#sheet .voile');
+    if (voile) voile.onclick = () => toast('Choisissez une période pour commencer', 'erreur');
+
+    let type = PERIODES.parDefaut;
+    const maj = () => {
+      const d = $('#pp-d').value || aujourdhui;
+      if (type !== 'personnalise') $('#pp-f').value = finNaturelle(type, d);
+      const n = joursEntre($('#pp-d').value, $('#pp-f').value).length;
+      $('#pp-info').textContent = n > 0
+        ? 'Fenêtre de ' + n + ' jour(s), du ' + fmtD($('#pp-d').value) + ' au ' + fmtD($('#pp-f').value) + '.'
+        : 'La date de fin doit suivre la date de début.';
+    };
+    $$('#pp-type [data-t]').forEach(b => b.onclick = () => {
+      $$('#pp-type .chip').forEach(x => x.classList.remove('on'));
+      b.classList.add('on'); type = b.dataset.t; maj();
+    });
+    $('#pp-d').onchange = maj;
+    $('#pp-f').onchange = maj;
+    maj();
+
+    $('#pp-ok').onclick = async () => {
+      const d1 = $('#pp-d').value, d2 = $('#pp-f').value;
+      if (!d1 || !d2 || d2 < d1) return toast('Dates incohérentes', 'erreur');
+      const p = { id:uid(), type:type, debut:d1, fin:d2, ouverte:true,
+                  creee:nowISO(), creeePar:STATE.user ? STATE.user.prenom : '—', premiere:true };
+      await DB.set('periode:courante', p);
+      await feed('ok', (STATE.user ? STATE.user.prenom : '—') +
+                 ' a ouvert la première période : ' + libellePeriode(p));
+      closeSheet();
+      toast('Période ouverte · ' + libellePeriode(p));
+      resolve(p);
+    };
+  });
+}
    function debutNaturel(type, ref) {
      if (type === 'mois')      return ref.slice(0, 7) + '-01';
      if (type === 'trimestre') { const t = Math.floor((+ref.slice(5, 7) - 1) / 3) * 3 + 1; return ref.slice(0, 4) + '-' + String(t).padStart(2, '0') + '-01'; }
@@ -1782,6 +1874,23 @@
    async function scannerBL() {
      const r = await scannerPhoto('bl');
      if (!r) return;
+
+     /* L'OCR ne sait pas lire les lignes d'un bon de livraison. Enregistrer ici
+        ajouterait 0 litre aux achats : le stock théorique serait amputé de toute
+        la livraison et l'écart accuserait l'équipe d'un manque qui n'existe pas. */
+     if (!r.lignes || !r.lignes.length) {
+       showSheet(
+         '<h2 id="sheet-titre">Lignes non lisibles</h2>' +
+         '<p class="sub">' + esc(r.numero || 'Bon de livraison') + '</p>' +
+         '<div class="alerte bad"><span class="ai">▲</span><div><b>Aucune référence extraite</b>' +
+         '<p>Le scan sait lire un numéro, pas un tableau de références. Enregistrer ce bon ' +
+         'ajouterait 0 litre aux achats et créerait un écart fantôme de plusieurs centaines ' +
+         'd’euros, sans que rien ne le signale.</p></div></div>' +
+         '<div class="actions"><button class="btn clair" data-fermer>Fermer</button>' +
+         '<button class="btn menthe" id="bl-manuel">Saisir la livraison</button></div>');
+       $('#bl-manuel').onclick = () => { closeSheet(); rendre('reception'); };
+       return;
+     }
      const total = r.lignes.reduce((s, l) => s + l.bacs, 0);
      const litres = r.lignes.reduce((s, l) => s + l.bacs * l.taille, 0);
    
