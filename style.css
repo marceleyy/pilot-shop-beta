@@ -30,8 +30,17 @@
 
 /* --- 2. Base ------------------------------------------------------------ */
 *,*::before,*::after{box-sizing:border-box}
-html{-webkit-text-size-adjust:100%}
+html{-webkit-text-size-adjust:100%;touch-action:manipulation}
 html,body{margin:0;padding:0;height:100%}
+/* iOS ignore user-scalable=no depuis iOS 10 : seul touch-action désactive
+   réellement le zoom au double-appui. Sans lui, taper vite un code PIN ou
+   cocher plusieurs tâches d'affilée fait zoomer l'écran à chaque fois. */
+body{touch-action:manipulation}
+button,.chip,.tache,.deg,.menu-item,.qui button,.pave button,.chk,.box{
+  touch-action:manipulation;
+  -webkit-user-select:none;user-select:none;
+  -webkit-touch-callout:none;
+}
 body{
   font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text",Inter,"Segoe UI",Roboto,sans-serif;
   background:var(--fond); color:var(--encre);
