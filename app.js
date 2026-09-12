@@ -519,7 +519,19 @@
      STATE._pin = '';
      await DB.set('session', STATE.user);
      await chargerService();
-     demarrer();
+     /* Un échec de démarrage ne doit plus laisser l'équipière devant un écran
+        de connexion muet alors que sa session est ouverte. */
+     try {
+       demarrer();
+     } catch (err) {
+       console.error('Démarrage :', err);
+       $('#login').hidden = true;
+       $('#app').hidden = false;
+       $('#page').innerHTML = carte(
+         entete('⚠️', 'L’application n’a pas pu s’ouvrir',
+           String(err && err.message || err)) +
+         '<button class="btn clair bloc" onclick="location.reload()">Recharger</button>');
+     }
    }
    
    async function chargerService() {
@@ -1658,18 +1670,22 @@ function ecranRemiseAZero(auto) {
    }
    
    function demarrer() {
-     $('#bt').textContent = 'Boutique ' + CFG_SITE();
-     $('#login').hidden = true;
-     $('#app').hidden = false;
-     document.title = APP.nom;
-     STATE.phase = phaseCourante();
-     majBandeau();
-     initFeedback();
-     purgerPreuves();          // les photos de plus de trois mois s'effacent seules
+  /* #bt et #who n'existent pas dans cette version de l'interface : y écrire
+     jetait une exception avant même de masquer l'écran de connexion, et la
+     session s'ouvrait sans que rien ne s'affiche. */
+  const bt = $('#bt');
+  if (bt) bt.textContent = 'Boutique ' + APP.site;
+
+  $('#login').hidden = true;
+  $('#app').hidden = false;
+  document.title = APP.nom + ' — ' + APP.site;
+  STATE.phase = phaseCourante();
+  majBandeau();
+  initFeedback();
+  purgerPreuves();          // les photos de plus de trois mois s'effacent seules
   renderNav();
   rendre(STATE.user.role === 'manager' ? 'controle' : 'accueil');
 }
-function CFG_SITE() { return APP.site; }
    
    (async function () {
      initLogin();
