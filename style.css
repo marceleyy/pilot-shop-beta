@@ -509,6 +509,11 @@ select{background-image:linear-gradient(45deg,transparent 50%,var(--brume) 50%),
 
 @media(prefers-reduced-motion:reduce){#vs-prendre,#vs-flash{transition:none}}
 
+/* Lien discret de remise à zéro, sur l'écran de connexion */
+#lg-reset{display:block;width:100%;margin-top:20px;padding:12px;
+  background:none;border:0;color:var(--brume);font-size:13px;text-decoration:underline}
+#lg-reset:active{color:var(--corail-d)}
+
 /* --- 21. Impression : registre sanitaire -------------------------------- */
 #printview{display:none}
 @media print{

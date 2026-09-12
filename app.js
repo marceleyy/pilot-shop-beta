@@ -451,6 +451,11 @@
      $$('#qui-liste [data-qui]').forEach(b => b.onclick = () => ouvrirPin(b.dataset.qui));
      $$('#pin-pave [data-k]').forEach(b => b.onclick = () => toucheP(b.dataset.k));
      $('#pin-retour').onclick = retourQui;
+
+     /* Accès à la remise à zéro avant toute connexion : indispensable sur une
+        tablette où l'on ne peut pas ouvrir la console du navigateur. */
+     const rz = $('#lg-reset');
+     if (rz) rz.onclick = function () { ecranRemiseAZero(false); };
    
      document.addEventListener('keydown', e => {
        if ($('#login').hidden || $('#login-pin').hidden) return;
@@ -1557,8 +1562,76 @@ async function purgerPreuves() {
    }
    
    /* =============================================================================
-      19. DÉMARRAGE
-      ========================================================================== */
+   REMISE À ZÉRO DE L'APPAREIL
+   Sur iPad la console n'est pas accessible : la remise à zéro doit donc vivre
+   dans l'application. Deux accès, tous deux avant connexion :
+     • le lien discret en bas de l'écran des prénoms
+     • l'adresse https://…/?reset tapée directement dans le navigateur
+   ========================================================================== */
+async function viderAppareil() {
+  let cles = 0, cachesEff = 0, sw = 0;
+  try {
+    const p = OFFLINE.storeLocal + ':';
+    Object.keys(localStorage).filter(k => k.indexOf(p) === 0)
+      .forEach(k => { localStorage.removeItem(k); cles++; });
+  } catch (e) {}
+  try {
+    if (navigator.serviceWorker) {
+      const regs = await navigator.serviceWorker.getRegistrations();
+      for (const r of regs) { await r.unregister(); sw++; }
+    }
+  } catch (e) {}
+  try {
+    if (window.caches) {
+      const noms = await caches.keys();
+      for (const n of noms) { await caches.delete(n); cachesEff++; }
+    }
+  } catch (e) {}
+  return { cles: cles, caches: cachesEff, sw: sw };
+}
+
+function ecranRemiseAZero(auto) {
+  const p = OFFLINE.storeLocal + ':';
+  let n = 0;
+  try { n = Object.keys(localStorage).filter(k => k.indexOf(p) === 0).length; } catch (e) {}
+
+  showSheet(
+    '<h2 id="sheet-titre">Réinitialiser cet appareil</h2>' +
+    '<p class="sub">' + n + ' élément(s) enregistré(s) sur cet appareil</p>' +
+
+    '<div class="alerte warn"><span class="ai">●</span><div><b>Ce qui va être effacé</b>' +
+    '<p>Les saisies gardées en local, la session ouverte, et la version en cache de ' +
+    'l’application. Ce qui est déjà remonté dans la base n’est pas touché et reviendra ' +
+    'tout seul à la reconnexion.</p></div></div>' +
+
+    (n > 0 ? '<div class="alerte bad" style="margin-top:10px"><span class="ai">▲</span><div>' +
+      '<b>Les saisies non synchronisées seront perdues</b><p>Si cet appareil a travaillé ' +
+      'hors ligne sans jamais se reconnecter, ces données n’existent nulle part ailleurs.</p></div></div>' : '') +
+
+    '<div class="actions"><button class="btn clair" id="rz-x">Annuler</button>' +
+    '<button class="btn corail" id="rz-ok">Tout effacer</button></div>');
+
+  $('#rz-x').onclick = function () {
+    closeSheet();
+    if (auto) location.replace(location.pathname);
+  };
+  $('#rz-ok').onclick = async function () {
+    $('#sheet-corps').innerHTML =
+      '<h2>Nettoyage en cours…</h2><div class="vide"><span class="vi">🧹</span>Un instant</div>';
+    const r = await viderAppareil();
+    $('#sheet-corps').innerHTML =
+      '<h2>✅ Appareil remis à zéro</h2>' +
+      '<p class="sub">' + r.cles + ' saisie(s), ' + r.sw + ' service worker, ' +
+      r.caches + ' cache(s) effacés.</p>' +
+      '<div class="alerte ok" style="margin-top:12px"><span class="ai">✓</span><div>' +
+      '<b>Redémarrage…</b><p>L’application va se recharger sur sa dernière version.</p></div></div>';
+    setTimeout(function () { location.replace(location.pathname); }, 1500);
+  };
+}
+
+/* =============================================================================
+   19. DÉMARRAGE
+   ========================================================================== */
    /* Service worker : sans cette inscription, la PWA ne s'installe pas et
       l'application ne s'ouvre pas hors ligne. Silencieux si non supporté
       ou si la page est servie depuis file://. */
@@ -1602,6 +1675,14 @@ function CFG_SITE() { return APP.site; }
      initLogin();
      majBandeau();
      enregistrerSW();
+
+     /* L'adresse …/?reset ouvre directement la remise à zéro, sans code PIN :
+        c'est le seul moyen depuis une tablette où la console est inaccessible. */
+     if (/[?&]reset\b/.test(location.search)) {
+       setTimeout(function () { ecranRemiseAZero(true); }, 250);
+       return;
+     }
+
      const s = await DB.get('session', null);
      if (s && s.id && EQUIPE.filter(e => e.id === s.id)[0]) {
        STATE.user = s;
