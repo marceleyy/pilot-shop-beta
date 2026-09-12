@@ -121,6 +121,22 @@
   </div>
 </div>
 
+<!-- Viseur de scan : cadre de visée par-dessus la caméra en direct -->
+<div id="viseur" aria-hidden="true">
+  <video id="vs-video" playsinline muted autoplay></video>
+  <div id="vs-cadre"><i></i><i></i><i></i><i></i></div>
+  <div id="vs-aide">
+    <b id="vs-titre">Alignez l’étiquette du lot dans le cadre</b>
+    <span>Posez l’étiquette à plat · évitez le reflet direct sur l’inox</span>
+  </div>
+  <div id="vs-flash"></div>
+  <div id="vs-barre">
+    <button type="button" class="vs-sec" id="vs-annuler">Annuler</button>
+    <button type="button" id="vs-prendre" aria-label="Prendre la photo"></button>
+    <button type="button" class="vs-sec" id="vs-fichier">Galerie</button>
+  </div>
+</div>
+
 <div id="toast" role="status" aria-live="polite"></div>
 
 <div id="printview" aria-hidden="true"></div>

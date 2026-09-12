@@ -28,6 +28,10 @@ const OCR = {
   sauvola:       { k: 0.34, R: 128, divFenetre: 18 },
   inactiviteMs:  90000,        // arrêt du worker après ce délai sans usage
   batch:         /(\d{5})\s*([A-Z])/g,
+  /* Viseur intégré : cadre de visée et recadrage sur la zone utile. */
+  viseur:        true,         // false = retour à l'appareil photo natif
+  cadre:         { largeur: 0.86, ratio: 1.55 },  // part de l'écran, largeur/hauteur
+  margeCadre:    0.05,         // tolérance ajoutée autour du cadre au recadrage
   _worker: null,
   _minuteur: null
 };
@@ -381,12 +385,215 @@ function extraireParfum(texte) {
 }
 
 /* =============================================================================
-   6. FONCTION PRINCIPALE
-   Remplace la version simulée. Contrat de retour inchangé :
+   6. VISEUR INTÉGRÉ
+   capture="environment" ouvre l'appareil photo natif d'iOS : aucun HTML ne peut
+   s'y superposer. Pour obtenir un vrai cadre de visée, la caméra est donc
+   affichée dans la page. Avantage décisif : le recadrage porte exactement sur
+   ce que la personne voyait, au lieu de deviner une zone après coup.
+   ========================================================================== */
+let fluxCamera = null;
+
+function geometrieCadre() {
+  const L = window.innerWidth, H = window.innerHeight;
+  const w = Math.round(L * OCR.cadre.largeur);
+  const h = Math.round(w / OCR.cadre.ratio);
+  return { x: Math.round((L - w) / 2), y: Math.round((H - h) / 2 - H * 0.04), w: w, h: h };
+}
+function placerCadre() {
+  const g = geometrieCadre(), c = document.getElementById('vs-cadre');
+  if (!c) return g;
+  c.style.left = g.x + 'px'; c.style.top = g.y + 'px';
+  c.style.width = g.w + 'px'; c.style.height = g.h + 'px';
+  return g;
+}
+function fermerViseur() {
+  const v = document.getElementById('viseur');
+  if (v) v.classList.remove('on');
+  if (fluxCamera) { fluxCamera.getTracks().forEach(t => t.stop()); fluxCamera = null; }
+  const vid = document.getElementById('vs-video');
+  if (vid) vid.srcObject = null;
+}
+
+/* Résout avec un canvas recadré, la chaîne 'fichier' si la personne préfère la
+   galerie, ou null si elle annule. Rejette si la caméra est indisponible. */
+function ouvrirViseur(aide) {
+  return new Promise(async (resolve, reject) => {
+    const v = document.getElementById('viseur');
+    if (!OCR.viseur || !v || !navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      return reject(new Error('viseur indisponible'));
+    }
+    const video = document.getElementById('vs-video');
+    try {
+      fluxCamera = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: { ideal: 'environment' },
+                 width: { ideal: 1920 }, height: { ideal: 1080 } },
+        audio: false
+      });
+    } catch (e) { return reject(e); }
+
+    video.srcObject = fluxCamera;
+    try { await video.play(); } catch (e) {}
+    const t = document.getElementById('vs-titre');
+    if (t && aide) t.textContent = aide;
+    v.classList.add('on');
+    placerCadre();
+    const surRedim = () => placerCadre();
+    window.addEventListener('resize', surRedim);
+    window.addEventListener('orientationchange', surRedim);
+
+    const finir = valeur => {
+      window.removeEventListener('resize', surRedim);
+      window.removeEventListener('orientationchange', surRedim);
+      fermerViseur();
+      resolve(valeur);
+    };
+
+    document.getElementById('vs-annuler').onclick = () => finir(null);
+    document.getElementById('vs-fichier').onclick = () => finir('fichier');
+
+    document.getElementById('vs-prendre').onclick = () => {
+      const fl = document.getElementById('vs-flash');
+      fl.classList.add('on'); setTimeout(() => fl.classList.remove('on'), 60);
+      vibrer(UI.vibration.ok);
+
+      const g = geometrieCadre();
+      const vw = video.videoWidth, vh = video.videoHeight;
+      if (!vw || !vh) return finir(null);
+
+      /* object-fit: cover rogne la vidéo pour remplir l'écran. On refait ce
+         calcul à l'envers pour retrouver le rectangle réel à découper. */
+      const L = window.innerWidth, H = window.innerHeight;
+      const ech = Math.max(L / vw, H / vh);
+      const decX = (vw * ech - L) / 2, decY = (vh * ech - H) / 2;
+
+      const m = OCR.margeCadre;
+      let sx = (g.x - g.w * m + decX) / ech;
+      let sy = (g.y - g.h * m + decY) / ech;
+      let sw = (g.w * (1 + 2 * m)) / ech;
+      let sh = (g.h * (1 + 2 * m)) / ech;
+
+      /* Bornage : sans lui, un cadre débordant donne un canvas vide. */
+      sx = Math.max(0, Math.min(sx, vw - 1));
+      sy = Math.max(0, Math.min(sy, vh - 1));
+      sw = Math.max(1, Math.min(sw, vw - sx));
+      sh = Math.max(1, Math.min(sh, vh - sy));
+
+      /* Mise à l'échelle vers la taille attendue par Tesseract */
+      const r = Math.min(1, OCR.cotePx / Math.max(sw, sh));
+      const cv = document.createElement('canvas');
+      cv.width = Math.round(sw * r); cv.height = Math.round(sh * r);
+      const ctx = cv.getContext('2d', { willReadFrequently: true });
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = 'high';
+      ctx.drawImage(video, sx, sy, sw, sh, 0, 0, cv.width, cv.height);
+
+      finir({ canvas: cv, nom: 'Cadre de visée' });
+    };
+  });
+}
+
+/* Repli : rappel de cadrage avant d'ouvrir l'appareil photo natif, puisqu'on
+   ne pourra rien afficher par-dessus. */
+function rappelCadrage(type) {
+  return new Promise(resolve => {
+    showSheet(
+      '<h2 id="sheet-titre">Avant de photographier</h2>' +
+      '<p class="sub">La caméra intégrée n’est pas disponible sur cet appareil.</p>' +
+      '<div class="guide-apercu"><span></span><b>Étiquette ici</b></div>' +
+      '<div class="alerte info" style="margin-top:14px"><span class="ai">💡</span><div>' +
+      '<b>Trois règles</b><p>Remplissez l’écran avec l’étiquette seule. Tenez l’appareil ' +
+      'bien à plat au-dessus. Placez-vous de biais par rapport à la lumière pour ' +
+      'éviter le reflet de l’inox.</p></div></div>' +
+      '<div class="actions"><button class="btn clair" id="rc-x">Annuler</button>' +
+      '<button class="btn ciel" id="rc-ok">Ouvrir l’appareil photo</button></div>');
+    document.getElementById('rc-x').onclick = () => { closeSheet(); resolve(false); };
+    document.getElementById('rc-ok').onclick = () => { closeSheet(); resolve(true); };
+  });
+}
+
+/* =============================================================================
+   7. FONCTION PRINCIPALE
+   Contrat de retour inchangé :
      'etiquette' → { lot, ouv, parfum, confiance, texte }
      'bl'        → { fournisseur, numero, date, lignes, confiance, texte }
    ========================================================================== */
+async function analyserCanvas(type, canvas, nom, resolve) {
+  let apercu = '';
+  const etape = (t, s) => showSheet(
+    '<h2 id="sheet-titre">' + t + '</h2><p class="sub">' + esc(nom) + '</p>' +
+    '<div class="vide"><span class="vi">🔍</span>' + s + '</div>');
+  try {
+    etape('Lecture de l’étiquette', 'Nettoyage des reflets…');
+    await new Promise(r => setTimeout(r, 30));
+    pretraiter(canvas);
+    try { apercu = canvas.toDataURL('image/jpeg', 0.6); } catch (e) {}
+
+    etape('Lecture de l’étiquette', 'Reconnaissance du texte…');
+    const code   = await lire(canvas, 'code');
+    const parfum = await lire(canvas, 'parfum');
+
+    const batch = extraireBatch(code.texte + '\n' + parfum.texte);
+    const trouve = extraireParfum(parfum.texte);
+    const confiance = (code.confiance + parfum.confiance) / 2;
+    libererCanvas(canvas);
+
+    const r = type === 'etiquette'
+      ? { lot: batch ? batch.code : '', ouv: today(), parfum: trouve ? trouve.parfum : '',
+          confiance: confiance, corrige: !!(batch && batch.corrige),
+          texte: (code.texte + '\n' + parfum.texte).trim() }
+      : { fournisseur: FOURNISSEUR.nom, numero: batch ? batch.code : '', date: today(),
+          /* La lecture des lignes d'un bon de livraison n'est pas implémentée :
+             l'OCR ne sait extraire qu'un code lot, pas un tableau de références. */
+          lignes: [], lignesNonLues: true,
+          confiance: confiance, texte: (code.texte + '\n' + parfum.texte).trim() };
+
+    confirmerLecture(type, r, apercu, resolve);
+  } catch (err) {
+    libererCanvas(canvas);
+    saisieManuelle(type, err && err.message ? err.message : 'Lecture impossible', resolve);
+  }
+}
+
 function scannerPhoto(type) {
+  return new Promise(async resolve => {
+    const aide = type === 'bl'
+      ? 'Alignez le bon de livraison dans le cadre'
+      : 'Alignez l’étiquette du lot dans le cadre';
+
+    /* 1. Viseur intégré, avec recadrage exact sur la zone visée */
+    try {
+      const vu = await ouvrirViseur(aide);
+      if (vu === null) return resolve(null);
+      if (vu && vu.canvas) return analyserCanvas(type, vu.canvas, vu.nom, resolve);
+      /* vu === 'fichier' : la personne préfère la galerie, on enchaîne */
+    } catch (e) {
+      /* Caméra refusée ou indisponible : on prévient avant d'ouvrir le natif */
+      const suite = await rappelCadrage(type);
+      if (!suite) return resolve(null);
+    }
+
+    /* 2. Repli : appareil photo natif ou galerie */
+    const cam = document.getElementById('cam');
+    cam.value = '';
+    cam.onchange = async () => {
+      const file = cam.files && cam.files[0];
+      if (!file) return resolve(null);
+      showSheet('<h2 id="sheet-titre">Lecture de l’étiquette</h2>' +
+        '<p class="sub">' + esc(file.name) + '</p>' +
+        '<div class="vide"><span class="vi">🔍</span>Mise à l’endroit de la photo…</div>');
+      try {
+        const chargee = await chargerImage(file, OCR.cotePx);
+        analyserCanvas(type, chargee.canvas, file.name, resolve);
+      } catch (err) {
+        saisieManuelle(type, err && err.message ? err.message : 'Image illisible', resolve);
+      }
+    };
+    cam.click();
+  });
+}
+
+/* Ancienne version, conservée le temps de la bêta puis à supprimer. */
+function scannerPhotoNatif(type) {
   return new Promise(resolve => {
     const cam = document.getElementById('cam');
     cam.value = '';
