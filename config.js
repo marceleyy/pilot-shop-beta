@@ -776,6 +776,72 @@ const UI = {
 
 
 /* =============================================================================
+   21. TÂCHES HEBDOMADAIRES
+   Transcription du tableau affiché en boutique : « Tâches du nettoyage
+   hebdomadaires ». À ne pas confondre avec le registre HACCP quotidien
+   (NETTOYAGE ci-dessus), qui liste les postes 7/7 et 1/7.
+
+   Ici chaque ligne est une ACTION précise, pas un poste : « Nettoyer le mobilier
+   en bois (portes, bas de la vitrine) » et non « mobilier ». C'est ce niveau de
+   détail qui permet à quelqu'un qui débute de savoir quoi faire.
+
+   jour  : 1 = lundi … 7 = dimanche. Modifiable par le manager (Back-office).
+   rang  : ordre d'affichage dans la journée.
+   perso : true = tâche à attribuer nommément, marquée ainsi sur le tableau.
+   ========================================================================== */
+const TACHES_HEBDO_DEF = [
+  /* --- Lundi --- */
+  { id:'h101', jour:1, rang:1, libelle:'Nettoyer le mobilier en bois (portes, bas de la vitrine)' },
+  { id:'h102', jour:1, rang:2, libelle:'Nettoyer les placards bas et hauts en arrière-boutique' },
+  { id:'h103', jour:1, rang:3, libelle:'Nettoyer l’évier' },
+  { id:'h104', jour:1, rang:4, libelle:'Nettoyer la terrasse extérieure' },
+
+  /* --- Mardi --- */
+  { id:'h201', jour:2, rang:1, libelle:'Nettoyer les appareils à crêpes et gaufres', perso:true },
+  { id:'h202', jour:2, rang:2, libelle:'Nettoyer le stoppeur, les poteaux de file d’attente et l’affichage extérieur' },
+  { id:'h203', jour:2, rang:3, libelle:'Mettre en décongélation le frigo −20 °C (crêpes / gaufres)' },
+
+  /* --- Mercredi --- */
+  { id:'h301', jour:3, rang:1, libelle:'Nettoyer les frigos positifs (lait, boissons, crème, frigo crêpe/gaufre)' },
+  { id:'h302', jour:3, rang:2, libelle:'Nettoyer les tables et chaises, à l’intérieur et à l’extérieur' },
+  { id:'h303', jour:3, rang:3, libelle:'Nettoyer les pieds des tables' },
+  { id:'h304', jour:3, rang:4, libelle:'Nettoyer la vitrine', perso:true },
+
+  /* --- Jeudi --- */
+  { id:'h401', jour:4, rang:1, libelle:'Nettoyer les distributeurs à cornets et à cuillères' },
+  { id:'h402', jour:4, rang:2, libelle:'Nettoyer les murs de la boutique' },
+  { id:'h403', jour:4, rang:3, libelle:'Nettoyer le sous-sol et organiser le stockage des produits' },
+  { id:'h404', jour:4, rang:4, libelle:'Nettoyer les toilettes et le vestiaire au sous-sol' },
+
+  /* --- Vendredi --- */
+  { id:'h501', jour:5, rang:1, libelle:'Nettoyer les machines à chantilly, à café et à milkshake' },
+  { id:'h502', jour:5, rang:2, libelle:'Nettoyer le comptoir, le meuble de caisse et le présentoir' },
+
+  /* --- Samedi --- */
+  { id:'h601', jour:6, rang:1, libelle:'Nettoyer les surfaces vitrées (baies, portes, fenêtres)' },
+
+  /* --- Dimanche --- */
+  { id:'h701', jour:7, rang:1, libelle:'Nettoyer les poubelles intérieures et extérieures' },
+  { id:'h702', jour:7, rang:2, libelle:'Nettoyer la poussière sur les étagères hautes et dans les coins' }
+];
+/* Le plan effectif est chargé depuis la base au démarrage : le manager peut
+   déplacer une tâche d'un jour à l'autre sans toucher au code. */
+let TACHES_HEBDO = TACHES_HEBDO_DEF.map(t => Object.assign({}, t));
+
+/* Responsabilités de la semaine, en bas du tableau affiché en boutique */
+const RESPONSABLES = [
+  { id:'r_linge',  libelle:'Responsable du linge, deux fois par semaine', icone:'🧺' },
+  { id:'r_trace',  libelle:'Responsable du contrôle de la traçabilité',   icone:'📋' },
+  { id:'r_fifo',   libelle:'Responsable du contrôle FIFO — alerter si un produit approche de sa DLC', icone:'🧊' }
+];
+
+const HEBDO = {
+  photosObligatoires: true,
+  photosMax: 4,          // plusieurs vues d'une même tâche : avant, après, détail
+  photosMin: 1
+};
+
+/* =============================================================================
    20. CHECK-LISTES OFFICIELLES
    Transcription des MOP Amorino : « CHECK-LIST D'OUVERTURE » et
    « MOP 04 112 CHECK-LISTE DE FERMETURE ». L'ordre et les durées sont ceux
@@ -883,6 +949,7 @@ const STOCK = {
 
 const CONFIG = {
   CHECKLISTS, HORAIRES, HORAIRES_DEF, PREUVE, RECEPTION, STOCK, ENCEINTES_DEF,
+  TACHES_HEBDO, TACHES_HEBDO_DEF, RESPONSABLES, HEBDO,
   APP, SUPABASE, OFFLINE, PWA, ROLES, EQUIPE, POINTEUSE,
   DLC_RULES, DLC_SEUILS, DLC_MATCH, ENCEINTES, RELEVES,
   JOURS_SEMAINE, NETTOYAGE, REASSORT, REASSORT_CATS, RUPTURE,

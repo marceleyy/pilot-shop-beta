@@ -95,6 +95,9 @@
      ['reception:',   'receptions'],
      ['horaires',     'reglages'],
      ['enceintes',    'reglages'],
+     ['hebdo:plan',   'reglages'],
+     ['hebdo:responsables', 'reglages'],
+     ['hebdo:',       'checklists'],
      ['hebdo',        'reglages'],
      ['async:',       'reglages']
    ];

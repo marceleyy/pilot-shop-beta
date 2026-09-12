@@ -10,14 +10,19 @@
       A. NAVIGATION — nouvelles entrées
       ========================================================================== */
    PAGES.reception  = { titre:'Réception',   sous:'Livraison, DLC et stock fermé' };
-   PAGES.stock      = { titre:'Stock fermé', sous:'Produits reçus non encore ouverts' };
-   PAGES.parametres = { titre:'Back-office', sous:'Tâches, horaires et unités froides' };
-   PAGES.lots.titre = 'Traçabilité';
-   PAGES.lots.sous  = 'Ouverture de tout nouveau produit';
+PAGES.stock      = { titre:'Stock fermé', sous:'Produits reçus non encore ouverts' };
+PAGES.parametres = { titre:'Back-office', sous:'Tâches, horaires et unités froides' };
+PAGES.hebdo      = { titre:'Tâches du jour', sous:'Plan hebdomadaire de la boutique' };
+PAGES.lots.titre = 'Traçabilité';
+PAGES.lots.sous  = 'Ouverture de tout nouveau produit';
    
    if (MENU_PLUS.equipe.indexOf('reception') < 0)  MENU_PLUS.equipe.splice(2, 0, 'reception', 'stock');
-   if (MENU_PLUS.manager.indexOf('reception') < 0) MENU_PLUS.manager.splice(2, 0, 'reception', 'stock');
-   if (MENU_PLUS.manager.indexOf('parametres') < 0) MENU_PLUS.manager.push('parametres');
+if (MENU_PLUS.manager.indexOf('reception') < 0) MENU_PLUS.manager.splice(2, 0, 'reception', 'stock');
+if (MENU_PLUS.manager.indexOf('parametres') < 0) MENU_PLUS.manager.push('parametres');
+/* Les tâches hebdomadaires méritent leur onglet : c'est le tableau que l'équipe
+   consultait au mur, consulté plusieurs fois par jour. */
+if (MENU_PLUS.equipe.indexOf('hebdo') < 0)  MENU_PLUS.equipe.unshift('hebdo');
+if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
    
    /* =============================================================================
       B. PHOTO DE PREUVE
@@ -850,6 +855,116 @@ function confirmerHorsStock(produit, lot) {
 }
 
 /* =============================================================================
+   M. TÂCHES HEBDOMADAIRES
+   Le tableau affiché en boutique, en version numérique. L'équipier ne choisit
+   rien : il se connecte, on est samedi, il voit les tâches du samedi. C'est le
+   manager qui a décidé du jour et, si besoin, de la personne.
+   ========================================================================== */
+async function planHebdo() {
+  const perso = await DB.get('hebdo:plan', null);
+  return TACHES_HEBDO.map(t => {
+    const p = perso && perso[t.id];
+    return Object.assign({}, t, p || {});
+  }).filter(t => !t.retiree);
+}
+async function tachesHebdoDuJour(jour) {
+  const j = jourISO(jour);
+  return (await planHebdo()).filter(t => +t.jour === j)
+    .sort((a, b) => (a.rang || 0) - (b.rang || 0));
+}
+
+V.hebdo = async function () {
+  const j = STATE.jour;
+  const taches = await tachesHebdoDuJour(j);
+  const rec = await DB.get('hebdo:' + j, {});
+  const preuves = await DB.get('preuves:' + j, []);
+  const resp = await DB.get('hebdo:responsables', {});
+  const faits = taches.filter(t => rec[t.id] && rec[t.id].ok).length;
+
+  $('#pa').innerHTML = '<input type="date" id="jj" value="' + j + '" style="width:auto;min-height:42px">';
+
+  const photosDe = id => preuves.filter(p => p.tache === id);
+
+  $('#page').innerHTML =
+    carte(entete('🗓️', nomJour(j) + ' ' + fmtD(j),
+      taches.length ? faits + ' sur ' + taches.length + ' tâches du jour'
+                    : 'Aucune tâche hebdomadaire prévue ce jour') +
+      (taches.length
+        ? '<div class="jauge"><i style="width:' + Math.round(faits / taches.length * 100) + '%"></i></div>'
+        : ''), 'solide') +
+
+    (taches.length
+      ? '<div class="stack" style="margin-top:12px">' + taches.map((t, i) => {
+          const v = rec[t.id] || {};
+          const ph = photosDe(t.id);
+          const assignee = t.assignee ? (EQUIPE.filter(e => e.id === t.assignee)[0] || {}).prenom : null;
+          return carte(
+            '<div class="rang" style="align-items:flex-start">' +
+            '<span class="stepnum">' + (i + 1) + '</span>' +
+            '<div style="flex:1;min-width:0">' +
+            '<b style="font-size:15.5px;line-height:1.3;display:block">' + esc(t.libelle) + '</b>' +
+            '<div class="mini" style="margin-top:4px">' +
+            (v.ok ? '✓ ' + esc(v.par) + ' · ' + heure(v.at)
+                  : (assignee ? 'Attribuée à ' + esc(assignee)
+                              : (t.perso ? 'Aucune personne attribuée' : 'À faire aujourd’hui'))) +
+            ' · ' + ph.length + '/' + HEBDO.photosMax + ' photo(s)</div></div>' +
+            (v.ok ? pastille('ok', 'Fait') : pastille('n', 'À faire')) + '</div>' +
+
+            (ph.length
+              ? '<div class="rang" style="margin-top:12px;gap:8px">' + ph.map(p =>
+                  '<img src="' + p.img + '" alt="Preuve" style="width:74px;height:74px;' +
+                  'object-fit:cover;border-radius:10px;border:1px solid var(--line)">').join('') + '</div>'
+              : '') +
+
+            '<div class="btn-row" style="margin-top:12px">' +
+            '<button class="btn ' + (ph.length ? 'clair' : 'ciel') + '" data-ph="' + t.id + '"' +
+            (ph.length >= HEBDO.photosMax ? ' disabled' : '') + '>📷 ' +
+            (ph.length ? 'Ajouter une photo' : 'Photographier') + '</button>' +
+            '<button class="btn ' + (v.ok ? 'clair' : 'menthe') + '" data-v="' + t.id + '">' +
+            (v.ok ? 'Annuler' : '✓ Valider') + '</button></div>',
+            v.ok ? 'menthe' : '');
+        }).join('') + '</div>'
+      : vide('🗓️', 'Rien de prévu ce jour dans le plan hebdomadaire.')) +
+
+    '<div class="entete"><h3>Responsables de la semaine</h3></div>' +
+    '<div class="stack">' + RESPONSABLES.map(r => {
+      const qui = resp[r.id] ? (EQUIPE.filter(e => e.id === resp[r.id])[0] || {}).prenom : null;
+      return carte('<div class="rang"><span class="ci">' + r.icone + '</span>' +
+        '<div style="flex:1;min-width:0"><b>' + esc(r.libelle) + '</b></div>' +
+        (qui ? pastille('ok', esc(qui)) : pastille('n', 'non attribué')) + '</div>',
+        qui ? 'menthe' : 'sable');
+    }).join('') + '</div>';
+
+  $('#jj').onchange = e => { STATE.jour = e.target.value; rendre('hebdo'); };
+
+  $$('[data-ph]').forEach(b => b.onclick = async () => {
+    const p = await attacherPreuve(j, b.dataset.ph,
+      taches.filter(t => t.id === b.dataset.ph)[0].libelle);
+    if (p) { toast('Photo ajoutée (' + p.poids + ' Ko)'); rendre('hebdo'); }
+  });
+
+  $$('[data-v]').forEach(b => b.onclick = async () => {
+    const id = b.dataset.v, actif = !(rec[id] && rec[id].ok);
+    if (actif && HEBDO.photosObligatoires && photosDe(id).length < HEBDO.photosMin) {
+      toast('Photographiez d’abord le résultat', 'erreur');
+      const ph = $('[data-ph="' + id + '"]');
+      if (ph) ph.click();
+      return;
+    }
+    rec[id] = actif
+      ? { ok:1, par:STATE.user.prenom, employe:STATE.user.id, at:nowISO(),
+          photos:photosDe(id).length }
+      : { ok:0 };
+    await DB.set('hebdo:' + j, rec);
+    if (actif) {
+      const t = taches.filter(x => x.id === id)[0];
+      await feed('ok', STATE.user.prenom + ' : ' + t.libelle);
+    }
+    rendre('hebdo');
+  });
+};
+
+/* =============================================================================
    I. BACK-OFFICE
    ========================================================================== */
 V.parametres = async function () {
@@ -860,7 +975,14 @@ V.parametres = async function () {
      const hebdo = await DB.get('hebdo', null);
    
      $('#page').innerHTML =
-       carte(entete('🕐', 'Horaires', 'Bornes des phases de la journée dans « Ma journée ».') +
+       carte(entete('🗓️', 'Tâches hebdomadaires', 'Qui fait quoi, et quel jour.') +
+      '<p class="mini">Le tableau du mur, en numérique. L’équipier ne choisit rien : ' +
+      'il voit les tâches du jour où il se connecte. Vous seul décidez du jour et, ' +
+      'quand c’est utile, de la personne.</p>' +
+      '<button class="btn clair bloc" id="hb-ouvrir" style="margin-top:14px">Organiser la semaine</button>' +
+      '<button class="btn clair bloc" id="hb-resp" style="margin-top:8px">Attribuer les responsables</button>', 'solide') +
+
+    carte(entete('🕐', 'Horaires', 'Bornes des phases de la journée dans « Ma journée ».') +
          '<div class="grid g2">' +
          '<div class="champ"><label class="f">Ouverture boutique</label><input type="time" id="h1" value="' + HORAIRES.ouverture + '"></div>' +
          '<div class="champ"><label class="f">Fermeture boutique</label><input type="time" id="h2" value="' + HORAIRES.fermeture + '"></div>' +
@@ -905,15 +1027,18 @@ V.parametres = async function () {
          '<button class="btn menthe bloc" id="hbv" style="margin-top:14px">Enregistrer les jours</button>');
    
      $('#hv').onclick = async () => {
-       Object.assign(HORAIRES, { ouverture:$('#h1').value, fermeture:$('#h2').value,
-         debutOuverture:$('#h3').value, finOuverture:$('#h4').value,
-         debutFermeture:$('#h5').value, finFermeture:$('#h6').value });
-       PHASES[0].de = HORAIRES.debutOuverture; PHASES[0].a = HORAIRES.finOuverture;
-       PHASES[1].de = HORAIRES.finOuverture;   PHASES[1].a = HORAIRES.debutFermeture;
-       PHASES[2].de = HORAIRES.debutFermeture; PHASES[2].a = HORAIRES.finFermeture;
-       await DB.set('horaires', HORAIRES);
-       toast('Horaires enregistrés');
+     Object.assign(HORAIRES, { ouverture:$('#h1').value, fermeture:$('#h2').value,
+     debutOuverture:$('#h3').value, finOuverture:$('#h4').value,
+     debutFermeture:$('#h5').value, finFermeture:$('#h6').value });
+     PHASES[0].de = HORAIRES.debutOuverture; PHASES[0].a = HORAIRES.finOuverture;
+     PHASES[1].de = HORAIRES.finOuverture;   PHASES[1].a = HORAIRES.debutFermeture;
+     PHASES[2].de = HORAIRES.debutFermeture; PHASES[2].a = HORAIRES.finFermeture;
+     await DB.set('horaires', HORAIRES);
+     toast('Horaires enregistrés');
      };
+
+  $('#hb-ouvrir').onclick = organiserSemaine;
+  $('#hb-resp').onclick   = attribuerResponsables;
    
      $$('[data-supp]').forEach(b => b.onclick = () => {
        const e = ENCEINTES[+b.dataset.supp];
@@ -952,9 +1077,113 @@ V.parametres = async function () {
      };
    };
    
-   /* =============================================================================
-      J. RESTAURATION DES RÉGLAGES AU DÉMARRAGE
-      ========================================================================== */
+   /* Organisation de la semaine : le manager déplace les tâches d'un jour à
+   l'autre et désigne qui s'en charge. L'équipe ne voit que le résultat. */
+async function organiserSemaine() {
+  const perso = await DB.get('hebdo:plan', {}) || {};
+  const plan = await planHebdo();
+
+  const rendreEditeur = () => {
+    const parJour = {};
+    for (let j = 1; j <= 7; j++) parJour[j] = [];
+    plan.forEach(t => { const j = +t.jour; if (parJour[j]) parJour[j].push(t); });
+    Object.keys(parJour).forEach(j => parJour[j].sort((a, b) => (a.rang || 0) - (b.rang || 0)));
+
+    $('#sheet-corps').innerHTML =
+      '<h2 id="sheet-titre">Organiser la semaine</h2>' +
+      '<p class="sub">' + plan.length + ' tâches réparties sur sept jours</p>' +
+      '<div style="max-height:56vh;overflow:auto">' +
+      [1,2,3,4,5,6,7].map(j =>
+        '<div class="entete"><h3>' + JOURS_SEMAINE[j] + '</h3>' +
+        '<span class="pousse mini num">' + parJour[j].length + '</span></div>' +
+        (parJour[j].length
+          ? parJour[j].map(t =>
+              '<div class="card plat" style="margin-bottom:8px">' +
+              '<b style="font-size:14px;line-height:1.3;display:block">' + esc(t.libelle) + '</b>' +
+              '<div class="grid g2" style="margin-top:10px;gap:8px">' +
+              '<div class="champ"><label class="f">Jour</label>' +
+              '<select data-j="' + t.id + '">' + [1,2,3,4,5,6,7].map(k =>
+                '<option value="' + k + '"' + (+t.jour === k ? ' selected' : '') + '>' +
+                JOURS_SEMAINE[k] + '</option>').join('') + '</select></div>' +
+              '<div class="champ"><label class="f">Attribuée à</label>' +
+              '<select data-a="' + t.id + '"><option value="">— toute l’équipe —</option>' +
+              EQUIPE.map(e => '<option value="' + e.id + '"' +
+                (t.assignee === e.id ? ' selected' : '') + '>' + esc(e.prenom) + '</option>').join('') +
+              '</select></div></div></div>').join('')
+          : '<p class="mini" style="margin-bottom:10px">Aucune tâche ce jour</p>')
+      ).join('') + '</div>' +
+      '<div class="actions"><button class="btn clair" id="os-x">Annuler</button>' +
+      '<button class="btn menthe" id="os-ok">Enregistrer</button></div>' +
+      '<button class="btn fantome bloc" id="os-raz" style="margin-top:8px">' +
+      'Rétablir le tableau d’origine</button>';
+
+    $('#os-x').onclick = closeSheet;
+
+    /* Changer le jour redessine immédiatement, pour voir la répartition. */
+    $$('[data-j]').forEach(s => s.onchange = () => {
+      const t = plan.filter(x => x.id === s.dataset.j)[0];
+      if (t) t.jour = +s.value;
+      rendreEditeur();
+    });
+    $$('[data-a]').forEach(s => s.onchange = () => {
+      const t = plan.filter(x => x.id === s.dataset.a)[0];
+      if (t) t.assignee = s.value || null;
+    });
+
+    $('#os-ok').onclick = async () => {
+      const out = {};
+      plan.forEach(t => { out[t.id] = { jour:+t.jour, assignee:t.assignee || null }; });
+      await DB.set('hebdo:plan', out);
+      TACHES_HEBDO.forEach(t => { if (out[t.id]) Object.assign(t, out[t.id]); });
+      await feed('ok', STATE.user.prenom + ' a réorganisé les tâches de la semaine');
+      closeSheet();
+      toast('Semaine enregistrée');
+      rendre('parametres');
+    };
+
+    $('#os-raz').onclick = () => confirmer('Rétablir le tableau d’origine ?',
+      'Les jours et les attributions reviendront à la transcription du tableau ' +
+      'affiché en boutique. Les tâches déjà validées ne sont pas touchées.',
+      'Rétablir', async () => {
+        await DB.del('hebdo:plan');
+        TACHES_HEBDO = TACHES_HEBDO_DEF.map(t => Object.assign({}, t));
+        closeSheet(); toast('Tableau rétabli'); rendre('parametres');
+      });
+  };
+
+  showSheet('<div class="vide">Chargement…</div>');
+  rendreEditeur();
+}
+
+/* Les trois responsabilités de la semaine, en bas du tableau du mur */
+async function attribuerResponsables() {
+  const resp = await DB.get('hebdo:responsables', {}) || {};
+  showSheet(
+    '<h2 id="sheet-titre">Responsables de la semaine</h2>' +
+    '<p class="sub">Trois rôles à désigner, comme au bas du tableau.</p>' +
+    RESPONSABLES.map(r =>
+      '<div class="champ" style="margin-top:14px"><label class="f">' + r.icone + ' ' + esc(r.libelle) + '</label>' +
+      '<select data-r="' + r.id + '"><option value="">— personne —</option>' +
+      EQUIPE.map(e => '<option value="' + e.id + '"' +
+        (resp[r.id] === e.id ? ' selected' : '') + '>' + esc(e.prenom) + '</option>').join('') +
+      '</select></div>').join('') +
+    '<div class="actions"><button class="btn clair" data-fermer>Annuler</button>' +
+    '<button class="btn menthe" id="ar-ok">Enregistrer</button></div>');
+
+  $('#ar-ok').onclick = async () => {
+    const out = {};
+    $$('[data-r]').forEach(s => { if (s.value) out[s.dataset.r] = s.value; });
+    await DB.set('hebdo:responsables', out);
+    await feed('ok', STATE.user.prenom + ' a désigné les responsables de la semaine');
+    closeSheet();
+    toast('Responsables enregistrés');
+    rendre('parametres');
+  };
+}
+
+/* =============================================================================
+   J. RESTAURATION DES RÉGLAGES AU DÉMARRAGE
+   ========================================================================== */
    (async function appliquerReglages() {
      try {
        const h = await DB.get('horaires', null);
@@ -968,6 +1197,9 @@ V.parametres = async function () {
        if (e && e.length) ENCEINTES = e;
        const hb = await DB.get('hebdo', null);
        if (hb) NETTOYAGE.zones.forEach(z => z.taches.forEach(t => { if (hb[t.id]) t.jours = hb[t.id]; }));
+    /* Plan hebdomadaire décidé par le manager */
+    const plan = await DB.get('hebdo:plan', null);
+    if (plan) TACHES_HEBDO.forEach(t => { if (plan[t.id]) Object.assign(t, plan[t.id]); });
      } catch (err) { /* réglages d'usine */ }
    })();
    
