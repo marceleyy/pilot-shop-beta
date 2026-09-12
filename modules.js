@@ -390,20 +390,24 @@
      const faits = blocs.reduce((s, b) => s + b.taches.filter(t => rec[t.id] && rec[t.id].ok).length, 0);
    
      const ligne = t => {
-       const v = rec[t.id] || {};
-       const preuve = preuves.filter(p => p.tache === t.id)[0];
-       const besoinPhoto = PREUVE.actif && PREUVE.tachesObligatoires.indexOf(t.id) >= 0;
-       return '<div class="tache' + (v.ok ? ' on' : '') + '">' +
-         '<button class="box" data-t="' + t.id + '">✓</button>' +
-         '<span class="tx"><span class="tn">' + esc(t.t) + '</span>' +
-         '<span class="tm" data-min="' + t.min + '">' + (v.ok ? esc(v.par) + ' · ' + heure(v.at) : t.min + ' min') +
-         (besoinPhoto ? ' · photo requise' : '') + '</span></span>' +
-         (t.minuteur ? '<button class="btn clair sm" data-min="' + t.minuteur + '" data-nom="' + esc(t.t) + '">⏱️</button>' : '') +
+     const v = rec[t.id] || {};
+     const preuve = preuves.filter(p => p.tache === t.id)[0];
+     /* Une tâche restreinte à certains jours est une tâche périodique :
+        elle exige une photo, comme les tâches hebdomadaires du nettoyage. */
+     const besoinPhoto = PREUVE.actif &&
+     (PREUVE.tachesObligatoires.indexOf(t.id) >= 0 ||
+      (PREUVE.hebdoObligatoire && (t.jours || t.joursSauf || t.async)));
+     return '<div class="tache' + (v.ok ? ' on' : '') + '">' +
+     '<button class="box" data-t="' + t.id + '">✓</button>' +
+     '<span class="tx"><span class="tn">' + esc(t.t) + '</span>' +
+     '<span class="tm" data-min="' + t.min + '">' + (v.ok ? esc(v.par) + ' · ' + heure(v.at) : t.min + ' min') +
+     (besoinPhoto ? ' · photo requise' : '') + '</span></span>' +
+     (t.minuteur ? '<button class="btn clair sm" data-min="' + t.minuteur + '" data-nom="' + esc(t.t) + '">⏱️</button>' : '') +
          (besoinPhoto ? '<button class="btn ' + (preuve ? 'menthe' : 'clair') + ' sm" data-photo="' + t.id +
-           '" data-lib="' + esc(t.t) + '">' + (preuve ? '✓📷' : '📷') + '</button>' : '') +
-         (t.lien ? '<button class="btn clair sm" data-go="' + t.lien + '">→</button>' : '') +
-         '</div>';
-     };
+        '" data-lib="' + esc(t.t) + '">' + (preuve ? '✓📷' : '📷') + '</button>' : '') +
+      (t.lien ? '<button class="btn clair sm" data-go="' + t.lien + '">→</button>' : '') +
+      '</div>';
+  };
    
      $('#page').innerHTML =
        carte('<div class="rang">' + avatar(STATE.user, 'av') +
@@ -451,11 +455,17 @@
      $$('[data-ph]').forEach(b => b.onclick = () => { STATE.phase = b.dataset.ph; rendre('accueil'); });
    
      $$('[data-t]').forEach(b => b.onclick = async () => {
-       const id = b.dataset.t, actif = !b.parentElement.classList.contains('on');
-       const besoinPhoto = PREUVE.actif && PREUVE.tachesObligatoires.indexOf(id) >= 0;
-       if (actif && besoinPhoto && !preuves.filter(p => p.tache === id)[0]) {
-         return toast('Cette tâche demande une photo de preuve', 'erreur');
-       }
+     const id = b.dataset.t, actif = !b.parentElement.classList.contains('on');
+     const tache = blocs.reduce((a, bl) => a.concat(bl.taches), []).filter(t => t.id === id)[0] || {};
+     const besoinPhoto = PREUVE.actif &&
+     (PREUVE.tachesObligatoires.indexOf(id) >= 0 ||
+        (PREUVE.hebdoObligatoire && (tache.jours || tache.joursSauf || tache.async)));
+    if (actif && besoinPhoto && !preuves.filter(p => p.tache === id)[0]) {
+      toast('Photographiez d’abord le résultat', 'erreur');
+      const ph = $('[data-photo="' + id + '"]');
+      if (ph) ph.click();
+      return;
+    }
        rec[id] = actif ? { ok:1, par:STATE.user.prenom, at:nowISO() } : { ok:0 };
 
        /* Mise à jour sur place : pas de redessin de la page, donc pas de saut
@@ -524,12 +534,15 @@
       Vérifié sur l'exemple : 300 + 100 + 150 = 150 + 400 = 550.
       ========================================================================== */
    function equilibreCaisse(o) {
-     const gauche = num(o.tpe) + num(o.depot) + num(o.ff);
-     const droite = num(o.fi) + num(o.cb) + num(o.esp);
-     const ecart = +(gauche - droite).toFixed(2);
-     return { gauche, droite, ecart, conforme: Math.abs(ecart) < 0.01,
-              ca: num(o.cb) + num(o.esp) };
-   }
+   /* Compatibilité : les feuilles antérieures à modules.js stockent le dépôt sous
+      « ret ». On lit les deux plutôt que de réécrire un historique déjà signé. */
+   const depot = (o.depot !== undefined && o.depot !== '') ? o.depot : o.ret;
+   const gauche = num(o.tpe) + num(depot) + num(o.ff);
+   const droite = num(o.fi) + num(o.cb) + num(o.esp);
+  const ecart = +(gauche - droite).toFixed(2);
+  return { gauche, droite, ecart, conforme: Math.abs(ecart) < 0.01,
+           depot: num(depot), ca: num(o.cb) + num(o.esp) };
+}
    
    V.caisse = async function () {
      const j = STATE.jour;
@@ -538,8 +551,10 @@
      const attendu = veille ? num(veille.ff) : null;
    
      const champ = (k, l, ph) => '<div class="champ"><label class="f">' + l + '</label>' +
-       '<input type="number" inputmode="decimal" step="0.01" data-k="' + k + '" value="' +
-       (r[k] === undefined ? '' : r[k]) + '" placeholder="' + (ph || '') + '"></div>';
+     '<input type="number" inputmode="decimal" step="0.01" data-k="' + k + '" value="' +
+     (r[k] !== undefined && r[k] !== '' ? r[k]
+      : (k === 'depot' && r.ret !== undefined ? r.ret : '')) +
+    '" placeholder="' + (ph || '') + '"></div>';
    
      $('#vue-actions').innerHTML = '<input type="date" id="jj" value="' + j + '" style="width:auto;min-height:42px">';
    
@@ -602,7 +617,7 @@
          (rempli
            ? (eq.conforme
                ? '<div class="alerte ok" style="margin-top:12px"><span class="ai">✅</span><div>' +
-                 '<b>Conforme</b><p>' + eur(num(o.tpe)) + ' TPE + ' + eur(num(o.depot)) + ' dépôt + ' +
+                 '<b>Conforme</b><p>' + eur(num(o.tpe)) + ' TPE + ' + eur(eq.depot) + ' dépôt + ' +
                  eur(num(o.ff)) + ' fond final = ' + eur(num(o.fi)) + ' fond initial + ' + eur(eq.ca) + ' de CA.</p></div></div>'
                : '<div class="alerte bad" style="margin-top:12px"><span class="ai">▲</span><div>' +
                  '<b>L’équation ne tombe pas juste : ' + eur(eq.ecart) + '</b>' +
@@ -646,19 +661,95 @@
      h.insertBefore(bandeau.firstChild, h.firstChild);
    
      $('#tr-scan').onclick = async () => {
+     const mode = await choisirModeScan();
+     if (!mode) return;
      /* Mode chaîne : tant que l'équipier demande « le suivant », on renchîne. */
      let compteur = 0;
      for (;;) {
-         const r = await scannerPhoto('etiquette');
-         if (!r) break;
-      const enregistre = await choisirProduit(r, r.enchainer === true);
-         if (enregistre) compteur++;
-       if (!r.enchainer || !enregistre) break;
-     }
-     if (compteur) toast(compteur + ' produit(s) tracé(s)');
-     rendre('lots');
-     };
-     $('#tr-stock').onclick = () => rendre('stock');
+     const r = await scannerPhoto('etiquette');
+     if (!r) break;
+     const enregistre = mode === 'stock'
+         ? await entrerEnStock(r)
+         : await choisirProduit(r, r.enchainer === true);
+       if (enregistre) compteur++;
+         if (!r.enchainer || !enregistre) break;
+       }
+    if (compteur) toast(compteur + (mode === 'stock' ? ' bac(s) entré(s) en stock' : ' produit(s) tracé(s)'));
+    rendre(mode === 'stock' ? 'stock' : 'lots');
+  };
+  $('#tr-stock').onclick = () => rendre('stock');
+
+  /* Deux gestes distincts, deux conséquences distinctes sur le stock :
+     l'entrée ajoute un bac fermé, l'ouverture le sort du stock et déclenche
+     le compte à rebours de la DLC. Les confondre fausse les deux. */
+  function choisirModeScan() {
+    return new Promise(resolve => {
+      showSheet(
+        '<h2 id="sheet-titre">Que scannez-vous ?</h2>' +
+        '<p class="sub">Le stock se met à jour automatiquement selon votre choix.</p>' +
+        '<div class="stack">' +
+        '<button type="button" class="menu-item" data-mode="stock">' +
+        '<span class="mi-tx"><span class="mi-t">📦 Entrée en stock</span>' +
+        '<span class="mi-s">Bac fermé, rangé en chambre froide — ajouté au stock</span></span>' +
+        '<span class="mi-fl">›</span></button>' +
+        '<button type="button" class="menu-item" data-mode="ouverture">' +
+        '<span class="mi-tx"><span class="mi-t">🍦 Ouverture d’un bac</span>' +
+        '<span class="mi-s">Mis en vitrine — sorti du stock, DLC lancée</span></span>' +
+        '<span class="mi-fl">›</span></button></div>' +
+        '<div class="actions"><button class="btn clair" id="cm-x">Annuler</button></div>');
+      $('#cm-x').onclick = () => { closeSheet(); resolve(null); };
+      $$('[data-mode]').forEach(b => b.onclick = () => { closeSheet(); resolve(b.dataset.mode); });
+    });
+  }
+
+  /* Entrée en stock : le bac reste fermé. Le volume et le poids lus sur
+     l'étiquette préremplissent la fiche, il ne reste qu'à confirmer. */
+  function entrerEnStock(r) {
+    return new Promise(resolve => {
+      const taille = r.volume || FOURNISSEUR.tailleParDefaut;
+      showSheet(
+        '<h2 id="sheet-titre">📦 Entrée en stock</h2>' +
+        '<p class="sub">Lot <b>' + esc(r.lot || '—') + '</b>' +
+        (r.volume ? ' · ' + r.volume + ' L lus sur l’étiquette' : '') + '</p>' +
+        (r.dluo ? '<div class="alerte info"><span class="ai">⏱️</span><div><b>DLUO du bac fermé : ' +
+          fmtD(r.dluo) + '</b><p>Les 10 jours de conservation ne commenceront qu’à l’ouverture.</p></div></div>' : '') +
+        '<div class="champ" style="margin-top:14px"><label class="f">Parfum</label>' +
+        '<select id="es-p"><option value="">— choisir —</option>' +
+        PARFUMS.map(p => '<option value="' + esc(p) + '"' + (p === r.parfum ? ' selected' : '') + '>' +
+          esc(p) + '</option>').join('') + '</select></div>' +
+        '<div class="grid g3" style="margin-top:14px">' +
+        '<div class="champ"><label class="f">Taille</label><select id="es-t">' +
+        TAILLES_BAC.map(x => '<option value="' + x + '"' + (x === taille ? ' selected' : '') + '>' +
+          x + ' L</option>').join('') + '</select></div>' +
+        '<div class="champ"><label class="f">Nombre</label>' +
+        '<input type="number" id="es-n" min="1" step="1" value="1"></div>' +
+        '<div class="champ"><label class="f">N° de lot</label>' +
+        '<input type="text" id="es-l" value="' + esc(r.lot || '') + '" autocapitalize="characters"></div></div>' +
+        '<div class="champ" style="margin-top:14px"><label class="f">DLUO (bac fermé)</label>' +
+        '<input type="date" id="es-d" value="' + (r.dluo || '') + '"></div>' +
+        '<div class="actions"><button class="btn clair" id="es-x">Annuler</button>' +
+        '<button class="btn menthe" id="es-ok">Ajouter au stock</button></div>');
+
+      $('#es-x').onclick = () => { closeSheet(); resolve(false); };
+      $('#es-ok').onclick = async () => {
+        const p = $('#es-p').value, lot = $('#es-l').value.trim().toUpperCase();
+        if (!p) return toast('Choisissez le parfum', 'erreur');
+        if (!lot) return toast('Le numéro de lot est obligatoire', 'erreur');
+        const t = num($('#es-t').value) || FOURNISSEUR.tailleParDefaut;
+        const n = Math.max(1, num($('#es-n').value) || 1);
+        const stock = await DB.get('stock:ferme', []);
+        stock.push({ id:uid(), produit:p, qte:n, unite:'bac', taille:t,
+                     lot:lot, dlc:$('#es-d').value, recuLe:today(),
+                     poidsNet:r.poidsNet || null, production:r.production || null,
+                     ouvert:false, par:STATE.user.prenom, source:'scan' });
+        await DB.set('stock:ferme', stock);
+        await feed('ok', STATE.user.prenom + ' a entré en stock ' + n + ' × ' + p +
+                   ' ' + t + ' L (lot ' + lot + ')');
+        closeSheet();
+        resolve(true);
+      };
+    });
+  }
 
      /* Renvoie true si le produit a bien été enregistré. En mode chaîne, le choix
      du produit est pré-rempli et validable d'un seul appui. */
@@ -692,7 +783,38 @@
         const rec = await DB.get('lots:' + m, {});
         rec[cle] = { lot:lot, ouv:$('#tr-d').value, par:STATE.user.prenom, at:nowISO() };
         await DB.set('lots:' + m, rec);
-        await feed('ok', STATE.user.prenom + ' a ouvert un produit (lot ' + lot + ')');
+
+        /* Si ce lot existe en stock fermé, on l'en sort : c'est ce qui évite
+           d'avoir à tenir le stock à la main en plus de la traçabilité. */
+        const nomProduit = cle.slice(2);
+        const stock = await DB.get('stock:ferme', []);
+        const candidat = stock.filter(x => !x.ouvert && !x.jete &&
+          (x.lot === lot || x.produit === nomProduit))[0];
+
+        if (!candidat) {
+          /* Rien en stock : on trace quand même — la traçabilité HACCP prime —
+             mais on le dit, car c'est le signe d'une réception non saisie ou
+             d'un stock qui a décroché du réel. */
+          const suite = await confirmerHorsStock(nomProduit, lot);
+          if (!suite) return;
+        } else {
+          candidat.qte = Math.max(0, num(candidat.qte) - 1);
+          if (candidat.qte === 0) {
+            candidat.ouvert = true;
+            candidat.ouvertLe = $('#tr-d').value || today();
+            candidat.ouvertPar = STATE.user.prenom;
+            candidat.lotOuverture = lot;
+          } else {
+            stock.push(Object.assign({}, candidat, { id:uid(), qte:1, ouvert:true,
+              ouvertLe:$('#tr-d').value || today(), ouvertPar:STATE.user.prenom, lotOuverture:lot }));
+          }
+          await DB.set('stock:ferme', stock);
+          toast(nomProduit + ' sorti du stock fermé');
+        }
+
+        await feed(candidat ? 'ok' : 'warn',
+          STATE.user.prenom + ' a ouvert ' + nomProduit + ' (lot ' + lot + ')' +
+          (candidat ? '' : ' — absent du stock fermé'));
         closeSheet();
         resolve(true);
       };
@@ -700,10 +822,37 @@
   }
 };
    
-   /* =============================================================================
-      I. BACK-OFFICE
-      ========================================================================== */
-   V.parametres = async function () {
+   /* Ouverture d'un produit absent du stock fermé : on avertit sans bloquer.
+   Bloquer empêcherait de tracer un bac réellement ouvert, ce qui serait pire
+   qu'un stock inexact lors d'un contrôle sanitaire. */
+function confirmerHorsStock(produit, lot) {
+  return new Promise(resolve => {
+    showSheet(
+      '<h2 id="sheet-titre">⚠️ Absent du stock fermé</h2>' +
+      '<p class="sub">' + esc(produit) + ' · lot ' + esc(lot) + '</p>' +
+      '<div class="alerte warn"><span class="ai">●</span><div>' +
+      '<b>Aucun bac correspondant en stock</b>' +
+      '<p>Ce lot n’a jamais été entré en stock. Trois explications courantes : ' +
+      'la livraison n’a pas été saisie, le bac vient d’une autre boutique, ou le ' +
+      'numéro de lot a été mal lu.</p></div></div>' +
+      '<div class="alerte info" style="margin-top:10px"><span class="ai">ℹ️</span><div>' +
+      '<b>Si vous continuez</b><p>L’ouverture sera traçée normalement — c’est ce qui ' +
+      'compte pour un contrôle — mais le stock ne sera pas décrémenté et l’écart de ' +
+      'période s’en ressentira. Eve verra le signalement dans le fil.</p></div></div>' +
+      '<div class="actions"><button class="btn clair" id="hs-x">Vérifier le lot</button>' +
+      '<button class="btn ambre" id="hs-ok">Tracer quand même</button></div>' +
+      '<button class="btn clair bloc" id="hs-rec" style="margin-top:10px">' +
+      'Saisir d’abord la réception</button>');
+    $('#hs-x').onclick   = () => { closeSheet(); resolve(false); };
+    $('#hs-ok').onclick  = () => { resolve(true); };
+    $('#hs-rec').onclick = () => { closeSheet(); resolve(false); rendre('reception'); };
+  });
+}
+
+/* =============================================================================
+   I. BACK-OFFICE
+   ========================================================================== */
+V.parametres = async function () {
      const h = await DB.get('horaires', HORAIRES);
      Object.assign(HORAIRES, h);
      const ench = await DB.get('enceintes', null);
@@ -989,11 +1138,21 @@
        '<div class="dl"><span class="c1">Dernière erreur</span><span class="c ww">' +
        (STATE.erreurBase ? esc(STATE.erreurBase) : 'aucune') + '</span></div>' +
        (STATE.dernierEchec
-         ? '<div class="dl"><span class="c1">Requête refusée</span><span class="c ww">' +
-           esc(STATE.dernierEchec.methode + ' ' + STATE.dernierEchec.chemin) + '</span></div>' +
-           '<div class="dl"><span class="c1">Code HTTP</span><span class="c ww num">' + STATE.dernierEchec.status + '</span></div>'
-         : '') +
-       '</div>' +
+       ? '<div class="dl"><span class="c1">Requête refusée</span><span class="c ww">' +
+       esc(STATE.dernierEchec.methode + ' ' + STATE.dernierEchec.chemin) + '</span></div>' +
+       '<div class="dl"><span class="c1">Code HTTP</span><span class="c ww num">' + STATE.dernierEchec.status + '</span></div>' +
+         (STATE.dernierEchec.motif
+             ? '<div class="dl"><span class="c1">Motif renvoyé</span><span class="c ww">' +
+            esc(STATE.dernierEchec.motif.slice(0, 120)) + '</span></div>' : '')
+      : '') +
+    '</div>' +
+    (Object.keys(DB._gros || {}).length
+      ? '<div class="alerte warn" style="margin-top:12px"><span class="ai">●</span><div>' +
+        '<b>' + Object.keys(DB._gros).length + ' donnée(s) trop lourde(s) pour la base</b>' +
+        '<p>' + esc(Object.keys(DB._gros).slice(0, 4).join(', ')) + '. Ces éléments — des ' +
+        'journées de photos, en pratique — restent sur cet appareil et ne remonteront pas. ' +
+        'Le passage à Supabase Storage réglera ce point.</p></div></div>'
+      : '') +
        '<button class="btn clair bloc" id="dg-test" style="margin-top:14px">Tester lecture et écriture</button>' +
        '<div id="dg-res" style="margin-top:12px"></div>' +
        '<button class="btn fantome bloc" id="dg-purge" style="margin-top:8px">Vider la file d’attente</button>', 'plat');

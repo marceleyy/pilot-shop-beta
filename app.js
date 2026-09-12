@@ -144,14 +144,19 @@
          if (!r.ok) {
            const err = new Error('HTTP ' + r.status);
            err.http = r.status;
-           /* 401/403 : clé ou RLS. 404 : table absente. Ce n'est pas une panne réseau,
-              le signaler comme tel évite de basculer toute l'app en mode hors-ligne. */
+           /* Le corps de la réponse contient le vrai motif : contrainte violée,
+              colonne inconnue, charge trop lourde. Sans lui, on en est réduit
+              à deviner — ce qui a coûté une soirée entière. */
+           let motif = '';
+           try { motif = (await r.text()).slice(0, 300); } catch (x) {}
+           err.motif = motif;
            if (r.status === 401 || r.status === 403) STATE.erreurBase = 'Clé Supabase refusée';
            else if (r.status === 404) STATE.erreurBase = 'Table introuvable';
+           else if (r.status === 413) STATE.erreurBase = 'Donnée trop lourde';
            else STATE.erreurBase = 'Base en erreur (' + r.status + ')';
-           /* Trace exploitable dans Réglages : quelle table, quel code, quand. */
            STATE.dernierEchec = { chemin:chemin.split('?')[0], status:r.status,
-                                  methode:(options && options.method) || 'GET', at:nowISO() };
+                                  methode:(options && options.method) || 'GET',
+                                  motif:motif, at:nowISO() };
            majBandeau();
            throw err;
          }
@@ -190,6 +195,20 @@
          catch (e) { toast('Mémoire pleine — libérez de l’espace sur l’iPad', 'erreur'); return false; }
    
          if (!distant(cle)) return true;
+
+         /* Garde-fou : une journée de photos en base64 pèse plusieurs centaines
+            de kilo-octets. Au-delà du seuil, on garde en local sans tenter
+            l'envoi — sinon l'échec se répète et rallume le bandeau en boucle. */
+         let poids = 0;
+         try { poids = JSON.stringify(valeur).length; } catch (e) {}
+         if (poids > OFFLINE.tailleMaxOctets) {
+           if (!DB._gros[cle]) {
+             DB._gros[cle] = poids;
+             console.warn('Trop lourd pour la base (' + Math.round(poids / 1024) + ' Ko) :', cle);
+           }
+           return true;
+         }
+
          if (!STATE.enLigne) { await empiler('set', cle, valeur); return true; }
    
          try {
@@ -243,7 +262,7 @@
    
        /* Exposés pour la file d'attente et l'écran de réglages */
        _appel: appel, _table: table, _distant: distant, _clesLocales: clesLocales,
-       _lire: lire, _ecrire: ecrire, _oter: oter
+       _lire: lire, _ecrire: ecrire, _oter: oter, _gros: {}
      };
    })();
    
@@ -916,13 +935,44 @@
      );
    }
    
-   /* =============================================================================
-      11. VUE — NETTOYAGE (validation en un clic)
-      ========================================================================== */
+   /* Quelles tâches exigent une photo avant validation.
+   Toute tâche non quotidienne : hebdomadaire, mensuelle, annuelle, asynchrone.
+   Une tâche faite chaque jour se contrôle de visu ; une tâche mensuelle, non. */
+function exigePhoto(tache) {
+  if (!PREUVE.actif || !tache) return false;
+  if (PREUVE.tachesObligatoires.indexOf(tache.id) >= 0) return true;
+  if (!PREUVE.hebdoObligatoire) return false;
+  return ['hebdo', 'mensuel', 'annuel', 'async'].indexOf(tache.recurrence) >= 0;
+}
+
+/* Purge des photos de preuve au-delà de PREUVE.purgeJours.
+   Sans elle, le quota du navigateur tombe en pleine saison : 12 photos par
+   jour à 40 Ko saturent les 5 Mo de l'iPad en trois semaines. */
+async function purgerPreuves() {
+  if (!PREUVE.actif || !PREUVE.purgeJours) return 0;
+  const limite = addD(today(), -PREUVE.purgeJours);
+  let effaces = 0;
+  try {
+    for (const cle of await DB.list('preuves:')) {
+      const jour = cle.replace('preuves:', '');
+      if (jour >= limite) continue;
+      const l = await DB.get(cle, []);
+      effaces += Array.isArray(l) ? l.length : 0;
+      await DB.del(cle);
+    }
+  } catch (e) { /* purge sans conséquence si elle échoue */ }
+  if (effaces) console.info('Purge : ' + effaces + ' photo(s) de plus de ' + PREUVE.purgeJours + ' jours');
+  return effaces;
+}
+
+/* =============================================================================
+   11. VUE — NETTOYAGE (validation en un clic)
+   ========================================================================== */
    V.clean = async function () {
-     const j = STATE.jour;
-     const rec = await DB.get('clean:' + j, {});
-     const liste = tachesDuJour(j);
+   const j = STATE.jour;
+   const rec = await DB.get('clean:' + j, {});
+   const preuves = await DB.get('preuves:' + j, []);
+  const liste = tachesDuJour(j);
      const asy = await asyncDuJour(j);
      const faits = liste.filter(t => rec[t.id] && rec[t.id].ok).length;
      const pct = liste.length ? Math.round(faits / liste.length * 100) : 0;
@@ -931,14 +981,21 @@
      liste.forEach(t => { (parZone[t.zoneId] = parZone[t.zoneId] || { nom:t.zone, icone:t.icone, t:[] }).t.push(t); });
    
      const ligne = t => {
-       const v = rec[t.id] || {};
-       return '<button type="button" class="tache' + (v.ok ? ' on' : '') + '" data-c="' + t.id + '">' +
-         '<span class="box">✓</span><span class="tx"><span class="tn">' + esc(t.nom) + '</span>' +
-         '<span class="tm">' + (v.ok ? esc(v.par) + ' · ' + heure(v.at)
+     const v = rec[t.id] || {};
+     const photo = exigePhoto(t);
+     const prise = preuves.filter(p => p.tache === t.id)[0];
+     return '<div class="tache' + (v.ok ? ' on' : '') + '">' +
+     '<button class="box" data-c="' + t.id + '">✓</button>' +
+     '<span class="tx"><span class="tn">' + esc(t.nom) + '</span>' +
+     '<span class="tm">' + (v.ok ? esc(v.par) + ' · ' + heure(v.at)
            : (t.recurrence === 'quotidien' ? 'Tous les jours' :
-              t.recurrence === 'hebdo' ? 'Le ' + nomJour(j).toLowerCase() :
-              t.recurrence === 'mensuel' ? 'Une fois par mois' : 'Une fois par an')) + '</span></span></button>';
-     };
+           t.recurrence === 'hebdo' ? 'Le ' + nomJour(j).toLowerCase() :
+           t.recurrence === 'mensuel' ? 'Une fois par mois' : 'Une fois par an')) +
+      (photo ? ' · photo requise' : '') + '</span></span>' +
+      (photo ? '<button class="btn ' + (prise ? 'menthe' : 'clair') + ' sm" data-photo="' + t.id +
+        '" data-lib="' + esc(t.nom) + '">' + (prise ? '✓📷' : '📷') + '</button>' : '') +
+      '</div>';
+  };
    
      $('#page').innerHTML =
        carte(entete('🧽', nomJour(j) + ' ' + fmtD(j), 'Un appui suffit : la tâche est signée à votre nom.') +
@@ -969,23 +1026,40 @@
        }).join('');
    
      $$('[data-c]').forEach(b => b.onclick = async () => {
-       const cle = b.dataset.c, actif = !b.classList.contains('on');
-       b.classList.toggle('on', actif);
-       rec[cle] = actif ? { ok:1, par:STATE.user.prenom, id:STATE.user.id, at:nowISO() } : { ok:0 };
-       const tm = $('.tm', b);
+     const cle = b.dataset.c, actif = !b.parentElement.classList.contains('on');
+     const tache = liste.filter(t => t.id === cle)[0] ||
+                   { id:cle, recurrence: cle.indexOf('async_') === 0 ? 'async' : 'quotidien' };
+
+     /* Une tâche non quotidienne ne se valide pas sans preuve : c'est justement
+        celle que personne ne peut confirmer de mémoire trois semaines plus tard. */
+     if (actif && exigePhoto(tache) && !preuves.filter(p => p.tache === cle)[0]) {
+      toast('Photographiez d’abord le résultat', 'erreur');
+       const ph = $('[data-photo="' + cle + '"]');
+     if (ph) ph.click();
+     return;
+     }
+
+     b.parentElement.classList.toggle('on', actif);
+     rec[cle] = actif ? { ok:1, par:STATE.user.prenom, id:STATE.user.id, at:nowISO() } : { ok:0 };
+     const tm = $('.tm', b.parentElement);
        if (tm) tm.textContent = actif ? STATE.user.prenom + ' · ' + heure(nowISO()) : 'À faire';
-       vibrer(UI.vibration.ok);
-       await DB.set('clean:' + j, rec);
-   
-       if (cle.indexOf('async_') === 0) {
-         const a = NETTOYAGE.asynchrones.filter(x => 'async_' + x.id === cle)[0];
-         if (actif && a) { await DB.set('async:' + a.id, { jour:j, par:STATE.user.prenom, at:nowISO() }); }
-       }
-       if (actif) {
-         const nom = ($('.tn', b) ? $('.tn', b).textContent : cle);
-         await feed('ok', STATE.user.prenom + ' a nettoyé ' + nom.replace(/^[^\p{L}\p{N}]+/u, '').toLowerCase());
-       }
-     });
+    vibrer(UI.vibration.ok);
+    await DB.set('clean:' + j, rec);
+
+    if (cle.indexOf('async_') === 0) {
+      const a = NETTOYAGE.asynchrones.filter(x => 'async_' + x.id === cle)[0];
+      if (actif && a) { await DB.set('async:' + a.id, { jour:j, par:STATE.user.prenom, at:nowISO() }); }
+    }
+    if (actif) {
+      const nom = ($('.tn', b.parentElement) ? $('.tn', b.parentElement).textContent : cle);
+      await feed('ok', STATE.user.prenom + ' a nettoyé ' + nom.replace(/^[^\p{L}\p{N}]+/u, '').toLowerCase());
+    }
+  });
+
+  $$('[data-photo]').forEach(b => b.onclick = async () => {
+    const p = await attacherPreuve(j, b.dataset.photo, b.dataset.lib);
+    if (p) { toast('Photo enregistrée (' + p.poids + ' Ko)'); rendre('clean'); }
+  });
    };
    
    /* =============================================================================
@@ -1511,15 +1585,18 @@
    }
    
    function demarrer() {
+     $('#bt').textContent = 'Boutique ' + CFG_SITE();
      $('#login').hidden = true;
      $('#app').hidden = false;
-     document.title = APP.nom + ' — ' + APP.site;
+     document.title = APP.nom;
      STATE.phase = phaseCourante();
      majBandeau();
      initFeedback();
-     renderNav();
-     rendre(STATE.user.role === 'manager' ? 'controle' : 'accueil');
-   }
+     purgerPreuves();          // les photos de plus de trois mois s'effacent seules
+  renderNav();
+  rendre(STATE.user.role === 'manager' ? 'controle' : 'accueil');
+}
+function CFG_SITE() { return APP.site; }
    
    (async function () {
      initLogin();
@@ -2371,6 +2448,7 @@ function ouvrirPremierePeriode() {
    
        '<button class="btn ' + (bloquants.length ? 'clair' : 'menthe') + ' bloc xl" id="clo" style="margin-top:16px">' +
        (anticipee ? '⏭️ Clôture anticipée' : '🔒 Terminer la période') + '</button>' +
+    '<button class="btn clair bloc" id="modif" style="margin-top:8px">✏️ Modifier les dates de la période</button>' +
    
        (historique.length ? '<div class="entete"><h3>Périodes clôturées</h3></div>' +
          '<div class="dense"><div class="dense-h"><span class="c1">Période</span>' +
@@ -2382,7 +2460,80 @@ function ouvrirPremierePeriode() {
            '<span class="c ww">' + esc(p.par) + ' ' + fmtDC(p.jour) + '</span></div>').join('') + '</div>' : '');
    
      $('#clo').onclick = () => ouvrirCloture(per, B, anticipee);
-   };
+  $('#modif').onclick = () => modifierPeriode(per);
+};
+
+/* Ajuster une période en cours sans la clôturer : la date de fin n'était
+   modifiable qu'au moment de la clôture, ce qui obligeait à fermer pour
+   corriger une simple erreur de saisie. */
+function modifierPeriode(per) {
+  showSheet(
+    '<h2 id="sheet-titre">Modifier la période en cours</h2>' +
+    '<p class="sub">' + esc(libellePeriode(per)) + '</p>' +
+
+    '<div class="entete"><h3>Type</h3></div>' +
+    '<div class="chips" id="mp-type">' + PERIODES.types.map(t =>
+      '<button type="button" class="chip' + (t.id === per.type ? ' on' : '') +
+      '" data-t="' + t.id + '">' + esc(t.label) + '</button>').join('') + '</div>' +
+
+    '<div class="grid g2" style="margin-top:16px">' +
+    '<div class="champ"><label class="f">Début</label>' +
+    '<input type="date" id="mp-d" value="' + per.debut + '"></div>' +
+    '<div class="champ"><label class="f">Fin</label>' +
+    '<input type="date" id="mp-f" value="' + per.fin + '"></div></div>' +
+    '<p class="mini" id="mp-info" style="margin-top:10px"></p>' +
+    '<div id="mp-avert"></div>' +
+
+    '<div class="actions"><button class="btn clair" data-fermer>Annuler</button>' +
+    '<button class="btn menthe" id="mp-ok">Enregistrer</button></div>');
+
+  let type = per.type, libre = (per.type === 'personnalise');
+  const maj = () => {
+    const d = $('#mp-d').value || per.debut;
+    /* En mode libre, la fin reste telle que saisie — c'est tout l'intérêt. */
+    if (!libre) $('#mp-f').value = finNaturelle(type, d);
+    const n = joursEntre($('#mp-d').value, $('#mp-f').value).length;
+    $('#mp-info').textContent = n > 0
+      ? 'Fenêtre de ' + n + ' jour(s), du ' + fmtD($('#mp-d').value) + ' au ' + fmtD($('#mp-f').value) + '.'
+      : 'La date de fin doit suivre la date de début.';
+
+    /* Raccourcir une période peut exclure des journées déjà saisies. */
+    const raccourcit = $('#mp-f').value < per.fin || $('#mp-d').value > per.debut;
+    $('#mp-avert').innerHTML = raccourcit
+      ? '<div class="alerte warn" style="margin-top:12px"><span class="ai">●</span><div>' +
+        '<b>La fenêtre se rétrécit</b><p>Les journées qui en sortent ne seront plus comptées ' +
+        'dans les écarts ni dans les cumuls de caisse. Les saisies elles-mêmes sont conservées ' +
+        'et reviendront si vous réélargissez la période.</p></div></div>'
+      : '';
+  };
+  $$('#mp-type [data-t]').forEach(b => b.onclick = () => {
+    $$('#mp-type .chip').forEach(x => x.classList.remove('on'));
+    b.classList.add('on'); type = b.dataset.t; libre = (type === 'personnalise'); maj();
+  });
+  /* Toucher la date de fin passe d'office en mode libre : sinon le recalcul
+     automatique écrasait la saisie, ce qui donnait l'impression d'un blocage. */
+  $('#mp-f').onchange = () => {
+    libre = true;
+    type = 'personnalise';
+    $$('#mp-type .chip').forEach(x => x.classList.toggle('on', x.dataset.t === 'personnalise'));
+    maj();
+  };
+  $('#mp-d').onchange = maj;
+  maj();
+
+  $('#mp-ok').onclick = async () => {
+    const d1 = $('#mp-d').value, d2 = $('#mp-f').value;
+    if (!d1 || !d2 || d2 < d1) return toast('Dates incohérentes', 'erreur');
+    const avant = libellePeriode(per);
+    Object.assign(per, { type:type, debut:d1, fin:d2,
+                         modifiee:nowISO(), modifieePar:STATE.user.prenom });
+    await DB.set('periode:courante', per);
+    await feed('ok', STATE.user.prenom + ' a modifié la période : ' + avant + ' → ' + libellePeriode(per));
+    closeSheet();
+    toast('Période mise à jour');
+    rendre('periodes');
+  };
+}
    
    function ouvrirCloture(per, B, anticipee) {
      const bloquants = B.filter(b => !b.forcable);

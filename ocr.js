@@ -365,23 +365,93 @@ function extraireParfum(texte) {
   const nettoye = sansAccents(texte)
     .replace(/[0-9]/g, c => CHIFFRE_EN_LETTRE[c] !== undefined ? CHIFFRE_EN_LETTRE[c] : ' ')
     .replace(/[^a-z\s-]/g, ' ');
+  const phrase = ' ' + nettoye.replace(/\s+/g, ' ').trim() + ' ';
   const mots = nettoye.split(/\s+/).filter(m => m.length >= 3);
   if (!mots.length) return null;
 
+  /* Cibles : le nom français plus tous ses alias anglais et italiens.
+     Les étiquettes Amorino n'écrivent jamais le français. */
+  const cibles = [];
+  PARFUMS.forEach(p => {
+    const vus = {};
+    const ajouter = s => { const c = sansAccents(s); if (c && !vus[c]) { vus[c] = 1; cibles.push({ p:p, c:c }); } };
+    ajouter(p);
+    ajouter(p.split(' ')[0]);
+    ((typeof PARFUMS_ALIAS !== 'undefined' && PARFUMS_ALIAS[p]) || []).forEach(ajouter);
+  });
+
   let meilleur = null;
-  for (const p of PARFUMS) {
-    const cible = sansAccents(p);
-    const partiel = cible.split(' ')[0];
+  const retenir = (p, score, lu) => {
+    if (score > 0.62 && (!meilleur || score > meilleur.score)) meilleur = { parfum:p, score:score, lu:lu };
+  };
+
+  for (const t of cibles) {
+    /* Expression composée (« passion fruit ») : on la cherche telle quelle */
+    if (t.c.indexOf(' ') >= 0) {
+      if (phrase.indexOf(' ' + t.c + ' ') >= 0) retenir(t.p, 1, t.c);
+      continue;
+    }
     for (const mot of mots) {
-      const d = Math.min(distance(mot, cible), distance(mot, partiel));
-      const ref = Math.min(mot.length, partiel.length);
-      const score = 1 - d / Math.max(ref, 1);
-      if (score > 0.62 && (!meilleur || score > meilleur.score)) {
-        meilleur = { parfum: p, score: score, lu: mot };
-      }
+      const d = distance(mot, t.c);
+      const ref = Math.max(mot.length, t.c.length);
+      retenir(t.p, 1 - d / Math.max(ref, 1), mot);
     }
   }
   return meilleur;
+}
+
+/* =============================================================================
+   EXTRACTION DES AUTRES CHAMPS DE L'ÉTIQUETTE
+   L'étiquette Amorino porte bien plus que le lot : volume, poids net, date de
+   production et DLUO. Les lire évite de ressaisir la taille du bac à la main.
+
+   Attention : le « Best before » est la limite du produit FERMÉ, à deux ans.
+   La règle des 10 jours court à partir de l'ouverture, elle est calculée
+   séparément par DLC_RULES. Ne jamais confondre les deux.
+   ========================================================================== */
+function extraireChamps(texte) {
+  const t = texte.replace(/\s+/g, ' ');
+  const out = {};
+
+  /* Volume : « 3 Litres », « 5 L ». On ne retient que les tailles au catalogue. */
+  const vol = t.match(/(\d{1,2})[.,]?\d*\s*(?:litres?|lt?r?s?\b)/i);
+  if (vol) {
+    const v = parseInt(vol[1], 10);
+    if (TAILLES_BAC.indexOf(v) >= 0) out.volume = v;
+  }
+
+  /* Poids net : « 2,525 » près de « kg ». Bornes larges mais plausibles. */
+  const poids = t.match(/(?:kg\s*net\s*wt\s*:?|net\s*wt\s*:?|poids\s*net\s*:?)\s*(\d{1,2}[.,]\d{1,3})/i)
+             || t.match(/(\d{1,2}[.,]\d{3})\s*(?:kg)?/);
+  if (poids) {
+    const p = parseFloat(poids[1].replace(',', '.'));
+    if (p > 0.5 && p < 20) out.poidsNet = p;
+  }
+
+  /* Dates au format jj/mm/aaaa. La plus ancienne est la production,
+     la plus lointaine la DLUO du produit fermé. */
+  const dates = [];
+  const re = /(\d{2})[\/.\-](\d{2})[\/.\-](\d{4})/g;
+  let m;
+  while ((m = re.exec(t)) !== null) {
+    const j = +m[1], mo = +m[2], a = +m[3];
+    if (j >= 1 && j <= 31 && mo >= 1 && mo <= 12 && a >= 2020 && a <= 2040) {
+      dates.push(a + '-' + m[2] + '-' + m[1]);
+    }
+  }
+  if (dates.length) {
+    dates.sort();
+    out.production = dates[0];
+    if (dates.length > 1) out.dluo = dates[dates.length - 1];
+  }
+
+  /* Cohérence : si volume et poids sont lus, on vérifie le kg/L. */
+  if (out.volume && out.poidsNet) {
+    const kgL = out.poidsNet / out.volume;
+    out.kgParLitre = Math.round(kgL * 10000) / 10000;
+    out.coherent = kgL > 0.6 && kgL < 1.1;
+  }
+  return out;
 }
 
 /* =============================================================================
@@ -533,12 +603,15 @@ async function analyserCanvas(type, canvas, nom, resolve) {
     const parfum = await lire(canvas, 'parfum');
 
     const batch = extraireBatch(code.texte + '\n' + parfum.texte);
-    const trouve = extraireParfum(parfum.texte);
+    const trouve = extraireParfum(parfum.texte + '\n' + code.texte);
+    const champs = extraireChamps(code.texte + '\n' + parfum.texte);
     const confiance = (code.confiance + parfum.confiance) / 2;
     libererCanvas(canvas);
 
     const r = type === 'etiquette'
       ? { lot: batch ? batch.code : '', ouv: today(), parfum: trouve ? trouve.parfum : '',
+          volume: champs.volume || null, poidsNet: champs.poidsNet || null,
+          production: champs.production || null, dluo: champs.dluo || null,
           confiance: confiance, corrige: !!(batch && batch.corrige),
           texte: (code.texte + '\n' + parfum.texte).trim() }
       : { fournisseur: FOURNISSEUR.nom, numero: batch ? batch.code : '', date: today(),

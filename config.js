@@ -66,6 +66,9 @@ const OFFLINE = {
   backoffMs: [1000, 4000, 15000, 60000, 300000],
   intervalleSyncMs: 20000,
   purgeLocaleJours: 120,              // conservation du cache local
+  /* Au-delà, l'écriture reste locale : c'est le cas des journées de photos en
+     base64, dont l'envoi échouait en boucle et rallumait le bandeau d'erreur. */
+  tailleMaxOctets: 900000,
   /* Les lectures servies depuis le cache si le réseau ne répond pas à temps */
   timeoutReseauMs: 3500,
   /* Écritures autorisées hors-ligne (les autres sont bloquées avec message) */
@@ -481,6 +484,34 @@ const PARFUMS = [
   'Pistache','Stracciatella','Tiramisu','Vanille','Yogurt'
 ];
 
+/* Les étiquettes Amorino sont imprimées en anglais et en italien, jamais en
+   français : « PASSION FRUIT / PASSIONE », « PISTACHIO MAWARDI ». Sans ces
+   alias, la reconnaissance du parfum échouait sur la moitié des bacs. */
+const PARFUMS_ALIAS = {
+  'Amarena':                ['amarena', 'sour cherry', 'griotte', 'amarene'],
+  'Banane':                 ['banana', 'banane'],
+  'Café':                   ['coffee', 'caffe', 'espresso'],
+  'Caramel au beurre salé': ['salted butter caramel', 'salted caramel', 'caramello salato', 'caramel'],
+  'Chocolat noir':          ['dark chocolate', 'chocolate', 'cioccolato fondente', 'cioccolato'],
+  'Chocolat équateur':      ['ecuador chocolate', 'chocolate ecuador', 'cioccolato ecuador', 'equateur'],
+  'Chocolat bio (sorbet)':  ['organic chocolate', 'chocolate sorbet', 'cioccolato bio'],
+  'Citron bio':             ['lemon', 'organic lemon', 'limone'],
+  'Citron vert basilic':    ['lime basil', 'lime and basil', 'lime basilico'],
+  'Fraise':                 ['strawberry', 'fragola'],
+  'Framboise':              ['raspberry', 'lampone'],
+  'Fruit de la passion':    ['passion fruit', 'passionfruit', 'passione', 'frutto della passione'],
+  'Inimitable':             ['inimitable', 'inimitabile'],
+  'Mangue':                 ['mango'],
+  'Noisette':               ['hazelnut', 'nocciola'],
+  'Noix de coco':           ['coconut', 'cocco'],
+  'Orange sanguine':        ['blood orange', 'arancia rossa'],
+  'Pistache':               ['pistachio', 'pistacchio', 'mawardi'],
+  'Stracciatella':          ['stracciatella'],
+  'Tiramisu':               ['tiramisu', 'tirami su'],
+  'Vanille':                ['vanilla', 'vaniglia', 'bourbon vanilla'],
+  'Yogurt':                 ['yogurt', 'yoghurt', 'yaourt', 'greek yogurt']
+};
+
 /* Références fournisseur, format du bon de livraison Jetfreeze */
 const FOURNISSEUR = {
   nom: 'Jetfreeze',
@@ -489,7 +520,11 @@ const FOURNISSEUR = {
   bacsParPalette: 176,
   taillesBac: [3, 4, 5, 7],
   tailleParDefaut: 5,
-  poidsMoyenLitre: 0.8465840740740742,        // kg par litre
+  /* Mesuré sur étiquette Amorino : 2,525 kg pour 3 L, soit 0,84167 kg/L.
+     L'ancienne valeur du classeur surestimait le stock de 0,58 %, soit environ
+     1,8 kg d'écart fantôme sur un inventaire de 120 bacs. */
+  poidsMoyenLitre: 0.8416666666666667,
+  poidsMoyenLitreClasseur: 0.8465840740740742,  // valeur historique, pour comparaison
   prixMoyenKg: 6.7
 };
 
@@ -819,7 +854,10 @@ const PREUVE = {
   cotePx: 640,           // suffisant pour constater, assez léger pour tenir en base
   qualite: 0.45,
   maxParJour: 12,        // au-delà, le quota du navigateur explose
-  purgeJours: 60,
+  purgeJours: 90,        // trois mois, puis les photos sont effacées
+  /* Toute tâche non quotidienne exige une photo : c'est justement celle qu'on
+     ne peut pas vérifier de mémoire le lendemain. */
+  hebdoObligatoire: true,
   tachesObligatoires: ['f04', 'f14', 'a12']   // Bactalim, chantilly, chambre froide
 };
 
@@ -848,7 +886,7 @@ const CONFIG = {
   APP, SUPABASE, OFFLINE, PWA, ROLES, EQUIPE, POINTEUSE,
   DLC_RULES, DLC_SEUILS, DLC_MATCH, ENCEINTES, RELEVES,
   JOURS_SEMAINE, NETTOYAGE, REASSORT, REASSORT_CATS, RUPTURE,
-  PHASES, RELEVE, FICHES, PARFUMS, FOURNISSEUR, TAILLES_BAC,
+  PHASES, RELEVE, FICHES, PARFUMS, PARFUMS_ALIAS, FOURNISSEUR, TAILLES_BAC,
   INVENTAIRE_SEC, MOTIFS_PERTE, VOIX, SCANNER, PERIODES,
   SEUILS, FRAUDE, METEO, TABS, MENU_PLUS, PAGES, UI
 };

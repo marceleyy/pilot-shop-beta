@@ -1,6 +1,18 @@
 # Clés Supabase — généré au build par scripts/env.cjs, jamais versionné
 env.js
 
+# Photos de test et d'étiquettes — lourdes, sans intérêt pour le déploiement
+*.HEIC
+*.heic
+*.jpg
+*.jpeg
+!icons/*
+photos/
+
+# Fichiers parasites créés en collant du JavaScript dans CMD
+localStorage.removeItem*
+*))
+
 # Dépendances et artefacts
 node_modules/
 .vercel/
