@@ -1751,11 +1751,13 @@ function ouvrirPremierePeriode() {
         '" data-t="' + t.id + '">' + esc(t.label) + '</button>').join('') + '</div>' +
 
       '<div class="grid g2" style="margin-top:16px">' +
-      '<div class="champ"><label class="f">Début</label>' +
+      '<div class="champ"><label class="f">Début de période</label>' +
       '<input type="date" id="pp-d" value="' + aujourdhui + '"></div>' +
-      '<div class="champ"><label class="f">Fin</label>' +
+      '<div class="champ"><label class="f">Fin de période</label>' +
       '<input type="date" id="pp-f" value="' + finNaturelle(PERIODES.parDefaut, aujourdhui) + '"></div></div>' +
-      '<p class="mini" id="pp-info" style="margin-top:10px"></p>' +
+      '<p class="mini" style="margin-top:8px">Les deux dates sont modifiables. Toucher la date ' +
+      'de fin bascule en période personnalisée.</p>' +
+      '<p class="mini" id="pp-info" style="margin-top:6px"></p>' +
 
       '<div class="actions"><button class="btn menthe bloc" id="pp-ok">Ouvrir la période</button></div>');
 
@@ -1765,20 +1767,44 @@ function ouvrirPremierePeriode() {
     if (voile) voile.onclick = () => toast('Choisissez une période pour commencer', 'erreur');
 
     let type = PERIODES.parDefaut;
+    let libre = false;          // vrai dès que la date de fin est saisie à la main
+
     const maj = () => {
       const d = $('#pp-d').value || aujourdhui;
-      if (type !== 'personnalise') $('#pp-f').value = finNaturelle(type, d);
+      /* En mode libre, on ne touche plus à la date de fin : c'est précisément
+         ce recalcul qui écrasait la saisie et empêchait de choisir une date. */
+      if (!libre) $('#pp-f').value = finNaturelle(type, d);
       const n = joursEntre($('#pp-d').value, $('#pp-f').value).length;
-      $('#pp-info').textContent = n > 0
+      const ok = n > 0;
+      $('#pp-info').textContent = ok
         ? 'Fenêtre de ' + n + ' jour(s), du ' + fmtD($('#pp-d').value) + ' au ' + fmtD($('#pp-f').value) + '.'
-        : 'La date de fin doit suivre la date de début.';
+        : 'La date de fin doit être égale ou postérieure à la date de début.';
+      $('#pp-info').style.color = ok ? '' : 'var(--corail-d)';
+      $('#pp-ok').disabled = !ok;
     };
+
     $$('#pp-type [data-t]').forEach(b => b.onclick = () => {
       $$('#pp-type .chip').forEach(x => x.classList.remove('on'));
-      b.classList.add('on'); type = b.dataset.t; maj();
+      b.classList.add('on');
+      type = b.dataset.t;
+      libre = (type === 'personnalise');
+      /* On ne déplace jamais la date de début choisie : le type ne fait que
+         proposer une date de fin cohérente. Recaler le début en douce serait
+         exactement le contraire du contrôle demandé. */
+      maj();
     });
+
+    /* Modifier la date de fin à la main bascule d'office en « personnalisé ». */
+    const passerEnLibre = () => {
+      libre = true;
+      type = 'personnalise';
+      $$('#pp-type .chip').forEach(x => x.classList.toggle('on', x.dataset.t === 'personnalise'));
+      maj();
+    };
+    $('#pp-f').onchange = passerEnLibre;
+    $('#pp-f').oninput  = passerEnLibre;
     $('#pp-d').onchange = maj;
-    $('#pp-f').onchange = maj;
+    $('#pp-d').oninput  = maj;
     maj();
 
     $('#pp-ok').onclick = async () => {
@@ -1803,12 +1829,12 @@ function ouvrirPremierePeriode() {
      return ref;
    }
    function finNaturelle(type, ref) {
-     if (type === 'mois')      { const d = new Date(+ref.slice(0, 4), +ref.slice(5, 7), 0); return isoOf(d); }
-     if (type === 'trimestre') { const t = Math.floor((+ref.slice(5, 7) - 1) / 3) * 3 + 3; const d = new Date(+ref.slice(0, 4), t, 0); return isoOf(d); }
-     if (type === 'semaine')   return addD(debutNaturel('semaine', ref), 6);
-     if (type === 'quinzaine') return addD(ref, 0);
-     return ref;
-   }
+   if (type === 'mois')      { const d = new Date(+ref.slice(0, 4), +ref.slice(5, 7), 0); return isoOf(d); }
+   if (type === 'trimestre') { const t = Math.floor((+ref.slice(5, 7) - 1) / 3) * 3 + 3; const d = new Date(+ref.slice(0, 4), t, 0); return isoOf(d); }
+   if (type === 'semaine')   return addD(ref, 6);
+   if (type === 'quinzaine') return addD(ref, 13);
+   return ref;
+}
    const joursEntre = (a, b) => { const o = []; let d = a; let g = 0; while (d <= b && g++ < 400) { o.push(d); d = addD(d, 1); } return o; };
    const libellePeriode = p => PERIODES.types.filter(t => t.id === p.type)[0].label + ' · ' + fmtDC(p.debut) + ' → ' + fmtDC(p.fin);
    
