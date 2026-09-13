@@ -810,6 +810,20 @@ body{font-size:var(--t-corps);line-height:1.5}
 .entete{margin:var(--e5) 0 var(--e2)}
 .grid{gap:var(--e3)}
 
+/* Bascule de phase : icône au-dessus du libellé */
+.phase-nav{display:flex;gap:8px}
+.phase-nav button{flex:1;min-height:66px;border-radius:var(--r-btn);
+  background:rgba(255,255,255,.7);border:1.5px solid rgba(15,32,39,.10);
+  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;
+  font-size:13.5px;font-weight:600;color:var(--brume)}
+.phase-nav button .pi{display:none}
+.phase-nav button.on{background:var(--blanc);color:var(--encre);
+  border-color:var(--encre);box-shadow:var(--ombre)}
+.phase-nav button.on svg.ic{stroke-width:2}
+
+/* Duo Fait / Rupture : l'icône double le libellé */
+.duo .btn{display:flex;align-items:center;justify-content:center;gap:7px}
+
 /* --- 21. Impression : registre sanitaire -------------------------------- */
 #printview{display:none}
 @media print{

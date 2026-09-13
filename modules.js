@@ -480,8 +480,9 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
            fmtDC(m.jour) + '</div></div></div>', 'ambre')).join('') + '</div>' : '') +
    
        '<div class="phase-nav" style="margin-top:18px">' + PHASES.map(p =>
-         '<button type="button" data-ph="' + p.id + '" class="' + (STATE.phase === p.id ? 'on' : '') + '">' +
-         '<span class="pi">' + p.icone + '</span>' + esc(p.label) + '</button>').join('') + '</div>' +
+       '<button type="button" data-ph="' + p.id + '" class="' + (STATE.phase === p.id ? 'on' : '') + '">' +
+       ic(p.id === 'ouverture' ? 'matin' : p.id === 'fermeture' ? 'soir' : 'service', 20) +
+     '<span>' + esc(p.label) + '</span></button>').join('') + '</div>' +
    
        (phase === 'service'
          ? carte(entete('⚡', 'Service', 'Ce qui se déclare au fil de la journée.') +

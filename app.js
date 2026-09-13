@@ -624,6 +624,7 @@ const TRACES = {
   gauche:   'M15 5l-7 7 7 7',
   droite:   'M9 5l7 7-7 7',
   valide:   'M4 12l5 5L20 7',
+  service:  'M13 2L4 14h7l-1 8 9-12h-7z',
   matin:    'M12 6a6 6 0 100 12 6 6 0 000-12zM12 2v2M12 20v2M4 12H2M22 12h-2M5.6 5.6L4.2 4.2M19.8 19.8l-1.4-1.4M18.4 5.6l1.4-1.4M4.2 19.8l1.4-1.4',
   soir:     'M20 14a8.5 8.5 0 01-10.5-10.5A8.5 8.5 0 1020 14z'
 };
@@ -1418,7 +1419,7 @@ async function purgerPreuves() {
        REASSORT_CATS.map(c => {
          const items = REASSORT.filter(r => r.cat === c.id);
          const ok = items.filter(r => rec[r.id] && rec[r.id].ok).length;
-         return '<div class="entete"><h3>' + c.icone + ' ' + esc(c.id) + '</h3>' +
+         return '<div class="entete"><h3>' + esc(c.id) + '</h3>' +
            '<span class="pousse mini num">' + ok + '/' + items.length + '</span></div>' +
            '<div class="stack">' + items.map(r => {
              const v = rec[r.id] || {};
@@ -1427,7 +1428,8 @@ async function purgerPreuves() {
                '<div class="mini">' + (v.ok ? 'Vérifié par ' + esc(v.par) + ' · ' + heure(v.at)
                  : v.rupture ? 'Reste ' + v.reste + ' ' + r.unite + ' — signalé' : 'En ' + r.unite) + '</div></div></div>' +
                '<div class="duo" style="margin-top:12px">' +
-               '<button type="button" class="btn ok' + (v.ok ? ' on' : '') + '" data-ok="' + r.id + '">✅ Fait</button>' +
+               '<button type="button" class="btn ok' + (v.ok ? ' on' : '') + '" data-ok="' + r.id + '">' +
+       ic('valide', 18) + '<span>Fait</span></button>' +
                '<button type="button" class="btn ko' + (v.rupture ? ' on' : '') + '" data-ko="' + r.id + '">Rupture</button>' +
                '</div>', v.rupture ? 'corail' : v.ok ? 'menthe' : c.couleur);
            }).join('') + '</div>';
@@ -1501,7 +1503,7 @@ async function purgerPreuves() {
        carte(entete('💬', 'Laisser un mot', 'Ce que la prochaine équipe doit savoir en arrivant.') +
          '<div class="chips" id="rc">' + RELEVE.categories.map((c, i) =>
            '<button type="button" class="chip' + (i === 3 ? ' on' : '') + '" data-rc="' + c.id + '">' +
-           c.icone + ' ' + esc(c.label) + '</button>').join('') + '</div>' +
+           esc(c.label) + '</button>').join('') + '</div>' +
          '<div class="champ" style="margin-top:14px">' +
          '<textarea id="rt" placeholder="' + esc(RELEVE.exemples[0]) + '"></textarea></div>' +
          '<div class="btn-row" style="margin-top:14px">' +
@@ -1511,7 +1513,7 @@ async function purgerPreuves() {
        '<div class="entete"><h3>Derniers messages</h3></div>' +
        (visibles.length ? '<div class="stack">' + visibles.map(m => {
          const c = RELEVE.categories.filter(x => x.id === m.cat)[0] || RELEVE.categories[3];
-         return carte('<div class="rang"><span class="ci">' + c.icone + '</span>' +
+         return carte('<div class="rang">' +
            '<div style="flex:1;min-width:0"><b>' + esc(m.texte) + '</b>' +
            '<div class="mini">' + esc(m.par) + ' · ' + fmtDC(m.jour) + ' ' + heure(m.at) +
            (m.luPar && m.luPar.length ? ' · lu par ' + esc(m.luPar.join(', ')) : '') + '</div></div>' +
