@@ -704,6 +704,24 @@ input[type=password],input[type=search],input[type=time],select,textarea{
 .tache.liee.on .box{background:var(--menthe-d);border-style:solid;border-color:var(--menthe-d);color:#fff}
 .tache.liee .tm{font-style:italic}
 
+/* Navigation entre les jours : une flèche de chaque côté de la date */
+.navjour{display:flex;align-items:center;gap:10px;margin-bottom:12px}
+.navjour button{width:48px;height:48px;flex:0 0 auto;border-radius:12px;
+  background:var(--blanc);border:1px solid var(--line-fort);
+  font-size:24px;line-height:1;color:var(--ardoise)}
+.navjour button:active{background:var(--fond-2)}
+.nj-c{flex:1;min-width:0;text-align:center}
+.nj-c b{display:block;font-size:16px;font-weight:650;line-height:1.15}
+.nj-c span{display:block;font-size:12.5px;color:var(--brume)}
+
+/* Bandeau de consultation seule */
+.lecture{margin:0 0 12px;padding:10px 14px;border-radius:10px;
+  background:var(--fond-2);color:var(--ardoise);font-size:13.5px;line-height:1.35}
+
+/* Éléments neutralisés en consultation */
+.fige,button:disabled,input:disabled,select:disabled,textarea:disabled{
+  opacity:.5;pointer-events:none}
+
 /* Sélecteur de jours : sept pastilles, plusieurs choix possibles */
 .jours{display:flex;gap:6px}
 .jbtn{flex:1;min-width:0;height:44px;border-radius:10px;

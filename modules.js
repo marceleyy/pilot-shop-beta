@@ -1118,8 +1118,9 @@ V.hebdo = async function () {
   $('#page').innerHTML =
     navJour(j) +
     carte('<h2>' + nomJour(j) + ' ' + fmtD(j) + '</h2>' +
-      taches.length ? faits + ' sur ' + taches.length + ' tâches du jour'
-                    : 'Aucune tâche hebdomadaire prévue ce jour') +
+      '<div class="cs">' + (taches.length
+        ? faits + ' sur ' + taches.length + ' tâches du jour'
+        : 'Aucune tâche hebdomadaire prévue ce jour') + '</div>' +
       (taches.length
         ? '<div class="jauge"><i style="width:' + Math.round(faits / taches.length * 100) + '%"></i></div>'
         : ''), 'solide') +
@@ -1166,7 +1167,8 @@ V.hebdo = async function () {
         qui ? 'menthe' : 'sable');
     }).join('') + '</div>';
 
-  $('#jj').onchange = e => { STATE.jour = e.target.value; rendre('hebdo'); };
+  brancherNavJour('hebdo');
+  if (!peutModifier(j)) return;
 
   $$('[data-ph]').forEach(b => b.onclick = async () => {
     const p = await attacherPreuve(j, b.dataset.ph,
