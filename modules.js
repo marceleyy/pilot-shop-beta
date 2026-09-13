@@ -10,14 +10,15 @@
       A. NAVIGATION — nouvelles entrées
       ========================================================================== */
    PAGES.reception  = { titre:'Réception',   sous:'Livraison, DLC et stock fermé' };
-PAGES.stock      = { titre:'Stock fermé', sous:'Produits reçus non encore ouverts' };
+PAGES.stock      = { titre:'Stock réel', sous:'Inventaire, réceptions et ouvertures' };
+PAGES.inventaire = { titre:'Inventaire', sous:'Comptage physique du stock' };
 PAGES.parametres = { titre:'Back-office', sous:'Tâches, horaires et unités froides' };
 PAGES.hebdo      = { titre:'Tâches du jour', sous:'Plan hebdomadaire de la boutique' };
 PAGES.lots.titre = 'Traçabilité';
 PAGES.lots.sous  = 'Ouverture de tout nouveau produit';
    
-   if (MENU_PLUS.equipe.indexOf('reception') < 0)  MENU_PLUS.equipe.splice(2, 0, 'reception', 'stock');
-if (MENU_PLUS.manager.indexOf('reception') < 0) MENU_PLUS.manager.splice(2, 0, 'reception', 'stock');
+   if (MENU_PLUS.equipe.indexOf('reception') < 0)  MENU_PLUS.equipe.splice(2, 0, 'reception', 'stock', 'inventaire');
+if (MENU_PLUS.manager.indexOf('reception') < 0) MENU_PLUS.manager.splice(2, 0, 'reception', 'stock', 'inventaire');
 if (MENU_PLUS.manager.indexOf('parametres') < 0) MENU_PLUS.manager.push('parametres');
 /* Les tâches hebdomadaires méritent leur onglet : c'est le tableau que l'équipe
    consultait au mur, consulté plusieurs fois par jour. */
@@ -252,14 +253,24 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
          await DB.push('reception:' + today(), rec);
    
          if (!bl.refuse) {
-           const stock = await DB.get('stock:ferme', []);
-           valides.forEach(l => stock.push({
-             id:uid(), produit:l.produit.trim(), qte:num(l.qte) || 1, unite:l.unite,
-             lot:l.lot, dlc:l.dlc, recuLe:today(), bl:bl.numero, fournisseur:bl.fournisseur,
-             ouvert:false, par:STATE.user.prenom
-           }));
-           await DB.set('stock:ferme', stock);
-         }
+         const stock = await DB.get('stock:ferme', []);
+         valides.forEach(l => stock.push({
+         id:uid(), produit:l.produit.trim(), qte:num(l.qte) || 1, unite:l.unite,
+         lot:l.lot, dlc:l.dlc, recuLe:today(), bl:bl.numero, fournisseur:bl.fournisseur,
+         ouvert:false, par:STATE.user.prenom
+         }));
+         await DB.set('stock:ferme', stock);
+
+        /* Et surtout : la réception incrémente le stock réel, la valeur qui
+           sert ensuite au calcul d'écart. C'est le second des trois mouvements. */
+        for (const l of valides) {
+          const fam = devinerFamille(l.produit);
+          const cle = cleArticle(fam.id, fam.parfums ? l.produit.trim() : '',
+                                 fam.parfums ? (num(l.taille) || FOURNISSEUR.tailleParDefaut) : '');
+          await ajouterMouvement('reception', cle, num(l.qte) || 1,
+            { lot:l.lot, bl:bl.numero, famille:fam.id });
+        }
+      }
          await feed(bl.refuse ? 'bad' : 'ok',
            STATE.user.prenom + (bl.refuse ? ' a REFUSÉ la livraison ' : ' a réceptionné ') + bl.numero +
            ' (' + valides.length + ' réf.)');

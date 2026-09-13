@@ -700,15 +700,15 @@ const METEO = {
    trop longue à l'écran. On classe d'abord par famille, le parfum ne sert
    qu'aux glaces. */
 const FAMILLES_PRODUIT = [
-  { id:'glace',      libelle:'Glaces',              parfums:true,  dlc:'gelato' },
-  { id:'mac_classico', libelle:'Macarons Classico', parfums:false, dlc:'macaron_gelato' },
-  { id:'mac_grandioso',libelle:'Macarons Grandioso',parfums:false, dlc:'macaron_gelato' },
-  { id:'gianduiotto',libelle:'Gianduiotto',         parfums:false, dlc:'gianduiotto' },
-  { id:'crepe',      libelle:'Crêpes',              parfums:false, dlc:'crepe_negatif' },
-  { id:'gaufre',     libelle:'Gaufres',             parfums:false, dlc:'gaufre' },
-  { id:'chantilly',  libelle:'Chantilly',           parfums:false, dlc:'chantilly' },
-  { id:'coulis',     libelle:'Coulis',              parfums:false, dlc:'coulis' },
-  { id:'topping',    libelle:'Toppings',            parfums:false, dlc:'topping' }
+  { id:'glace',        libelle:'Glace',              parfums:true,  dlc:'gelato' },
+  { id:'mac_classico', libelle:'Macarons Classico',  parfums:false, dlc:'macaron_gelato' },
+  { id:'mac_grandioso',libelle:'Macarons Grandioso', parfums:false, dlc:'macaron_gelato' },
+  { id:'gianduiotto',  libelle:'Gianduiotto',        parfums:false, dlc:'gianduiotto' },
+  { id:'gaufre',       libelle:'Gaufre',             parfums:false, dlc:'gaufre' },
+  { id:'crepe',        libelle:'Crêpe',              parfums:false, dlc:'crepe_negatif' },
+  { id:'chantilly',    libelle:'Chantilly',          parfums:false, dlc:'chantilly' },
+  { id:'coulis',       libelle:'Coulis',             parfums:false, dlc:'coulis' },
+  { id:'topping',      libelle:'Topping',            parfums:false, dlc:'topping' }
 ];
 
 /* Anomalies constatées en boutique — nouveau module demandé par l'équipe */

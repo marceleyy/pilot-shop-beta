@@ -92,6 +92,7 @@
      ['checklist:',   'checklists'],
      ['preuves:',     'preuves'],
      ['stock:',       'stock'],
+     ['inventaire',   'inventaires_stock'],
      ['reception:',   'receptions'],
      ['anomalies',    'feedback'],
      ['horaires',     'reglages'],
