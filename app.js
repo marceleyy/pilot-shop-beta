@@ -1729,6 +1729,51 @@ window.addEventListener('popstate', function (ev) {
   }
 });
 
+/* -----------------------------------------------------------------------------
+   NAVIGATION ENTRE LES JOURS
+   Tout le monde peut consulter n'importe quel jour. La modification, elle, est
+   réservée au jour en cours pour l'équipe : un registre sanitaire ne se
+   réécrit pas après coup. Le manager, lui, peut corriger le passé — c'est sa
+   responsabilité et ça laisse une trace à son nom.
+   -------------------------------------------------------------------------- */
+function peutModifier(jour) {
+  if (jour === today()) return true;
+  return !!(STATE.user && STATE.user.role === 'manager');
+}
+
+/* Barre de navigation : jour précédent, date, jour suivant. */
+function navJour(jour) {
+  const hier = addD(jour, -1), demain = addD(jour, 1);
+  return '<div class="navjour">' +
+    '<button type="button" data-nj="' + hier + '" aria-label="Jour précédent">‹</button>' +
+    '<div class="nj-c"><b>' + nomJour(jour) + '</b><span>' + fmtD(jour) + '</span></div>' +
+    '<button type="button" data-nj="' + demain + '" aria-label="Jour suivant">›</button>' +
+    '</div>' +
+    (jour === today() ? '' :
+      '<button type="button" class="btn clair bloc sm" data-nj="' + today() + '" ' +
+      'style="margin:-4px 0 12px">Revenir à aujourd’hui</button>') +
+    (peutModifier(jour) ? '' :
+      '<div class="lecture">Consultation seule — seul le jour en cours est modifiable.</div>');
+}
+
+/* À appeler après avoir injecté navJour dans la page. */
+function brancherNavJour(vue) {
+  $$('[data-nj]').forEach(b => b.onclick = () => {
+    STATE.jour = b.dataset.nj;
+    if (V.temp && V.temp._d !== undefined) V.temp._d = STATE.jour;
+    rendre(vue);
+  });
+  /* En consultation, on neutralise tout ce qui modifie. */
+  if (!peutModifier(STATE.jour)) {
+    $$('#page button').forEach(b => {
+      if (b.dataset.nj !== undefined) return;
+      b.disabled = true;
+      b.classList.add('fige');
+    });
+    $$('#page input, #page select, #page textarea').forEach(i => { i.disabled = true; });
+  }
+}
+
 /* =============================================================================
    19. DÉMARRAGE
    ========================================================================== */

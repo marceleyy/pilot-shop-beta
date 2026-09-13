@@ -828,39 +828,62 @@ const UI = {
    perso : true = tâche à attribuer nommément, marquée ainsi sur le tableau.
    ========================================================================== */
 const TACHES_HEBDO_DEF = [
-  /* --- Lundi --- */
-  { id:'h101', jour:1, rang:1, libelle:'Nettoyer le mobilier en bois (portes, bas de la vitrine)' },
-  { id:'h102', jour:1, rang:2, libelle:'Nettoyer les placards bas et hauts en arrière-boutique' },
-  { id:'h103', jour:1, rang:3, libelle:'Nettoyer l’évier' },
-  { id:'h104', jour:1, rang:4, libelle:'Nettoyer la terrasse extérieure' },
+  /* --- Tableau affiché en boutique : « Tâches du nettoyage hebdomadaires » --- */
+  { id:'h101', jours:[1], rang:1, libelle:'Nettoyer le mobilier en bois (portes, bas de la vitrine)' },
+  { id:'h102', jours:[1], rang:2, libelle:'Nettoyer les placards bas et hauts en arrière-boutique' },
+  { id:'h103', jours:[1], rang:3, libelle:'Nettoyer l’évier' },
+  { id:'h104', jours:[1], rang:4, libelle:'Nettoyer la terrasse extérieure' },
 
-  /* --- Mardi --- */
-  { id:'h201', jour:2, rang:1, libelle:'Nettoyer les appareils à crêpes et gaufres', perso:true },
-  { id:'h202', jour:2, rang:2, libelle:'Nettoyer le stoppeur, les poteaux de file d’attente et l’affichage extérieur' },
-  { id:'h203', jour:2, rang:3, libelle:'Mettre en décongélation le frigo −20 °C (crêpes / gaufres)' },
+  { id:'h201', jours:[2], rang:1, libelle:'Nettoyer les appareils à crêpes et gaufres', perso:true },
+  { id:'h202', jours:[2], rang:2, libelle:'Nettoyer le stoppeur, les poteaux de file d’attente et l’affichage extérieur' },
+  { id:'h203', jours:[2], rang:3, libelle:'Mettre en décongélation le frigo −20 °C (crêpes / gaufres)' },
 
-  /* --- Mercredi --- */
-  { id:'h301', jour:3, rang:1, libelle:'Nettoyer les frigos positifs (lait, boissons, crème, frigo crêpe/gaufre)' },
-  { id:'h302', jour:3, rang:2, libelle:'Nettoyer les tables et chaises, à l’intérieur et à l’extérieur' },
-  { id:'h303', jour:3, rang:3, libelle:'Nettoyer les pieds des tables' },
-  { id:'h304', jour:3, rang:4, libelle:'Nettoyer la vitrine', perso:true },
+  { id:'h301', jours:[3], rang:1, libelle:'Nettoyer les frigos positifs (lait, boissons, crème, frigo crêpe/gaufre)' },
+  { id:'h302', jours:[3], rang:2, libelle:'Nettoyer les tables et chaises, à l’intérieur et à l’extérieur' },
+  { id:'h303', jours:[3], rang:3, libelle:'Nettoyer les pieds des tables' },
+  { id:'h304', jours:[3], rang:4, libelle:'Nettoyer la vitrine', perso:true },
 
-  /* --- Jeudi --- */
-  { id:'h401', jour:4, rang:1, libelle:'Nettoyer les distributeurs à cornets et à cuillères' },
-  { id:'h402', jour:4, rang:2, libelle:'Nettoyer les murs de la boutique' },
-  { id:'h403', jour:4, rang:3, libelle:'Nettoyer le sous-sol et organiser le stockage des produits' },
-  { id:'h404', jour:4, rang:4, libelle:'Nettoyer les toilettes et le vestiaire au sous-sol' },
+  { id:'h401', jours:[4], rang:1, libelle:'Nettoyer les distributeurs à cornets et à cuillères' },
+  { id:'h402', jours:[4], rang:2, libelle:'Nettoyer les murs de la boutique' },
+  { id:'h403', jours:[4], rang:3, libelle:'Nettoyer le sous-sol et organiser le stockage des produits' },
+  { id:'h404', jours:[4], rang:4, libelle:'Nettoyer les toilettes et le vestiaire au sous-sol' },
 
-  /* --- Vendredi --- */
-  { id:'h501', jour:5, rang:1, libelle:'Nettoyer les machines à chantilly, à café et à milkshake' },
-  { id:'h502', jour:5, rang:2, libelle:'Nettoyer le comptoir, le meuble de caisse et le présentoir' },
+  { id:'h501', jours:[5], rang:1, libelle:'Nettoyer les machines à chantilly, à café et à milkshake' },
+  { id:'h502', jours:[5], rang:2, libelle:'Nettoyer le comptoir, le meuble de caisse et le présentoir' },
 
-  /* --- Samedi --- */
-  { id:'h601', jour:6, rang:1, libelle:'Nettoyer les surfaces vitrées (baies, portes, fenêtres)' },
+  { id:'h601', jours:[6], rang:1, libelle:'Nettoyer les surfaces vitrées (baies, portes, fenêtres)' },
 
-  /* --- Dimanche --- */
-  { id:'h701', jour:7, rang:1, libelle:'Nettoyer les poubelles intérieures et extérieures' },
-  { id:'h702', jour:7, rang:2, libelle:'Nettoyer la poussière sur les étagères hautes et dans les coins' }
+  { id:'h701', jours:[7], rang:1, libelle:'Nettoyer les poubelles intérieures et extérieures' },
+  { id:'h702', jours:[7], rang:2, libelle:'Nettoyer la poussière sur les étagères hautes et dans les coins' },
+
+  /* --- Registre HACCP Amorino : postes non placés au tableau -------------
+     Le manager leur attribue des jours depuis le back-office. Ceux marqués
+     « procedure » sont déjà faits chaque jour par la procédure d'ouverture ou
+     de fermeture : ils restent au catalogue mais ne sont pas programmés, pour
+     ne pas demander deux fois la même chose à l'équipe. */
+  { id:'r01', jours:[], rang:1, libelle:'Nettoyer la machine à chantilly', procedure:'fermeture' },
+  { id:'r02', jours:[], rang:2, libelle:'Nettoyer la machine à frappé', procedure:'fermeture' },
+  { id:'r03', jours:[], rang:3, libelle:'Nettoyer la machine à café', procedure:'fermeture' },
+  { id:'r04', jours:[], rang:4, libelle:'Nettoyer l’évier de la boutique', procedure:'fermeture' },
+  { id:'r05', jours:[], rang:5, libelle:'Nettoyer les vitrines −13 °C', procedure:'ouverture' },
+  { id:'r06', jours:[], rang:6, libelle:'Nettoyer les ustensiles dans le bac en inox', procedure:'ouverture' },
+  { id:'r07', jours:[], rang:7, libelle:'Passer le balai et la serpillière', procedure:'ouverture' },
+  { id:'r08', jours:[], rang:8, libelle:'Nettoyer les poubelles de la boutique', procedure:'fermeture' },
+
+  { id:'r10', jours:[], rang:10, libelle:'Nettoyer la machine à chantilly — démontage complet' },
+  { id:'r11', jours:[], rang:11, libelle:'Nettoyer la crêpière' },
+  { id:'r12', jours:[], rang:12, libelle:'Nettoyer le bain-marie' },
+  { id:'r13', jours:[], rang:13, libelle:'Nettoyer la vitrine d’exposition' },
+  { id:'r14', jours:[], rang:14, libelle:'Nettoyer l’affichage intérieur' },
+  { id:'r15', jours:[], rang:15, libelle:'Nettoyer l’évier de l’arrière-boutique' },
+  { id:'r16', jours:[], rang:16, libelle:'Nettoyer les murs de l’arrière-boutique' },
+  { id:'r17', jours:[], rang:17, libelle:'Nettoyer les vestiaires' },
+  { id:'r18', jours:[], rang:18, libelle:'Nettoyer les étagères de la réserve' },
+  { id:'r19', jours:[], rang:19, libelle:'Nettoyer l’enseigne et le lambrequin' },
+  { id:'r20', jours:[], rang:20, libelle:'Nettoyer les poubelles extérieures' },
+  { id:'r21', jours:[], rang:21, libelle:'Nettoyer les armoires froides' },
+  { id:'r22', jours:[], rang:22, libelle:'Nettoyer le filtre de la climatisation' },
+  { id:'r23', jours:[], rang:23, libelle:'Nettoyer la chambre froide' }
 ];
 /* Le plan effectif est chargé depuis la base au démarrage : le manager peut
    déplacer une tâche d'un jour à l'autre sans toucher au code. */

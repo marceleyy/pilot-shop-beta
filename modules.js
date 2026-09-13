@@ -681,7 +681,7 @@ V.caisse = async function () {
     return (a && r[a] !== undefined) ? r[a] : '';
   };
 
-  $('#vue-actions').innerHTML = '<input type="date" id="jj" value="' + j + '" style="width:auto;min-height:42px">';
+  $('#vue-actions').innerHTML = '';
 
   const champ = (k, l, ph) =>
     '<div class="champ"><label class="f">' + l + '</label>' +
@@ -693,6 +693,7 @@ V.caisse = async function () {
     const valide = r[mom + '_valide'];
 
     $('#page').innerHTML =
+      navJour(j) +
       '<div class="tseg">' +
       [['m', 'Ouverture'], ['s', 'Fermeture']].map(x =>
         '<button class="' + (x[0] === mom ? 'on' : '') + '" data-mom="' + x[0] + '">' + x[1] +
@@ -832,7 +833,8 @@ V.caisse = async function () {
   }, 400);
 
   function brancher() {
-    $('#jj').onchange = ev => { STATE.jour = ev.target.value; V.caisse._m = null; rendre('caisse'); };
+    brancherNavJour('caisse');
+    if (!peutModifier(j)) return;
     $$('[data-mom]').forEach(b => b.onclick = () => {
       if (b.dataset.mom === mom) return;
       mom = b.dataset.mom; V.caisse._m = mom; dessiner();
@@ -1087,12 +1089,17 @@ async function planHebdo() {
   const perso = await DB.get('hebdo:plan', null);
   return TACHES_HEBDO.map(t => {
     const p = perso && perso[t.id];
-    return Object.assign({}, t, p || {});
+    const f = Object.assign({}, t, p || {});
+    /* Compatibilité avec l'ancien format à jour unique */
+    if (!Array.isArray(f.jours)) f.jours = (f.jour ? [+f.jour] : []);
+    return f;
   }).filter(t => !t.retiree);
 }
 async function tachesHebdoDuJour(jour) {
   const j = jourISO(jour);
-  return (await planHebdo()).filter(t => +t.jour === j)
+  return (await planHebdo())
+    /* Déjà faite chaque jour par la procédure : on ne la redemande pas ici. */
+    .filter(t => !t.procedure && t.jours.indexOf(j) >= 0)
     .sort((a, b) => (a.rang || 0) - (b.rang || 0));
 }
 
@@ -1104,12 +1111,13 @@ V.hebdo = async function () {
   const resp = await DB.get('hebdo:responsables', {});
   const faits = taches.filter(t => rec[t.id] && rec[t.id].ok).length;
 
-  $('#vue-actions').innerHTML = '<input type="date" id="jj" value="' + j + '" style="width:auto;min-height:42px">';
+  $('#vue-actions').innerHTML = '';
 
   const photosDe = id => preuves.filter(p => p.tache === id);
 
   $('#page').innerHTML =
-    carte(entete('🗓️', nomJour(j) + ' ' + fmtD(j),
+    navJour(j) +
+    carte('<h2>' + nomJour(j) + ' ' + fmtD(j) + '</h2>' +
       taches.length ? faits + ' sur ' + taches.length + ' tâches du jour'
                     : 'Aucune tâche hebdomadaire prévue ce jour') +
       (taches.length
@@ -1230,7 +1238,7 @@ V.temp = async function () {
   };
   const valideMoment = () => rec.valide[mom.id];
 
-  $('#vue-actions').innerHTML = '<input type="date" id="jj" value="' + j + '" style="width:auto;min-height:42px">';
+  $('#vue-actions').innerHTML = '';
 
   const manquants = () => ENCEINTES.filter(e => !saisi(e));
 
@@ -1258,6 +1266,7 @@ V.temp = async function () {
     const vm = valideMoment();
 
     $('#page').innerHTML =
+      navJour(j) +
       /* Sélecteur matin / soir, avec l'état de chacun */
       '<div class="tseg">' + moments.map(m => {
         const v = rec.valide[m.id];
@@ -1299,7 +1308,8 @@ V.temp = async function () {
   const invalider = () => { if (rec.valide[mom.id]) delete rec.valide[mom.id]; };
 
   function brancher() {
-    $('#jj').onchange = ev => { V.temp._d = ev.target.value; rendre('temp'); };
+    brancherNavJour('temp');
+    if (!peutModifier(j)) return;
     $$('[data-mom]').forEach(b => b.onclick = () => {
       if (b.dataset.mom === mom.id) return;
       V.temp._m = b.dataset.mom;
@@ -1498,38 +1508,52 @@ V.parametres = async function () {
    /* Organisation de la semaine : le manager déplace les tâches d'un jour à
    l'autre et désigne qui s'en charge. L'équipe ne voit que le résultat. */
 async function organiserSemaine() {
-  const perso = await DB.get('hebdo:plan', {}) || {};
   const plan = await planHebdo();
+  const JOURS_COURTS = ['', 'L', 'M', 'M', 'J', 'V', 'S', 'D'];
 
   const rendreEditeur = () => {
-    const parJour = {};
-    for (let j = 1; j <= 7; j++) parJour[j] = [];
-    plan.forEach(t => { const j = +t.jour; if (parJour[j]) parJour[j].push(t); });
-    Object.keys(parJour).forEach(j => parJour[j].sort((a, b) => (a.rang || 0) - (b.rang || 0)));
+    const programmees = plan.filter(t => !t.procedure && t.jours.length);
+    const libres      = plan.filter(t => !t.procedure && !t.jours.length);
+    const enProcedure = plan.filter(t => t.procedure);
+
+    const ligne = t =>
+      '<div class="card plat" style="margin-bottom:10px">' +
+      '<b style="font-size:14px;line-height:1.3;display:block">' + esc(t.libelle) + '</b>' +
+      '<div class="jours" style="margin-top:10px">' +
+      [1,2,3,4,5,6,7].map(k =>
+        '<button type="button" class="jbtn' + (t.jours.indexOf(k) >= 0 ? ' on' : '') +
+        '" data-j="' + t.id + '.' + k + '">' + JOURS_COURTS[k] + '</button>').join('') + '</div>' +
+      '<div class="champ" style="margin-top:10px"><label class="f">Attribuée à</label>' +
+      '<select data-a="' + t.id + '"><option value="">— toute l’équipe —</option>' +
+      EQUIPE.map(e => '<option value="' + e.id + '"' +
+        (t.assignee === e.id ? ' selected' : '') + '>' + esc(e.prenom) + '</option>').join('') +
+      '</select></div></div>';
 
     $('#sheet-corps').innerHTML =
       '<h2 id="sheet-titre">Organiser la semaine</h2>' +
-      '<p class="sub">' + plan.length + ' tâches réparties sur sept jours</p>' +
-      '<div style="max-height:56vh;overflow:auto">' +
-      [1,2,3,4,5,6,7].map(j =>
-        '<div class="entete"><h3>' + JOURS_SEMAINE[j] + '</h3>' +
-        '<span class="pousse mini num">' + parJour[j].length + '</span></div>' +
-        (parJour[j].length
-          ? parJour[j].map(t =>
-              '<div class="card plat" style="margin-bottom:8px">' +
-              '<b style="font-size:14px;line-height:1.3;display:block">' + esc(t.libelle) + '</b>' +
-              '<div class="grid g2" style="margin-top:10px;gap:8px">' +
-              '<div class="champ"><label class="f">Jour</label>' +
-              '<select data-j="' + t.id + '">' + [1,2,3,4,5,6,7].map(k =>
-                '<option value="' + k + '"' + (+t.jour === k ? ' selected' : '') + '>' +
-                JOURS_SEMAINE[k] + '</option>').join('') + '</select></div>' +
-              '<div class="champ"><label class="f">Attribuée à</label>' +
-              '<select data-a="' + t.id + '"><option value="">— toute l’équipe —</option>' +
-              EQUIPE.map(e => '<option value="' + e.id + '"' +
-                (t.assignee === e.id ? ' selected' : '') + '>' + esc(e.prenom) + '</option>').join('') +
-              '</select></div></div></div>').join('')
-          : '<p class="mini" style="margin-bottom:10px">Aucune tâche ce jour</p>')
-      ).join('') + '</div>' +
+      '<p class="sub">Cochez les jours où chaque tâche doit être faite.</p>' +
+
+      '<div style="max-height:58vh;overflow:auto">' +
+
+      '<div class="entete"><h3>Programmées</h3>' +
+      '<span class="pousse mini num">' + programmees.length + '</span></div>' +
+      (programmees.length ? programmees.map(ligne).join('') : '<p class="mini">Aucune</p>') +
+
+      '<div class="entete"><h3>Non programmées</h3>' +
+      '<span class="pousse mini num">' + libres.length + '</span></div>' +
+      (libres.length ? libres.map(ligne).join('') : '<p class="mini">Aucune</p>') +
+
+      (enProcedure.length
+        ? '<div class="entete"><h3>Déjà faites chaque jour</h3></div>' +
+          '<p class="mini" style="margin-bottom:10px">Ces postes figurent dans la procédure ' +
+          'd’ouverture ou de fermeture. Les programmer ici les ferait demander deux fois.</p>' +
+          enProcedure.map(t =>
+            '<div class="tache"><span class="tx"><span class="tn">' + esc(t.libelle) + '</span>' +
+            '<span class="tm">Procédure ' + (t.procedure === 'ouverture' ? 'd’ouverture' : 'de fermeture') +
+            '</span></span></div>').join('')
+        : '') +
+
+      '</div>' +
       '<div class="actions"><button class="btn clair" id="os-x">Annuler</button>' +
       '<button class="btn menthe" id="os-ok">Enregistrer</button></div>' +
       '<button class="btn fantome bloc" id="os-raz" style="margin-top:8px">' +
@@ -1537,11 +1561,14 @@ async function organiserSemaine() {
 
     $('#os-x').onclick = closeSheet;
 
-    /* Changer le jour redessine immédiatement, pour voir la répartition. */
-    $$('[data-j]').forEach(s => s.onchange = () => {
-      const t = plan.filter(x => x.id === s.dataset.j)[0];
-      if (t) t.jour = +s.value;
-      rendreEditeur();
+    $$('[data-j]').forEach(b => b.onclick = () => {
+      const [id, k] = b.dataset.j.split('.');
+      const t = plan.filter(x => x.id === id)[0];
+      if (!t) return;
+      const n = +k, i = t.jours.indexOf(n);
+      if (i >= 0) t.jours.splice(i, 1); else t.jours.push(n);
+      t.jours.sort();
+      b.classList.toggle('on', i < 0);
     });
     $$('[data-a]').forEach(s => s.onchange = () => {
       const t = plan.filter(x => x.id === s.dataset.a)[0];
@@ -1550,7 +1577,7 @@ async function organiserSemaine() {
 
     $('#os-ok').onclick = async () => {
       const out = {};
-      plan.forEach(t => { out[t.id] = { jour:+t.jour, assignee:t.assignee || null }; });
+      plan.forEach(t => { out[t.id] = { jours:t.jours, assignee:t.assignee || null }; });
       await DB.set('hebdo:plan', out);
       TACHES_HEBDO.forEach(t => { if (out[t.id]) Object.assign(t, out[t.id]); });
       await feed('ok', STATE.user.prenom + ' a réorganisé les tâches de la semaine');
@@ -1613,10 +1640,10 @@ V.clean = async function () {
   const photosDe = id => preuves.filter(p => p.tache === id);
   const faits = taches.filter(t => rec[t.id] && rec[t.id].ok).length;
 
-  $('#vue-actions').innerHTML =
-    '<input type="date" id="jj" value="' + j + '" style="width:auto;min-height:42px">';
+  $('#vue-actions').innerHTML = '';
 
   $('#page').innerHTML =
+    navJour(j) +
     carte('<h2>' + nomJour(j) + ' ' + fmtD(j) + '</h2>' +
       '<div class="cs">' + (taches.length
         ? faits + ' sur ' + taches.length + ' tâches faites'
@@ -1651,7 +1678,8 @@ V.clean = async function () {
         }).join('') + '</div>'
       : vide('', 'Rien de prévu au tableau ce jour.'));
 
-  $('#jj').onchange = ev => { STATE.jour = ev.target.value; rendre('clean'); };
+  brancherNavJour('clean');
+  if (!peutModifier(j)) return;
 
   $$('[data-hbp]').forEach(b => b.onclick = async () => {
     const t = taches.filter(x => x.id === b.dataset.hbp)[0];
