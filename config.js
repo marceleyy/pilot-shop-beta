@@ -644,6 +644,9 @@ const SEUILS = {
   ecartGlaceAlertePct: 6,
   caisseJourEur:       10,
   caisseCumulEur:      50,
+  /* Écart entre le fond compté le matin et celui laissé la veille. En deçà,
+     c'est une monnaie mal rendue ; à partir de là, ça se signale. */
+  ecartFondEur:        5,
   joursSansNettoyage:  2,
   tempCritiquesTolerees: 0,
   stockBasUnites:      2

@@ -711,13 +711,15 @@ V.caisse = async function () {
         '<input type="number" inputmode="decimal" step="0.01" data-k="' + p + 'fond" value="' +
         lire(p + 'fond') + '" placeholder="' + (mom === 'm' ? 'compté à l’ouverture' : 'laissé pour demain') + '"></div>' +
 
-        '<div class="grid g2" style="margin-top:14px">' +
-        champ(p + 'cb',  'Recettes CB sur la caisse', 'ticket Z') +
-        champ(p + 'tpe', 'Recettes sur le TPE', 'totalisateur') + '</div>' +
-
-        '<div style="margin-top:14px">' +
-        champ(p + 'retrait', 'Retrait d’espèces', mom === 'm' ? 'généralement 0' : 'déposé le soir') +
-        '</div>') +
+        /* Le matin, rien d'autre : la personne compte le tiroir, c'est tout.
+           Les recettes n'existent pas encore. */
+        (mom === 's'
+          ? '<div class="grid g2" style="margin-top:14px">' +
+            champ('s_cb',  'Recettes CB sur la caisse', 'ticket Z') +
+            champ('s_tpe', 'Recettes sur le TPE', 'totalisateur') + '</div>' +
+            '<div style="margin-top:14px">' +
+            champ('s_retrait', 'Retrait d’espèces', 'déposé le soir') + '</div>'
+          : '')) +
 
       '<div id="cverdict"></div>' +
 
@@ -743,12 +745,23 @@ V.caisse = async function () {
       const compte = r.m_fond;
       if (fondVeille === null || compte === undefined || compte === '') { box.innerHTML = ''; return; }
       const d = +(num(compte) - fondVeille).toFixed(2);
-      box.innerHTML = Math.abs(d) < 0.01
-        ? '<p class="verdict ok">Fond conforme à hier soir.</p>'
-        : '<div class="verdict bad"><b>Écart de ' + eur(d) + ' avec hier soir</b>' +
-          '<span>' + eur(fondVeille) + ' laissés, ' + eur(num(compte)) + ' comptés ce matin. ' +
+      const seuil = (typeof SEUILS !== 'undefined' && SEUILS.ecartFondEur) ? SEUILS.ecartFondEur : 5;
+      /* En deçà du seuil, on le dit sans dramatiser. À partir du seuil, en rouge
+         et avec la possibilité de prévenir le manager. */
+      const grave = Math.abs(d) >= seuil;
+
+      if (Math.abs(d) < 0.01) {
+        box.innerHTML = '<p class="verdict ok">Fond conforme au fond de caisse final d’hier soir.</p>';
+      } else if (!grave) {
+        box.innerHTML = '<p class="verdict n">Écart de ' + eur(d) + ' avec hier soir, sous le seuil de ' +
+          eur(seuil) + '.</p>';
+      } else {
+        box.innerHTML =
+          '<div class="verdict bad"><b>Écart de ' + eur(d) + ' avec hier soir</b>' +
+          '<span>' + eur(fondVeille) + ' laissés hier, ' + eur(num(compte)) + ' comptés ce matin. ' +
           'L’écart date de la veille, pas de votre comptage.</span>' +
           '<button class="btn corail sm" id="signaler-ecart">Signaler au manager</button></div>';
+      }
       const sg = $('#signaler-ecart');
       if (sg) sg.onclick = async () => {
         await feed('bad', STATE.user.prenom + ' signale un écart de fond de caisse : ' +
@@ -805,9 +818,11 @@ V.caisse = async function () {
     });
     $('#cv').onclick = async () => {
       const p = mom + '_';
-      const requis = [p + 'fond', p + 'cb', p + 'tpe'];
+      const requis = (mom === 'm') ? ['m_fond'] : ['s_fond', 's_cb', 's_tpe'];
       const vides = requis.filter(k => r[k] === undefined || r[k] === '');
-      if (vides.length) return toast('Renseignez le fond et les deux recettes', 'erreur');
+      if (vides.length) return toast(mom === 'm'
+        ? 'Renseignez le fond de caisse initial'
+        : 'Renseignez le fond et les deux recettes', 'erreur');
       r[mom + '_valide'] = { par:STATE.user.prenom, id:STATE.user.id, at:nowISO() };
       $$('[data-k]').forEach(i => { r[i.dataset.k] = i.value; });
       await DB.set('caisse:' + j, r);
