@@ -1632,7 +1632,9 @@ function ecranRemiseAZero(auto) {
 
   $('#rz-x').onclick = function () {
     closeSheet();
-    if (auto) location.replace(location.pathname);
+    /* L'adresse est déjà propre : on reprend simplement la connexion normale,
+       sans rechargement, donc sans risque de rouvrir cet écran. */
+    if (auto) demarrerConnexion();
   };
   $('#rz-ok').onclick = async function () {
     $('#sheet-corps').innerHTML =
@@ -1646,6 +1648,18 @@ function ecranRemiseAZero(auto) {
       '<b>Redémarrage…</b><p>L’application va se recharger sur sa dernière version.</p></div></div>';
     setTimeout(function () { location.replace(location.pathname); }, 1500);
   };
+}
+
+/* Reprend le parcours de connexion normal après un passage par …/?reset */
+async function demarrerConnexion() {
+  try {
+    const s = await DB.get('session', null);
+    if (s && s.id && EQUIPE.filter(e => e.id === s.id)[0]) {
+      STATE.user = s;
+      await chargerService();
+      demarrer();
+    }
+  } catch (e) { /* on reste sur l'écran des prénoms */ }
 }
 
 /* =============================================================================
@@ -1700,8 +1714,11 @@ function ecranRemiseAZero(auto) {
      enregistrerSW();
 
      /* L'adresse …/?reset ouvre directement la remise à zéro, sans code PIN :
-        c'est le seul moyen depuis une tablette où la console est inaccessible. */
+        c'est le seul moyen depuis une tablette où la console est inaccessible.
+        On nettoie l'adresse immédiatement : sans ça, un retour arrière, un
+        rechargement ou un raccourci enregistré rouvrait l'écran sans fin. */
      if (/[?&]reset\b/.test(location.search)) {
+       try { history.replaceState(null, '', location.pathname); } catch (e) {}
        setTimeout(function () { ecranRemiseAZero(true); }, 250);
        return;
      }
