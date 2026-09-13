@@ -1046,6 +1046,19 @@ body::before{display:none!important}
 .avanc span{flex:0 0 auto;font-size:13px;font-weight:600;color:var(--brume)}
 .avanc .jauge{flex:1;min-width:0}
 
+/* Fiches techniques : les étapes empruntent la classe .tache, mais sans le
+   bouton à cocher. La pastille du numéro héritait alors du dimensionnement
+   souple et s'étalait sur 486 px, réduisant le texte à zéro — la fiche
+   s'ouvrait sur un grand bloc blanc. */
+#sheet-corps .tache{align-items:flex-start;min-height:0;padding:10px 2px}
+#sheet-corps .tache .box{flex:0 0 auto;width:30px;height:30px;min-height:30px;
+  border-radius:9px;font-size:14px;font-weight:700;
+  display:flex;align-items:center;justify-content:center;
+  background:var(--fond-2);border:0;color:var(--ardoise)}
+#sheet-corps .tache .tx{flex:1 1 auto;min-width:0;display:block}
+#sheet-corps .tache .tn{display:block;font-size:15px;line-height:1.4;font-weight:400;
+  white-space:normal;overflow-wrap:anywhere}
+
 /* --- 21. Impression : registre sanitaire -------------------------------- */
 #printview{display:none}
 @media print{

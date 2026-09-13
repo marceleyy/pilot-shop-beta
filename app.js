@@ -1357,7 +1357,7 @@ async function purgerPreuves() {
      $('#page').innerHTML = cats.map(c =>
        '<div class="entete"><h3>' + esc(c) + '</h3></div><div class="stack">' +
        FICHES.filter(f => f.cat === c).map(f =>
-         carte('<div class="rang"><span class="ci">' + f.icone + '</span>' +
+         carte('<div class="rang">' +
            '<div style="flex:1;min-width:0"><b>' + esc(f.titre) + '</b>' +
            '<div class="mini">' + esc(f.resume) + '</div></div>' +
            pastille('n', f.duree) + '</div>', 'tap').replace('<div class="card', '<div data-f="' + f.id + '" class="card')
@@ -1366,7 +1366,7 @@ async function purgerPreuves() {
      $$('[data-f]').forEach(b => b.onclick = () => {
        const f = FICHES.filter(x => x.id === b.dataset.f)[0];
        showSheet(
-         '<h2 id="sheet-titre">' + f.icone + ' ' + esc(f.titre) + '</h2>' +
+         '<h2 id="sheet-titre">' + esc(f.titre) + '</h2>' +
          '<p class="sub">' + esc(f.resume) + '</p>' +
          '<div class="stack">' + f.etapes.map((s, i) =>
            '<div class="tache"><span class="box" style="border:0;background:var(--ciel-l);color:var(--ciel-d)">' +
