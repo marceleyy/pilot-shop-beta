@@ -180,18 +180,15 @@ const DLC_MATCH = [
    vert = plage cible. crit = au-delà, dépassement de limite critique.
    pas = incrément des boutons tactiles (pas de clavier en plein rush).
    -------------------------------------------------------------------------- */
-/* Modifiable depuis Réglages → Back-office. ENCEINTES_DEF sert de valeur d'usine. */
+/* Modifiable depuis Réglages → Back-office. ENCEINTES_DEF sert de valeur d'usine.
+   Configuration réelle de la boutique Paccard : six unités, pas dix. */
 const ENCEINTES_DEF = [
-  { id: 'cf',  nom: 'Chambre froide',                    cible: '−20 °C',    lo: -24, hi: -14, pas: 1, vert: [-20, -17], crit: -15, zone: 'reserve' },
-  { id: 'ar1', nom: 'Armoire froide 1',                  cible: '−20 °C',    lo: -24, hi: -14, pas: 1, vert: [-20, -17], crit: -15, zone: 'reserve' },
-  { id: 'ar2', nom: 'Armoire froide 2',                  cible: '−20 °C',    lo: -24, hi: -14, pas: 1, vert: [-20, -17], crit: -15, zone: 'reserve' },
-  { id: 'ar3', nom: 'Armoire froide 3',                  cible: '−20 °C',    lo: -24, hi: -14, pas: 1, vert: [-20, -17], crit: -15, zone: 'reserve' },
-  { id: 'vg',  nom: 'Vitrine gelato',                    cible: '−13 °C',    lo: -18, hi: -8,  pas: 1, vert: [-16, -11], crit: -10, zone: 'boutique' },
-  { id: 'vs',  nom: 'Vitrine sorbet',                    cible: '−13 °C',    lo: -18, hi: -8,  pas: 1, vert: [-16, -11], crit: -10, zone: 'boutique' },
-  { id: 'fn',  nom: 'Congélateur −13 °C',                cible: '−13 °C',    lo: -18, hi: -8,  pas: 1, vert: [-16, -11], crit: -10, zone: 'boutique' },
-  { id: 'pc',  nom: 'Petit congélateur crêpes/gaufres',  cible: 'Congèle petit, négatif', lo: -20, hi: -6, pas: 1, vert: [-16, -11], crit: -10, zone: 'boutique' },
-  { id: 'fp1', nom: 'Frigo positif',                     cible: '0 / +3 °C', lo: -2,  hi: 8,   pas: 1, vert: [0, 3],     crit: 5,   zone: 'boutique' },
-  { id: 'ch',  nom: 'Machine à chantilly',               cible: '0 / +4 °C', lo: -2,  hi: 8,   pas: 1, vert: [0, 4],     crit: 6,   zone: 'boutique' }
+  { id: 'cf',  nom: 'Chambre froide',              cible: '−18 °C', lo: -24, hi: -12, pas: 1, vert: [-20, -17], crit: -15, zone: 'reserve' },
+  { id: 'ar1', nom: 'Armoire froide',              cible: '−13 °C', lo: -18, hi: -8,  pas: 1, vert: [-15, -11], crit: -10, zone: 'reserve' },
+  { id: 'vg',  nom: 'Vitrine',                     cible: '−13 °C', lo: -18, hi: -8,  pas: 1, vert: [-15, -11], crit: -10, zone: 'boutique' },
+  { id: 'pc',  nom: 'Congélateur crêpes / gaufres', cible: '−18 °C', lo: -24, hi: -12, pas: 1, vert: [-20, -17], crit: -15, zone: 'boutique' },
+  { id: 'fp1', nom: 'Frigo positif',               cible: '+3 °C',  lo: -2,  hi: 8,   pas: 1, vert: [0, 3],     crit: 5,   zone: 'boutique' },
+  { id: 'ch',  nom: 'Machine à chantilly',         cible: '+4 °C',  lo: -2,  hi: 8,   pas: 1, vert: [0, 4],     crit: 6,   zone: 'boutique' }
 ];
 let ENCEINTES = ENCEINTES_DEF.map(e => Object.assign({}, e));
 

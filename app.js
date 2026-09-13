@@ -947,15 +947,17 @@
      if (s.every(x => x === 'vert')) return pastille('ok', 'Conforme');
      return pastille('n', 'À relever');
    }
+   /* Limite critique franchie : message court et une seule consigne.
+      L'ancienne version déroulait la procédure en cinq étapes, qui s'affichait
+      mal et que personne ne lit quand un frigo lâche en plein service. */
    function alerteCritique(e, v) {
-     const f = FICHES.filter(x => x.id === 'f05')[0];
      showSheet(
        '<h2 id="sheet-titre">🚨 ' + esc(e.nom) + ' à ' + v + ' °C</h2>' +
-       '<p class="sub">Limite critique dépassée. Voici la marche à suivre.</p>' +
-       '<div class="stack">' + f.etapes.map((s, i) =>
-         '<div class="tache"><span class="box" style="border:0;background:var(--corail-l);color:var(--corail-d)">' +
-         (i + 1) + '</span><span class="tx"><span class="tn">' + esc(s) + '</span></span></div>').join('') + '</div>' +
-       '<div class="actions"><button class="btn corail" data-fermer>J’ai compris</button></div>'
+       '<p class="sub">Limite critique dépassée — cible ' + esc(e.cible) + '.</p>' +
+       '<div class="alerte bad" style="margin-top:14px"><span class="ai">☎️</span>' +
+       '<div><b>Appelez Eve</b><p>En attendant, transférez les produits dans une ' +
+       'enceinte conforme et notez l’action corrective en bas de l’écran.</p></div></div>' +
+       '<div class="actions"><button class="btn corail bloc" data-fermer>J’ai compris</button></div>'
      );
    }
    
