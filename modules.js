@@ -706,20 +706,25 @@ V.caisse = async function () {
         : '') +
 
       carte(
-        '<div class="champ">' +
-        '<label class="f">Fond de caisse ' + (mom === 'm' ? 'initial' : 'final') + '</label>' +
-        '<input type="number" inputmode="decimal" step="0.01" data-k="' + p + 'fond" value="' +
-        lire(p + 'fond') + '" placeholder="' + (mom === 'm' ? 'compté à l’ouverture' : 'laissé pour demain') + '"></div>' +
+        (mom === 'm'
+          ? '<div class="champ">' +
+            '<label class="f">Fond de caisse initial</label>' +
+            '<input type="number" inputmode="decimal" step="0.01" data-k="m_fond" value="' +
+            lire('m_fond') + '" placeholder="compté à l’ouverture"></div>'
 
-        /* Le matin, rien d'autre : la personne compte le tiroir, c'est tout.
-           Les recettes n'existent pas encore. */
-        (mom === 's'
-          ? '<div class="grid g2" style="margin-top:14px">' +
-            champ('s_cb',  'Recettes CB sur la caisse', 'ticket Z') +
-            champ('s_tpe', 'Recettes sur le TPE', 'totalisateur') + '</div>' +
-            '<div style="margin-top:14px">' +
-            champ('s_retrait', 'Retrait d’espèces', 'déposé le soir') + '</div>'
-          : '')) +
+          /* Le soir, l'ordre suit le geste : les recettes, puis ce qu'on
+             retire, puis ce qu'on laisse dans le tiroir. */
+          : '<div class="grid g2">' +
+            champ('s_cb',  'Recettes CB sur la caisse') +
+            champ('s_esp', 'Recettes espèces sur la caisse') + '</div>' +
+            '<div style="margin-top:14px">' + champ('s_tpe', 'Recettes sur le TPE') + '</div>' +
+            '<div style="margin-top:14px">' + champ('s_retrait', 'Retrait d’espèces') + '</div>' +
+            '<p class="aide">Retirez uniquement des billets, pour un montant rond : ' +
+            '50, 55, 60 €… La monnaie reste dans le tiroir pour le lendemain.</p>' +
+            '<div style="margin-top:14px"><div class="champ">' +
+            '<label class="f">Fond de caisse final</label>' +
+            '<input type="number" inputmode="decimal" step="0.01" data-k="s_fond" value="' +
+            lire('s_fond') + '" placeholder="laissé pour demain"></div></div>')) +
 
       '<div id="cverdict"></div>' +
 
@@ -753,8 +758,7 @@ V.caisse = async function () {
       if (Math.abs(d) < 0.01) {
         box.innerHTML = '<p class="verdict ok">Fond conforme au fond de caisse final d’hier soir.</p>';
       } else if (!grave) {
-        box.innerHTML = '<p class="verdict n">Écart de ' + eur(d) + ' avec hier soir, sous le seuil de ' +
-          eur(seuil) + '.</p>';
+        box.innerHTML = '<p class="verdict n">Écart de ' + eur(d) + ' avec hier soir.</p>';
       } else {
         box.innerHTML =
           '<div class="verdict bad"><b>Écart de ' + eur(d) + ' avec hier soir</b>' +
@@ -784,19 +788,42 @@ V.caisse = async function () {
       return;
     }
 
-    /* Soir : le contrôle est la comparaison des deux recettes carte.
-       Ce que la caisse a enregistré en CB doit égaler ce que le TPE a encaissé. */
-    const cb = r.s_cb, tpe = r.s_tpe;
-    if (cb === undefined || cb === '' || tpe === undefined || tpe === '') {
-      box.innerHTML = '<p class="verdict n">Renseignez les deux recettes pour le contrôle.</p>';
+    /* Soir : deux contrôles indépendants.
+       Carte   — ce que la caisse a enregistré doit égaler ce que le TPE a encaissé.
+       Espèces — fond initial + recettes espèces − retrait doit donner le fond final. */
+    const cb = r.s_cb, tpe = r.s_tpe, esp = r.s_esp, fond = r.s_fond, ret = r.s_retrait;
+    const lignes = [];
+
+    if (cb !== '' && cb !== undefined && tpe !== '' && tpe !== undefined) {
+      const dC = +(num(tpe) - num(cb)).toFixed(2);
+      lignes.push(Math.abs(dC) < 0.01
+        ? { ok:true,  t:'Carte : caisse et TPE au même montant.' }
+        : { ok:false, t:'Carte : ' + eur(dC) + ' d’écart. ' + eur(num(cb)) +
+                        ' sur la caisse, ' + eur(num(tpe)) + ' sur le TPE.' });
+    }
+
+    const fondOuv = (r.m_fond !== undefined && r.m_fond !== '') ? num(r.m_fond)
+                  : (fondVeille !== null ? fondVeille : null);
+    if (fondOuv !== null && esp !== '' && esp !== undefined &&
+        fond !== '' && fond !== undefined && ret !== '' && ret !== undefined) {
+      const attendu = +(fondOuv + num(esp) - num(ret)).toFixed(2);
+      const dE = +(num(fond) - attendu).toFixed(2);
+      lignes.push(Math.abs(dE) < 0.01
+        ? { ok:true,  t:'Espèces : le tiroir tombe juste.' }
+        : { ok:false, t:'Espèces : ' + eur(dE) + ' d’écart. ' + eur(fondOuv) + ' au départ + ' +
+                        eur(num(esp)) + ' encaissés − ' + eur(num(ret)) + ' retirés = ' +
+                        eur(attendu) + ' attendus, ' + eur(num(fond)) + ' laissés.' });
+    }
+
+    if (!lignes.length) {
+      box.innerHTML = '<p class="verdict n">Renseignez les recettes pour le contrôle.</p>';
       return;
     }
-    const d = +(num(tpe) - num(cb)).toFixed(2);
-    box.innerHTML = Math.abs(d) < 0.01
-      ? '<p class="verdict ok">Recettes carte conformes : caisse et TPE au même montant.</p>'
-      : '<div class="verdict bad"><b>Écart carte de ' + eur(d) + '</b><span>' +
-        eur(num(cb)) + ' enregistrés sur la caisse, ' + eur(num(tpe)) + ' encaissés sur le TPE. ' +
-        'Expliquez-le dans le commentaire.</span></div>';
+    const soucis = lignes.filter(l => !l.ok);
+    box.innerHTML = soucis.length
+      ? '<div class="verdict bad"><b>' + soucis.length + ' écart(s)</b><span>' +
+        soucis.map(l => esc(l.t)).join('<br>') + '<br>Expliquez-le dans le commentaire.</span></div>'
+      : '<p class="verdict ok">' + lignes.map(l => esc(l.t)).join(' ') + '</p>';
   }
 
   const sauver = debounce(async () => {
@@ -818,11 +845,11 @@ V.caisse = async function () {
     });
     $('#cv').onclick = async () => {
       const p = mom + '_';
-      const requis = (mom === 'm') ? ['m_fond'] : ['s_fond', 's_cb', 's_tpe'];
+      const requis = (mom === 'm') ? ['m_fond'] : ['s_cb', 's_esp', 's_tpe', 's_retrait', 's_fond'];
       const vides = requis.filter(k => r[k] === undefined || r[k] === '');
       if (vides.length) return toast(mom === 'm'
         ? 'Renseignez le fond de caisse initial'
-        : 'Renseignez le fond et les deux recettes', 'erreur');
+        : 'Renseignez tous les montants du soir', 'erreur');
       r[mom + '_valide'] = { par:STATE.user.prenom, id:STATE.user.id, at:nowISO() };
       $$('[data-k]').forEach(i => { r[i.dataset.k] = i.value; });
       await DB.set('caisse:' + j, r);

@@ -704,6 +704,9 @@ input[type=password],input[type=search],input[type=time],select,textarea{
 .tache.liee.on .box{background:var(--menthe-d);border-style:solid;border-color:var(--menthe-d);color:#fff}
 .tache.liee .tm{font-style:italic}
 
+/* Consigne courte sous un champ, pour éviter un mode d'emploi séparé */
+.aide{margin:8px 0 0;font-size:13px;line-height:1.4;color:var(--brume)}
+
 /* Rappel d'information au-dessus d'un formulaire */
 .rappel{margin:0 0 12px;padding:10px 14px;border-radius:10px;
   background:var(--fond-2);color:var(--ardoise);font-size:13.5px;line-height:1.35}
