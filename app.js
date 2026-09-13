@@ -757,12 +757,10 @@
      const k   = await DB.get('caisse:' + jour, null);
      const r   = await DB.get('reassort:' + jour, {});
    
-     /* Une enceinte marquée hors service compte comme relevée : sinon l'alerte
-        « frigos du matin non relevés » ne s'éteignait jamais. */
-     const complet = mom => ENCEINTES.every(e => {
-       const v = t[mom + '_' + e.id];
-       return v !== undefined && v !== '';
-     });
+     /* Une enceinte marquée hors service compte comme relevée. Et c'est la
+        validation explicite qui fait foi, pas le simple remplissage : une
+        valeur saisie puis modifiée sans revalider ne compte pas. */
+     const complet = mom => !!(t.valide && t.valide[mom]);
      const crit = ENCEINTES.filter(e => ['m','s'].some(m => etatTemp(e, t[m + '_' + e.id]) === 'crit')).length;
      const rupt = Object.keys(r).filter(k2 => r[k2] && r[k2].rupture).length;
    

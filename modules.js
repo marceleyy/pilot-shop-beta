@@ -989,115 +989,135 @@ V.temp = async function () {
   if (!V.temp._d) V.temp._d = today();
   const j = V.temp._d;
   const rec = await DB.get('temp:' + j, {});
-  const moments = RELEVES.moments;
+  if (!rec.valide) rec.valide = {};
 
-  /* Valeur courante : ce qui est déjà saisi, sinon la cible de l'enceinte */
-  const val = (e, m) => {
-    const v = rec[m.id + '_' + e.id];
+  /* Un seul moment à l'écran : le matin ou le soir, jamais les deux.
+     Le moment proposé dépend de l'heure, mais reste changeable. */
+  const moments = RELEVES.moments;
+  if (!V.temp._m) {
+    const h = new Date().getHours();
+    V.temp._m = (h < 15 && !rec.valide.m) ? 'm' : (rec.valide.s ? 'm' : 's');
+  }
+  const mom = moments.filter(x => x.id === V.temp._m)[0] || moments[0];
+
+  const cle = e => mom.id + '_' + e.id;
+  const brut = e => rec[cle(e)];
+  const saisi = e => { const v = brut(e); return v !== undefined && v !== ''; };
+  const val = e => {
+    const v = brut(e);
     if (v === 'HS') return 'HS';
     return (v === undefined || v === '') ? defautEnceinte(e) : Number(v);
   };
-  const saisi = (e, m) => {
-    const v = rec[m.id + '_' + e.id];
-    return v !== undefined && v !== '';
-  };
+  const valideMoment = () => rec.valide[mom.id];
 
   $('#vue-actions').innerHTML = '<input type="date" id="jj" value="' + j + '" style="width:auto;min-height:42px">';
 
-  const ligneMoment = (e, m) => {
-    const v = val(e, m), hs = v === 'HS', ok = saisi(e, m);
+  const manquants = () => ENCEINTES.filter(e => !saisi(e));
+
+  const ligne = e => {
+    const v = val(e), hs = v === 'HS', ok = saisi(e);
     const etat = hs ? '' : etatTemp(e, v);
-    return '<div class="tmoment' + (ok ? ' ok' : '') + '">' +
-      '<span class="tm-lbl">' + m.label + '</span>' +
+    /* Trois états lisibles d'un coup d'œil : à relever, relevé, validé. */
+    const cls = valideMoment() && ok ? 'tligne valide' : ok ? 'tligne saisi' : 'tligne';
+    return '<div class="' + cls + '">' +
+      '<div class="tl-haut"><b>' + esc(e.nom) + '</b>' +
+      '<span class="tl-cible">' + esc(e.cible) + '</span>' +
+      '<span class="tl-etat">' + (valideMoment() && ok ? '✓ validé' : ok ? 'relevé' : 'à relever') + '</span></div>' +
+      '<div class="tl-bas">' +
       (hs
         ? '<span class="tm-hs">Hors service</span>'
-        : '<button class="tm-pas" data-pas="-1" data-e="' + e.id + '" data-m="' + m.id + '">−</button>' +
-          '<button class="tm-val ' + etat + '" data-libre="' + e.id + '.' + m.id + '">' +
-          v + '<small>°C</small></button>' +
-          '<button class="tm-pas" data-pas="1" data-e="' + e.id + '" data-m="' + m.id + '">+</button>') +
-      '<button class="tm-off' + (hs ? ' on' : '') + '" data-hs="' + e.id + '.' + m.id + '">HS</button>' +
-      '</div>';
+        : '<button class="tm-pas" data-pas="-1" data-e="' + e.id + '">−</button>' +
+          '<button class="tm-val ' + etat + '" data-libre="' + e.id + '">' + v + '<small>°C</small></button>' +
+          '<button class="tm-pas" data-pas="1" data-e="' + e.id + '">+</button>') +
+      '<button class="tm-off' + (hs ? ' on' : '') + '" data-hs="' + e.id + '">HS</button>' +
+      '</div></div>';
   };
-
-  const manquants = () => ENCEINTES.filter(e => moments.some(m => !saisi(e, m)));
 
   const dessiner = () => {
     const reste = manquants();
-    $('#page').innerHTML =
-      carte(entete('🌡️', 'Relévé du ' + fmtD(j),
-        reste.length ? reste.length + ' enceinte(s) à relever'
-                     : 'Toutes les enceintes sont relevées') +
-        '<div class="jauge"><i class="' + (reste.length ? 'warn' : '') + '" style="width:' +
-        Math.round((ENCEINTES.length - reste.length) / ENCEINTES.length * 100) + '%"></i></div>', 'solide') +
+    const vm = valideMoment();
 
-      '<div class="stack" style="margin-top:12px">' + ENCEINTES.map(e =>
-        carte('<div class="rang"><b style="flex:1">' + esc(e.nom) + '</b>' +
-          '<span class="mini">cible ' + e.cible + '</span>' +
-          '<span data-st="' + e.id + '">' + pastilleTemp(e, rec) + '</span></div>' +
-          moments.map(m => ligneMoment(e, m)).join(''),
-          moments.every(m => saisi(e, m)) ? 'menthe' : '')
-      ).join('') + '</div>' +
+    $('#page').innerHTML =
+      /* Sélecteur matin / soir, avec l'état de chacun */
+      '<div class="tseg">' + moments.map(m => {
+        const v = rec.valide[m.id];
+        return '<button class="' + (m.id === mom.id ? 'on' : '') + '" data-mom="' + m.id + '">' +
+          (m.id === 'm' ? '☀️ ' : '🌙 ') + m.label +
+          '<small>' + (v ? '✓ validé à ' + heure(v.at) : 'à faire') + '</small></button>';
+      }).join('') + '</div>' +
+
+      (vm
+        ? '<div class="alerte ok" style="margin-bottom:12px"><span class="ai">✓</span><div>' +
+          '<b>Relévé du ' + mom.label.toLowerCase() + ' validé</b>' +
+          '<p>Par ' + esc(vm.par) + ' à ' + heure(vm.at) + '. Toute modification demandera ' +
+          'une nouvelle validation.</p></div></div>'
+        : '') +
+
+      '<div class="stack">' + ENCEINTES.map(ligne).join('') + '</div>' +
 
       carte(entete('📝', 'Action corrective',
         'Obligatoire dès qu’une enceinte dépasse sa limite critique.') +
-        '<textarea id="obs" placeholder="Ex. vitrine gelato à −9 °C : bacs transférés en chambre froide, technicien appelé.">' +
+        '<textarea id="obs" placeholder="Ex. vitrine à −9 °C : bacs transférés en chambre froide, Eve prévenue.">' +
         esc(rec.obs || '') + '</textarea>') +
 
-      '<button class="btn menthe bloc xl" id="tvalider" style="margin-top:16px">' +
-      (reste.length ? '✓ Valider (' + reste.length + ' enceinte(s) non relevée(s))' : '✓ Valider le relevé') +
-      '</button>' +
-      '<p class="mini" style="text-align:center;margin-top:10px">' +
-      (rec.par ? 'Signé par ' + esc(rec.par) + ' · ' + heure(rec.at) : 'Pas encore signé') + '</p>';
+      '<button class="btn ' + (vm ? 'clair' : 'menthe') + ' bloc xl" id="tvalider" style="margin-top:16px">' +
+      (vm ? '✓ Déjà validé — revalider'
+          : reste.length ? 'Valider le ' + mom.label.toLowerCase() + ' (' + reste.length + ' manquante' + (reste.length > 1 ? 's' : '') + ')'
+                         : 'Valider le relévé du ' + mom.label.toLowerCase()) +
+      '</button>';
 
     brancher();
   };
 
   const sauver = async () => {
-    rec.obs = $('#obs') ? $('#obs').value : (rec.obs || '');
-    rec.par = STATE.user.prenom; rec.id = STATE.user.id; rec.at = nowISO();
+    if ($('#obs')) rec.obs = $('#obs').value;
     await DB.set('temp:' + j, rec);
   };
 
+  /* Modifier une valeur après validation annule celle-ci : le registre doit
+     porter la signature de la personne qui a vu la dernière valeur. */
+  const invalider = () => { if (rec.valide[mom.id]) delete rec.valide[mom.id]; };
+
   function brancher() {
     $('#jj').onchange = ev => { V.temp._d = ev.target.value; rendre('temp'); };
+    $$('[data-mom]').forEach(b => b.onclick = () => { V.temp._m = b.dataset.mom; dessiner(); });
 
     $$('[data-pas]').forEach(b => b.onclick = async () => {
       const e = ENCEINTES.filter(x => x.id === b.dataset.e)[0];
-      const m = moments.filter(x => x.id === b.dataset.m)[0];
-      const actuel = val(e, m);
-      const nouveau = (actuel === 'HS' ? defautEnceinte(e) : actuel) + (+b.dataset.pas);
-      if (nouveau < e.lo - 5 || nouveau > e.hi + 5) return;
-      rec[m.id + '_' + e.id] = nouveau;
+      const actuel = val(e);
+      const nv = (actuel === 'HS' ? defautEnceinte(e) : actuel) + (+b.dataset.pas);
+      if (nv < e.lo - 5 || nv > e.hi + 5) return;
+      rec[cle(e)] = nv;
+      invalider();
       vibrer(UI.vibration.ok);
       await sauver();
       dessiner();
-      if (etatTemp(e, nouveau) === 'crit') alerteCritique(e, nouveau);
+      if (etatTemp(e, nv) === 'crit') alerteCritique(e, nv);
     });
 
     $$('[data-hs]').forEach(b => b.onclick = async () => {
-      const [eid, mid] = b.dataset.hs.split('.');
-      const cle = mid + '_' + eid;
-      rec[cle] = (rec[cle] === 'HS') ? '' : 'HS';
+      const e = ENCEINTES.filter(x => x.id === b.dataset.hs)[0];
+      rec[cle(e)] = (rec[cle(e)] === 'HS') ? '' : 'HS';
+      invalider();
       await sauver();
       dessiner();
     });
 
     $$('[data-libre]').forEach(b => b.onclick = () => {
-      const [eid, mid] = b.dataset.libre.split('.');
-      const e = ENCEINTES.filter(x => x.id === eid)[0];
-      const m = moments.filter(x => x.id === mid)[0];
+      const e = ENCEINTES.filter(x => x.id === b.dataset.libre)[0];
       showSheet(
-        '<h2 id="sheet-titre">' + esc(e.nom) + ' · ' + m.label + '</h2>' +
-        '<p class="sub">Cible ' + e.cible + '</p>' +
+        '<h2 id="sheet-titre">' + esc(e.nom) + '</h2>' +
+        '<p class="sub">' + mom.label + ' · cible ' + esc(e.cible) + '</p>' +
         '<div class="champ"><label class="f">Température relevée (°C)</label>' +
         '<input type="number" step="0.1" id="tl" data-autofocus value="' +
-        (val(e, m) === 'HS' ? '' : val(e, m)) + '" style="font-size:28px;text-align:center"></div>' +
+        (val(e) === 'HS' ? '' : val(e)) + '" style="font-size:30px;text-align:center"></div>' +
         '<div class="actions"><button class="btn clair" data-fermer>Annuler</button>' +
         '<button class="btn menthe" id="tlok">Enregistrer</button></div>');
       $('#tlok').onclick = async () => {
         const v = $('#tl').value;
         if (v === '') return toast('Saisissez une température', 'erreur');
-        rec[m.id + '_' + e.id] = num(v);
+        rec[cle(e)] = num(v);
+        invalider();
         await sauver();
         closeSheet();
         dessiner();
@@ -1109,26 +1129,27 @@ V.temp = async function () {
 
     $('#tvalider').onclick = async () => {
       const reste = manquants();
-      const crit = ENCEINTES.filter(e => moments.some(m => etatTemp(e, rec[m.id + '_' + e.id]) === 'crit'));
+      const crit = ENCEINTES.filter(e => etatTemp(e, brut(e)) === 'crit');
       if (crit.length && !(rec.obs || '').trim()) {
         toast('Renseignez l’action corrective', 'erreur');
         if ($('#obs')) $('#obs').focus();
         return;
       }
       if (reste.length) {
-        confirmer('Valider malgré ' + reste.length + ' enceinte(s) non relevée(s) ?',
-          'Non relevées : ' + reste.map(e => e.nom).join(', ') + '. Un registre incomplet ' +
-          'est un registre contestable lors d’un contrôle.',
-          'Valider quand même', async () => { await finir(); });
+        confirmer('Valider avec ' + reste.length + ' enceinte(s) non relevée(s) ?',
+          'Manquantes : ' + reste.map(e => e.nom).join(', ') + '. Un registre incomplet ' +
+          'est contestable lors d’un contrôle.',
+          'Valider quand même', finir);
         return;
       }
-      await finir();
+      finir();
     };
 
     async function finir() {
+      rec.valide[mom.id] = { par:STATE.user.prenom, id:STATE.user.id, at:nowISO() };
       await sauver();
-      await feed('ok', STATE.user.prenom + ' a relevé les températures');
-      toast('Relévé enregistré');
+      await feed('ok', STATE.user.prenom + ' a validé les températures du ' + mom.label.toLowerCase());
+      toast('Relévé du ' + mom.label.toLowerCase() + ' validé');
       rendre('accueil');
     }
   }
