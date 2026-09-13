@@ -655,7 +655,10 @@
   const memeVue = (STATE.view === id);
   const scrollAvant = window.scrollY || document.documentElement.scrollTop || 0;
   STATE.view = id;
-     STATE.jour = today();
+     /* La date n'est PAS remise à aujourd'hui ici : c'était la raison pour
+        laquelle la navigation entre les jours restait sans effet — le clic
+        changeait bien la date, puis le redessin l'écrasait aussitôt.
+        Elle repart à aujourd'hui à la connexion et sur demande explicite. */
      const p = PAGES[id] || { titre:id, sous:'' };
      $('#vue-titre').textContent = p.titre;
      $('#vue-sous').textContent  = p.sous;
@@ -1812,6 +1815,7 @@ function brancherNavJour(vue) {
   $('#login').hidden = true;
   $('#app').hidden = false;
   document.title = APP.nom + ' — ' + APP.site;
+  STATE.jour = today();       // chaque connexion repart du jour en cours
   STATE.phase = phaseCourante();
   majBandeau();
   initFeedback();
