@@ -1883,7 +1883,10 @@ async function securiteActive() {
   try {
     const ctrl = new AbortController();
     setTimeout(() => ctrl.abort(), 5000);
-    const r = await fetch(SUPABASE.url + '/rest/v1/' + SUPABASE.tables.reglages + '?select=id&limit=1', {
+    /* Nom de table en clair : SUPABASE.tables.reglages n'existe pas dans la
+       configuration, et l'URL devenait « /rest/v1/undefined » — 404 au lieu de
+       401, donc la sonde concluait toujours que la sécurité était inactive. */
+    const r = await fetch(SUPABASE.url + '/rest/v1/reglages?select=id&limit=1', {
       headers: { 'apikey': SUPABASE.anonKey, 'Authorization': 'Bearer ' + SUPABASE.anonKey },
       signal: ctrl.signal
     });
@@ -2063,8 +2066,17 @@ function ecranAmorcage() {
      /* La liste des prénoms a été dessinée par initLogin alors qu'EQUIPE était
         encore vide : on la redessine une fois l'équipe chargée depuis la base. */
      if (typeof initLogin === 'function') initLogin();
-     /* Aucune équipe nulle part : on ne laisse pas un écran vide sans explication. */
-     if (!EQUIPE.length && typeof ecranAmorcage === 'function') ecranAmorcage();
+     /* Toujours aucune équipe : soit l'appareil n'est pas rattaché — et c'est
+        le rattachement qu'il faut proposer, pas la création d'une équipe qui
+        existe déjà — soit la boutique démarre vraiment de zéro. */
+     if (!EQUIPE.length) {
+       if (typeof appareilRattache === 'function' && !appareilRattache() &&
+           typeof ecranRattachement === 'function') {
+         await ecranRattachement();
+       } else if (typeof ecranAmorcage === 'function') {
+         ecranAmorcage();
+       }
+     }
 
      const s = await DB.get('session', null);
      if (s && s.id && EQUIPE.filter(e => e.id === s.id)[0]) {
