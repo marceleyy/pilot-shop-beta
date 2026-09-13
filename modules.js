@@ -674,7 +674,7 @@ V.caisse = async function () {
   let mom = V.caisse._m;
 
   /* Relecture des anciennes clés pour préremplir sans rien perdre */
-  const legacy = { m_fond:'fi', s_fond:'ff', s_tpe:'tpe' };
+  const legacy = { m_fond:'fi', s_fond:'ff', s_tpe:'tpe', s_cb:'cb', s_retrait:'depot' };
   const lire = k => {
     if (r[k] !== undefined && r[k] !== '') return r[k];
     const a = legacy[k];
@@ -701,25 +701,25 @@ V.caisse = async function () {
 
       /* Rappel discret du fond laissé la veille, à l'ouverture seulement */
       (mom === 'm' && fondVeille !== null
-        ? '<p class="rappel">Fond laissé hier soir : <b>' + eur(fondVeille) + '</b>' +
-          (veille.s_valide ? ' par ' + esc(veille.s_valide.par) : '') + '</p>'
+        ? '<p class="rappel">Fond de caisse final d’hier soir : <b>' + eur(fondVeille) + '</b>' +
+          (veille.s_valide ? ' · ' + esc(veille.s_valide.par) : '') + '</p>'
         : '') +
 
-      carte('<div class="grid g2">' +
-        champ(p + 'esp', 'Espèces comptées', 'tout le tiroir') +
-        champ(p + 'tpe', 'Total TPE') + '</div>' +
+      carte(
+        '<div class="champ">' +
+        '<label class="f">Fond de caisse ' + (mom === 'm' ? 'initial' : 'final') + '</label>' +
+        '<input type="number" inputmode="decimal" step="0.01" data-k="' + p + 'fond" value="' +
+        lire(p + 'fond') + '" placeholder="' + (mom === 'm' ? 'compté à l’ouverture' : 'laissé pour demain') + '"></div>' +
+
+        '<div class="grid g2" style="margin-top:14px">' +
+        champ(p + 'cb',  'Recettes CB sur la caisse', 'ticket Z') +
+        champ(p + 'tpe', 'Recettes sur le TPE', 'totalisateur') + '</div>' +
+
         '<div style="margin-top:14px">' +
-        champ(p + 'fond', mom === 'm' ? 'Fond de caisse compté' : 'Fond de caisse laissé') +
+        champ(p + 'retrait', 'Retrait d’espèces', mom === 'm' ? 'généralement 0' : 'déposé le soir') +
         '</div>') +
 
       '<div id="cverdict"></div>' +
-
-      (mom === 's'
-        ? '<details class="det"><summary>Ticket Z de la caisse tactile</summary>' +
-          carte('<div class="grid g2">' + champ('z_cb', 'Carte') + champ('z_esp', 'Espèces') + '</div>' +
-            '<p class="mini" style="margin-top:10px">Sert au contrôle automatique. ' +
-            'Sans ces deux chiffres, l’écart ne peut pas être calculé.</p>') + '</details>'
-        : '') +
 
       carte('<div class="champ"><label class="f">Commentaire</label>' +
         '<textarea data-k="' + p + 'com" placeholder="Toute explication utile.">' +
@@ -771,24 +771,18 @@ V.caisse = async function () {
       return;
     }
 
-    /* Soir : on compare ce qui est physiquement là au ticket Z */
-    const zcb = r.z_cb, zesp = r.z_esp;
-    if (zcb === undefined || zcb === '' || zesp === undefined || zesp === '') {
-      box.innerHTML = '<p class="verdict n">Renseignez le ticket Z pour le contrôle automatique.</p>';
+    /* Soir : le contrôle est la comparaison des deux recettes carte.
+       Ce que la caisse a enregistré en CB doit égaler ce que le TPE a encaissé. */
+    const cb = r.s_cb, tpe = r.s_tpe;
+    if (cb === undefined || cb === '' || tpe === undefined || tpe === '') {
+      box.innerHTML = '<p class="verdict n">Renseignez les deux recettes pour le contrôle.</p>';
       return;
     }
-    const fondOuv = (r.m_fond !== undefined && r.m_fond !== '') ? num(r.m_fond)
-                  : (fondVeille !== null ? fondVeille : 0);
-    const dCarte = +(num(r.s_tpe) - num(zcb)).toFixed(2);
-    const encaisse = num(r.s_esp) - fondOuv;      // tiroir moins le fond du matin
-    const dEsp = +(encaisse - num(zesp)).toFixed(2);
-    const ok = Math.abs(dCarte) < 0.01 && Math.abs(dEsp) < 0.01;
-
-    box.innerHTML = ok
-      ? '<p class="verdict ok">Tout correspond au ticket Z.</p>'
-      : '<div class="verdict bad"><b>Écart constaté</b><span>' +
-        (Math.abs(dCarte) >= 0.01 ? 'Carte : ' + eur(dCarte) + ' d’écart entre le TPE et le ticket Z. ' : '') +
-        (Math.abs(dEsp) >= 0.01 ? 'Espèces : ' + eur(dEsp) + ' d’écart après déduction du fond du matin. ' : '') +
+    const d = +(num(tpe) - num(cb)).toFixed(2);
+    box.innerHTML = Math.abs(d) < 0.01
+      ? '<p class="verdict ok">Recettes carte conformes : caisse et TPE au même montant.</p>'
+      : '<div class="verdict bad"><b>Écart carte de ' + eur(d) + '</b><span>' +
+        eur(num(cb)) + ' enregistrés sur la caisse, ' + eur(num(tpe)) + ' encaissés sur le TPE. ' +
         'Expliquez-le dans le commentaire.</span></div>';
   }
 
@@ -811,9 +805,9 @@ V.caisse = async function () {
     });
     $('#cv').onclick = async () => {
       const p = mom + '_';
-      const requis = [p + 'esp', p + 'tpe', p + 'fond'];
+      const requis = [p + 'fond', p + 'cb', p + 'tpe'];
       const vides = requis.filter(k => r[k] === undefined || r[k] === '');
-      if (vides.length) return toast('Renseignez les trois montants', 'erreur');
+      if (vides.length) return toast('Renseignez le fond et les deux recettes', 'erreur');
       r[mom + '_valide'] = { par:STATE.user.prenom, id:STATE.user.id, at:nowISO() };
       $$('[data-k]').forEach(i => { r[i.dataset.k] = i.value; });
       await DB.set('caisse:' + j, r);
