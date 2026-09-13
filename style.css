@@ -757,6 +757,57 @@ input[type=password],input[type=search],input[type=time],select,textarea{
 /* --- Textes explicatifs : discrets, pas absents ------------------------- */
 .card .sub,.card .cs{font-size:13.5px;color:var(--brume);line-height:1.4}
 
+/* =============================================================================
+   25. JETONS ET COMPOSANTS
+   Quatre règles issues des recommandations 2026 pour les outils de terrain :
+     • espacement en multiples de 4, jamais de valeur arbitraire ;
+     • échelle typographique à quatre niveaux, pas davantage ;
+     • cible tactile de 48 px minimum, 8 px entre deux cibles ;
+     • l'information ne repose jamais sur la seule couleur : forme, poids et
+       libellé la portent aussi, pour les daltoniens et pour la lumière du jour.
+   ========================================================================== */
+:root{
+  --e1:4px; --e2:8px; --e3:12px; --e4:16px; --e5:24px; --e6:32px; --e7:48px;
+  --t-titre:26px; --t-section:11.5px; --t-corps:16px; --t-note:13px;
+  --tap:48px;
+}
+
+/* --- Icônes ------------------------------------------------------------- */
+svg.ic{display:block;flex:0 0 auto;stroke:currentColor}
+
+/* --- Barre du bas : icône au-dessus du libellé -------------------------- */
+:root{--barre-h:calc(64px + var(--safe-b))}
+#tabbar{background:rgba(255,255,255,.97);border-top:1px solid var(--line);box-shadow:none;
+  padding-bottom:var(--safe-b)}
+#tabbar button{display:flex;flex-direction:column;align-items:center;justify-content:center;
+  gap:3px;min-height:62px;padding:6px 2px 0;border-top:2px solid transparent;
+  font-size:10.5px;font-weight:600;color:var(--brume-2);letter-spacing:-.01em}
+#tabbar button .tl{display:block;line-height:1.1;text-align:center;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
+#tabbar button.on{color:var(--encre);border-top-color:var(--encre)}
+#tabbar button.on svg.ic{stroke-width:2}
+
+/* --- Échelle typographique — quatre niveaux ---------------------------- */
+#page > .card:first-child h2,
+#page > *:first-child + .card h2{font-size:var(--t-titre);line-height:1.12}
+.entete h3{font-size:var(--t-section);letter-spacing:.07em;text-transform:uppercase}
+body{font-size:var(--t-corps);line-height:1.5}
+.mini,.cs,.sub,.tm{font-size:var(--t-note);line-height:1.4}
+
+/* --- Cibles tactiles ---------------------------------------------------- */
+.btn,.tache .box,.navjour button,.jbtn,.tm-pas,.tm-val,.tm-off{min-height:var(--tap)}
+.btn.sm{min-height:40px}
+.tache{gap:var(--e3);padding:var(--e3) var(--e4)}
+.tache + .tache{margin-top:var(--e2)}
+.tache .box{width:var(--tap);height:var(--tap);border-radius:12px}
+
+/* --- Rythme vertical ---------------------------------------------------- */
+.card{padding:var(--e4)}
+.card + .card{margin-top:var(--e3)}
+.stack{gap:var(--e2)}
+.entete{margin:var(--e5) 0 var(--e2)}
+.grid{gap:var(--e3)}
+
 /* --- 21. Impression : registre sanitaire -------------------------------- */
 #printview{display:none}
 @media print{

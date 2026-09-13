@@ -601,13 +601,48 @@
       ========================================================================== */
    const V = {};   // vues, remplies ici et en partie 2
    
-   function renderNav() {
+/* -----------------------------------------------------------------------------
+   ICONÔGRAPHIE
+   Tracés SVG au filet, 24 px, héritant de la couleur du texte. Les emojis ont
+   été retirés parce qu'ils datent l'interface ; les remplacer par rien n'était
+   pas mieux. Une information ne doit jamais reposer sur la seule couleur :
+   forme, poids et libellé la portent aussi.
+   -------------------------------------------------------------------------- */
+const TRACES = {
+  journee:  'M4 11l8-7 8 7M6 10v9h12v-9M10 19v-5h4v5',
+  nettoyage:'M10 3h3v3h-3zM8 6h7v14H8zM11 10v3M17 4h2M17 7h2M18 10h1',
+  tracabilite:'M4 7h16M4 12h16M4 17h10M17 15l3 3-3 3',
+  reassort: 'M3 8l9-5 9 5v8l-9 5-9-5zM3 8l9 5 9-5M12 13v10',
+  temperature:'M12 3a2 2 0 012 2v8a4 4 0 11-4 0V5a2 2 0 012-2zM12 9v5M17 6h3M17 10h3',
+  anomalie: 'M12 3l9 16H3zM12 9v5M12 16.5v.5',
+  controle: 'M3 17a9 9 0 1118 0M12 17l5-6',
+  ecarts:   'M4 20V9M10 20V4M16 20v-7M22 20H2',
+  frigo:    'M12 3v18M3 12h18M6 6l12 12M18 6L6 18',
+  periodes: 'M4 6h16v14H4zM4 10h16M8 3v4M16 3v4M9 15h2M14 15h2',
+  plus:     'M6 12h.01M12 12h.01M18 12h.01',
+  photo:    'M4 8h3l2-2h6l2 2h3v12H4zM12 17a4 4 0 110-8 4 4 0 010 8z',
+  gauche:   'M15 5l-7 7 7 7',
+  droite:   'M9 5l7 7-7 7',
+  valide:   'M4 12l5 5L20 7'
+};
+function ic(nom, taille) {
+  const d = TRACES[nom];
+  if (!d) return '';
+  const t = taille || 24;
+  return '<svg class="ic" width="' + t + '" height="' + t + '" viewBox="0 0 24 24" ' +
+    'fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" ' +
+    'stroke-linejoin="round" aria-hidden="true"><path d="' + d + '"/></svg>';
+}
+
+function renderNav() {
      const onglets = TABS[STATE.user.role] || TABS.equipe;
-     /* Plus de pictogramme dans la barre : le libellé seul, avec un trait sur
-        l'onglet actif. Afficher t.icone ici écrivait « undefined » depuis que
-        les icônes ont été retirées de la configuration. */
      $('#tabbar').innerHTML = onglets.map(t =>
        '<button type="button" class="tab' + (STATE.view === t.id ? ' on' : '') + '" data-tab="' + t.id + '">' +
+         ic(t.id === 'accueil' ? 'journee' : t.id === 'clean' ? 'nettoyage' :
+            t.id === 'lots' ? 'tracabilite' : t.id === 'reas' ? 'reassort' :
+            t.id === 'temp' ? 'temperature' : t.id === 'anomalie' ? 'anomalie' :
+            t.id === 'controle' ? 'controle' : t.id === 'ecarts' ? 'ecarts' :
+            t.id === 'frigo' ? 'frigo' : t.id === 'periodes' ? 'periodes' : 'plus', 22) +
          '<span class="tl">' + esc(t.label) + '</span>' +
          '<span class="badge" data-badge="' + t.id + '" hidden></span>' +
        '</button>'
@@ -1748,9 +1783,9 @@ function peutModifier(jour) {
 function navJour(jour) {
   const hier = addD(jour, -1), demain = addD(jour, 1);
   return '<div class="navjour">' +
-    '<button type="button" data-nj="' + hier + '" aria-label="Jour précédent">‹</button>' +
+    '<button type="button" data-nj="' + hier + '" aria-label="Jour précédent">' + ic('gauche', 22) + '</button>' +
     '<div class="nj-c"><b>' + nomJour(jour) + '</b><span>' + fmtD(jour) + '</span></div>' +
-    '<button type="button" data-nj="' + demain + '" aria-label="Jour suivant">›</button>' +
+    '<button type="button" data-nj="' + demain + '" aria-label="Jour suivant">' + ic('droite', 22) + '</button>' +
     '</div>' +
     (jour === today() ? '' :
       '<button type="button" class="btn clair bloc sm" data-nj="' + today() + '" ' +

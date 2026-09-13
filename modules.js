@@ -1729,7 +1729,7 @@ V.anomalie = async function () {
     (ouvertes.length
       ? '<div class="entete"><h3>En cours</h3><span class="pousse mini num">' + ouvertes.length + '</span></div>' +
         '<div class="stack">' + ouvertes.map(carteAnomalie).join('') + '</div>'
-      : carte('<div class="alerte ok"><span class="ai">✓</span><div><b>Aucune anomalie en cours</b>' +
+      : carte('<div class="alerte ok"><span class="ai">•</span><div><b>Aucune anomalie en cours</b>' +
         '<p>Tout ce qui a été signalé a été traité.</p></div></div>', 'plat')) +
 
     (traitees.length
