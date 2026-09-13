@@ -93,6 +93,7 @@
      ['preuves:',     'preuves'],
      ['stock:',       'stock'],
      ['reception:',   'receptions'],
+     ['anomalies',    'feedback'],
      ['horaires',     'reglages'],
      ['enceintes',    'reglages'],
      ['hebdo:plan',   'reglages'],
@@ -756,6 +757,8 @@
      const k   = await DB.get('caisse:' + jour, null);
      const r   = await DB.get('reassort:' + jour, {});
    
+     /* Une enceinte marquée hors service compte comme relevée : sinon l'alerte
+        « frigos du matin non relevés » ne s'éteignait jamais. */
      const complet = mom => ENCEINTES.every(e => {
        const v = t[mom + '_' + e.id];
        return v !== undefined && v !== '';
@@ -774,6 +777,7 @@
    }
    
    function etatTemp(e, v) {
+     if (v === 'HS') return '';          // enceinte hors service : ni conforme ni critique
      if (v === '' || v === null || v === undefined || isNaN(v)) return '';
      v = Number(v);
      if (v > e.crit) return 'crit';

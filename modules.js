@@ -654,11 +654,21 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
       H. TRAÇABILITÉ — libellé et liste déroulante de confirmation
       ========================================================================== */
    const V_lots_origine = V.lots;
-   V.lots = async function () {
-     await V_lots_origine.call(this);
-     const h = $('#page');
-     if (!h) return;
-     const bandeau = document.createElement('div');
+V.lots = async function () {
+   await V_lots_origine.call(this);
+   const h = $('#page');
+   if (!h) return;
+
+  /* La vue d'origine affiche déjà une carte « Scanner l'étiquette ». On la
+     retire avant d'ajouter la nôtre, sinon l'écran présente deux boutons
+     identiques qui font la même chose — signalé par l'équipe. */
+  const doublon = $('#scan');
+  if (doublon) {
+    const carteDoublon = doublon.closest('.card');
+    if (carteDoublon) carteDoublon.remove();
+  }
+
+  const bandeau = document.createElement('div');
      bandeau.innerHTML = carte(entete('#️⃣', 'Traçabilité pour l’ouverture de tout nouveau produit',
        'Le lot se note au moment où le produit est ouvert et mis en vitrine, jamais à la livraison.') +
        '<button class="btn ciel bloc xl" id="tr-scan">📸 Scanner l’étiquette</button>' +
@@ -962,6 +972,168 @@ V.hebdo = async function () {
     }
     rendre('hebdo');
   });
+};
+
+/* =============================================================================
+   N. TEMPÉRATURES — saisie au pas, pas en liste
+   L'ancien écran affichait jusqu'à quinze boutons par enceinte sur dix
+   enceintes : illisible et interminable à faire défiler. Ici, une valeur par
+   défaut, deux flèches, un bouton hors service, une saisie libre, et un
+   bouton de validation unique en bas qui ramène à l'accueil.
+   ========================================================================== */
+function defautEnceinte(e) {
+  return Math.round((e.vert[0] + e.vert[1]) / 2);
+}
+
+V.temp = async function () {
+  if (!V.temp._d) V.temp._d = today();
+  const j = V.temp._d;
+  const rec = await DB.get('temp:' + j, {});
+  const moments = RELEVES.moments;
+
+  /* Valeur courante : ce qui est déjà saisi, sinon la cible de l'enceinte */
+  const val = (e, m) => {
+    const v = rec[m.id + '_' + e.id];
+    if (v === 'HS') return 'HS';
+    return (v === undefined || v === '') ? defautEnceinte(e) : Number(v);
+  };
+  const saisi = (e, m) => {
+    const v = rec[m.id + '_' + e.id];
+    return v !== undefined && v !== '';
+  };
+
+  $('#pa').innerHTML = '<input type="date" id="jj" value="' + j + '" style="width:auto;min-height:42px">';
+
+  const ligneMoment = (e, m) => {
+    const v = val(e, m), hs = v === 'HS', ok = saisi(e, m);
+    const etat = hs ? '' : etatTemp(e, v);
+    return '<div class="tmoment' + (ok ? ' ok' : '') + '">' +
+      '<span class="tm-lbl">' + m.label + '</span>' +
+      (hs
+        ? '<span class="tm-hs">Hors service</span>'
+        : '<button class="tm-pas" data-pas="-1" data-e="' + e.id + '" data-m="' + m.id + '">−</button>' +
+          '<button class="tm-val ' + etat + '" data-libre="' + e.id + '.' + m.id + '">' +
+          v + '<small>°C</small></button>' +
+          '<button class="tm-pas" data-pas="1" data-e="' + e.id + '" data-m="' + m.id + '">+</button>') +
+      '<button class="tm-off' + (hs ? ' on' : '') + '" data-hs="' + e.id + '.' + m.id + '">HS</button>' +
+      '</div>';
+  };
+
+  const manquants = () => ENCEINTES.filter(e => moments.some(m => !saisi(e, m)));
+
+  const dessiner = () => {
+    const reste = manquants();
+    $('#page').innerHTML =
+      carte(entete('🌡️', 'Relévé du ' + fmtD(j),
+        reste.length ? reste.length + ' enceinte(s) à relever'
+                     : 'Toutes les enceintes sont relevées') +
+        '<div class="jauge"><i class="' + (reste.length ? 'warn' : '') + '" style="width:' +
+        Math.round((ENCEINTES.length - reste.length) / ENCEINTES.length * 100) + '%"></i></div>', 'solide') +
+
+      '<div class="stack" style="margin-top:12px">' + ENCEINTES.map(e =>
+        carte('<div class="rang"><b style="flex:1">' + esc(e.nom) + '</b>' +
+          '<span class="mini">cible ' + e.cible + '</span>' +
+          '<span data-st="' + e.id + '">' + pastilleTemp(e, rec) + '</span></div>' +
+          moments.map(m => ligneMoment(e, m)).join(''),
+          moments.every(m => saisi(e, m)) ? 'menthe' : '')
+      ).join('') + '</div>' +
+
+      carte(entete('📝', 'Action corrective',
+        'Obligatoire dès qu’une enceinte dépasse sa limite critique.') +
+        '<textarea id="obs" placeholder="Ex. vitrine gelato à −9 °C : bacs transférés en chambre froide, technicien appelé.">' +
+        esc(rec.obs || '') + '</textarea>') +
+
+      '<button class="btn menthe bloc xl" id="tvalider" style="margin-top:16px">' +
+      (reste.length ? '✓ Valider (' + reste.length + ' enceinte(s) non relevée(s))' : '✓ Valider le relevé') +
+      '</button>' +
+      '<p class="mini" style="text-align:center;margin-top:10px">' +
+      (rec.par ? 'Signé par ' + esc(rec.par) + ' · ' + heure(rec.at) : 'Pas encore signé') + '</p>';
+
+    brancher();
+  };
+
+  const sauver = async () => {
+    rec.obs = $('#obs') ? $('#obs').value : (rec.obs || '');
+    rec.par = STATE.user.prenom; rec.id = STATE.user.id; rec.at = nowISO();
+    await DB.set('temp:' + j, rec);
+  };
+
+  function brancher() {
+    $('#jj').onchange = ev => { V.temp._d = ev.target.value; rendre('temp'); };
+
+    $$('[data-pas]').forEach(b => b.onclick = async () => {
+      const e = ENCEINTES.filter(x => x.id === b.dataset.e)[0];
+      const m = moments.filter(x => x.id === b.dataset.m)[0];
+      const actuel = val(e, m);
+      const nouveau = (actuel === 'HS' ? defautEnceinte(e) : actuel) + (+b.dataset.pas);
+      if (nouveau < e.lo - 5 || nouveau > e.hi + 5) return;
+      rec[m.id + '_' + e.id] = nouveau;
+      vibrer(UI.vibration.ok);
+      await sauver();
+      dessiner();
+      if (etatTemp(e, nouveau) === 'crit') alerteCritique(e, nouveau);
+    });
+
+    $$('[data-hs]').forEach(b => b.onclick = async () => {
+      const [eid, mid] = b.dataset.hs.split('.');
+      const cle = mid + '_' + eid;
+      rec[cle] = (rec[cle] === 'HS') ? '' : 'HS';
+      await sauver();
+      dessiner();
+    });
+
+    $$('[data-libre]').forEach(b => b.onclick = () => {
+      const [eid, mid] = b.dataset.libre.split('.');
+      const e = ENCEINTES.filter(x => x.id === eid)[0];
+      const m = moments.filter(x => x.id === mid)[0];
+      showSheet(
+        '<h2 id="sheet-titre">' + esc(e.nom) + ' · ' + m.label + '</h2>' +
+        '<p class="sub">Cible ' + e.cible + '</p>' +
+        '<div class="champ"><label class="f">Température relevée (°C)</label>' +
+        '<input type="number" step="0.1" id="tl" data-autofocus value="' +
+        (val(e, m) === 'HS' ? '' : val(e, m)) + '" style="font-size:28px;text-align:center"></div>' +
+        '<div class="actions"><button class="btn clair" data-fermer>Annuler</button>' +
+        '<button class="btn menthe" id="tlok">Enregistrer</button></div>');
+      $('#tlok').onclick = async () => {
+        const v = $('#tl').value;
+        if (v === '') return toast('Saisissez une température', 'erreur');
+        rec[m.id + '_' + e.id] = num(v);
+        await sauver();
+        closeSheet();
+        dessiner();
+        if (etatTemp(e, num(v)) === 'crit') alerteCritique(e, num(v));
+      };
+    });
+
+    if ($('#obs')) $('#obs').oninput = debounce(sauver, 600);
+
+    $('#tvalider').onclick = async () => {
+      const reste = manquants();
+      const crit = ENCEINTES.filter(e => moments.some(m => etatTemp(e, rec[m.id + '_' + e.id]) === 'crit'));
+      if (crit.length && !(rec.obs || '').trim()) {
+        toast('Renseignez l’action corrective', 'erreur');
+        if ($('#obs')) $('#obs').focus();
+        return;
+      }
+      if (reste.length) {
+        confirmer('Valider malgré ' + reste.length + ' enceinte(s) non relevée(s) ?',
+          'Non relevées : ' + reste.map(e => e.nom).join(', ') + '. Un registre incomplet ' +
+          'est un registre contestable lors d’un contrôle.',
+          'Valider quand même', async () => { await finir(); });
+        return;
+      }
+      await finir();
+    };
+
+    async function finir() {
+      await sauver();
+      await feed('ok', STATE.user.prenom + ' a relevé les températures');
+      toast('Relévé enregistré');
+      rendre('accueil');
+    }
+  }
+
+  dessiner();
 };
 
 /* =============================================================================

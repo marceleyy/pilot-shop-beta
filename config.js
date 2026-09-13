@@ -696,13 +696,48 @@ const METEO = {
    17. NAVIGATION — barre du bas, pouce accessible
    Cinq entrées maximum par rôle : au-delà, la barre devient illisible en rush.
    -------------------------------------------------------------------------- */
+/* Familles de produits pour la traçabilité : la liste des 22 parfums était
+   trop longue à l'écran. On classe d'abord par famille, le parfum ne sert
+   qu'aux glaces. */
+const FAMILLES_PRODUIT = [
+  { id:'glace',      libelle:'Glaces',              parfums:true,  dlc:'gelato' },
+  { id:'mac_classico', libelle:'Macarons Classico', parfums:false, dlc:'macaron_gelato' },
+  { id:'mac_grandioso',libelle:'Macarons Grandioso',parfums:false, dlc:'macaron_gelato' },
+  { id:'gianduiotto',libelle:'Gianduiotto',         parfums:false, dlc:'gianduiotto' },
+  { id:'crepe',      libelle:'Crêpes',              parfums:false, dlc:'crepe_negatif' },
+  { id:'gaufre',     libelle:'Gaufres',             parfums:false, dlc:'gaufre' },
+  { id:'chantilly',  libelle:'Chantilly',           parfums:false, dlc:'chantilly' },
+  { id:'coulis',     libelle:'Coulis',              parfums:false, dlc:'coulis' },
+  { id:'topping',    libelle:'Toppings',            parfums:false, dlc:'topping' }
+];
+
+/* Anomalies constatées en boutique — nouveau module demandé par l'équipe */
+const ANOMALIES = {
+  categories: [
+    { id:'materiel',  libelle:'Panne ou matériel cassé',     icone:'🔧' },
+    { id:'froid',     libelle:'Problème de froid',           icone:'❄️' },
+    { id:'produit',   libelle:'Produit non conforme',        icone:'📦' },
+    { id:'proprete',  libelle:'Propreté ou hygiène',         icone:'🧽' },
+    { id:'securite',  libelle:'Sécurité des personnes',       icone:'⚠️' },
+    { id:'client',    libelle:'Incident client',             icone:'🙋' },
+    { id:'autre',     libelle:'Autre',                       icone:'💬' }
+  ],
+  gravites: [
+    { id:'bloquant', libelle:'Bloquant — la boutique ne peut pas fonctionner', couleur:'bad' },
+    { id:'gene',     libelle:'Gênant — on travaille mais mal',                couleur:'warn' },
+    { id:'signale',  libelle:'À signaler — sans urgence',                     couleur:'ok' }
+  ],
+  photoConseillee: true
+};
+
 const TABS = {
   equipe: [
-    { id: 'accueil', label: 'Ma journée', icone: '🏠' },
-    { id: 'temp',    label: 'Frigos',     icone: '🌡️' },
-    { id: 'clean',   label: 'Nettoyage',  icone: '🧽' },
-    { id: 'reas',    label: 'Réassort',   icone: '📦' },
-    { id: 'plus',    label: 'Plus',       icone: '⋯'  }
+    { id: 'accueil',  label: 'Ma journée', icone: '🏠' },
+    { id: 'clean',    label: 'Nettoyage',  icone: '🧽' },
+    { id: 'lots',     label: 'Traçabilité',icone: '#️⃣' },
+    { id: 'reas',     label: 'Réassort',   icone: '📦' },
+    { id: 'temp',     label: 'Température',icone: '🌡️' },
+    { id: 'anomalie', label: 'Anomalie',   icone: '⚠️' }
   ],
   manager: [
     { id: 'controle', label: 'Contrôle',  icone: '🗼' },
@@ -849,27 +884,18 @@ const HEBDO = {
    ========================================================================== */
 const CHECKLISTS = {
   ouverture: [
-    { bloc: 'Avant l’ouverture aux clients', taches: [
-      { id:'o01', t:'Ouvrir la porte et refermer derrière soi, allumer les lumières', min:5 },
-      { id:'o02', t:'Mettre la tenue Amorino', min:5 },
-      { id:'o03', t:'Se laver les mains au savon antibactérien', min:5 },
-      { id:'o04', t:'Relever les températures des unités froides et les noter sur la fiche', min:5, lien:'temp' },
-      { id:'o05', t:'Vérifier que le congélateur −13 °C et la chambre froide ont bien été fermés', min:5 },
-      { id:'o06', t:'Sortir de nouvelles lavettes rose, jaune et bleue', min:5, jours:[1,3,6], async:'lavettes' },
-      { id:'o07', t:'Rincer les lavettes désinfectées au Bactalim la veille', min:5, joursSauf:[1,3,6] },
-      { id:'o08', t:'Nettoyer les inox visibles des vitrines −13 °C au Bactalim, rincer, sécher, allumer la vitrine', min:5, fiche:'f01' },
-      { id:'o09', t:'Installer tables et chaises, sortir la poubelle et le stoppeur, descendre le store', min:5 },
-      { id:'o10', t:'Nettoyer l’intérieur : balai, serpillière, surfaces visibles', min:5 },
-      { id:'o11', t:'À −13 °C atteints, remettre les bacs et macarons entamés la veille (finir les anciens avant d’en ouvrir)', min:10 },
-      { id:'o12', t:'Rincer à l’eau chaude les ustensiles laissés dans le Bactalim et les ranger', min:5 },
-      { id:'o13', t:'Laver et désinfecter les couvercles des bacs, les placer à −13 °C', min:5 },
-      { id:'o14', t:'Allumer le gaufrier et la crêpière', min:2 },
-      { id:'o15', t:'Allumer la radio Amorino puis compter le fond de caisse', min:5, lien:'caisse', obligatoire:true },
-      { id:'o16', t:'Vérifier la qualité de la chantilly maison (48 h maximum)', min:1, lien:'frigo' }
-    ]},
-    { bloc: 'Après l’ouverture aux clients', taches: [
-      { id:'o17', t:'Vérifier le −13 °C et y remonter bacs et macarons depuis la chambre froide', min:10 },
-      { id:'o18', t:'Faire le réassort : cornets, pots, serviettes, cuillères', min:20, lien:'reas' }
+    { bloc: 'Ouverture de la boutique', taches: [
+      { id:'o01', t:'Se mettre en tenue et retirer tous les bijoux', min:5 },
+      { id:'o02', t:'Se laver les mains au savon antibactérien', min:2 },
+      { id:'o03', t:'Relever les températures des unités froides', min:5, lien:'temp', obligatoire:true },
+      { id:'o04', t:'Nettoyer les vitrines, puis les allumer', min:10, fiche:'f01' },
+      { id:'o05', t:'Installer la terrasse', min:8 },
+      { id:'o06', t:'Passer le balai et la serpillière dans la boutique', min:8 },
+      { id:'o07', t:'Nettoyer les ustensiles dans le bac en inox', min:5 },
+      { id:'o08', t:'Allumer la crêpière et le gaufrier', min:2 },
+      { id:'o09', t:'Préparer la chantilly', min:5, fiche:'f03' },
+      { id:'o10', t:'Mettre les glaces dans la vitrine', min:10 },
+      { id:'o11', t:'Compter le fond de caisse', min:5, lien:'caisse', obligatoire:true }
     ]}
   ],
   fermeture: [
@@ -953,7 +979,8 @@ const CONFIG = {
   APP, SUPABASE, OFFLINE, PWA, ROLES, EQUIPE, POINTEUSE,
   DLC_RULES, DLC_SEUILS, DLC_MATCH, ENCEINTES, RELEVES,
   JOURS_SEMAINE, NETTOYAGE, REASSORT, REASSORT_CATS, RUPTURE,
-  PHASES, RELEVE, FICHES, PARFUMS, PARFUMS_ALIAS, FOURNISSEUR, TAILLES_BAC,
+  PHASES, RELEVE, FICHES, PARFUMS, PARFUMS_ALIAS, FAMILLES_PRODUIT, ANOMALIES,
+  FOURNISSEUR, TAILLES_BAC,
   INVENTAIRE_SEC, MOTIFS_PERTE, VOIX, SCANNER, PERIODES,
   SEUILS, FRAUDE, METEO, TABS, MENU_PLUS, PAGES, UI
 };

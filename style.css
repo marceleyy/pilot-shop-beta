@@ -523,6 +523,28 @@ select{background-image:linear-gradient(45deg,transparent 50%,var(--brume) 50%),
   background:none;border:0;color:var(--brume);font-size:13px;text-decoration:underline}
 #lg-reset:active{color:var(--corail-d)}
 
+/* --- Saisie de température : pas à pas, sur une seule ligne ------------- */
+.tmoment{display:flex;align-items:center;gap:8px;padding:10px 0}
+.tmoment + .tmoment{border-top:.5px solid rgba(15,32,39,.07)}
+.tm-lbl{width:54px;flex:0 0 auto;font-size:13px;font-weight:600;color:var(--brume)}
+.tm-pas{width:52px;height:52px;flex:0 0 auto;border-radius:14px;
+  background:rgba(255,255,255,.94);border:1.5px solid rgba(15,32,39,.12);
+  font-size:26px;font-weight:600;line-height:1;color:var(--ardoise)}
+.tm-pas:active{background:var(--fond-2);transform:scale(.93)}
+.tm-val{flex:1;min-width:0;height:52px;border-radius:14px;
+  background:rgba(255,255,255,.94);border:1.5px solid rgba(15,32,39,.12);
+  font-size:24px;font-weight:700;font-variant-numeric:tabular-nums}
+.tm-val small{font-size:13px;font-weight:500;opacity:.6;margin-left:2px}
+.tm-val.vert{background:var(--menthe-l);border-color:rgba(127,184,164,.55);color:var(--menthe-d)}
+.tm-val.rouge{background:var(--ambre-l);border-color:rgba(224,168,92,.55);color:var(--ambre-d)}
+.tm-val.crit{background:var(--corail-d);border-color:var(--corail-d);color:#fff}
+.tm-off{width:52px;height:52px;flex:0 0 auto;border-radius:14px;
+  background:rgba(255,255,255,.94);border:1.5px solid rgba(15,32,39,.12);
+  font-size:13px;font-weight:700;color:var(--brume)}
+.tm-off.on{background:var(--ardoise);border-color:var(--ardoise);color:#fff}
+.tm-hs{flex:1;text-align:center;font-size:15px;font-weight:600;color:var(--ardoise);
+  background:rgba(15,32,39,.06);border-radius:14px;padding:15px 0}
+
 /* --- 21. Impression : registre sanitaire -------------------------------- */
 #printview{display:none}
 @media print{
