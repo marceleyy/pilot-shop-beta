@@ -14,7 +14,7 @@
      4. Mémoire  — redimensionnement pendant le décodage, jamais 12 Mpx en RAM,
                    libération explicite, worker arrêté après inactivité.
 
-   Dépend de : Tesseract.js (CDN), et de PARFUMS / toast / showSheet / esc de
+   Dépend de : Tesseract.js (embarqué dans vendor/), et de PARFUMS / toast / showSheet / esc de
    l'application. Se charge APRÈS app.js : la fonction y remplace la simulation.
    ============================================================================= */
 
@@ -258,13 +258,28 @@ function pretraiter(canvas) {
    ========================================================================== */
 async function obtenirWorker() {
   if (OCR._worker) return OCR._worker;
-  if (typeof Tesseract === 'undefined') throw new Error('Tesseract absent — vérifiez le réseau');
+  if (typeof Tesseract === 'undefined') throw new Error('Moteur de lecture absent');
+
+  /* Chemins locaux : sans eux, le moteur va chercher son ouvrier, son cœur
+     WebAssembly et le modèle français sur un CDN — et le scan ne marche pas
+     hors ligne, alors que la réserve d'une boutique est justement l'endroit où
+     le réseau manque. Les quatre fichiers sont dans vendor/ et précachés. */
+  const chemins = {
+    workerPath: 'vendor/tesseract-worker.min.js',
+    corePath:   'vendor/tesseract-core-simd.wasm.js',
+    langPath:   'vendor/'
+  };
 
   let w;
   try {
-    w = await Tesseract.createWorker(OCR.langues, 1);        // API v5
+    w = await Tesseract.createWorker(OCR.langues, 1, chemins);   // API v5
   } catch (e) {
-    w = await Tesseract.createWorker();                      // API v4
+    /* Repli 1 : v5 sans chemins imposés, si un fichier local manque. */
+    try {
+      w = await Tesseract.createWorker(OCR.langues, 1);
+    } catch (e2) {
+      w = await Tesseract.createWorker(chemins);                 // API v4
+    }
   }
   if (typeof w.loadLanguage === 'function') {                // v4 : chargement manuel
     await w.load();
