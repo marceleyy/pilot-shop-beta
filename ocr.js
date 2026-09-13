@@ -313,24 +313,52 @@ const VERS_CHIFFRE = { O:'0', o:'0', Q:'0', D:'0', I:'1', l:'1', L:'1', '|':'1',
 const VERS_LETTRE  = { '0':'O', '1':'I', '5':'S', '8':'B', '6':'G', '2':'Z', '4':'A' };
 
 function extraireBatch(texte) {
-  const brut = texte.toUpperCase().replace(/[^0-9A-Z|\s]/g, ' ');
+  const T = texte.toUpperCase();
 
-  /* Passe 1 : le motif est déjà propre */
-  OCR.batch.lastIndex = 0;
-  let m = OCR.batch.exec(brut);
-  if (m) return { code: m[1] + m[2], corrige: false };
+  /* 1. On s'ancre sur le mot BATCH. L'étiquette Amorino écrit
+        « Batch N° : 14001A », et c'est la seule occurrence fiable.
+        Sans cet ancrage, le premier motif « cinq chiffres + lettre » du texte
+        gagnait la course — et c'était souvent la DLUO ou le volume :
+        « 2026 Litres » donnait 52026L, « 28 06 2026 » donnait 46700S. */
+  const ancre = T.match(/BAT[CGO]H[^0-9A-Z]{0,12}(?:N[^0-9A-Z]{0,4})?([\s\S]{0,24})/);
 
-  /* Passe 2 : six caractères plausibles collés, on corrige les confusions
-     classiques selon la position — un 0 en dernière place est un O. */
-  const jetons = brut.split(/\s+/).filter(t => t.length >= 5 && t.length <= 8);
+  const chercher = src => {
+    const brut = src.replace(/[^0-9A-Z]/g, ' ');
+    const re = /(\d{5})\s*([A-Z])/g;
+    let m;
+    while ((m = re.exec(brut)) !== null) {
+      const n = m[1];
+      /* Un groupe qui commence par une année plausible est une date, pas un lot */
+      if (/^20[2-4]\d/.test(n)) continue;
+      if (n.slice(1) === '2026' || n.slice(1) === '2027' || n.slice(1) === '2028') continue;
+      return { code: n + m[2], corrige: false };
+    }
+    return null;
+  };
+
+  if (ancre) { const r = chercher(ancre[1]); if (r) return r; }
+
+  /* 2. Repli sur tout le texte, dates et unités retirées au préalable. */
+  const sansDates = T
+    .replace(/\d{2}[\/.\-]\d{2}[\/.\-]\d{2,4}/g, ' ')
+    .replace(/\b20[2-4]\d\b/g, ' ')
+    .replace(/\bLITRES?\b|\bVOLUME\b|\bKG\b|\bNET\b|\bWT\b/g, ' ');
+  const r2 = chercher(sansDates);
+  if (r2) return r2;
+
+  /* 3. Dernier recours : correction des confusions de caractères. */
+  const jetons = sansDates.replace(/[^0-9A-Z]/g, ' ').split(/\s+/)
+    .filter(t => t.length >= 5 && t.length <= 8);
   for (const t of jetons) {
     const c = t.split('');
     let chiffres = '', reste = '';
     for (let i = 0; i < c.length && chiffres.length < 5; i++) {
       const ch = VERS_CHIFFRE[c[i]] !== undefined ? VERS_CHIFFRE[c[i]] : c[i];
-      if (/[0-9]/.test(ch)) chiffres += ch; else if (chiffres.length) { reste = c.slice(i).join(''); break; }
+      if (/[0-9]/.test(ch)) chiffres += ch;
+      else if (chiffres.length) { reste = c.slice(i).join(''); break; }
     }
     if (chiffres.length !== 5) continue;
+    if (/^20[2-4]\d/.test(chiffres)) continue;
     if (!reste) reste = t.slice(-1);
     const l0 = reste[0];
     const lettre = VERS_LETTRE[l0] !== undefined ? VERS_LETTRE[l0] : l0;
