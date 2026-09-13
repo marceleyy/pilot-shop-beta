@@ -161,13 +161,23 @@
            try { motif = (await r.text()).slice(0, 300); } catch (x) {}
            err.motif = motif;
            if (r.status === 401 || r.status === 403) {
-             /* Un refus d'authentification n'est plus une anomalie depuis que la
-                base exige un jeton : c'est le comportement normal d'un appareil
-                non rattaché. Le message doit dire quoi faire, pas alarmer. */
+             /* Avant d'alarmer, on tente un renouvellement silencieux : une
+                session qui vient d'expirer se répare toute seule, et l'équipe
+                n'a rien à savoir. On n'affiche le bandeau que si ça échoue. */
+             let repare = false;
+             if (typeof renouveler === 'function' && typeof appareilRattache === 'function'
+                 && appareilRattache()) {
+               try { repare = !!(await renouveler()); } catch (x) {}
+             }
+             if (repare) {
+               STATE.erreurBase = null;
+               clearTimeout(to);
+               throw Object.assign(new Error('jeton renouvelé, à rejouer'), { http:false, rejouer:true });
+             }
              const rattache = (typeof appareilRattache === 'function') ? appareilRattache() : true;
              STATE.erreurBase = rattache
                ? 'Session expirée — rattachez cet appareil'
-               : 'Appareil non rattaché — vos saisies restent ici';
+               : 'Appareil non rattaché';
            }
            else if (r.status === 404) STATE.erreurBase = 'Table introuvable';
            else if (r.status === 413) STATE.erreurBase = 'Donnée trop lourde';
@@ -413,10 +423,19 @@
      /* Sans clés Supabase, tout est local par choix : pas de bandeau alarmiste. */
      const configure = (typeof DB !== 'undefined' && DB.configure);
      if (!configure) { b.classList.remove('on'); return; }
-   
+
+     /* Un bandeau qui annonce un problème sans offrir de solution est un
+        cul-de-sac : on le rend cliquable quand l'action existe. */
+     const besoinRattachement = STATE.erreurBase &&
+       /rattach|expir/i.test(STATE.erreurBase);
+     b.classList.toggle('agir', !!besoinRattachement);
+     b.onclick = besoinRattachement ? reparerSession : null;
+
      if (STATE.erreurBase) {
        b.classList.add('on');
-       if (msg) msg.textContent = STATE.erreurBase + ' — vos saisies restent sur l’iPad';
+       if (msg) msg.textContent = besoinRattachement
+         ? STATE.erreurBase + ' — touchez ici'
+         : STATE.erreurBase + ' — vos saisies restent sur l’iPad';
      } else if (!STATE.enLigne) {
        b.classList.add('on');
        if (msg) msg.textContent = PWA.bannerOffline;
@@ -424,6 +443,39 @@
        b.classList.remove('on');
      }
      $('#offline-n').textContent = STATE.fileAttente ? '· ' + STATE.fileAttente + ' en attente' : '';
+   }
+
+   /* Réparation en un geste : on tente d'abord un renouvellement silencieux,
+      et on ne dérange la personne que si celui-ci échoue vraiment. */
+   let reparationEnCours = false;
+   async function reparerSession() {
+     if (reparationEnCours) return;
+     reparationEnCours = true;
+     try {
+       if (typeof renouveler === 'function') {
+         const s = await renouveler();
+         if (s) {
+           STATE.erreurBase = null;
+           majBandeau();
+           if (typeof journaliserSync === 'function') await journaliserSync();
+           majBandeau();
+           toast('Connexion rétablie');
+           return;
+         }
+       }
+       if (typeof ecranRattachement === 'function') {
+         await ecranRattachement();
+         STATE.erreurBase = null;
+         majBandeau();
+         if (typeof journaliserSync === 'function') await journaliserSync();
+         majBandeau();
+         toast('Appareil rattaché');
+       }
+     } catch (e) {
+       toast('Échec du rattachement', 'erreur');
+     } finally {
+       reparationEnCours = false;
+     }
    }
    
    /* Sonde légère : rétablit l'état en ligne dès que la base répond de nouveau. */

@@ -1059,6 +1059,13 @@ body::before{display:none!important}
 #sheet-corps .tache .tn{display:block;font-size:15px;line-height:1.4;font-weight:400;
   white-space:normal;overflow-wrap:anywhere}
 
+/* Bandeau cliquable : quand une action peut résoudre le problème, il doit se
+   voir et s'inviter à être touché. Un bandeau qui annonce sans rien proposer
+   n'est qu'un reproche permanent. */
+#offline.agir{cursor:pointer;padding-top:12px;padding-bottom:12px}
+#offline.agir .msg{text-decoration:underline;text-underline-offset:3px}
+#offline.agir:active{filter:brightness(.94)}
+
 /* --- 21. Impression : registre sanitaire -------------------------------- */
 #printview{display:none}
 @media print{
