@@ -16,7 +16,12 @@
      ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
    
    const num = v => { const x = parseFloat(String(v).replace(',', '.')); return isFinite(x) ? x : 0; };
-   const n1  = v => (Number(v) || 0).toFixed(1);
+   /* Une décimale, à la française. La version précédente rendait « 1234.6 » :
+      point décimal anglais et aucun séparateur de milliers, alors que eur()
+      juste à côté affiche « 1 234,56 € ». Les deux se côtoient dans l'écran
+      Stock, où les litres voisinent avec les kilos. */
+   const n1  = v => (Number(v) || 0).toLocaleString('fr-FR',
+     { minimumFractionDigits: 1, maximumFractionDigits: 1 });
    const n2  = v => (Number(v) || 0).toFixed(2);
    const eur = v => (Number(v) || 0).toLocaleString(APP.locale, { style:'currency', currency:APP.devise });
    
