@@ -116,6 +116,7 @@ async function ajouterMouvement(type, cle, qte, extra) {
   _moisCache = { cle: cm, lignes: l };
   invaliderStock();
   await DB.set(cm, l);
+  await noterMois(cm);
   return m;
 }
 
@@ -134,13 +135,36 @@ function moisAParcourir(depuisJour) {
   return out;
 }
 
+/* Index des mois qui contiennent réellement des mouvements.
+   Sans lui, on interrogeait douze mois à l'aveugle, dont onze vides. Le
+   navigateur ne lançant que six requêtes simultanées par domaine, cela faisait
+   trois vagues successives : 223 ms pour afficher le stock. */
+async function moisConnus() {
+  const idx = await DB.get('stock:mois', null);
+  return Array.isArray(idx) ? idx : null;
+}
+async function noterMois(cle) {
+  const idx = (await DB.get('stock:mois', [])) || [];
+  if (idx.indexOf(cle) >= 0) return;
+  idx.push(cle);
+  idx.sort();
+  await DB.set('stock:mois', idx.slice(-60));
+}
+
 /* Lecture de tous les mouvements utiles, anciens formats compris.
-   Les mois sont lus EN PARALLÈLE : en séquence, douze mois faisaient douze
-   allers-retours à la suite, soit 437 ms pour afficher l'écran Stock. En
-   parallèle, on ne paie qu'une fois la latence. */
-async function tousMouvements(depuisJour) {
-  const cles = ['stock:mouvements'].concat(moisAParcourir(depuisJour));
-  const blocs = await Promise.all(cles.map(c => DB.get(c, []).catch(() => [])));
+   On ne lit que les mois qui existent, et en parallèle. */
+async function tousMouvements(depuisJour, connusDejaLus) {
+  const attendus = moisAParcourir(depuisJour);
+  const connus = (connusDejaLus !== undefined) ? connusDejaLus : await moisConnus();
+  /* Premier démarrage sans index : on interroge la fenêtre complète une fois,
+     puis l'index prend le relais. */
+  const cles = connus
+    ? attendus.filter(c => connus.indexOf(c) >= 0)
+    : attendus;
+
+  const blocs = await Promise.all(
+    ['stock:mouvements'].concat(cles).map(c => DB.get(c, []).catch(() => [])));
+
   const out = [];
   blocs.forEach(l => { if (l && l.length) out.push.apply(out, l); });
   return out.sort((a, b) => String(a.a || a.at).localeCompare(String(b.a || b.at)));
@@ -209,8 +233,13 @@ async function stockReel() {
   if (_stockCache.valeur && (Date.now() - _stockCache.at) < STOCK_CACHE_MS) {
     return _stockCache.valeur;
   }
-  const inv = await DB.get('stock:inventaire', null);
-  const mouv = await tousMouvements(inv ? inv.jour : null);
+  /* L'inventaire et l'index des mois sont lus ensemble : en séquence, chacun
+     coûtait sa propre latence avant même de commencer à lire les mois. */
+  const [inv, connus] = await Promise.all([
+    DB.get('stock:inventaire', null).catch(() => null),
+    moisConnus().catch(() => null)
+  ]);
+  const mouv = await tousMouvements(inv ? inv.jour : null, connus);
 
   const out = {};
   const dateInv = inv ? inv.at : null;
