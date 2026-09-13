@@ -882,6 +882,112 @@ body{font-size:var(--t-corps);line-height:1.5}
 #rattach .lg p{font-size:14px;color:var(--brume);margin-top:4px}
 #rattach input{font-size:16px}     /* 16 px minimum : en dessous, iOS zoome */
 
+/* =============================================================================
+   26. ALIGNEMENT SUR PILLOT-RESTAURANT
+   Les deux outils doivent se reconnaître comme venant de la même maison.
+   Relevé fait sur l'application en ligne :
+     • fond ardoise très clair, cartes blanches, filet d'un pixel #E2E8F0 ;
+     • ombre quasi nulle — 0 1px 4px à 4 % — là où j'avais des ombres portées ;
+     • deux rayons seulement : 14 px pour les cartes, 12 px pour les blocs
+       intérieurs ;
+     • les statuts ne sont pas des traits de couleur mais des blocs teintés très
+       pâles — fond rose très clair pour une rupture, ambre pâle pour une alerte.
+       C'est plus calme et ça se lit mieux de loin qu'un liséré.
+
+   Je renonce au serif pour les titres : Pillot utilise Inter en graisse 800, et
+   deux polices de titre différentes feraient deux produits étrangers l'un à
+   l'autre. L'unité de famille passe avant ma préférence.
+   ========================================================================== */
+
+:root{
+  --fond:      #F1F5F9;   /* ardoise 100 */
+  --fond-2:    #E9EEF4;
+  --blanc:     #FFFFFF;
+  --line:      #E2E8F0;   /* ardoise 200 */
+  --line-fort: #CBD5E1;   /* ardoise 300 */
+  --encre:     #0F172A;   /* ardoise 900 */
+  --ardoise:   #334155;   /* ardoise 700 */
+  --brume:     #64748B;   /* ardoise 500 */
+  --brume-2:   #94A3B8;   /* ardoise 400 */
+
+  --rouge:   #DC2626;  --rouge-l:  #FEF2F2;
+  --ambre-d: #D97706;  --ambre-l:  #FFFBEB;
+  --vert:    #16A34A;  --vert-l:   #F0FDF4;
+  --bleu:    #2563EB;  --bleu-l:   #EFF6FF;
+
+  --r-carte: 14px;
+  --r-bloc:  12px;
+  --r-btn:   12px;
+  --ombre:   0 1px 4px rgba(0,0,0,.04);
+}
+
+body{background:var(--fond);color:var(--encre);
+  font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Inter,Roboto,Arial,sans-serif}
+
+/* --- Titres : Inter en graisse 800, comme Pillot ------------------------- */
+#topbar h1,#page > .card:first-child h2,#page > *:first-child + .card h2,
+#rattach .lg h1,#amorcage .lg h1{
+  font-family:Inter,-apple-system,BlinkMacSystemFont,sans-serif;
+  font-weight:800;letter-spacing:-.025em;line-height:1.15}
+#topbar h1{font-size:22px}
+#page > .card:first-child h2{font-size:21px}
+
+/* --- Cartes ------------------------------------------------------------- */
+.card{background:var(--blanc);border:1px solid var(--line);
+  border-radius:var(--r-carte);box-shadow:var(--ombre);padding:18px 20px}
+.card.menthe,.card.corail,.card.ambre,.card.ciel,.card.sable,.card.solide{
+  background:var(--blanc);border:1px solid var(--line);box-shadow:var(--ombre)}
+.card.plat{background:transparent;border:0;box-shadow:none;padding:0}
+
+/* --- Statuts : blocs teintés, pas de liséré ---------------------------- */
+.alerte,.verdict,.rappel,.lecture,.aide{border-radius:var(--r-bloc);border:0}
+.alerte.bad,.verdict.bad {background:var(--rouge-l);color:#991B1B}
+.alerte.warn,.verdict.warn{background:var(--ambre-l);color:#92400E}
+.alerte.ok,.verdict.ok   {background:var(--vert-l); color:#166534}
+.verdict.n,.rappel,.lecture{background:var(--fond-2);color:var(--ardoise)}
+
+.pill{border-radius:8px;font-size:11.5px;font-weight:600;padding:4px 10px;border:0}
+.pill.ok  {background:var(--vert-l); color:#166534}
+.pill.warn{background:var(--ambre-l);color:#92400E}
+.pill.bad {background:var(--rouge-l);color:#991B1B}
+.pill.n   {background:var(--fond-2); color:var(--brume)}
+
+/* Les tâches faites : bloc vert pâle plutôt qu'un trait */
+.tache{background:var(--blanc);border:1px solid var(--line);border-radius:var(--r-bloc)}
+.tache.on{background:var(--vert-l);border-color:#BBF7D0}
+.tache.on .tn{color:#166534}
+.tache .box{border:1.5px solid var(--line-fort);border-radius:10px;background:var(--blanc)}
+.tache.on .box{background:var(--vert);border-color:var(--vert);color:#fff}
+
+/* --- Boutons ------------------------------------------------------------ */
+.btn{border-radius:var(--r-btn);font-weight:600;box-shadow:none}
+.btn.menthe{background:var(--encre);color:#fff}
+.btn.menthe:active{background:#000}
+.btn.clair,.btn.ciel{background:var(--blanc);color:var(--encre);border:1px solid var(--line-fort)}
+.btn.corail{background:var(--rouge);color:#fff}
+.btn.fantome{background:transparent;color:var(--brume)}
+
+/* --- Champs ------------------------------------------------------------- */
+input[type=text],input[type=number],input[type=date],input[type=month],
+input[type=password],input[type=search],input[type=time],select,textarea{
+  background:var(--blanc);border:1px solid var(--line-fort);border-radius:var(--r-btn)}
+
+/* --- Barres ------------------------------------------------------------- */
+#tabbar{background:rgba(255,255,255,.97);border-top:1px solid var(--line)}
+#tabbar button{min-height:56px}
+#topbar{background:transparent}
+.tseg button,.phase-nav button{border-radius:var(--r-bloc);border:1px solid var(--line);
+  background:var(--blanc)}
+.tseg button.on,.phase-nav button.on{border-color:var(--encre);box-shadow:var(--ombre)}
+
+/* --- Lignes de température --------------------------------------------- */
+.tligne{background:var(--blanc);border:1px solid var(--line);border-radius:var(--r-bloc)}
+.tligne.saisi{background:var(--bleu-l);border-color:#BFDBFE}
+.tligne.valide{background:var(--vert-l);border-color:#BBF7D0;box-shadow:none}
+.tm-val.vert{background:var(--vert-l);border-color:#BBF7D0;color:#166534}
+.tm-val.rouge{background:var(--ambre-l);border-color:#FDE68A;color:#92400E}
+.tm-val.crit{background:var(--rouge);border-color:var(--rouge);color:#fff}
+
 /* --- 21. Impression : registre sanitaire -------------------------------- */
 #printview{display:none}
 @media print{
