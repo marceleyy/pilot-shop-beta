@@ -579,6 +579,101 @@ select{background-image:linear-gradient(45deg,transparent 50%,var(--brume) 50%),
   color:var(--brume-2);line-height:1}
 .tache.on .tnum{color:var(--menthe-d)}
 
+/* =============================================================================
+   24. PASSE DE DESIGN
+   Quatre principes, appliqués en surcharge pour rester réversibles :
+     1. Un serif large pour les titres de page, contrasté avec le sans-serif.
+        Le contraste de deux familles est ce qui distingue une interface
+        dessinée d'une interface générée.
+     2. La couleur ne décore pas, elle informe. Cartes blanches, filet fin ;
+        la teinte est réservée aux statuts et aux alertes.
+     3. Du vide. Les marges valent autant que le contenu.
+     4. Pas d'emoji dans le mobilier de l'interface.
+   ========================================================================== */
+
+/* --- Typographie -------------------------------------------------------- */
+:root{
+  --serif: ui-serif, "New York", "Iowan Old Style", Georgia, "Times New Roman", serif;
+  --line: rgba(15,32,39,.09);
+  --line-fort: rgba(15,32,39,.16);
+}
+
+#topbar h1, #page > .card:first-child h2{
+  font-family:var(--serif);
+  font-weight:600;
+  letter-spacing:-.02em;
+  line-height:1.08;
+}
+#topbar h1{font-size:30px}
+#page > .card:first-child h2{font-size:26px}
+
+.entete h3{
+  font-size:11.5px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;
+  color:var(--brume);
+}
+
+/* --- Cartes : blanches, filet fin, pas d'ombre portée ------------------- */
+.card{
+  background:var(--blanc);
+  border:1px solid var(--line);
+  border-radius:14px;
+  box-shadow:none;
+  backdrop-filter:none;-webkit-backdrop-filter:none;
+  padding:18px;
+}
+/* Les variantes colorées ne teintent plus le fond : elles marquent le bord
+   gauche. On garde l'information, on perd le bariolage. */
+.card.menthe,.card.corail,.card.ambre,.card.ciel,.card.sable,.card.solide{
+  background:var(--blanc);
+  border:1px solid var(--line);
+}
+.card.menthe{box-shadow:inset 3px 0 0 var(--menthe-d)}
+.card.corail{box-shadow:inset 3px 0 0 var(--corail-d)}
+.card.ambre {box-shadow:inset 3px 0 0 var(--ambre-d)}
+.card.ciel  {box-shadow:inset 3px 0 0 var(--ciel-d)}
+.card.sable {box-shadow:inset 3px 0 0 var(--sable)}
+.card.plat  {background:transparent;border:0;padding:0}
+
+/* --- Boutons : un seul plein par écran ---------------------------------- */
+.btn{border-radius:11px;font-weight:600;letter-spacing:-.006em;box-shadow:none}
+.btn.menthe{background:var(--encre);color:#fff}
+.btn.menthe:active{background:#000}
+.btn.clair{background:var(--blanc);color:var(--encre);border:1px solid var(--line-fort)}
+.btn.ciel{background:var(--blanc);color:var(--encre);border:1px solid var(--line-fort)}
+.btn.corail{background:var(--corail-d);color:#fff}
+.btn.xl{min-height:54px;font-size:16px}
+
+/* --- Pastilles : la seule couleur qui reste ----------------------------- */
+.pill{font-size:11.5px;font-weight:600;padding:4px 10px;border-radius:7px;border:0}
+.pill.ok  {background:#E8F3EE;color:#2F6B53}
+.pill.warn{background:#FBF0DF;color:#8C6320}
+.pill.bad {background:#FBEAE9;color:#A8423B}
+.pill.n   {background:#F1F3F4;color:#78868C}
+
+/* --- Champs ------------------------------------------------------------- */
+input[type=text],input[type=number],input[type=date],input[type=month],
+input[type=password],input[type=search],input[type=time],select,textarea{
+  background:var(--blanc);border:1px solid var(--line-fort);border-radius:11px;
+}
+.f{font-size:12px;font-weight:600;letter-spacing:.01em;color:var(--brume);text-transform:none}
+
+/* --- Barre du bas : sobre ---------------------------------------------- */
+#tabbar{background:rgba(255,255,255,.94);border-top:1px solid var(--line);box-shadow:none}
+#tabbar button{font-size:11.5px;font-weight:600;color:var(--brume-2);
+  display:flex;align-items:center;justify-content:center;padding:0 4px;
+  border-top:2px solid transparent}
+#tabbar button .ti{display:none}          /* plus d'emoji dans la barre */
+#tabbar button.on{color:var(--encre);border-top-color:var(--encre)}
+
+/* --- Respiration -------------------------------------------------------- */
+#page{padding-top:6px}
+.stack{gap:10px}
+.entete{margin:26px 0 10px}
+.card + .card{margin-top:12px}
+
+/* --- Textes explicatifs : discrets, pas absents ------------------------- */
+.card .sub,.card .cs{font-size:13.5px;color:var(--brume);line-height:1.4}
+
 /* --- 21. Impression : registre sanitaire -------------------------------- */
 #printview{display:none}
 @media print{

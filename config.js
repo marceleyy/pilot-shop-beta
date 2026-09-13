@@ -727,21 +727,24 @@ const ANOMALIES = {
   photoConseillee: true
 };
 
+/* La barre du bas n'affiche plus d'emoji : un pictogramme coloré par onglet
+   fait « bricolage ». Le libellé seul, avec l'onglet actif en encre, suffit —
+   c'est ce que font les applications professionnelles de ce secteur. */
 const TABS = {
   equipe: [
-    { id: 'accueil',  label: 'Ma journée', icone: '🏠' },
-    { id: 'clean',    label: 'Nettoyage',  icone: '🧽' },
-    { id: 'lots',     label: 'Traçabilité',icone: '#️⃣' },
-    { id: 'reas',     label: 'Réassort',   icone: '📦' },
-    { id: 'temp',     label: 'Température',icone: '🌡️' },
-    { id: 'anomalie', label: 'Anomalie',   icone: '⚠️' }
+    { id: 'accueil',  label: 'Ma journée' },
+    { id: 'clean',    label: 'Nettoyage' },
+    { id: 'lots',     label: 'Traçabilité' },
+    { id: 'reas',     label: 'Réassort' },
+    { id: 'temp',     label: 'Température' },
+    { id: 'anomalie', label: 'Anomalie' }
   ],
   manager: [
-    { id: 'controle', label: 'Contrôle',  icone: '🗼' },
-    { id: 'ecarts',   label: 'Écarts',    icone: '📊' },
-    { id: 'frigo',    label: 'Frigo',     icone: '🧊' },
-    { id: 'periodes', label: 'Périodes',  icone: '📅' },
-    { id: 'plus',     label: 'Plus',      icone: '⋯'  }
+    { id: 'controle', label: 'Contrôle' },
+    { id: 'ecarts',   label: 'Écarts' },
+    { id: 'frigo',    label: 'Frigo' },
+    { id: 'periodes', label: 'Périodes' },
+    { id: 'plus',     label: 'Plus' }
   ]
 };
 
