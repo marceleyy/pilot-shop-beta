@@ -394,24 +394,28 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
      const total = blocs.reduce((s, b) => s + b.taches.length, 0);
      const faits = blocs.reduce((s, b) => s + b.taches.filter(t => rec[t.id] && rec[t.id].ok).length, 0);
    
-     const ligne = t => {
+     const ligne = (t, n) => {
      const v = rec[t.id] || {};
      const preuve = preuves.filter(p => p.tache === t.id)[0];
      /* Une tâche restreinte à certains jours est une tâche périodique :
-        elle exige une photo, comme les tâches hebdomadaires du nettoyage. */
+     elle exige une photo, comme les tâches hebdomadaires du nettoyage. */
      const besoinPhoto = PREUVE.actif &&
      (PREUVE.tachesObligatoires.indexOf(t.id) >= 0 ||
-      (PREUVE.hebdoObligatoire && (t.jours || t.joursSauf || t.async)));
+     (PREUVE.hebdoObligatoire && (t.jours || t.joursSauf || t.async)));
      return '<div class="tache' + (v.ok ? ' on' : '') + '">' +
+     '<span class="tnum">' + n + '</span>' +
      '<button class="box" data-t="' + t.id + '">✓</button>' +
      '<span class="tx"><span class="tn">' + esc(t.t) + '</span>' +
-     '<span class="tm" data-min="' + t.min + '">' + (v.ok ? esc(v.par) + ' · ' + heure(v.at) : t.min + ' min') +
-     (besoinPhoto ? ' · photo requise' : '') + '</span></span>' +
+     (v.ok || besoinPhoto
+     ? '<span class="tm">' + (v.ok ? esc(v.par) + ' · ' + heure(v.at) : '') +
+       (besoinPhoto ? (v.ok ? ' · ' : '') + 'photo requise' : '') + '</span>'
+       : '') +
+     '</span>' +
      (t.minuteur ? '<button class="btn clair sm" data-min="' + t.minuteur + '" data-nom="' + esc(t.t) + '">⏱️</button>' : '') +
-         (besoinPhoto ? '<button class="btn ' + (preuve ? 'menthe' : 'clair') + ' sm" data-photo="' + t.id +
-        '" data-lib="' + esc(t.t) + '">' + (preuve ? '✓📷' : '📷') + '</button>' : '') +
-      (t.lien ? '<button class="btn clair sm" data-go="' + t.lien + '">→</button>' : '') +
-      '</div>';
+     (besoinPhoto ? '<button class="btn ' + (preuve ? 'menthe' : 'clair') + ' sm" data-photo="' + t.id +
+       '" data-lib="' + esc(t.t) + '">' + (preuve ? '✓📷' : '📷') + '</button>' : '') +
+     (t.lien ? '<button class="btn clair sm" data-go="' + t.lien + '">→</button>' : '') +
+         '</div>';
   };
    
      $('#page').innerHTML =
@@ -448,13 +452,24 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
              '<span class="mi-fl">›</span></button>';
              }).join('') + '</div>')
    
-         : carte(entete(PHASES.filter(p => p.id === phase)[0].icone,
-             'Check-liste officielle · ' + (phase === 'ouverture' ? 'ouverture' : 'fermeture'),
-             faits + ' sur ' + total + ' tâches · procédure Amorino MOP') +
-             '<div class="jauge" style="margin-bottom:16px"><i style="width:' +
-             (total ? Math.round(faits / total * 100) : 0) + '%"></i></div>' +
-             blocs.map(b => '<div class="entete"><h3>' + esc(b.bloc) + '</h3></div>' +
-               '<div class="stack">' + b.taches.map(ligne).join('') + '</div>').join(''), 'solide'));
+         : (function () {
+         /* Numérotation continue sur toute la procédure, tous blocs confondus. */
+         let n = 0;
+         const vp = rec['_valide_' + phase];
+         return carte(entete(PHASES.filter(p => p.id === phase)[0].icone,
+           'Procédure d’' + (phase === 'ouverture' ? 'ouverture' : 'e fermeture'),
+         faits + ' sur ' + total + ' tâches') +
+            '<div class="jauge" style="margin-bottom:16px"><i style="width:' +
+            (total ? Math.round(faits / total * 100) : 0) + '%"></i></div>' +
+            (vp ? '<div class="alerte ok" style="margin-bottom:14px"><span class="ai">✓</span>' +
+              '<div><b>Procédure validée</b><p>Par ' + esc(vp.par) + ' à ' + heure(vp.at) + '.</p></div></div>' : '') +
+            blocs.map(b => (blocs.length > 1 ? '<div class="entete"><h3>' + esc(b.bloc) + '</h3></div>' : '') +
+              '<div class="stack">' + b.taches.map(t => ligne(t, ++n)).join('') + '</div>').join('') +
+            '<button class="btn ' + (vp ? 'clair' : 'menthe') + ' bloc xl" id="valproc" style="margin-top:18px">' +
+            (vp ? '✓ Déjà validée — revalider'
+                : 'Valider la procédure' + (faits < total ? ' (' + (total - faits) + ' restante' + (total - faits > 1 ? 's' : '') + ')' : '')) +
+            '</button>', 'solide');
+        })());
    
      $('#ptg').onclick = () => pointer(!STATE.service);
      $$('[data-ph]').forEach(b => b.onclick = () => { STATE.phase = b.dataset.ph; rendre('accueil'); });
@@ -478,9 +493,7 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
          const ligne2 = b.parentElement;
     ligne2.classList.toggle('on', actif);
     const tm = ligne2.querySelector('.tm');
-    if (tm) tm.textContent = actif
-      ? STATE.user.prenom + ' · ' + heure(nowISO())
-      : (tm.dataset.min || '') + ' min';
+    if (tm) tm.textContent = actif ? STATE.user.prenom + ' · ' + heure(nowISO()) : '';
     vibrer(UI.vibration.ok);
 
     /* Compteur et barre d'avancement, recalculés sans tout reconstruire */
@@ -503,7 +516,28 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
      });
    
      $$('[data-min]').forEach(b => b.onclick = () => minuteur(+b.dataset.min, b.dataset.nom));
-   };
+
+  const vp = $('#valproc');
+  if (vp) vp.onclick = async () => {
+    const restants = blocs.reduce((a, b) => a.concat(b.taches), [])
+      .filter(t => !(rec[t.id] && rec[t.id].ok));
+    const finir = async () => {
+      rec['_valide_' + phase] = { par:STATE.user.prenom, id:STATE.user.id, at:nowISO() };
+      await DB.set('checklist:' + j, rec);
+      await feed('ok', STATE.user.prenom + ' a validé la procédure d’' +
+        (phase === 'ouverture' ? 'ouverture' : 'e fermeture'));
+      toast('Procédure validée');
+      rendre('accueil');
+    };
+    if (restants.length) {
+      confirmer('Valider avec ' + restants.length + ' tâche(s) non faite(s) ?',
+        'Non faites : ' + restants.map(t => t.t).join(' · ') + '.',
+        'Valider quand même', finir);
+      return;
+    }
+    finir();
+  };
+};
    
    /* Minuteur des 10 minutes de contact du Bactalim */
    function minuteur(secondes, nom) {
@@ -992,13 +1026,20 @@ V.temp = async function () {
   if (!rec.valide) rec.valide = {};
 
   /* Un seul moment à l'écran : le matin ou le soir, jamais les deux.
-     Le moment proposé dépend de l'heure, mais reste changeable. */
+     Le moment proposé dépend de l'heure et de ce qui reste à faire. */
   const moments = RELEVES.moments;
-  if (!V.temp._m) {
+  if (!V.temp._m || V.temp._j !== j) {
+    V.temp._j = j;
     const h = new Date().getHours();
-    V.temp._m = (h < 15 && !rec.valide.m) ? 'm' : (rec.valide.s ? 'm' : 's');
+    if (!rec.valide.m && h < 15)      V.temp._m = 'm';
+    else if (!rec.valide.s)           V.temp._m = 's';
+    else if (!rec.valide.m)           V.temp._m = 'm';
+    else                              V.temp._m = (h < 15) ? 'm' : 's';
   }
-  const mom = moments.filter(x => x.id === V.temp._m)[0] || moments[0];
+  /* « let » et non « const » : le moment change quand on bascule, et toutes
+     les fonctions ci-dessous doivent suivre. Avec const, le clic sur « Soir »
+     changeait la mémoire mais l'écran restait sur le matin. */
+  let mom = moments.filter(x => x.id === V.temp._m)[0] || moments[0];
 
   const cle = e => mom.id + '_' + e.id;
   const brut = e => rec[cle(e)];
@@ -1080,7 +1121,12 @@ V.temp = async function () {
 
   function brancher() {
     $('#jj').onchange = ev => { V.temp._d = ev.target.value; rendre('temp'); };
-    $$('[data-mom]').forEach(b => b.onclick = () => { V.temp._m = b.dataset.mom; dessiner(); });
+    $$('[data-mom]').forEach(b => b.onclick = () => {
+      if (b.dataset.mom === mom.id) return;
+      V.temp._m = b.dataset.mom;
+      mom = moments.filter(x => x.id === V.temp._m)[0] || moments[0];
+      dessiner();
+    });
 
     $$('[data-pas]').forEach(b => b.onclick = async () => {
       const e = ENCEINTES.filter(x => x.id === b.dataset.e)[0];

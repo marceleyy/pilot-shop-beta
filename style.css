@@ -573,6 +573,12 @@ select{background-image:linear-gradient(45deg,transparent 50%,var(--brume) 50%),
 .tligne.valide .tl-etat{background:var(--menthe-d);color:#fff}
 .tl-bas{display:flex;align-items:center;gap:8px}
 
+/* Numéro d'ordre devant chaque étape d'une procédure */
+.tnum{flex:0 0 auto;width:24px;text-align:right;
+  font-size:14px;font-weight:700;font-variant-numeric:tabular-nums;
+  color:var(--brume-2);line-height:1}
+.tache.on .tnum{color:var(--menthe-d)}
+
 /* --- 21. Impression : registre sanitaire -------------------------------- */
 #printview{display:none}
 @media print{

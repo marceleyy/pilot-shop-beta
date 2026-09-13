@@ -367,6 +367,9 @@
      $('#sheet-corps').innerHTML = html;
      $('#sheet').hidden = false;
      document.body.style.overflow = 'hidden';
+     /* Une entrée d'historique pour la feuille : le bouton retour du téléphone
+        la referme au lieu de quitter l'écran, voire l'application. */
+     try { history.pushState({ vue:STATE.view, feuille:true }, '', location.pathname); } catch (e) {}
      $$('[data-fermer]').forEach(b => b.onclick = closeSheet);
      const p = $('#sheet-corps input, #sheet-corps textarea');
      if (p && p.dataset.autofocus !== undefined) setTimeout(() => p.focus(), 120);
@@ -637,7 +640,7 @@
 /* Vues dont le contenu n'a aucun sens sans période définie */
    const VUES_PERIODE = ['ecarts', 'periodes', 'inv'];
 
-   async function rendre(id) {
+   async function rendre(id, viaHistorique) {
    if (!V[id]) { toast('Vue indisponible'); return; }
    /* On quitte les réglages : on arrête le rafraîchissement de l'indicateur */
    if (V.reglages && V.reglages._t) { clearInterval(V.reglages._t); V.reglages._t = null; }
@@ -680,6 +683,14 @@
        $('#rt').onclick = () => rendre(id);
      }
      $$('#page [data-go]').forEach(b => b.onclick = () => rendre(b.dataset.go));
+
+     /* Chaque vue laisse une trace dans l'historique du navigateur : sans cela,
+        le bouton « retour » du téléphone quittait purement et simplement
+        l'application au lieu de revenir à l'écran précédent. */
+     if (!viaHistorique) {
+       try { history.pushState({ vue:id }, '', location.pathname); } catch (e) {}
+     }
+
      if (memeVue) {
     /* Deux passages : après peinture, puis après les images éventuelles. */
     window.scrollTo(0, scrollAvant);
@@ -1662,6 +1673,42 @@ async function demarrerConnexion() {
   } catch (e) { /* on reste sur l'écran des prénoms */ }
 }
 
+/* -----------------------------------------------------------------------------
+   BOUTON RETOUR DU TÉLÉPHONE
+   Une application d'une seule page n'a pas d'historique : un appui sur « retour »
+   quittait donc l'application, parfois au milieu d'une saisie. On lui donne un
+   comportement attendu : fermer la feuille ouverte, sinon revenir à l'accueil,
+   et ne laisser sortir que depuis l'accueil.
+   -------------------------------------------------------------------------- */
+function vueAccueil() {
+  return (STATE.user && STATE.user.role === 'manager') ? 'controle' : 'accueil';
+}
+
+window.addEventListener('popstate', function (ev) {
+  /* 1. Une feuille est ouverte : le retour la ferme, comme on l'attend.
+     showSheet a empilé une entrée d'historique, donc rien à rempiler ici. */
+  const sheet = document.getElementById('sheet');
+  if (sheet && !sheet.hidden) {
+    closeSheet();
+    return;
+  }
+
+  /* 2. Pas connecté : on laisse le navigateur faire son travail. */
+  if (!STATE.user) return;
+
+  /* 3. Une vue précédente existe : on y retourne. */
+  const cible = ev.state && ev.state.vue;
+  if (cible && V[cible]) { rendre(cible, true); return; }
+
+  /* 4. Rien derrière : on ramène à l'accueil plutôt que de quitter. Depuis
+     l'accueil lui-même, un second appui sortira vraiment. */
+  const accueil = vueAccueil();
+  if (STATE.view !== accueil) {
+    rendre(accueil, true);
+    try { history.pushState({ vue:accueil }, '', location.pathname); } catch (e) {}
+  }
+});
+
 /* =============================================================================
    19. DÉMARRAGE
    ========================================================================== */
@@ -1705,6 +1752,9 @@ async function demarrerConnexion() {
   initFeedback();
   purgerPreuves();          // les photos de plus de trois mois s'effacent seules
   renderNav();
+  /* Une première entrée d'historique, pour que le tout premier « retour »
+     ramène à l'accueil au lieu de sortir de l'application. */
+  try { history.replaceState({ vue:vueAccueil() }, '', location.pathname); } catch (e) {}
   rendre(STATE.user.role === 'manager' ? 'controle' : 'accueil');
 }
    

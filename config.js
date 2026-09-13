@@ -882,17 +882,16 @@ const HEBDO = {
 const CHECKLISTS = {
   ouverture: [
     { bloc: 'Ouverture de la boutique', taches: [
-      { id:'o01', t:'Se mettre en tenue et retirer tous les bijoux', min:5 },
-      { id:'o02', t:'Se laver les mains au savon antibactérien', min:2 },
-      { id:'o03', t:'Relever les températures des unités froides', min:5, lien:'temp', obligatoire:true },
-      { id:'o04', t:'Nettoyer les vitrines, puis les allumer', min:10, fiche:'f01' },
-      { id:'o05', t:'Installer la terrasse', min:8 },
-      { id:'o06', t:'Passer le balai et la serpillière dans la boutique', min:8 },
-      { id:'o07', t:'Nettoyer les ustensiles dans le bac en inox', min:5 },
-      { id:'o08', t:'Allumer la crêpière et le gaufrier', min:2 },
-      { id:'o09', t:'Préparer la chantilly', min:5, fiche:'f03' },
-      { id:'o10', t:'Mettre les glaces dans la vitrine', min:10 },
-      { id:'o11', t:'Compter le fond de caisse', min:5, lien:'caisse', obligatoire:true }
+      { id:'o01', t:'Se mettre en tenue et retirer tous les bijoux' },
+      { id:'o03', t:'Relever les températures des unités froides', lien:'temp', obligatoire:true },
+      { id:'o04', t:'Nettoyer les vitrines, puis les allumer', fiche:'f01' },
+      { id:'o05', t:'Installer la terrasse' },
+      { id:'o06', t:'Passer le balai et la serpillière dans la boutique' },
+      { id:'o07', t:'Nettoyer les ustensiles dans le bac en inox' },
+      { id:'o08', t:'Allumer la crêpière et le gaufrier' },
+      { id:'o09', t:'Préparer la chantilly', fiche:'f03' },
+      { id:'o10', t:'Mettre les glaces dans la vitrine' },
+      { id:'o11', t:'Compter le fond de caisse', lien:'caisse', obligatoire:true }
     ]}
   ],
   fermeture: [
