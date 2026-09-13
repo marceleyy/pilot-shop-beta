@@ -695,8 +695,9 @@ V.caisse = async function () {
     $('#page').innerHTML =
       navJour(j) +
       '<div class="tseg">' +
-      [['m', 'Ouverture'], ['s', 'Fermeture']].map(x =>
-        '<button class="' + (x[0] === mom ? 'on' : '') + '" data-mom="' + x[0] + '">' + x[1] +
+      [['m', 'Ouverture', 'matin'], ['s', 'Fermeture', 'soir']].map(x =>
+        '<button class="' + (x[0] === mom ? 'on' : '') + '" data-mom="' + x[0] + '">' +
+        ic(x[2], 20) + '<span class="tsl">' + x[1] + '</span>' +
         '<small>' + (r[x[0] + '_valide'] ? '✓ ' + heure(r[x[0] + '_valide'].at) : 'à faire') +
         '</small></button>').join('') + '</div>' +
 
@@ -1117,12 +1118,11 @@ V.hebdo = async function () {
 
   $('#page').innerHTML =
     navJour(j) +
-    carte('<h2>' + nomJour(j) + ' ' + fmtD(j) + '</h2>' +
-      '<div class="cs">' + (taches.length
+    carte('<div class="cs">' + (taches.length
         ? faits + ' sur ' + taches.length + ' tâches du jour'
         : 'Aucune tâche hebdomadaire prévue ce jour') + '</div>' +
       (taches.length
-        ? '<div class="jauge"><i style="width:' + Math.round(faits / taches.length * 100) + '%"></i></div>'
+        ? '<div class="jauge" style="margin-top:10px"><i style="width:' + Math.round(faits / taches.length * 100) + '%"></i></div>'
         : ''), 'solide') +
 
     (taches.length
@@ -1273,7 +1273,8 @@ V.temp = async function () {
       '<div class="tseg">' + moments.map(m => {
         const v = rec.valide[m.id];
         return '<button class="' + (m.id === mom.id ? 'on' : '') + '" data-mom="' + m.id + '">' +
-          (m.id === 'm' ? '☀️ ' : '🌙 ') + m.label +
+          ic(m.id === 'm' ? 'matin' : 'soir', 20) +
+          '<span class="tsl">' + m.label + '</span>' +
           '<small>' + (v ? '✓ validé à ' + heure(v.at) : 'à faire') + '</small></button>';
       }).join('') + '</div>' +
 
@@ -1646,12 +1647,11 @@ V.clean = async function () {
 
   $('#page').innerHTML =
     navJour(j) +
-    carte('<h2>' + nomJour(j) + ' ' + fmtD(j) + '</h2>' +
-      '<div class="cs">' + (taches.length
+    carte('<div class="cs">' + (taches.length
         ? faits + ' sur ' + taches.length + ' tâches faites'
         : 'Aucune tâche prévue ce jour') + '</div>' +
       (taches.length
-        ? '<div class="jauge" style="margin-top:12px"><i style="width:' +
+        ? '<div class="jauge" style="margin-top:10px"><i style="width:' +
           Math.round(faits / taches.length * 100) + '%"></i></div>'
         : ''), 'solide') +
 

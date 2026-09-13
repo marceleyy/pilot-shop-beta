@@ -623,7 +623,9 @@ const TRACES = {
   photo:    'M4 8h3l2-2h6l2 2h3v12H4zM12 17a4 4 0 110-8 4 4 0 010 8z',
   gauche:   'M15 5l-7 7 7 7',
   droite:   'M9 5l7 7-7 7',
-  valide:   'M4 12l5 5L20 7'
+  valide:   'M4 12l5 5L20 7',
+  matin:    'M12 6a6 6 0 100 12 6 6 0 000-12zM12 2v2M12 20v2M4 12H2M22 12h-2M5.6 5.6L4.2 4.2M19.8 19.8l-1.4-1.4M18.4 5.6l1.4-1.4M4.2 19.8l1.4-1.4',
+  soir:     'M20 14a8.5 8.5 0 01-10.5-10.5A8.5 8.5 0 1020 14z'
 };
 function ic(nom, taille) {
   const d = TRACES[nom];

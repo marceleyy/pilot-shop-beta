@@ -547,13 +547,15 @@ select{background-image:linear-gradient(45deg,transparent 50%,var(--brume) 50%),
 
 /* Bascule matin / soir : un seul moment à l'écran à la fois */
 .tseg{display:flex;gap:8px;margin-bottom:14px}
-.tseg button{flex:1;min-height:62px;border-radius:var(--r-btn);
+.tseg button{flex:1;min-height:70px;border-radius:var(--r-btn);
   background:rgba(255,255,255,.7);border:1.5px solid rgba(15,32,39,.10);
-  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;
-  font-size:15px;font-weight:650;color:var(--brume)}
+  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;
+  color:var(--brume)}
+.tseg button .tsl{font-size:14.5px;font-weight:650;line-height:1.1}
 .tseg button small{font-size:11.5px;font-weight:500;opacity:.9}
 .tseg button.on{background:var(--blanc);color:var(--encre);
   border-color:var(--encre);box-shadow:var(--ombre)}
+.tseg button.on svg.ic{stroke-width:2}
 
 /* Ligne d'enceinte : l'état se lit au contour, sans avoir à chercher */
 .tligne{background:rgba(255,255,255,.7);border:1.5px solid rgba(15,32,39,.10);
