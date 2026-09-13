@@ -827,6 +827,88 @@ V.caisse = async function () {
   dessiner();
 };
 
+
+       carte(entete('☀️', 'Comptage d’ouverture', 'Tâche obligatoire du matin : compter le fond de caisse.') +
+         '<div class="grid g2">' + champ('fi', 'Fond de caisse initial compté') +
+         '<div class="champ"><label class="f">Fond final de la veille</label>' +
+         '<input type="text" value="' + (attendu === null ? 'aucune donnée' : eur(attendu)) + '" readonly></div></div>' +
+         '<div id="ct-croise" style="margin-top:12px"></div>', 'sable') +
+   
+       carte(entete('🌙', 'Fermeture', 'Ticket Z, totalisateur TPE, puis comptage des espèces.') +
+         '<div class="grid g2">' + champ('cb', 'CA carte (ticket Z)') + champ('esp', 'CA espèces (ticket Z)') + '</div>' +
+         '<div class="grid g2" style="margin-top:14px">' + champ('tpe', 'Total TPE') + champ('depot', 'Dépôt d’espèces retiré') + '</div>' +
+         '<div class="grid g2" style="margin-top:14px">' + champ('ff', 'Fond de caisse final laissé') +
+         '<div class="champ"><label class="f">Commandes annulées</label>' +
+         '<input type="text" data-k="ann" value="' + esc(r.ann || '') + '" placeholder="Nombre, montant, personne"></div></div>' +
+         '<div class="champ" style="margin-top:14px"><label class="f">Commentaire</label>' +
+         '<textarea data-k="com" placeholder="Toute explication d’écart.">' + esc(r.com || '') + '</textarea></div>', 'solide') +
+   
+       '<div id="ct-bilan"></div>' +
+       '<button class="btn menthe bloc xl" id="cv" style="margin-top:16px">Enregistrer la feuille</button>';
+   
+     const sauver = debounce(async (o, eq) => {
+       await DB.set('caisse:' + j, Object.assign({}, o, {
+         ecart:eq.ecart, conforme:eq.conforme, ca:eq.ca,
+         ecartOuverture: attendu === null ? null : +(num(o.fi) - attendu).toFixed(2),
+         par:STATE.user.prenom, employe:STATE.user.id, at:nowISO()
+       }));
+     }, 450);
+   
+     const refresh = () => {
+       const o = {}; $$('[data-k]').forEach(i => o[i.dataset.k] = i.value);
+       const eq = equilibreCaisse(o);
+   
+       /* Contrôle croisé du matin */
+       if (attendu === null) {
+         $('#ct-croise').innerHTML = '<div class="alerte info"><span class="ai">ℹ️</span><div>' +
+           '<b>Pas de feuille la veille</b><p>Le contrôle croisé démarrera demain.</p></div></div>';
+       } else if (o.fi === '' || o.fi === undefined) {
+         $('#ct-croise').innerHTML = '<div class="alerte warn"><span class="ai">●</span><div>' +
+           '<b>Comptage du matin à faire</b><p>Le fond doit être compté avant l’ouverture aux clients.</p></div></div>';
+       } else {
+         const d = +(num(o.fi) - attendu).toFixed(2);
+         $('#ct-croise').innerHTML = Math.abs(d) < 0.01
+           ? '<div class="alerte ok"><span class="ai">•</span><div><b>Fond conforme à la veille</b>' +
+             '<p>' + eur(num(o.fi)) + ' comptés, identique au fond laissé hier soir.</p></div></div>'
+           : '<div class="alerte bad"><span class="ai">▲</span><div><b>Écart avec la veille : ' + eur(d) + '</b>' +
+             '<p>' + eur(attendu) + ' laissés hier par ' + esc(veille.par || '—') + ', ' + eur(num(o.fi)) +
+             ' comptés ce matin. À élucider avant d’ouvrir.</p></div></div>';
+       }
+   
+       /* Équilibre de fermeture */
+       const rempli = ['cb','esp','tpe','depot','ff'].every(k => o[k] !== '' && o[k] !== undefined);
+       $('#ct-bilan').innerHTML =
+         '<div class="grid g3" style="margin-top:12px">' +
+         kpi('CA total', eur(eq.ca), '', 'Carte + espèces') +
+         kpi('Écart d’équilibre', eur(eq.ecart), rempli ? (eq.conforme ? 'ok' : 'bad') : '', 'Doit être nul') +
+         kpi('Contrôle', rempli ? (eq.conforme ? 'CONFORME' : 'ÉCART') : '—',
+             rempli ? (eq.conforme ? 'ok' : 'bad') : '', 'Équation de caisse') + '</div>' +
+         (rempli
+           ? (eq.conforme
+               ? '<div class="alerte ok" style="margin-top:12px"><span class="ai">•</span><div>' +
+                 '<b>Conforme</b><p>' + eur(num(o.tpe)) + ' TPE + ' + eur(eq.depot) + ' dépôt + ' +
+                 eur(num(o.ff)) + ' fond final = ' + eur(num(o.fi)) + ' fond initial + ' + eur(eq.ca) + ' de CA.</p></div></div>'
+               : '<div class="alerte bad" style="margin-top:12px"><span class="ai">▲</span><div>' +
+                 '<b>L’équation ne tombe pas juste : ' + eur(eq.ecart) + '</b>' +
+                 '<p>' + eur(eq.gauche) + ' d’un côté, ' + eur(eq.droite) + ' de l’autre. ' +
+                 (Math.abs(num(o.tpe) - num(o.cb)) > 0.01
+                   ? 'Le TPE (' + eur(num(o.tpe)) + ') ne correspond pas au CA carte (' + eur(num(o.cb)) + ') : côté banque. '
+                   : 'Le CA carte correspond au TPE : l’écart est du côté des espèces. ') +
+                 'Expliquez-le dans le commentaire.</p></div></div>')
+           : '<div class="alerte info" style="margin-top:12px"><span class="ai">ℹ️</span><div>' +
+             '<b>Contrôle en attente</b><p>Renseignez CA carte, CA espèces, TPE, dépôt et fond final.</p></div></div>');
+   
+       sauver(o, eq);
+       return eq;
+     };
+   
+     $$('[data-k]').forEach(i => i.oninput = refresh);
+     refresh();
+   
+     $('#cv').onclick = async () => {
+       const eq = refresh();
+       await feed(eq.conforme ? 'ok' : 'bad',
+         STATE.user.prenom + ' a fermé la caisse — ' + (eq.conforme ? 'conforme' : 'écart ' + eur(eq.ecart)));
    /* =============================================================================
       H. TRAÇABILITÉ — libellé et liste déroulante de confirmation
       ========================================================================== */
