@@ -430,16 +430,20 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
   };
    
      $('#page').innerHTML =
-       carte('<div class="rang">' + avatar(STATE.user, 'av') +
-         '<div><h2>Bonjour ' + esc(STATE.user.prenom) + '</h2>' +
-         '<div class="mini">' + nomJour(j) + ' ' + fmtD(j) + ' · ' +
-         (STATE.service ? 'en service depuis ' + heure(STATE.service.debut) : 'pas encore pointé') + '</div></div>' +
-         '<span class="pousse">' + pastille(R.length ? 'bad' : 'ok', R.length ? R.length + ' alerte(s)' : 'Tout va bien') +
-         '</span></div>', 'solide') +
-   
-       (R.length ? '<div class="stack" style="margin-top:12px">' + R.slice(0, 4).map(r =>
-         '<div class="alerte ' + r[0] + '"><span class="ai">▲</span><div><b>' + esc(r[1]) + '</b><p>' + esc(r[2]) + '</p></div>' +
-         '<span class="go"><button class="btn clair sm" data-go="' + r[3] + '">Ouvrir</button></span></div>').join('') + '</div>' : '') +
+       /* La salutation occupait une carte entière sans porter d'action, alors que
+          le prénom figure déjà dans le bouton de compte. On la réduit à une ligne,
+          et on donne la place à ce qui compte : ce qu'il reste à faire. */
+       '<p class="salut">' + nomJour(j) + ' ' + fmtD(j) + ' · ' +
+       (STATE.service ? 'en service depuis ' + heure(STATE.service.debut) : 'pas encore pointé') +
+       '</p>' +
+
+       (R.length
+         ? '<div class="stack">' + R.slice(0, 4).map(r =>
+             '<div class="alerte ' + r[0] + '"><div style="flex:1;min-width:0">' +
+             '<b>' + esc(r[1]) + '</b><p>' + esc(r[2]) + '</p></div>' +
+             '<button class="btn clair sm" data-go="' + r[3] + '">Ouvrir</button></div>').join('') + '</div>'
+         : '<div class="alerte ok"><div style="flex:1"><b>Tout est à jour</b>' +
+           '<p>Aucun relévé ni contrôle en retard.</p></div></div>') +
    
        (msgs.length ? '<div class="entete"><h3>Carnet de relève</h3>' +
          '<button class="btn fantome sm pousse" data-go="releve">Tout voir</button></div>' +
