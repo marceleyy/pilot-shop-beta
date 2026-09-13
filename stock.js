@@ -203,6 +203,47 @@ function totauxStock(articles) {
 }
 
 /* -----------------------------------------------------------------------------
+   CONTRÔLE DE VRAISEMBLANCE
+   Un stock négatif veut dire qu'on a ouvert un bac que l'application ne
+   connaissait pas : livraison non saisie, bac antérieur à la mise en service,
+   ou erreur de taille au moment du scan. Ce n'est pas grave en soi, mais si
+   personne ne le voit, l'écart de période devient faux et on cherche un vol
+   là où il n'y a qu'une saisie manquante.
+
+   Un stock absurdement élevé dit la même chose en sens inverse : une réception
+   comptée deux fois, ou une quantité saisie en litres au lieu de bacs.
+   -------------------------------------------------------------------------- */
+const STOCK_PLAFOND_PLAUSIBLE = 400;      // bacs : au-delà, la chambre froide déborde
+
+function anomaliesStock(articles) {
+  const out = [];
+  const negatifs = Object.keys(articles).filter(c => num(articles[c]) < 0);
+  if (negatifs.length) {
+    const pire = negatifs.reduce((a, c) => num(articles[c]) < num(articles[a]) ? c : a, negatifs[0]);
+    out.push({
+      niveau: 'warn',
+      titre: negatifs.length + ' article(s) en stock négatif',
+      detail: 'Le plus bas : ' + libelleArticle(pire) + ' à ' + articles[pire] + '. ' +
+        'Des bacs ont été ouverts sans avoir été reçus dans l’application. ' +
+        'Un inventaire remet les compteurs à plat.',
+      cles: negatifs
+    });
+  }
+  const t = totauxStock(articles);
+  if (t.bacs > STOCK_PLAFOND_PLAUSIBLE) {
+    out.push({
+      niveau: 'bad',
+      titre: 'Stock invraisemblable : ' + t.bacs + ' bacs',
+      detail: 'Soit ' + n1(t.kg) + ' kg, bien au-delà de ce que peut contenir la ' +
+        'chambre froide. Une réception a probablement été comptée deux fois, ou ' +
+        'saisie en litres au lieu de bacs.',
+      cles: []
+    });
+  }
+  return out;
+}
+
+/* -----------------------------------------------------------------------------
    VUE — STOCK RÉEL
    -------------------------------------------------------------------------- */
 V.stock = async function () {
@@ -210,6 +251,7 @@ V.stock = async function () {
   const cles = Object.keys(articles).filter(c => num(articles[c]) !== 0)
     .sort((a, b) => libelleArticle(a).localeCompare(libelleArticle(b)));
   const t = totauxStock(articles);
+  const alertes = anomaliesStock(articles);
 
   /* Regroupement par famille, pour ne pas dérouler quarante lignes à plat. */
   const parFamille = {};
@@ -231,6 +273,10 @@ V.stock = async function () {
         : 'Aucun inventaire enregistré. Le stock ne compte que les réceptions ' +
           'et les ouvertures depuis la mise en service.') + '</p>', 'solide') +
 
+    alertes.map(a =>
+      '<div class="alerte ' + a.niveau + '" style="margin-top:12px"><span class="ai">•</span>' +
+      '<div><b>' + esc(a.titre) + '</b><p>' + esc(a.detail) + '</p></div></div>').join('') +
+
     '<button class="btn menthe bloc xl" id="st-inv" style="margin-top:14px">Faire un inventaire</button>' +
 
     (cles.length
@@ -251,6 +297,34 @@ V.stock = async function () {
       : vide('', 'Stock vide. Commencez par un inventaire.'));
 
   $('#st-inv').onclick = () => rendre('inventaire');
+};
+
+/* -----------------------------------------------------------------------------
+   ALERTES DE STOCK SUR LA TOUR DE CONTRÔLE
+   Le manager n'ira pas consulter l'écran Stock tous les jours. Un article
+   négatif depuis trois semaines fausse pourtant tout l'écart de période.
+   -------------------------------------------------------------------------- */
+const V_controle_origine = V.controle;
+V.controle = async function () {
+  await V_controle_origine.call(this);
+  const page = $('#page');
+  if (!page) return;
+
+  const { articles } = await stockReel();
+  const alertes = anomaliesStock(articles);
+  if (!alertes.length) return;
+
+  const bloc = document.createElement('div');
+  bloc.innerHTML = alertes.map(a =>
+    carte('<div class="rang" style="align-items:flex-start">' +
+      '<div style="flex:1;min-width:0"><b>' + esc(a.titre) + '</b>' +
+      '<p class="mini" style="margin-top:4px">' + esc(a.detail) + '</p></div>' +
+      '<button class="btn clair sm" data-go="stock">Ouvrir</button></div>',
+      a.niveau === 'bad' ? 'corail' : 'ambre')).join('');
+
+  /* Juste sous l'en-tête : c'est une alerte, pas une note de bas de page. */
+  page.insertBefore(bloc, page.firstChild.nextSibling);
+  $$('#page [data-go]').forEach(b => b.onclick = () => rendre(b.dataset.go));
 };
 
 /* -----------------------------------------------------------------------------
