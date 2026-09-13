@@ -839,7 +839,10 @@ function renderNav() {
      if (v === 'HS') return '';          // enceinte hors service : ni conforme ni critique
      if (v === '' || v === null || v === undefined || isNaN(v)) return '';
      v = Number(v);
-     if (v > e.crit) return 'crit';
+     /* Comparaison large et non stricte : une enceinte pile à sa limite critique
+        doit alerter. Avec un > strict, une vitrine à −10 °C tout juste était
+        classée « hors cible » et n'exigeait aucune action corrective. */
+     if (v >= e.crit) return 'crit';
      if (v >= e.vert[0] && v <= e.vert[1]) return 'vert';
      return 'rouge';
    }
@@ -2181,6 +2184,15 @@ function ouvrirPremierePeriode() {
    /* =============================================================================
       23. FRIGO VIRTUEL (FIFO)
       ========================================================================== */
+   /* Seuil de passage en orange : la plus tardive des deux règles — le tiers de
+      vie restante, ou le plancher de préavis. Borné à la moitié de la durée de
+      vie, sinon un produit de douze heures serait orange dès sa fabrication. */
+   function seuilOrangeHeures(heures) {
+     const parTiers = heures * DLC_SEUILS.vert.min;
+     const plancher = Math.min(DLC_SEUILS.preavisMiniHeures || 0, heures / 2);
+     return Math.max(parTiers, plancher);
+   }
+
    async function calculFIFO(mois) {
      const rec = await DB.get('lots:' + mois, {});
      const out = [];
@@ -2194,7 +2206,8 @@ function ouvrirPremierePeriode() {
        const limite = new Date(new Date(v.ouv + 'T08:00:00').getTime() + heures * 3600e3);
        const resteH = Math.round((limite - Date.now()) / 3600e3);
        const part = resteH / heures;
-       const c = resteH < 0 ? 'rouge' : part <= DLC_SEUILS.vert.min ? 'orange' : 'vert';
+       const c = resteH < 0 ? 'rouge'
+               : resteH <= seuilOrangeHeures(heures) ? 'orange' : 'vert';
        out.push({ cle:cle, nom:nom, type:type, lot:v.lot, ouv:v.ouv, par:v.par,
                   regle:regle, heures:heures, limite:isoOf(limite), limiteH:limite,
                   resteH:resteH, c:c, zone:DLC_RULES[regle].zone });

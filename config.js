@@ -154,7 +154,13 @@ const DLC_RULES = {
 const DLC_SEUILS = {
   vert:   { min: 0.34, label: 'Conforme',      couleur: 'vert'   },
   orange: { min: 0.00, label: 'À vendre vite', couleur: 'orange' },
-  rouge:  { min: -1,   label: 'Périmé',        couleur: 'rouge'  }
+  rouge:  { min: -1,   label: 'Périmé',        couleur: 'rouge'  },
+  /* La règle des 1/3 convient à un gelato de dix jours — 3,4 jours de préavis.
+     Sur la chantilly, qui vit 48 h, elle ne prévient que 16 h à l'avance ; et
+     comme la boutique ferme à 23 h pour rouvrir à 9 h 30, le préavis réel peut
+     tomber à cinq heures. D'où un plancher, borné à la moitié de la durée de
+     vie pour ne pas rendre orange un produit dès sa fabrication. */
+  preavisMiniHeures: 24
 };
 
 /* Association produit → règle DLC. Le premier motif qui matche gagne. */

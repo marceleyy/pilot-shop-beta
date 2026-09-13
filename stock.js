@@ -62,14 +62,39 @@ function libelleArticle(cle) {
    -------------------------------------------------------------------------- */
 async function ajouterMouvement(type, cle, qte, extra) {
   const l = await DB.get('stock:mouvements', []);
+
+  /* Garde-fou contre le double appui : deux mouvements identiques à moins de
+     quinze secondes d'intervalle sont presque toujours une erreur de manipulation,
+     et ils fausseraient le stock de façon invisible. */
+  const dernier = l[l.length - 1];
+  if (dernier && dernier.type === type && dernier.cle === cle &&
+      num(dernier.qte) === num(qte) &&
+      (extra && extra.lot ? dernier.lot === extra.lot : true) &&
+      (Date.now() - new Date(dernier.at)) < 15000) {
+    toast('Déjà enregistré il y a quelques secondes', 'erreur');
+    return dernier;
+  }
+
   l.push(Object.assign({
     id: uid(), type: type, cle: cle, qte: num(qte),
     jour: today(), at: nowISO(),
     par: STATE.user ? STATE.user.prenom : null,
     employe: STATE.user ? STATE.user.id : null
   }, extra || {}));
-  /* On borne le journal : deux ans de mouvements suffisent largement. */
-  await DB.set('stock:mouvements', l.slice(-4000));
+
+  /* Purge bornée : on ne coupe JAMAIS un mouvement postérieur au dernier
+     inventaire, sinon le stock deviendrait faux sans que rien ne le signale.
+     On ne rogne que ce qui précède, et qui est déjà absorbé dans la référence. */
+  if (l.length > 4000) {
+    const inv = await DB.get('stock:inventaire', null);
+    const borne = inv ? inv.at : null;
+    const aGarder = borne ? l.filter(m => m.at > borne) : [];
+    const surplus = l.length - 4000;
+    const anciens = borne ? l.filter(m => m.at <= borne) : l;
+    await DB.set('stock:mouvements', anciens.slice(surplus).concat(aGarder));
+  } else {
+    await DB.set('stock:mouvements', l);
+  }
   return l[l.length - 1];
 }
 
