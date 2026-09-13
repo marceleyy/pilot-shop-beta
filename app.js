@@ -160,7 +160,15 @@
            let motif = '';
            try { motif = (await r.text()).slice(0, 300); } catch (x) {}
            err.motif = motif;
-           if (r.status === 401 || r.status === 403) STATE.erreurBase = 'Clé Supabase refusée';
+           if (r.status === 401 || r.status === 403) {
+             /* Un refus d'authentification n'est plus une anomalie depuis que la
+                base exige un jeton : c'est le comportement normal d'un appareil
+                non rattaché. Le message doit dire quoi faire, pas alarmer. */
+             const rattache = (typeof appareilRattache === 'function') ? appareilRattache() : true;
+             STATE.erreurBase = rattache
+               ? 'Session expirée — rattachez cet appareil'
+               : 'Appareil non rattaché — vos saisies restent ici';
+           }
            else if (r.status === 404) STATE.erreurBase = 'Table introuvable';
            else if (r.status === 413) STATE.erreurBase = 'Donnée trop lourde';
            else STATE.erreurBase = 'Base en erreur (' + r.status + ')';
