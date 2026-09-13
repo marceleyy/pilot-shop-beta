@@ -657,15 +657,26 @@ input[type=password],input[type=search],input[type=time],select,textarea{
 }
 .f{font-size:12px;font-weight:600;letter-spacing:.01em;color:var(--brume);text-transform:none}
 
-/* --- Barre du bas : sobre ---------------------------------------------- */
-#tabbar{background:rgba(255,255,255,.94);border-top:1px solid var(--line);box-shadow:none}
-#tabbar button{font-size:11.5px;font-weight:600;color:var(--brume-2);
-  display:flex;align-items:center;justify-content:center;padding:0 3px;
-  border-top:2px solid transparent;position:relative}
+/* --- Barre du bas ------------------------------------------------------
+   Six onglets sur un téléphone, c'est étroit : environ 62 px par entrée.
+   On gagne de la place en hauteur plutôt qu'en réduisant le texte, et on
+   autorise deux lignes pour « Traçabilité » et « Température ». */
+:root{--barre-h:calc(76px + var(--safe-b))}
+#tabbar{background:rgba(255,255,255,.96);border-top:1px solid var(--line);box-shadow:none;
+  padding-bottom:var(--safe-b)}
+#tabbar button{font-size:13px;font-weight:600;color:var(--brume-2);
+  display:flex;align-items:center;justify-content:center;padding:6px 2px 0;
+  border-top:2px solid transparent;position:relative;min-height:74px}
 #tabbar button .ic{display:none}          /* plus de pictogramme dans la barre */
-#tabbar button .tl{display:block;line-height:1.15;text-align:center;
-  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%}
-#tabbar button.on{color:var(--encre);border-top-color:var(--encre)}
+#tabbar button .tl{display:block;line-height:1.2;text-align:center;
+  word-break:normal;overflow-wrap:break-word;hyphens:none;max-width:100%}
+#tabbar button.on{color:var(--encre);border-top-color:var(--encre);font-weight:700}
+
+/* À partir de 420 px de large, tout tient sur une ligne : on agrandit encore. */
+@media (min-width:420px){
+  #tabbar button{font-size:14px}
+  #tabbar button .tl{white-space:nowrap}
+}
 
 /* --- Lignes de tâche : le libellé au-dessus, la précision en dessous ---- */
 .tache{display:flex;align-items:center;gap:12px;padding:14px 16px;
@@ -686,6 +697,12 @@ input[type=password],input[type=search],input[type=time],select,textarea{
 
 /* Entête de zone : pas de pictogramme, juste le nom en petites capitales */
 .entete h3 .zi{display:none}
+
+/* Une étape constatée plutôt que cochée : la case n'est pas cliquable, elle
+   reflète l'état réel de l'écran concerné. */
+.tache.liee .box{background:var(--fond-2);border-style:dashed;border-color:var(--brume-2)}
+.tache.liee.on .box{background:var(--menthe-d);border-style:solid;border-color:var(--menthe-d);color:#fff}
+.tache.liee .tm{font-style:italic}
 
 /* --- Respiration -------------------------------------------------------- */
 #page{padding-top:6px}

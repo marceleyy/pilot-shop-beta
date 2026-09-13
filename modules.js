@@ -369,14 +369,43 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
    }
    
    V.accueil = async function () {
-     const j = STATE.jour;
-     STATE.phase = STATE.phase || phaseCourante();
-     const e = await etatJour(j);
-     const rec = await DB.get('checklist:' + j, {});
-     const preuves = await DB.get('preuves:' + j, []);
-     const alertes = await alertesDLC();
-     const releve = await DB.get('releve', []);
-     const msgs = releve.filter(m => !m.lu || m.epingle).slice(-3).reverse();
+   const j = STATE.jour;
+   STATE.phase = STATE.phase || phaseCourante();
+   const e = await etatJour(j);
+   const rec = await DB.get('checklist:' + j, {});
+   const preuves = await DB.get('preuves:' + j, []);
+   const alertes = await alertesDLC();
+   const releve = await DB.get('releve', []);
+   const msgs = releve.filter(m => !m.lu || m.epingle).slice(-3).reverse();
+
+  /* Deux étapes ne se cochent pas à la main : elles se constatent. Le relevé
+     des températures et le comptage de caisse doivent avoir été réellement
+     faits dans leur écran. Cocher à la main un registre sanitaire sans l'avoir
+     rempli, c'est exactement ce que l'outil doit empêcher. */
+  const tempJour = await DB.get('temp:' + j, {});
+  const caisseJour = await DB.get('caisse:' + j, {});
+  const etatLie = (t, phase) => {
+    if (!t.lien || !t.obligatoire) return null;
+    if (t.lien === 'temp') {
+      const mom = (phase === 'fermeture') ? 's' : 'm';
+      const v = tempJour.valide && tempJour.valide[mom];
+      return { fait: !!v, ou: 'temp',
+               quoi: 'le relévé des températures du ' + (mom === 'm' ? 'matin' : 'soir'),
+               par: v ? v.par : null, at: v ? v.at : null };
+    }
+    if (t.lien === 'caisse') {
+      if (phase === 'fermeture') {
+        const champs = ['cb', 'esp', 'tpe', 'depot', 'ff'];
+        const ok = champs.every(c => caisseJour[c] !== undefined && caisseJour[c] !== '');
+        return { fait: ok, ou: 'caisse', quoi: 'la clôture de caisse',
+                 par: caisseJour.par, at: caisseJour.at };
+      }
+      const ok = caisseJour.fi !== undefined && caisseJour.fi !== '';
+      return { fait: ok, ou: 'caisse', quoi: 'le comptage du fond de caisse',
+               par: caisseJour.par, at: caisseJour.at };
+    }
+    return null;
+  };
    
      $('#vue-actions').innerHTML = STATE.service
        ? '<button class="btn corail sm" id="ptg">Fin de service</button>'
@@ -392,29 +421,43 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
      const phase = STATE.phase === 'service' ? 'service' : STATE.phase;
      const blocs = phase === 'service' ? [] : tachesChecklist(phase, j);
      const total = blocs.reduce((s, b) => s + b.taches.length, 0);
-     const faits = blocs.reduce((s, b) => s + b.taches.filter(t => rec[t.id] && rec[t.id].ok).length, 0);
+     /* Une étape liée compte comme faite quand l'action réelle a eu lieu, pas
+      quand la case est cochée — elle ne l'est plus à la main. */
+   const estFaite = t => {
+     const lie = etatLie(t, phase);
+     return lie ? lie.fait : !!(rec[t.id] && rec[t.id].ok);
+   };
+   const faits = blocs.reduce((s, b) => s + b.taches.filter(estFaite).length, 0);
    
      const ligne = (t, n) => {
      const v = rec[t.id] || {};
      const preuve = preuves.filter(p => p.tache === t.id)[0];
-     /* Une tâche restreinte à certains jours est une tâche périodique :
-     elle exige une photo, comme les tâches hebdomadaires du nettoyage. */
+     const lie = etatLie(t, phase);
      const besoinPhoto = PREUVE.actif &&
      (PREUVE.tachesObligatoires.indexOf(t.id) >= 0 ||
      (PREUVE.hebdoObligatoire && (t.jours || t.joursSauf || t.async)));
-     return '<div class="tache' + (v.ok ? ' on' : '') + '">' +
+     /* Une étape liée n'est cochée que si l'action a vraiment eu lieu. */
+     const faite = lie ? lie.fait : !!v.ok;
+     return '<div class="tache' + (faite ? ' on' : '') + (lie ? ' liee' : '') + '">' +
      '<span class="tnum">' + n + '</span>' +
-     '<button class="box" data-t="' + t.id + '">✓</button>' +
+     (lie
+       ? '<span class="box" aria-hidden="true">✓</span>'
+       : '<button class="box" data-t="' + t.id + '">✓</button>') +
      '<span class="tx"><span class="tn">' + esc(t.t) + '</span>' +
-     (v.ok || besoinPhoto
-     ? '<span class="tm">' + (v.ok ? esc(v.par) + ' · ' + heure(v.at) : '') +
-       (besoinPhoto ? (v.ok ? ' · ' : '') + 'photo requise' : '') + '</span>'
-       : '') +
+     (lie
+       ? '<span class="tm">' + (lie.fait
+           ? (lie.par ? esc(lie.par) + ' · ' + heure(lie.at) : 'fait')
+           : 'À faire dans l’écran dédié') + '</span>'
+       : (faite || besoinPhoto
+         ? '<span class="tm">' + (faite ? esc(v.par) + ' · ' + heure(v.at) : '') +
+           (besoinPhoto ? (faite ? ' · ' : '') + 'photo requise' : '') + '</span>'
+         : '')) +
      '</span>' +
      (t.minuteur ? '<button class="btn clair sm" data-min="' + t.minuteur + '" data-nom="' + esc(t.t) + '">⏱️</button>' : '') +
-     (besoinPhoto ? '<button class="btn ' + (preuve ? 'menthe' : 'clair') + ' sm" data-photo="' + t.id +
+     (besoinPhoto && !lie ? '<button class="btn ' + (preuve ? 'menthe' : 'clair') + ' sm" data-photo="' + t.id +
        '" data-lib="' + esc(t.t) + '">' + (preuve ? '✓ Photo' : 'Photo') + '</button>' : '') +
-     (t.lien ? '<button class="btn clair sm" data-go="' + t.lien + '">→</button>' : '') +
+     (t.lien ? '<button class="btn ' + (lie && !lie.fait ? 'menthe' : 'clair') + ' sm" data-go="' + t.lien + '">' +
+       (lie && !lie.fait ? 'Y aller' : '→') + '</button>' : '') +
          '</div>';
   };
    
@@ -519,8 +562,29 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
 
   const vp = $('#valproc');
   if (vp) vp.onclick = async () => {
-    const restants = blocs.reduce((a, b) => a.concat(b.taches), [])
-      .filter(t => !(rec[t.id] && rec[t.id].ok));
+    const toutes = blocs.reduce((a, b) => a.concat(b.taches), []);
+
+    /* Blocage dur sur les étapes constatées : on ne valide pas une procédure
+       en affirmant qu'un relévé a été fait alors qu'il n'existe pas. */
+    const manquantes = toutes.map(t => ({ t:t, lie:etatLie(t, phase) }))
+      .filter(x => x.lie && !x.lie.fait);
+    if (manquantes.length) {
+      const premier = manquantes[0];
+      showSheet(
+        '<h2 id="sheet-titre">Il manque ' + esc(premier.lie.quoi) + '</h2>' +
+        '<p class="sub">Cette étape ne peut pas être cochée à la main.</p>' +
+        '<div class="alerte bad"><span class="ai">•</span><div>' +
+        '<b>' + manquantes.length + ' étape(s) à faire dans leur écran</b><p>' +
+        esc(manquantes.map(x => x.lie.quoi).join(' · ')) +
+        '. Ce sont des pièces du registre sanitaire : elles doivent porter des ' +
+        'valeurs réelles et une signature.</p></div></div>' +
+        '<div class="actions"><button class="btn clair" data-fermer>Fermer</button>' +
+        '<button class="btn menthe" id="vp-go">' + esc('Aller à ' + premier.t.t) + '</button></div>');
+      $('#vp-go').onclick = () => { closeSheet(); rendre(premier.lie.ou); };
+      return;
+    }
+
+    const restants = toutes.filter(t => !estFaite(t));
     const finir = async () => {
       rec['_valide_' + phase] = { par:STATE.user.prenom, id:STATE.user.id, at:nowISO() };
       await DB.set('checklist:' + j, rec);
