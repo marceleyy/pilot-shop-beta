@@ -95,6 +95,7 @@
      ['reception:',   'receptions'],
      ['anomalies',    'feedback'],
      ['horaires',     'reglages'],
+     ['equipe',       'reglages'],
      ['enceintes',    'reglages'],
      ['hebdo:plan',   'reglages'],
      ['hebdo:responsables', 'reglages'],
@@ -1832,29 +1833,149 @@ function brancherNavJour(vue) {
    pour que la connexion fonctionne hors ligne.
    -------------------------------------------------------------------------- */
 async function chargerEquipe() {
+  /* 1. Ce qu'on a déjà en local : la connexion doit marcher hors ligne. */
   const local = (() => {
     try { return JSON.parse(localStorage.getItem('pilotshop.v3:equipe') || 'null'); }
     catch (e) { return null; }
   })();
   if (local && local.length) EQUIPE.splice(0, EQUIPE.length, ...local);
 
-  if (typeof appareilRattache === 'function' && !appareilRattache()) return;
-
-  try {
-    const jeton = await jetonValide();
-    if (!jeton) return;
-    const r = await fetch(SUPABASE.url + '/rest/v1/equipe?select=*&actif=eq.true&order=prenom', {
-      headers: { 'apikey': SUPABASE.anonKey, 'Authorization': 'Bearer ' + jeton }
-    });
-    if (!r.ok) return;
-    const l = await r.json();
-    if (!Array.isArray(l) || !l.length) return;
+  const garder = l => {
+    if (!Array.isArray(l) || !l.length) return false;
     EQUIPE.splice(0, EQUIPE.length, ...l.map(e => ({
       id: e.id, prenom: e.prenom, pin: String(e.pin), role: e.role,
       couleur: e.couleur, initiales: e.initiales
     })));
-    try { localStorage.setItem('pilotshop.v3:equipe', JSON.stringify(EQUIPE)); } catch (e) {}
-  } catch (e) { /* hors ligne : la liste locale suffit */ }
+    try { localStorage.setItem('pilotshop.v3:equipe', JSON.stringify(EQUIPE)); } catch (x) {}
+    return true;
+  };
+
+  /* 2. Table dédiée « equipe », si elle existe et qu'on a un jeton. */
+  try {
+    const jeton = (typeof jetonValide === 'function') ? await jetonValide() : null;
+    if (jeton) {
+      const r = await fetch(SUPABASE.url + '/rest/v1/equipe?select=*&actif=eq.true&order=prenom', {
+        headers: { 'apikey': SUPABASE.anonKey, 'Authorization': 'Bearer ' + jeton }
+      });
+      if (r.ok && garder(await r.json())) return;
+    }
+  } catch (e) { /* table absente ou hors ligne : on continue */ }
+
+  /* 3. Repli : une ligne dans la table des réglages. Ne demande aucune
+     migration de schéma, donc fonctionne dès maintenant. */
+  try {
+    const l = await DB.get('equipe', null);
+    if (garder(l)) return;
+  } catch (e) { /* rien en base non plus */ }
+
+  /* 4. Toujours rien : l'écran d'amorçage prendra le relais. */
+}
+
+/* -----------------------------------------------------------------------------
+   LA SÉCURITÉ EST-ELLE ACTIVE ?
+   Plutôt que de supposer, on demande à la base. Tant que le rôle anonyme peut
+   encore lire, l'application reste utilisable sans rattachement ; dès que les
+   droits sont retirés, le rattachement devient obligatoire. L'application
+   traverse donc la migration sans qu'on ait à synchroniser code et SQL à la
+   seconde près — ce qui nous a déjà coûté une boutique bloquée.
+   -------------------------------------------------------------------------- */
+async function securiteActive() {
+  try {
+    const ctrl = new AbortController();
+    setTimeout(() => ctrl.abort(), 5000);
+    const r = await fetch(SUPABASE.url + '/rest/v1/' + SUPABASE.tables.reglages + '?select=id&limit=1', {
+      headers: { 'apikey': SUPABASE.anonKey, 'Authorization': 'Bearer ' + SUPABASE.anonKey },
+      signal: ctrl.signal
+    });
+    /* 200 = le rôle anonyme a encore le droit de lire : sécurité non activée.
+       401 ou 403 = droits retirés : le rattachement est requis. */
+    if (r.status === 401 || r.status === 403) return true;
+    return false;
+  } catch (e) {
+    /* Hors ligne : on ne bloque pas l'équipe sur une incertitude réseau. */
+    return false;
+  }
+}
+
+/* -----------------------------------------------------------------------------
+   ÉCRAN D'AMORÇAGE
+   Aucune équipe nulle part : ni en local, ni en base. Ça arrive au tout premier
+   lancement d'un site, ou après une remise à zéro. Plutôt qu'un écran vide sans
+   explication, on permet de créer l'équipe sur place.
+   -------------------------------------------------------------------------- */
+function ecranAmorcage() {
+  if (document.getElementById('amorcage')) return;
+  const COULEURS = ['#7FA6A0','#C4907A','#9AA87F','#8FB4CE','#0F2027','#C9A227'];
+  let lignes = [{ prenom:'', pin:'', role:'manager' }];
+
+  const d = document.createElement('div');
+  d.id = 'amorcage';
+  document.body.appendChild(d);
+
+  const dessiner = () => {
+    d.innerHTML =
+      '<div class="in">' +
+      '<div class="lg"><h1>Pilot-Shop</h1><p>Première mise en service</p></div>' +
+      '<div class="card solide">' +
+      '<h2>Créer l’équipe</h2>' +
+      '<div class="cs">Aucune équipe n’est encore enregistrée pour ' + esc(APP.site) + '. ' +
+      'Commencez par la personne qui gère la boutique.</div>' +
+      lignes.map((l, i) =>
+        '<div class="card plat" style="margin-top:14px">' +
+        '<div class="grid g2">' +
+        '<div class="champ"><label class="f">Prénom</label>' +
+        '<input type="text" data-p="' + i + '" value="' + esc(l.prenom) + '" autocapitalize="words"></div>' +
+        '<div class="champ"><label class="f">Code à 4 chiffres</label>' +
+        '<input type="text" inputmode="numeric" maxlength="4" data-c="' + i + '" value="' + esc(l.pin) + '"></div>' +
+        '</div>' +
+        '<div class="champ" style="margin-top:10px"><label class="f">Rôle</label>' +
+        '<select data-r="' + i + '">' +
+        '<option value="equipe"' + (l.role === 'equipe' ? ' selected' : '') + '>Équipier</option>' +
+        '<option value="manager"' + (l.role === 'manager' ? ' selected' : '') + '>Manager</option>' +
+        '</select></div></div>').join('') +
+      '<button class="btn clair bloc" id="am-plus" style="margin-top:12px">+ Ajouter une personne</button>' +
+      '<button class="btn menthe bloc xl" id="am-ok" style="margin-top:14px">Enregistrer</button>' +
+      '<p class="mini" id="am-etat" style="text-align:center;margin-top:12px"></p>' +
+      '</div></div>';
+
+    const lire = () => {
+      d.querySelectorAll('[data-p]').forEach(i => lignes[+i.dataset.p].prenom = i.value.trim());
+      d.querySelectorAll('[data-c]').forEach(i => lignes[+i.dataset.c].pin = i.value.replace(/\D/g, ''));
+      d.querySelectorAll('[data-r]').forEach(i => lignes[+i.dataset.r].role = i.value);
+    };
+
+    d.querySelector('#am-plus').onclick = () => {
+      lire();
+      lignes.push({ prenom:'', pin:'', role:'equipe' });
+      dessiner();
+    };
+
+    d.querySelector('#am-ok').onclick = async () => {
+      lire();
+      const etat = m => { d.querySelector('#am-etat').textContent = m; };
+      const valides = lignes.filter(l => l.prenom && l.pin.length === 4);
+      if (!valides.length) return etat('Renseignez au moins un prénom et un code à 4 chiffres.');
+      if (!valides.some(l => l.role === 'manager')) return etat('Il faut au moins un manager.');
+      const codes = valides.map(l => l.pin);
+      if (new Set(codes).size !== codes.length) return etat('Deux personnes ont le même code.');
+
+      const equipe = valides.map((l, i) => ({
+        id: 'e' + (i + 1), prenom: l.prenom, pin: l.pin, role: l.role,
+        couleur: COULEURS[i % COULEURS.length],
+        initiales: l.prenom.slice(0, 2).toUpperCase()
+      }));
+
+      EQUIPE.splice(0, EQUIPE.length, ...equipe);
+      try { localStorage.setItem('pilotshop.v3:equipe', JSON.stringify(equipe)); } catch (e) {}
+      try { await DB.set('equipe', equipe); } catch (e) { /* partira avec la file */ }
+
+      d.remove();
+      if (typeof initLogin === 'function') initLogin();
+      toast(equipe.length + ' personne(s) enregistrée(s)');
+    };
+  };
+
+  dessiner();
 }
 
 /* =============================================================================
@@ -1930,15 +2051,20 @@ async function chargerEquipe() {
        return;
      }
 
-     /* Rattachement de l'appareil : une seule fois, avant tout le reste. Sans
-        lui, la base ne répond rien depuis l'activation de la sécurité. */
-     if (typeof appareilRattache === 'function' && !appareilRattache()) {
-       await ecranRattachement();
+     /* Rattachement de l'appareil, mais SEULEMENT si la base l'exige. Tant que
+        la sécurité n'est pas activée côté base, on n'impose rien : l'application
+        doit rester utilisable pendant la migration, pas après. */
+     if (typeof securiteActive === 'function' && typeof appareilRattache === 'function') {
+       if (!appareilRattache() && await securiteActive()) {
+         await ecranRattachement();
+       }
      }
      if (typeof chargerEquipe === 'function') await chargerEquipe();
      /* La liste des prénoms a été dessinée par initLogin alors qu'EQUIPE était
         encore vide : on la redessine une fois l'équipe chargée depuis la base. */
      if (typeof initLogin === 'function') initLogin();
+     /* Aucune équipe nulle part : on ne laisse pas un écran vide sans explication. */
+     if (!EQUIPE.length && typeof ecranAmorcage === 'function') ecranAmorcage();
 
      const s = await DB.get('session', null);
      if (s && s.id && EQUIPE.filter(e => e.id === s.id)[0]) {
