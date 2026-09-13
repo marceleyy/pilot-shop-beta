@@ -1439,13 +1439,16 @@ V.clean = async function () {
 
   $('#page').innerHTML =
     navJour(j) +
-    carte('<div class="cs">' + (taches.length
-        ? faits + ' sur ' + taches.length + ' tâches faites'
-        : 'Aucune tâche prévue ce jour') + '</div>' +
-      (taches.length
-        ? '<div class="jauge" style="margin-top:10px"><i style="width:' +
-          Math.round(faits / taches.length * 100) + '%"></i></div>'
-        : ''), 'solide') +
+    /* L'avancement tient dans une bande plutôt que dans une carte à moitié
+       vide : une ligne de texte et une jauge ne justifiaient pas soixante
+       pixels de hauteur à elles seules. */
+    '<div class="avanc"><span>' + (taches.length
+      ? faits + ' sur ' + taches.length + ' tâches faites'
+      : 'Aucune tâche prévue ce jour') + '</span>' +
+    (taches.length
+      ? '<div class="jauge"><i style="width:' +
+        Math.round(faits / taches.length * 100) + '%"></i></div>'
+      : '') + '</div>' +
 
     (taches.length
       ? '<div class="stack" style="margin-top:12px">' + taches.map((t, i) => {

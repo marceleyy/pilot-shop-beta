@@ -1006,9 +1006,9 @@ body::before{display:none!important}
 #tabbar button .tl{font-weight:600}
 
 /* Jauge d'avancement : invisible à zéro, il faut qu'on voie le rail. */
-.jauge{background:var(--fond-2);height:8px;border-radius:99px;overflow:hidden}
+.jauge{background:var(--line);height:8px;border-radius:99px;overflow:hidden}
 .jauge i{display:block;height:100%;background:var(--encre);border-radius:99px;
-  transition:width .25s ease}
+  transition:width .25s ease;min-width:0}
 .jauge i.warn{background:var(--ambre-d)}
 
 /* Boutons pleine largeur : 40 px n'est pas une cible tactile. */
@@ -1040,6 +1040,11 @@ body::before{display:none!important}
 .alerte p{margin:3px 0 0;font-size:13px;line-height:1.35;opacity:.85}
 .alerte .ai{display:none}
 .alerte .btn{flex:0 0 auto}
+
+/* Bande d'avancement : texte à gauche, jauge à droite, sans carte autour. */
+.avanc{display:flex;align-items:center;gap:14px;margin:0 0 12px;padding:0 2px}
+.avanc span{flex:0 0 auto;font-size:13px;font-weight:600;color:var(--brume)}
+.avanc .jauge{flex:1;min-width:0}
 
 /* --- 21. Impression : registre sanitaire -------------------------------- */
 #printview{display:none}
