@@ -70,8 +70,27 @@ function libelleArticle(cle) {
 const STOCK_POIDS_MAX = 500000;     // octets, bien en deçà du seuil de synchronisation
 const STOCK_LIGNES_MAX = 2500;
 
+/* Le journal est découpé par mois. Une seule grosse clé obligeait à relire et
+   réécrire 240 Ko à chaque scan : mesuré à 131 ms par bac sur une bonne
+   connexion, six secondes et demie pour une série de cinquante étiquettes,
+   et bien davantage sur le Wi-Fi d'une boutique de montagne.
+   Un mois pèse une centaine de kilo-octets, et seul le mois courant est écrit. */
+const cleMois = d => 'stock:mv:' + String(d || today()).slice(0, 7);
+
+/* Cache du mois courant : évite l'aller-retour de lecture à chaque scan
+   pendant une série. Invalidé dès qu'on change de mois. */
+let _moisCache = { cle: null, lignes: null };
+
+async function lireMois(cle) {
+  if (_moisCache.cle === cle && _moisCache.lignes) return _moisCache.lignes;
+  const l = await DB.get(cle, []);
+  _moisCache = { cle: cle, lignes: l };
+  return l;
+}
+
 async function ajouterMouvement(type, cle, qte, extra) {
-  let l = await DB.get('stock:mouvements', []);
+  const cm = cleMois();
+  let l = await lireMois(cm);
 
   /* Garde-fou contre le double appui : deux mouvements identiques à moins de
      quinze secondes d'intervalle sont presque toujours une erreur de manipulation,
@@ -94,8 +113,37 @@ async function ajouterMouvement(type, cle, qte, extra) {
   l.push(m);
 
   l = await purgerJournal(l);
-  await DB.set('stock:mouvements', l);
+  _moisCache = { cle: cm, lignes: l };
+  await DB.set(cm, l);
   return m;
+}
+
+/* Tous les mois utiles : depuis le dernier inventaire, ou les douze derniers. */
+function moisAParcourir(depuisJour) {
+  const out = [];
+  const fin = new Date(today() + 'T12:00:00');
+  let d = depuisJour ? new Date(depuisJour + 'T12:00:00')
+                     : new Date(fin.getFullYear(), fin.getMonth() - 11, 1);
+  d = new Date(d.getFullYear(), d.getMonth(), 1);
+  let garde = 0;
+  while (d <= fin && garde++ < 60) {
+    out.push('stock:mv:' + d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0'));
+    d = new Date(d.getFullYear(), d.getMonth() + 1, 1);
+  }
+  return out;
+}
+
+/* Lecture de tous les mouvements utiles, anciens formats compris. */
+async function tousMouvements(depuisJour) {
+  const out = [];
+  /* Ancienne clé unique, conservée le temps que l'historique s'écoule. */
+  const ancien = await DB.get('stock:mouvements', []);
+  if (ancien && ancien.length) out.push.apply(out, ancien);
+  for (const c of moisAParcourir(depuisJour)) {
+    const l = await DB.get(c, []);
+    if (l && l.length) out.push.apply(out, l);
+  }
+  return out.sort((a, b) => String(a.a || a.at).localeCompare(String(b.a || b.at)));
 }
 
 /* Purge fondée sur le poids autant que sur le nombre. Règle intangible :
@@ -150,7 +198,7 @@ async function enregistrerInventaire(lignes, note) {
    -------------------------------------------------------------------------- */
 async function stockReel() {
   const inv = await DB.get('stock:inventaire', null);
-  const mouv = await DB.get('stock:mouvements', []);
+  const mouv = await tousMouvements(inv ? inv.jour : null);
 
   const out = {};
   const dateInv = inv ? inv.at : null;
@@ -438,7 +486,7 @@ V.inventaire = async function () {
    Une ouverture décrémente le stock du même geste.
    -------------------------------------------------------------------------- */
 V.lots = async function () {
-  const mouv = await DB.get('stock:mouvements', []);
+  const mouv = await tousMouvements(null);
   const ouvertures = mouv.map(litMouvement)
     .filter(m => m.type === 'ouverture').slice(-40).reverse();
 
