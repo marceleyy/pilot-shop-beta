@@ -4,8 +4,12 @@
    l'application doit s'ouvrir instantanément, réseau ou pas.
    ============================================================================= */
 
-const CACHE   = 'pilotshop-cache-v4';
-const RUNTIME = 'pilotshop-runtime-v4';
+/* La version doit changer à CHAQUE modification de la liste ci-dessous : c'est
+   elle qui déclenche le re-téléchargement. Un appareil déjà installé garderait
+   sinon l'ancien cache, et n'irait jamais chercher les fichiers ajoutés — le
+   scan hors ligne ne marcherait que sur les appareils neufs. */
+const CACHE   = 'pilotshop-cache-v5';
+const RUNTIME = 'pilotshop-runtime-v5';
 
 const PRECACHE = [
   '/',
