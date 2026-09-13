@@ -891,7 +891,7 @@ V.hebdo = async function () {
   const resp = await DB.get('hebdo:responsables', {});
   const faits = taches.filter(t => rec[t.id] && rec[t.id].ok).length;
 
-  $('#pa').innerHTML = '<input type="date" id="jj" value="' + j + '" style="width:auto;min-height:42px">';
+  $('#vue-actions').innerHTML = '<input type="date" id="jj" value="' + j + '" style="width:auto;min-height:42px">';
 
   const photosDe = id => preuves.filter(p => p.tache === id);
 
@@ -1002,7 +1002,7 @@ V.temp = async function () {
     return v !== undefined && v !== '';
   };
 
-  $('#pa').innerHTML = '<input type="date" id="jj" value="' + j + '" style="width:auto;min-height:42px">';
+  $('#vue-actions').innerHTML = '<input type="date" id="jj" value="' + j + '" style="width:auto;min-height:42px">';
 
   const ligneMoment = (e, m) => {
     const v = val(e, m), hs = v === 'HS', ok = saisi(e, m);
