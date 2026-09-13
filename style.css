@@ -1019,13 +1019,15 @@ body::before{display:none!important}
 /* En-têtes de section : un peu plus contrastés */
 .entete h3{color:var(--brume);font-weight:700}
 
-/* Procédure : vingt-quatre tâches à 64 px font un mètre et demi de défilement.
-   On resserre sans descendre sous la cible tactile de 44 px. */
-.tache{padding:10px 14px;gap:12px;min-height:52px}
-.tache + .tache{margin-top:6px}
-.tache .box{width:38px;height:38px;font-size:16px}
-.tache .tn{font-size:15px;line-height:1.3}
-.tnum{width:20px;font-size:13px}
+/* Procédure : vingt-quatre tâches à 70 px font trois écrans de défilement.
+   On resserre sans descendre sous la cible tactile de 44 px pour la case.
+   Sélecteur préfixé par #page : sans lui, la règle des jetons qui force la
+   case à --tap l'emportait, et le resserrement restait sans effet. */
+#page .tache{padding:9px 14px;gap:12px;min-height:52px}
+#page .tache + .tache{margin-top:6px}
+#page .tache .box{width:44px;height:44px;min-height:44px;font-size:17px;border-radius:11px}
+#page .tache .tn{font-size:15px;line-height:1.3}
+#page .tnum{width:20px;font-size:13px}
 
 /* Ligne de contexte en tête d'accueil, à la place de l'ancienne carte de
    salutation : la date et l'état de pointage, rien de plus. */
