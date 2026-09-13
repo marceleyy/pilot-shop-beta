@@ -723,9 +723,12 @@
    
      NETTOYAGE.zones.forEach(z => z.taches.forEach(t => {
        if (t.annuel || t.mensuel) return;              // gérées à part, hors quotidien
-       if (t.jours && t.jours.indexOf(j) < 0) return;
+       /* Les tâches hebdomadaires viennent désormais du tableau affiché en
+          boutique (TACHES_HEBDO), pas de cette liste. On ne garde ici que le
+          registre quotidien, sinon les deux se doublonnent. */
+       if (t.jours) return;
        out.push({ id:t.id, nom:t.nom, zone:z.nom, zoneId:z.id, icone:z.icone,
-                  phase:t.phase, recurrence: t.jours ? 'hebdo' : 'quotidien' });
+                  phase:t.phase, recurrence:'quotidien' });
      }));
    
      NETTOYAGE.zones.forEach(z => z.taches.forEach(t => {
@@ -741,19 +744,19 @@
    async function asyncDuJour(jour) {
      const j = jourISO(jour), out = [];
      for (const a of NETTOYAGE.asynchrones) {
-       let du = false, retard = 0;
+       let du = false, retard = 0, jamais = false;
        if (a.type === 'jours-fixes') {
          du = a.jours.indexOf(j) >= 0;
        } else {
          const dernier = await DB.get('async:' + a.id, null);
-         if (!dernier) du = true;
+         if (!dernier) { du = true; jamais = true; }
          else {
            const ecart = Math.round((new Date(jour + 'T12:00:00') - new Date(dernier.jour + 'T12:00:00')) / 864e5);
            du = ecart >= a.intervalleJours;
            retard = Math.max(0, ecart - a.intervalleJours);
          }
        }
-       if (du) out.push(Object.assign({}, a, { retard:retard }));
+       if (du) out.push(Object.assign({}, a, { retard:retard, jamais:jamais }));
      }
      return out;
    }
@@ -1049,13 +1052,24 @@ async function purgerPreuves() {
        (asy.length ? '<div class="entete"><h3>À faire aujourd’hui en plus</h3></div><div class="stack">' +
          asy.map(a => {
            const v = rec['async_' + a.id] || {};
-           return carte('<button type="button" class="tache' + (v.ok ? ' on' : '') + '" data-c="async_' + a.id +
-             '" style="width:100%;background:transparent;border:0;padding:0">' +
-             '<span class="box">✓</span><span class="tx"><span class="tn">' + esc(a.nom) + '</span>' +
+           const cle = 'async_' + a.id;
+           /* Ces tâches ont la récurrence « async » : exigePhoto() les inclut,
+              mais le bouton pour prendre la photo n'était pas affiché — on
+              demandait donc une preuve impossible à fournir. */
+           const photo = exigePhoto({ id:cle, recurrence:'async' });
+           const prise = preuves.filter(p => p.tache === cle)[0];
+           return carte('<div class="tache' + (v.ok ? ' on' : '') + '">' +
+             '<button class="box" data-c="' + cle + '">✓</button>' +
+             '<span class="tx"><span class="tn">' + esc(a.nom) + '</span>' +
              '<span class="tm">' + (v.ok ? esc(v.par) + ' · ' + heure(v.at)
+               : a.jamais ? 'Jamais enregistrée — tous les ' + a.intervalleJours + ' jours'
                : a.type === 'jours-fixes' ? 'Chaque ' + a.jours.map(x => JOURS_SEMAINE[x].toLowerCase()).join(', ')
                : 'Tous les ' + a.intervalleJours + ' jours') +
-             (a.retard ? ' · en retard de ' + a.retard + ' j' : '') + '</span></span></button>' +
+             (a.retard ? ' · en retard de ' + a.retard + ' j' : '') +
+             (photo ? ' · photo requise' : '') + '</span></span>' +
+             (photo ? '<button class="btn ' + (prise ? 'menthe' : 'clair') + ' sm" data-photo="' + cle +
+               '" data-lib="' + esc(a.nom) + '">' + (prise ? '✓ Photo' : 'Photo') + '</button>' : '') +
+             '</div>' +
              '<p class="mini" style="margin-top:8px">' + esc(a.consigne) + '</p>',
              a.retard ? 'corail' : 'ambre');
          }).join('') + '</div>' : '') +
