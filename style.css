@@ -660,10 +660,32 @@ input[type=password],input[type=search],input[type=time],select,textarea{
 /* --- Barre du bas : sobre ---------------------------------------------- */
 #tabbar{background:rgba(255,255,255,.94);border-top:1px solid var(--line);box-shadow:none}
 #tabbar button{font-size:11.5px;font-weight:600;color:var(--brume-2);
-  display:flex;align-items:center;justify-content:center;padding:0 4px;
-  border-top:2px solid transparent}
-#tabbar button .ti{display:none}          /* plus d'emoji dans la barre */
+  display:flex;align-items:center;justify-content:center;padding:0 3px;
+  border-top:2px solid transparent;position:relative}
+#tabbar button .ic{display:none}          /* plus de pictogramme dans la barre */
+#tabbar button .tl{display:block;line-height:1.15;text-align:center;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%}
 #tabbar button.on{color:var(--encre);border-top-color:var(--encre)}
+
+/* --- Lignes de tâche : le libellé au-dessus, la précision en dessous ---- */
+.tache{display:flex;align-items:center;gap:12px;padding:14px 16px;
+  background:var(--blanc);border:1px solid var(--line);border-radius:12px;
+  min-height:var(--tap);overflow:hidden}
+.tache + .tache{margin-top:8px}
+.tache.on{background:#F7FAF9;border-color:rgba(78,140,119,.35)}
+.tache .tx{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
+.tache .tn{display:block;font-size:15px;font-weight:600;line-height:1.3;
+  color:var(--encre);overflow-wrap:anywhere}
+.tache .tm{display:block;font-size:12.5px;font-weight:400;line-height:1.25;
+  color:var(--brume);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tache.on .tn{color:var(--menthe-d)}
+.tache .box{flex:0 0 auto;width:28px;height:28px;border-radius:8px;
+  border:1.5px solid var(--line-fort);background:var(--blanc);
+  color:transparent;font-size:15px;font-weight:700;line-height:1}
+.tache.on .box{background:var(--menthe-d);border-color:var(--menthe-d);color:#fff}
+
+/* Entête de zone : pas de pictogramme, juste le nom en petites capitales */
+.entete h3 .zi{display:none}
 
 /* --- Respiration -------------------------------------------------------- */
 #page{padding-top:6px}

@@ -1062,7 +1062,7 @@ async function purgerPreuves() {
    
        Object.keys(parZone).map(z => {
          const g = parZone[z];
-         return '<div class="entete"><h3>' + g.icone + ' ' + esc(g.nom) + '</h3></div>' +
+         return '<div class="entete"><h3>' + esc(g.nom) + '</h3></div>' +
                 carte('<div class="stack">' + g.t.map(ligne).join('') + '</div>');
        }).join('');
    
