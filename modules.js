@@ -1708,6 +1708,133 @@ V.clean = async function () {
 };
 
 /* =============================================================================
+   O. ANOMALIES
+   Tout ce qui ne rentre dans aucun registre : une panne, un carreau cassé, un
+   client mécontent. Sans cet endroit, ces choses se disent à l'oral et se
+   perdent — ou finissent dans le carnet de relève, où personne ne les suit.
+   ========================================================================== */
+PAGES.anomalie = { titre:'Anomalie', sous:'Signaler un problème constaté en boutique' };
+
+V.anomalie = async function () {
+  const liste = (await DB.get('anomalies', [])).slice().reverse();
+  const ouvertes = liste.filter(a => !a.resolue);
+  const traitees = liste.filter(a => a.resolue).slice(0, 10);
+
+  $('#vue-actions').innerHTML = '';
+  $('#page').innerHTML =
+    carte('<h2>Signaler un problème</h2>' +
+      '<div class="cs">Panne, casse, produit non conforme, incident client.</div>' +
+      '<button class="btn corail bloc xl" id="an-new" style="margin-top:14px">Signaler</button>', 'solide') +
+
+    (ouvertes.length
+      ? '<div class="entete"><h3>En cours</h3><span class="pousse mini num">' + ouvertes.length + '</span></div>' +
+        '<div class="stack">' + ouvertes.map(carteAnomalie).join('') + '</div>'
+      : carte('<div class="alerte ok"><span class="ai">✓</span><div><b>Aucune anomalie en cours</b>' +
+        '<p>Tout ce qui a été signalé a été traité.</p></div></div>', 'plat')) +
+
+    (traitees.length
+      ? '<div class="entete"><h3>Traitées</h3></div><div class="stack">' +
+        traitees.map(carteAnomalie).join('') + '</div>'
+      : '');
+
+  $('#an-new').onclick = formulaireAnomalie;
+  $$('[data-res]').forEach(b => b.onclick = async () => {
+    const l = await DB.get('anomalies', []);
+    const a = l.filter(x => x.id === b.dataset.res)[0];
+    if (a) { a.resolue = true; a.resoluePar = STATE.user.prenom; a.resolueAt = nowISO(); }
+    await DB.set('anomalies', l);
+    if (a) await feed('ok', STATE.user.prenom + ' a traité : ' + a.titre);
+    rendre('anomalie');
+  });
+};
+
+function carteAnomalie(a) {
+  const c = ANOMALIES.categories.filter(x => x.id === a.categorie)[0] || ANOMALIES.categories[6];
+  const g = ANOMALIES.gravites.filter(x => x.id === a.gravite)[0] || ANOMALIES.gravites[2];
+  return carte(
+    '<div class="rang" style="align-items:flex-start">' +
+    '<div style="flex:1;min-width:0"><b>' + esc(a.titre) + '</b>' +
+    '<div class="mini" style="margin-top:3px">' + esc(c.libelle) + '</div>' +
+    (a.detail ? '<p class="mini" style="margin-top:4px">' + esc(a.detail) + '</p>' : '') +
+    '<div class="mini" style="margin-top:4px">' + esc(a.par) + ' · ' + fmtDC(a.jour) + ' ' + heure(a.at) +
+    (a.resolue ? ' · traitée par ' + esc(a.resoluePar) : '') + '</div></div>' +
+    pastille(a.resolue ? 'n' : g.couleur, a.resolue ? 'Traitée' : g.id) + '</div>' +
+    (a.photo ? '<img src="' + a.photo + '" alt="" style="width:100%;max-height:190px;' +
+      'object-fit:cover;border-radius:10px;margin-top:10px">' : '') +
+    (a.resolue ? '' : '<button class="btn clair bloc sm" data-res="' + a.id +
+      '" style="margin-top:10px">Marquer comme traitée</button>'),
+    a.resolue ? 'plat' : (g.couleur === 'bad' ? 'corail' : g.couleur === 'warn' ? 'ambre' : ''));
+}
+
+function formulaireAnomalie() {
+  let categorie = null, gravite = 'gene', photo = null;
+  const memo = { titre:'', detail:'' };
+  const garder = () => {
+    if ($('#an-t')) memo.titre = $('#an-t').value.trim();
+    if ($('#an-d')) memo.detail = $('#an-d').value.trim();
+  };
+
+  const dessiner = () => {
+    $('#sheet-corps').innerHTML =
+      '<h2 id="sheet-titre">Signaler un problème</h2>' +
+      '<p class="sub">Eve le verra immédiatement dans sa tour de contrôle.</p>' +
+
+      '<div class="entete"><h3>De quoi s’agit-il ?</h3></div>' +
+      '<div class="chips" id="an-cat">' + ANOMALIES.categories.map(c =>
+        '<button type="button" class="chip' + (categorie === c.id ? ' on' : '') +
+        '" data-c="' + c.id + '">' + esc(c.libelle) + '</button>').join('') + '</div>' +
+
+      '<div class="champ" style="margin-top:16px"><label class="f">En une phrase</label>' +
+      '<input type="text" id="an-t" value="' + esc(memo.titre) + '" placeholder="Ex. la crêpière ne chauffe plus"></div>' +
+
+      '<div class="champ" style="margin-top:14px"><label class="f">Détail (facultatif)</label>' +
+      '<textarea id="an-d" placeholder="Depuis quand, ce qui a été tenté, conséquence sur le service.">' +
+      esc(memo.detail) + '</textarea></div>' +
+
+      '<div class="entete"><h3>Gravité</h3></div>' +
+      '<div class="stack">' + ANOMALIES.gravites.map(g =>
+        '<button type="button" class="menu-item" data-g="' + g.id + '"' +
+        (gravite === g.id ? ' style="border-color:var(--encre);border-width:1.5px"' : '') + '>' +
+        '<span class="mi-tx"><span class="mi-t">' + esc(g.libelle) + '</span></span>' +
+        '<span class="mi-fl">' + (gravite === g.id ? '✓' : '') + '</span></button>').join('') + '</div>' +
+
+      '<button class="btn ' + (photo ? 'menthe' : 'ciel') + ' bloc" id="an-ph" style="margin-top:14px">' +
+      (photo ? '✓ Photo jointe — en reprendre une' : 'Photographier le problème') + '</button>' +
+      (photo ? '<img src="' + photo + '" alt="" style="width:100%;max-height:170px;object-fit:cover;' +
+        'border-radius:10px;margin-top:10px">' : '') +
+
+      '<div class="actions"><button class="btn clair" data-fermer>Annuler</button>' +
+      '<button class="btn corail" id="an-ok">Signaler</button></div>';
+
+    $$('[data-fermer]').forEach(b => b.onclick = closeSheet);
+    $$('#an-cat [data-c]').forEach(b => b.onclick = () => { garder(); categorie = b.dataset.c; dessiner(); });
+    $$('[data-g]').forEach(b => b.onclick = () => { garder(); gravite = b.dataset.g; dessiner(); });
+    $('#an-ph').onclick = async () => {
+      garder();
+      const p = await prendrePhoto();
+      if (p) photo = p.img;
+      dessiner();
+    };
+    $('#an-ok').onclick = async () => {
+      garder();
+      if (!categorie) return toast('Choisissez une catégorie', 'erreur');
+      if (!memo.titre) return toast('Décrivez le problème en une phrase', 'erreur');
+      await DB.push('anomalies', { id:uid(), categorie:categorie, gravite:gravite,
+        titre:memo.titre, detail:memo.detail, photo:photo, jour:today(),
+        par:STATE.user.prenom, employe:STATE.user.id, at:nowISO(), resolue:false });
+      await feed(gravite === 'bloquant' ? 'bad' : 'warn',
+        STATE.user.prenom + ' signale : ' + memo.titre);
+      closeSheet();
+      toast('Signalement transmis');
+      rendre('anomalie');
+    };
+  };
+
+  showSheet('<div class="vide">…</div>');
+  dessiner();
+}
+
+/* =============================================================================
    J. RESTAURATION DES RÉGLAGES AU DÉMARRAGE
    ========================================================================== */
    (async function appliquerReglages() {
