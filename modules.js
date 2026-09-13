@@ -1600,6 +1600,84 @@ async function attribuerResponsables() {
 }
 
 /* =============================================================================
+   P. NETTOYAGE — le tableau hebdomadaire, et rien d'autre
+   L'écran montre les tâches du jour telles qu'elles figurent sur le tableau
+   affiché en boutique. Un jour, une colonne. Le registre quotidien des postes
+   7/7 reste dans l'historique mais n'encombre plus cet écran.
+   ========================================================================== */
+V.clean = async function () {
+  const j = STATE.jour;
+  const taches = await tachesHebdoDuJour(j);
+  const rec = await DB.get('hebdo:' + j, {});
+  const preuves = await DB.get('preuves:' + j, []);
+  const photosDe = id => preuves.filter(p => p.tache === id);
+  const faits = taches.filter(t => rec[t.id] && rec[t.id].ok).length;
+
+  $('#vue-actions').innerHTML =
+    '<input type="date" id="jj" value="' + j + '" style="width:auto;min-height:42px">';
+
+  $('#page').innerHTML =
+    carte('<h2>' + nomJour(j) + ' ' + fmtD(j) + '</h2>' +
+      '<div class="cs">' + (taches.length
+        ? faits + ' sur ' + taches.length + ' tâches faites'
+        : 'Aucune tâche prévue ce jour') + '</div>' +
+      (taches.length
+        ? '<div class="jauge" style="margin-top:12px"><i style="width:' +
+          Math.round(faits / taches.length * 100) + '%"></i></div>'
+        : ''), 'solide') +
+
+    (taches.length
+      ? '<div class="stack" style="margin-top:12px">' + taches.map((t, i) => {
+          const v = rec[t.id] || {};
+          const ph = photosDe(t.id);
+          const qui = t.assignee ? (EQUIPE.filter(e => e.id === t.assignee)[0] || {}).prenom : null;
+          return carte(
+            '<div class="tache' + (v.ok ? ' on' : '') + '">' +
+            '<span class="tnum">' + (i + 1) + '</span>' +
+            '<button class="box" data-hb="' + t.id + '">✓</button>' +
+            '<span class="tx"><span class="tn">' + esc(t.libelle) + '</span>' +
+            '<span class="tm">' + (v.ok ? esc(v.par) + ' · ' + heure(v.at)
+              : (qui ? 'Attribuée à ' + esc(qui) : 'Photo obligatoire')) +
+            (ph.length ? ' · ' + ph.length + ' photo(s)' : '') + '</span></span>' +
+            '<button class="btn ' + (ph.length ? 'menthe' : 'clair') + ' sm" data-hbp="' + t.id + '"' +
+            (ph.length >= HEBDO.photosMax ? ' disabled' : '') + '>' +
+            (ph.length ? '✓ Photo' : 'Photo') + '</button></div>' +
+            (ph.length
+              ? '<div class="rang" style="margin-top:10px;gap:8px">' + ph.map(p =>
+                '<img src="' + p.img + '" alt="" style="width:62px;height:62px;object-fit:cover;' +
+                'border-radius:9px;border:1px solid var(--line)">').join('') + '</div>'
+              : ''),
+            v.ok ? 'menthe' : '');
+        }).join('') + '</div>'
+      : vide('', 'Rien de prévu au tableau ce jour.'));
+
+  $('#jj').onchange = ev => { STATE.jour = ev.target.value; rendre('clean'); };
+
+  $$('[data-hbp]').forEach(b => b.onclick = async () => {
+    const t = taches.filter(x => x.id === b.dataset.hbp)[0];
+    const p = await attacherPreuve(j, t.id, t.libelle);
+    if (p) { toast('Photo ajoutée'); rendre('clean'); }
+  });
+
+  $$('[data-hb]').forEach(b => b.onclick = async () => {
+    const id = b.dataset.hb, actif = !(rec[id] && rec[id].ok);
+    if (actif && HEBDO.photosObligatoires && photosDe(id).length < HEBDO.photosMin) {
+      toast('Photographiez d’abord le résultat', 'erreur');
+      const ph = $('[data-hbp="' + id + '"]');
+      if (ph) ph.click();
+      return;
+    }
+    rec[id] = actif ? { ok:1, par:STATE.user.prenom, employe:STATE.user.id, at:nowISO() } : { ok:0 };
+    await DB.set('hebdo:' + j, rec);
+    if (actif) {
+      const t = taches.filter(x => x.id === id)[0];
+      await feed('ok', STATE.user.prenom + ' : ' + t.libelle);
+    }
+    rendre('clean');
+  });
+};
+
+/* =============================================================================
    J. RESTAURATION DES RÉGLAGES AU DÉMARRAGE
    ========================================================================== */
    (async function appliquerReglages() {
