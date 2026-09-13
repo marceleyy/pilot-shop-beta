@@ -59,43 +59,73 @@ function libelleArticle(cle) {
    ÉCRITURE DES MOUVEMENTS
    Journal en ajout seul : on n'efface jamais une ligne, on en ajoute une qui
    corrige. C'est ce qui permet de reconstituer l'historique lors d'un contrôle.
+
+   Chaque ligne est tenue courte à dessein. Une ligne bavarde pèse 240 octets ;
+   4 000 lignes font alors 930 Ko, au-dessus du seuil au-delà duquel une clé
+   n'est plus envoyée à Supabase. Le journal serait resté sur l'iPad, sans
+   erreur visible, au bout de deux à trois mois de saison.
+   Le détail lisible (famille, parfum, taille) est déjà dans la clé : on ne le
+   duplique pas.
    -------------------------------------------------------------------------- */
+const STOCK_POIDS_MAX = 500000;     // octets, bien en deçà du seuil de synchronisation
+const STOCK_LIGNES_MAX = 2500;
+
 async function ajouterMouvement(type, cle, qte, extra) {
-  const l = await DB.get('stock:mouvements', []);
+  let l = await DB.get('stock:mouvements', []);
 
   /* Garde-fou contre le double appui : deux mouvements identiques à moins de
      quinze secondes d'intervalle sont presque toujours une erreur de manipulation,
      et ils fausseraient le stock de façon invisible. */
   const dernier = l[l.length - 1];
-  if (dernier && dernier.type === type && dernier.cle === cle &&
-      num(dernier.qte) === num(qte) &&
-      (extra && extra.lot ? dernier.lot === extra.lot : true) &&
-      (Date.now() - new Date(dernier.at)) < 15000) {
+  if (dernier && dernier.t === type && dernier.c === cle &&
+      num(dernier.q) === num(qte) &&
+      ((extra && extra.lot) ? dernier.l === extra.lot : true) &&
+      (Date.now() - new Date(dernier.a)) < 15000) {
     toast('Déjà enregistré il y a quelques secondes', 'erreur');
     return dernier;
   }
 
-  l.push(Object.assign({
-    id: uid(), type: type, cle: cle, qte: num(qte),
-    jour: today(), at: nowISO(),
-    par: STATE.user ? STATE.user.prenom : null,
-    employe: STATE.user ? STATE.user.id : null
-  }, extra || {}));
+  /* Champs courts : t=type, c=clé, q=quantité, a=horodatage, e=employé, l=lot */
+  const m = { t:type, c:cle, q:num(qte), a:nowISO(),
+              e: STATE.user ? STATE.user.id : null };
+  if (extra && extra.lot) m.l = extra.lot;
+  if (extra && extra.bl)  m.b = extra.bl;
+  if (extra && extra.motif) m.mo = extra.motif;
+  l.push(m);
 
-  /* Purge bornée : on ne coupe JAMAIS un mouvement postérieur au dernier
-     inventaire, sinon le stock deviendrait faux sans que rien ne le signale.
-     On ne rogne que ce qui précède, et qui est déjà absorbé dans la référence. */
-  if (l.length > 4000) {
-    const inv = await DB.get('stock:inventaire', null);
-    const borne = inv ? inv.at : null;
-    const aGarder = borne ? l.filter(m => m.at > borne) : [];
-    const surplus = l.length - 4000;
-    const anciens = borne ? l.filter(m => m.at <= borne) : l;
-    await DB.set('stock:mouvements', anciens.slice(surplus).concat(aGarder));
-  } else {
-    await DB.set('stock:mouvements', l);
+  l = await purgerJournal(l);
+  await DB.set('stock:mouvements', l);
+  return m;
+}
+
+/* Purge fondée sur le poids autant que sur le nombre. Règle intangible :
+   un mouvement postérieur au dernier inventaire n'est JAMAIS supprimé, sinon
+   le stock deviendrait faux sans que rien ne le signale. */
+async function purgerJournal(l) {
+  let poids = 0;
+  try { poids = JSON.stringify(l).length; } catch (e) { poids = l.length * 240; }
+  if (l.length <= STOCK_LIGNES_MAX && poids <= STOCK_POIDS_MAX) return l;
+
+  const inv = await DB.get('stock:inventaire', null);
+  const borne = inv ? inv.at : null;
+  const recents = borne ? l.filter(m => (m.a || m.at) > borne) : [];
+  const anciens = borne ? l.filter(m => (m.a || m.at) <= borne) : l.slice();
+
+  /* On rogne dans les anciens jusqu'à repasser sous les deux plafonds. */
+  let garde = anciens;
+  while (garde.length &&
+         (garde.length + recents.length > STOCK_LIGNES_MAX ||
+          JSON.stringify(garde.concat(recents)).length > STOCK_POIDS_MAX)) {
+    garde = garde.slice(Math.max(1, Math.ceil(garde.length * 0.2)));
   }
-  return l[l.length - 1];
+
+  if (!garde.length && recents.length > STOCK_LIGNES_MAX) {
+    /* Cas extrême : plus de 2 500 mouvements depuis le dernier inventaire.
+       On garde tout quand même — fausser le stock serait pire — et on alerte. */
+    console.warn('Journal de stock volumineux : ' + recents.length +
+                 ' mouvements depuis le dernier inventaire. Faites un inventaire.');
+  }
+  return garde.concat(recents);
 }
 
 /* Un inventaire remplace le précédent : il fixe la référence. */
@@ -123,7 +153,6 @@ async function stockReel() {
   const mouv = await DB.get('stock:mouvements', []);
 
   const out = {};
-  const depuis = inv ? inv.jour : null;
   const dateInv = inv ? inv.at : null;
 
   if (inv && inv.lignes) {
@@ -131,14 +160,33 @@ async function stockReel() {
   }
 
   mouv.forEach(m => {
-    /* Un mouvement antérieur à l'inventaire est déjà compris dedans. */
-    if (dateInv && m.at <= dateInv) return;
-    if (out[m.cle] === undefined) out[m.cle] = 0;
-    if (m.type === 'reception') out[m.cle] += num(m.qte);
-    else if (m.type === 'ouverture' || m.type === 'perte') out[m.cle] -= num(m.qte);
+    /* Format court depuis la réduction du journal, format long avant : on lit
+       les deux pour ne pas invalider l'historique déjà écrit. */
+    const type = m.t || m.type;
+    const c    = m.c || m.cle;
+    const q    = num(m.q !== undefined ? m.q : m.qte);
+    const at   = m.a || m.at;
+    if (!c) return;
+    if (dateInv && at <= dateInv) return;   // déjà compris dans l'inventaire
+    if (out[c] === undefined) out[c] = 0;
+    if (type === 'reception') out[c] += q;
+    else if (type === 'ouverture' || type === 'perte') out[c] -= q;
   });
 
-  return { articles: out, inventaire: inv, depuis: depuis };
+  return { articles: out, inventaire: inv, depuis: inv ? inv.jour : null };
+}
+
+/* Lecture unifiée d'un mouvement, quel que soit le format d'écriture. */
+function litMouvement(m) {
+  return {
+    type: m.t || m.type,
+    cle:  m.c || m.cle,
+    qte:  num(m.q !== undefined ? m.q : m.qte),
+    at:   m.a || m.at,
+    jour: (m.a || m.at || '').slice(0, 10),
+    lot:  m.l || m.lot || '',
+    employe: m.e || m.employe || null
+  };
 }
 
 /* Total en bacs et en litres, pour le calcul d'écart. */
@@ -317,7 +365,8 @@ V.inventaire = async function () {
    -------------------------------------------------------------------------- */
 V.lots = async function () {
   const mouv = await DB.get('stock:mouvements', []);
-  const ouvertures = mouv.filter(m => m.type === 'ouverture').slice(-40).reverse();
+  const ouvertures = mouv.map(litMouvement)
+    .filter(m => m.type === 'ouverture').slice(-40).reverse();
 
   $('#vue-actions').innerHTML = '';
   $('#page').innerHTML =
