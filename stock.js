@@ -114,6 +114,7 @@ async function ajouterMouvement(type, cle, qte, extra) {
 
   l = await purgerJournal(l);
   _moisCache = { cle: cm, lignes: l };
+  invaliderStock();
   await DB.set(cm, l);
   return m;
 }
@@ -133,18 +134,25 @@ function moisAParcourir(depuisJour) {
   return out;
 }
 
-/* Lecture de tous les mouvements utiles, anciens formats compris. */
+/* Lecture de tous les mouvements utiles, anciens formats compris.
+   Les mois sont lus EN PARALLÈLE : en séquence, douze mois faisaient douze
+   allers-retours à la suite, soit 437 ms pour afficher l'écran Stock. En
+   parallèle, on ne paie qu'une fois la latence. */
 async function tousMouvements(depuisJour) {
+  const cles = ['stock:mouvements'].concat(moisAParcourir(depuisJour));
+  const blocs = await Promise.all(cles.map(c => DB.get(c, []).catch(() => [])));
   const out = [];
-  /* Ancienne clé unique, conservée le temps que l'historique s'écoule. */
-  const ancien = await DB.get('stock:mouvements', []);
-  if (ancien && ancien.length) out.push.apply(out, ancien);
-  for (const c of moisAParcourir(depuisJour)) {
-    const l = await DB.get(c, []);
-    if (l && l.length) out.push.apply(out, l);
-  }
+  blocs.forEach(l => { if (l && l.length) out.push.apply(out, l); });
   return out.sort((a, b) => String(a.a || a.at).localeCompare(String(b.a || b.at)));
 }
+
+/* Le stock est recalculé à chaque rendu, et deux vues peuvent le demander
+   coup sur coup — la tour de contrôle puis l'écran Stock. Un cache très court
+   évite de refaire les appels pour rien, sans jamais servir une valeur périmée. */
+let _stockCache = { at: 0, valeur: null };
+const STOCK_CACHE_MS = 3000;
+
+function invaliderStock() { _stockCache = { at: 0, valeur: null }; }
 
 /* Purge fondée sur le poids autant que sur le nombre. Règle intangible :
    un mouvement postérieur au dernier inventaire n'est JAMAIS supprimé, sinon
@@ -190,6 +198,7 @@ async function enregistrerInventaire(lignes, note) {
   hist.push(inv);
   await DB.set('stock:inventaires', hist.slice(-36));
   await DB.set('stock:inventaire', inv);
+  invaliderStock();
   return inv;
 }
 
@@ -197,6 +206,9 @@ async function enregistrerInventaire(lignes, note) {
    CALCUL DU STOCK RÉEL
    -------------------------------------------------------------------------- */
 async function stockReel() {
+  if (_stockCache.valeur && (Date.now() - _stockCache.at) < STOCK_CACHE_MS) {
+    return _stockCache.valeur;
+  }
   const inv = await DB.get('stock:inventaire', null);
   const mouv = await tousMouvements(inv ? inv.jour : null);
 
@@ -221,7 +233,9 @@ async function stockReel() {
     else if (type === 'ouverture' || type === 'perte') out[c] -= q;
   });
 
-  return { articles: out, inventaire: inv, depuis: inv ? inv.jour : null };
+  const resultat = { articles: out, inventaire: inv, depuis: inv ? inv.jour : null };
+  _stockCache = { at: Date.now(), valeur: resultat };
+  return resultat;
 }
 
 /* Lecture unifiée d'un mouvement, quel que soit le format d'écriture. */
