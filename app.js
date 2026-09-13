@@ -433,10 +433,13 @@
    
    /* Fragments réutilisables */
    const carte = (contenu, cls) => '<div class="card ' + (cls || '') + '">' + contenu + '</div>';
+   /* L'icône passée en premier argument est ignorée : un emoji devant chaque
+      titre de carte est la marque la plus visible d'une interface improvisée.
+      Le paramètre reste dans la signature pour ne pas toucher aux 80 appels. */
    const entete = (icone, titre, sous) =>
-     '<div class="ch">' + (icone ? '<span class="ci">' + icone + '</span>' : '') +
-     '<h2>' + esc(titre) + '</h2></div>' + (sous ? '<div class="cs">' + esc(sous) + '</div>' : '');
-   const vide = (icone, texte) => '<div class="vide"><span class="vi">' + icone + '</span>' + esc(texte) + '</div>';
+     '<div class="ch"><h2>' + esc(titre) + '</h2></div>' +
+     (sous ? '<div class="cs">' + esc(sous) + '</div>' : '');
+   const vide = (icone, texte) => '<div class="vide">' + esc(texte) + '</div>';
    const pastille = (cls, txt) => '<span class="pill ' + cls + '">' + esc(txt) + '</span>';
    const avatar = (e, cls) =>
      '<span class="' + (cls || 'av') + '" style="background:' + e.couleur + '">' + esc(e.initiales) + '</span>';
@@ -600,9 +603,12 @@
    
    function renderNav() {
      const onglets = TABS[STATE.user.role] || TABS.equipe;
+     /* Plus de pictogramme dans la barre : le libellé seul, avec un trait sur
+        l'onglet actif. Afficher t.icone ici écrivait « undefined » depuis que
+        les icônes ont été retirées de la configuration. */
      $('#tabbar').innerHTML = onglets.map(t =>
        '<button type="button" class="tab' + (STATE.view === t.id ? ' on' : '') + '" data-tab="' + t.id + '">' +
-         '<span class="ic">' + t.icone + '</span>' + esc(t.label) +
+         '<span class="tl">' + esc(t.label) + '</span>' +
          '<span class="badge" data-badge="' + t.id + '" hidden></span>' +
        '</button>'
      ).join('');
@@ -871,7 +877,7 @@
            return carte('<div class="rang"><span class="ci">' + c.icone + '</span>' +
              '<div style="flex:1"><b>' + esc(m.texte) + '</b>' +
              '<div class="mini">' + esc(m.par) + ' · ' + fmtDC(m.jour) + ' ' + heure(m.at) + '</div></div>' +
-             (m.epingle ? '<span class="pill ambre">📌</span>' : '') + '</div>', c.couleur);
+             (m.epingle ? '<span class="pill ambre">Épinglé</span>' : '') + '</div>', c.couleur);
          }).join('') + '</div>' : '') +
    
        '<div class="phase-nav" style="margin-top:18px">' + PHASES.map(p =>
@@ -961,9 +967,9 @@
       mal et que personne ne lit quand un frigo lâche en plein service. */
    function alerteCritique(e, v) {
      showSheet(
-       '<h2 id="sheet-titre">🚨 ' + esc(e.nom) + ' à ' + v + ' °C</h2>' +
+       '<h2 id="sheet-titre">' + esc(e.nom) + ' à ' + v + ' °C</h2>' +
        '<p class="sub">Limite critique dépassée — cible ' + esc(e.cible) + '.</p>' +
-       '<div class="alerte bad" style="margin-top:14px"><span class="ai">☎️</span>' +
+       '<div class="alerte bad" style="margin-top:14px"><span class="ai">•</span>' +
        '<div><b>Appelez Eve</b><p>En attendant, transférez les produits dans une ' +
        'enceinte conforme et notez l’action corrective en bas de l’écran.</p></div></div>' +
        '<div class="actions"><button class="btn corail bloc" data-fermer>J’ai compris</button></div>'
@@ -1028,7 +1034,7 @@ async function purgerPreuves() {
            t.recurrence === 'mensuel' ? 'Une fois par mois' : 'Une fois par an')) +
       (photo ? ' · photo requise' : '') + '</span></span>' +
       (photo ? '<button class="btn ' + (prise ? 'menthe' : 'clair') + ' sm" data-photo="' + t.id +
-        '" data-lib="' + esc(t.nom) + '">' + (prise ? '✓📷' : '📷') + '</button>' : '') +
+        '" data-lib="' + esc(t.nom) + '">' + (prise ? '✓ Photo' : 'Photo') + '</button>' : '') +
       '</div>';
   };
    
@@ -1045,7 +1051,7 @@ async function purgerPreuves() {
            const v = rec['async_' + a.id] || {};
            return carte('<button type="button" class="tache' + (v.ok ? ' on' : '') + '" data-c="async_' + a.id +
              '" style="width:100%;background:transparent;border:0;padding:0">' +
-             '<span class="box">✓</span><span class="tx"><span class="tn">' + a.icone + ' ' + esc(a.nom) + '</span>' +
+             '<span class="box">✓</span><span class="tx"><span class="tn">' + esc(a.nom) + '</span>' +
              '<span class="tm">' + (v.ok ? esc(v.par) + ' · ' + heure(v.at)
                : a.type === 'jours-fixes' ? 'Chaque ' + a.jours.map(x => JOURS_SEMAINE[x].toLowerCase()).join(', ')
                : 'Tous les ' + a.intervalleJours + ' jours') +
@@ -1111,7 +1117,7 @@ async function purgerPreuves() {
            ? 'Appuyez, parlez normalement : « J’ai jeté 2 bacs de vanille ».'
            : 'La dictée n’est pas disponible sur ce navigateur. Utilisez la saisie ci-dessous.') +
          '<button class="btn corail bloc xl mic" id="mic"' + (SPEECH ? '' : ' disabled') + '>' +
-         '<span class="ic">🎙️</span>Dicter la perte</button>' +
+         'Dicter la perte</button>' +
          '<p class="mini" id="mtx" style="margin-top:12px">' +
          (SPEECH ? esc(VOIX.exemples.join(' · ')) : 'Dictée indisponible') + '</p>', 'corail') +
    
@@ -1173,7 +1179,7 @@ async function purgerPreuves() {
          clearTimeout(stop);
          toast(ev.error === 'not-allowed' ? 'Micro refusé par le navigateur' : 'Dictée interrompue', 'erreur');
        };
-       r.onend = () => { mb.classList.remove('rec'); mb.innerHTML = '<span class="ic">🎙️</span>Dicter la perte'; };
+       r.onend = () => { mb.classList.remove('rec'); mb.innerHTML = 'Dicter la perte'; };
        try { r.start(); } catch (e) { r.onend(); }
      };
    
@@ -1258,7 +1264,7 @@ async function purgerPreuves() {
        carte(entete('📸', 'Scanner l’étiquette', 'Photographiez l’étiquette plutôt que de recopier le numéro.') +
          '<span class="demo">MODE DÉMONSTRATION</span>' +
          '<button class="btn ciel bloc xl" id="scan" style="margin-top:14px">' +
-         '<span class="ic">📸</span>Scanner une étiquette</button>' +
+         'Scanner une étiquette</button>' +
          '<p class="mini" style="margin-top:12px">Le lot se note à l’ouverture du produit, au moment de la mise en vitrine.</p>', 'ciel') +
    
        '<div class="entete"><h3>Produits ouverts ce mois</h3><span class="pousse mini num">' + ouverts + '</span></div>' +
@@ -1276,7 +1282,7 @@ async function purgerPreuves() {
            '<div class="champ"><label class="f">Ouvert le</label>' +
            '<input type="date" data-l="' + s.cle + '.ouv" value="' + (v.ouv || '') + '"></div></div>' +
            '<div class="btn-row" style="margin-top:12px">' +
-           '<button class="btn clair sm" data-scan="' + s.cle + '">📸 Scanner</button>' +
+           '<button class="btn clair sm" data-scan="' + s.cle + '">Scanner</button>' +
            '<button class="btn clair sm" data-now="' + s.cle + '">Ouvert aujourd’hui</button></div>',
            v.lot ? 'menthe' : '');
        }).join('') + '</div>';
@@ -1368,7 +1374,7 @@ async function purgerPreuves() {
                  : v.rupture ? 'Reste ' + v.reste + ' ' + r.unite + ' — signalé' : 'En ' + r.unite) + '</div></div></div>' +
                '<div class="duo" style="margin-top:12px">' +
                '<button type="button" class="btn ok' + (v.ok ? ' on' : '') + '" data-ok="' + r.id + '">✅ Fait</button>' +
-               '<button type="button" class="btn ko' + (v.rupture ? ' on' : '') + '" data-ko="' + r.id + '">⚠️ Rupture</button>' +
+               '<button type="button" class="btn ko' + (v.rupture ? ' on' : '') + '" data-ko="' + r.id + '">Rupture</button>' +
                '</div>', v.rupture ? 'corail' : v.ok ? 'menthe' : c.couleur);
            }).join('') + '</div>';
        }).join('');
@@ -1393,7 +1399,7 @@ async function purgerPreuves() {
    
      function demanderQuantite(art) {
        showSheet(
-         '<h2 id="sheet-titre">⚠️ ' + esc(art.nom) + '</h2>' +
+         '<h2 id="sheet-titre">' + esc(art.nom) + '</h2>' +
          '<p class="sub">Combien en reste-t-il ? Eve reçoit l’alerte immédiatement.</p>' +
          '<div class="chips" id="qt">' + RUPTURE.unitesRapides.map(q =>
            '<button type="button" class="chip corail" data-q="' + q + '">' +
@@ -1446,7 +1452,7 @@ async function purgerPreuves() {
          '<textarea id="rt" placeholder="' + esc(RELEVE.exemples[0]) + '"></textarea></div>' +
          '<div class="btn-row" style="margin-top:14px">' +
          '<button class="btn menthe" id="rv">Publier</button>' +
-         '<button class="btn clair" id="rp">📌 Épingler</button></div>', 'solide') +
+         '<button class="btn clair" id="rp">Épingler</button></div>', 'solide') +
    
        '<div class="entete"><h3>Derniers messages</h3></div>' +
        (visibles.length ? '<div class="stack">' + visibles.map(m => {
@@ -1455,7 +1461,7 @@ async function purgerPreuves() {
            '<div style="flex:1;min-width:0"><b>' + esc(m.texte) + '</b>' +
            '<div class="mini">' + esc(m.par) + ' · ' + fmtDC(m.jour) + ' ' + heure(m.at) +
            (m.luPar && m.luPar.length ? ' · lu par ' + esc(m.luPar.join(', ')) : '') + '</div></div>' +
-           (m.epingle ? '<span class="pill ambre">📌</span>' : '') +
+           (m.epingle ? '<span class="pill ambre">Épinglé</span>' : '') +
            (m.luPar && m.luPar.indexOf(STATE.user.prenom) >= 0 ? ''
              : '<button class="btn clair sm" data-lu="' + m.id + '">J’ai lu</button>') + '</div>',
            m.epingle ? 'ambre' : c.couleur);
@@ -1512,7 +1518,7 @@ async function purgerPreuves() {
          '<div class="stack">' + f.etapes.map((s, i) =>
            '<div class="tache"><span class="box" style="border:0;background:var(--ciel-l);color:var(--ciel-d)">' +
            (i + 1) + '</span><span class="tx"><span class="tn">' + esc(s) + '</span></span></div>').join('') + '</div>' +
-         '<div class="alerte warn" style="margin-top:16px"><span class="ai">⚠️</span>' +
+         '<div class="alerte warn" style="margin-top:16px"><span class="ai">•</span>' +
          '<div><b>Sécurité</b><p>' + esc(f.securite) + '</p></div></div>' +
          '<div class="alerte info" style="margin-top:10px"><span class="ai">⏱️</span>' +
          '<div><b>Validité</b><p>' + esc(f.validite) + '</p></div></div>' +
@@ -1649,13 +1655,13 @@ function ecranRemiseAZero(auto) {
   };
   $('#rz-ok').onclick = async function () {
     $('#sheet-corps').innerHTML =
-      '<h2>Nettoyage en cours…</h2><div class="vide"><span class="vi">🧹</span>Un instant</div>';
+      '<h2>Nettoyage en cours…</h2><div class="vide">Un instant</div>';
     const r = await viderAppareil();
     $('#sheet-corps').innerHTML =
-      '<h2>✅ Appareil remis à zéro</h2>' +
+      '<h2>Appareil remis à zéro</h2>' +
       '<p class="sub">' + r.cles + ' saisie(s), ' + r.sw + ' service worker, ' +
       r.caches + ' cache(s) effacés.</p>' +
-      '<div class="alerte ok" style="margin-top:12px"><span class="ai">✓</span><div>' +
+      '<div class="alerte ok" style="margin-top:12px"><span class="ai">•</span><div>' +
       '<b>Redémarrage…</b><p>L’application va se recharger sur sa dernière version.</p></div></div>';
     setTimeout(function () { location.replace(location.pathname); }, 1500);
   };
@@ -1995,8 +2001,8 @@ function ouvrirPremierePeriode() {
    
      badge('controle', A.filter(a => a[0] === 'bad').length, true);
      $('#vue-actions').innerHTML =
-       '<button class="btn clair sm" id="scanbl">📸 Scanner BL</button>' +
-       '<button class="btn sm" id="pdf">🛡️ Registre</button>';
+       '<button class="btn clair sm" id="scanbl">Scanner BL</button>' +
+       '<button class="btn sm" id="pdf">Registre</button>';
    
      $('#page').innerHTML =
        '<div class="grid g2">' + widgetMeteo(m) +
@@ -2017,14 +2023,14 @@ function ouvrirPremierePeriode() {
          '<div class="alerte ' + a[0] + '"><span class="ai">' + (a[0] === 'bad' ? '▲' : '●') + '</span>' +
          '<div><b>' + esc(a[1]) + '</b><p>' + esc(a[2]) + '</p></div>' +
          '<span class="go"><button class="btn clair sm" data-go="' + a[3] + '">Ouvrir</button></span></div>').join('') + '</div>'
-         : carte('<div class="alerte ok"><span class="ai">✓</span><div><b>Rien à signaler</b>' +
+         : carte('<div class="alerte ok"><span class="ai">•</span><div><b>Rien à signaler</b>' +
            '<p>Caisse, frigos, nettoyage et stocks sont dans les clous.</p></div></div>', 'plat')) +
    
-       (ruptures.length ? '<div class="entete"><h3>🚨 Urgences</h3>' +
+       (ruptures.length ? '<div class="entete"><h3>Urgences</h3>' +
          '<button class="btn fantome sm pousse" id="tout-traite">Tout marquer traité</button></div>' +
          '<div class="stack">' + ruptures.slice().reverse().map(r => {
            const niv = RUPTURE.niveaux.filter(n => n.id === r.niveau)[0] || RUPTURE.niveaux[0];
-           return carte('<div class="rang"><span class="ci">⚠️</span>' +
+           return carte('<div class="rang">' +
              '<div style="flex:1;min-width:0"><b>' + esc(r.article) + '</b>' +
              '<div class="mini">' + (r.reste === 0 ? 'Plus rien en stock' : 'Reste ' + r.reste + ' ' + esc(r.unite)) +
              (r.note ? ' · ' + esc(r.note) : '') + ' · ' + esc(r.par) + ' le ' + fmtDC(r.jour) + ' ' + heure(r.at) + '</div></div>' +
@@ -2032,7 +2038,7 @@ function ouvrirPremierePeriode() {
              '<button class="btn menthe sm" data-traite="' + r.id + '">Traité</button></div>', 'urgence corail');
          }).join('') + '</div>' : '') +
    
-       '<div class="entete"><h3>🗼 En direct</h3><span class="pousse mini">3 derniers jours</span></div>' +
+       '<div class="entete"><h3>En direct</h3><span class="pousse mini">3 derniers jours</span></div>' +
        carte(feedJ.length ? '<div class="feed">' + feedJ.slice(0, 60).map(x => {
          const p = EQUIPE.filter(y => y.id === x.id)[0];
          return '<div class="fi ' + (x.n === 'ok' ? '' : x.n) + '">' +
@@ -2110,7 +2116,7 @@ function ouvrirPremierePeriode() {
        kpi('À écouler', o.length, o.length ? 'warn' : 'ok', 'Moins de 48 h') +
        kpi('Conformes', v.length, 'ok', 'Rien à signaler') + '</div>' +
    
-       (fifo.length ? [['rouge', '🔴 Périmés — à retirer', r], ['orange', '🟠 À vendre vite', o], ['vert', '🟢 Conformes', v]]
+       (fifo.length ? [['rouge', 'Périmés — à retirer', r], ['orange', 'À vendre vite', o], ['vert', 'Conformes', v]]
          .filter(g => g[2].length).map(g =>
            '<div class="entete"><h3>' + g[1] + '</h3><span class="pousse mini num">' + g[2].length + '</span></div>' +
            '<div class="stack">' + g[2].map(f =>
@@ -2178,7 +2184,7 @@ function ouvrirPremierePeriode() {
          '<div class="dl"><span class="c1">' + esc(l.ref) + ' · ' + esc(l.parfum) + '</span>' +
          '<span class="c w num">' + l.bacs + '</span>' +
          '<span class="c w num">' + (l.bacs * l.taille) + '</span></div>').join('') + '</div></div>' +
-       '<div class="alerte info" style="margin-top:14px"><span class="ai">📥</span><div><b>Ce que fait la validation</b>' +
+       '<div class="alerte info" style="margin-top:14px"><span class="ai">•</span><div><b>Ce que fait la validation</b>' +
        '<p>Les ' + n1(litres) + ' L s’ajoutent aux achats de la période en cours, base du calcul d’écart.</p></div></div>' +
        '<div class="actions"><button class="btn clair" data-fermer>Annuler</button>' +
        '<button class="btn menthe" id="bl-ok">Ajouter aux achats</button></div>');
@@ -2202,8 +2208,8 @@ function ouvrirPremierePeriode() {
      const per = await periodeCourante();
      const onglet = V.inv._t || 'glace';
      $('#vue-actions').innerHTML =
-       '<button class="btn ' + (onglet === 'glace' ? '' : 'clair') + ' sm" data-iv="glace">🍦 Glace</button>' +
-       '<button class="btn ' + (onglet === 'sec' ? '' : 'clair') + ' sm" data-iv="sec">📦 Sec</button>';
+       '<button class="btn ' + (onglet === 'glace' ? '' : 'clair') + ' sm" data-iv="glace">Glace</button>' +
+       '<button class="btn ' + (onglet === 'sec' ? '' : 'clair') + ' sm" data-iv="sec">Sec</button>';
      $$('[data-iv]').forEach(b => b.onclick = () => { V.inv._t = b.dataset.iv; rendre('inv'); });
      onglet === 'glace' ? await invGlace(per) : await invSec(per);
    };
@@ -2227,7 +2233,7 @@ function ouvrirPremierePeriode() {
        carte(entete('🍦', 'Inventaire glace · ' + libellePeriode(per),
          'Comptez parfum par parfum. Le total des bacs devra être confirmé avant validation.') +
          (rec.valide
-           ? '<div class="alerte ok"><span class="ai">✓</span><div><b>Validé</b><p>' + esc(rec.par) + ' · ' +
+           ? '<div class="alerte ok"><span class="ai">•</span><div><b>Validé</b><p>' + esc(rec.par) + ' · ' +
              fmtD(rec.jour) + ' ' + heure(rec.at) + ' — ' + rec.bacs + ' bacs, ' + n1(rec.kg) + ' kg</p></div>' +
              '<span class="go"><button class="btn clair sm" id="rouvrir">Rouvrir</button></span></div>'
            : '<div class="grid g3">' +
@@ -2320,7 +2326,7 @@ function ouvrirPremierePeriode() {
    
      $('#page').innerHTML =
        carte(entete('📦', 'Inventaire sec · ' + libellePeriode(per), 'Consommables et produits non congelés.') +
-         (rec.valide ? '<div class="alerte ok"><span class="ai">✓</span><div><b>Validé</b><p>' + esc(rec.par) +
+         (rec.valide ? '<div class="alerte ok"><span class="ai">•</span><div><b>Validé</b><p>' + esc(rec.par) +
            ' · ' + fmtD(rec.jour) + '</p></div><span class="go"><button class="btn clair sm" id="ro">Rouvrir</button></span></div>' : ''), 'solide') +
    
        '<div class="stack">' + INVENTAIRE_SEC.map((s, i) => {
@@ -2459,7 +2465,7 @@ function ouvrirPremierePeriode() {
      const pos = Math.max(-25, Math.min(25, -c.pct));
      const gauche = 50 + (pos / 25) * 50;
    
-     $('#vue-actions').innerHTML = '<button class="btn clair sm" id="sbl">📸 Scanner BL</button>';
+     $('#vue-actions').innerHTML = '<button class="btn clair sm" id="sbl">Scanner BL</button>';
    
      $('#page').innerHTML =
        carte(entete('📊', libellePeriode(per), 'Stock théorique = début + achats − jeté − vendu.') +
@@ -2490,7 +2496,7 @@ function ouvrirPremierePeriode() {
          '<p class="mini" style="margin-top:10px">' + n1(num(e.jeteL)) + ' L déclarés</p>') + '</div>' +
    
        carte(entete('🍦', 'Glace vendue', 'Poids sorti par la caisse sur la période. C’est la donnée qui pèse le plus dans l’écart.') +
-         '<button class="btn ciel bloc xl" id="imp-btn">📥 Importer l’export de caisse (XLSX)</button>' +
+         '<button class="btn ciel bloc xl" id="imp-btn">Importer l’export de caisse (XLSX)</button>' +
          '<input type="file" id="import-caisse" accept=".xlsx,.xls" hidden>' +
          '<div class="grid g2" style="margin-top:16px">' +
          kpi('Poids vendu', n1(c.vendu) + '<span class="u">kg</span>',
@@ -2510,7 +2516,7 @@ function ouvrirPremierePeriode() {
        (inv && inv.valide ? carte(entete('✅', 'Inventaire de clôture',
          inv.bacs + ' bacs · ' + n1(inv.kg) + ' kg · validé par ' + inv.par + ' le ' + fmtD(inv.jour)), 'menthe') : '') +
    
-       (tendances.length ? '<div class="entete"><h3>🔎 Tendances détectées</h3><span class="pousse demo">ANALYSE LOCALE</span></div>' +
+       (tendances.length ? '<div class="entete"><h3>Tendances détectées</h3><span class="pousse demo">ANALYSE LOCALE</span></div>' +
          '<div class="stack">' + tendances.map(t =>
            carte('<div class="rang"><span class="ci">' + t.icone + '</span>' +
              '<div style="flex:1"><b>' + esc(t.titre) + '</b><div class="mini">' + esc(t.detail) + '</div></div>' +
@@ -2537,7 +2543,7 @@ function ouvrirPremierePeriode() {
    
        showSheet('<h2 id="sheet-titre">Lecture de l’export</h2>' +
          '<p class="sub">' + esc(f.name) + '</p>' +
-         '<div class="vide"><span class="vi">📊</span>Analyse du fichier…</div>');
+         '<div class="vide">Analyse du fichier…</div>');
    
        let r;
        try { r = await lireExportCaisse(f); }
@@ -2573,13 +2579,13 @@ function ouvrirPremierePeriode() {
    
      Object.keys(parJour).forEach(j => {
        if (parJour[j] >= FRAUDE.minOccurrences)
-         out.push({ icone:'📅', niveau:'warn', compte:parJour[j],
+         out.push({ icone:'', niveau:'warn', compte:parJour[j],
                     titre:'Manques en caisse le ' + j.toLowerCase(),
                     detail:parJour[j] + ' écarts au-delà du seuil sur ' + FRAUDE.fenetreJours + ' jours, tous un ' + j.toLowerCase() + '.' });
      });
      Object.keys(parPersonne).forEach(p => {
        if (parPersonne[p] >= FRAUDE.minOccurrences)
-         out.push({ icone:'👤', niveau:'warn', compte:parPersonne[p],
+         out.push({ icone:'', niveau:'warn', compte:parPersonne[p],
                     titre:'Écarts concentrés sur une session',
                     detail:parPersonne[p] + ' clôtures avec écart signées ' + p + '. À vérifier avant toute conclusion.' });
      });
@@ -2588,7 +2594,7 @@ function ouvrirPremierePeriode() {
                   titre:'Commandes annulées répétées',
                   detail:annulations + ' journées avec des annulations notées sur la fenêtre analysée.' });
      if (pertesTotal > 0)
-       out.push({ icone:'🗑️', niveau:'n', compte:Math.round(pertesTotal),
+       out.push({ icone:'', niveau:'n', compte:Math.round(pertesTotal),
                   titre:'Volume de pertes déclarées',
                   detail:n1(pertesTotal) + ' L jetés sur ' + FRAUDE.fenetreJours + ' jours, soit ' +
                          n1(pertesTotal * FOURNISSEUR.poidsMoyenLitre * FOURNISSEUR.prixMoyenKg) + ' € de marchandise.' });
@@ -2640,12 +2646,12 @@ function ouvrirPremierePeriode() {
          '<div class="alerte ' + (b.forcable ? 'warn' : 'bad') + '"><span class="ai">' + (b.forcable ? '●' : '▲') + '</span>' +
          '<div><b>' + esc(b.txt) + '</b><p>' + (b.forcable ? 'Peut être forcé avec un motif écrit.' : 'Bloquant : la clôture est impossible sans cela.') + '</p></div>' +
          '<span class="go"><button class="btn clair sm" data-go="' + b.go + '">Ouvrir</button></span></div>').join('') + '</div>'
-         : carte('<div class="alerte ok"><span class="ai">✓</span><div><b>Tout est en ordre</b>' +
+         : carte('<div class="alerte ok"><span class="ai">•</span><div><b>Tout est en ordre</b>' +
            '<p>Inventaires validés, achats saisis, registres complets.</p></div></div>', 'plat')) +
    
        '<button class="btn ' + (bloquants.length ? 'clair' : 'menthe') + ' bloc xl" id="clo" style="margin-top:16px">' +
-       (anticipee ? '⏭️ Clôture anticipée' : '🔒 Terminer la période') + '</button>' +
-    '<button class="btn clair bloc" id="modif" style="margin-top:8px">✏️ Modifier les dates de la période</button>' +
+       (anticipee ? '⏭️ Clôture anticipée' : 'Terminer la période') + '</button>' +
+    '<button class="btn clair bloc" id="modif" style="margin-top:8px">Modifier les dates de la période</button>' +
    
        (historique.length ? '<div class="entete"><h3>Périodes clôturées</h3></div>' +
          '<div class="dense"><div class="dense-h"><span class="c1">Période</span>' +
@@ -2878,7 +2884,7 @@ function modifierPeriode(per) {
        }
      }
    
-     $('#vue-actions').innerHTML = '<button class="btn sm" id="pdf">🛡️ Registre sanitaire</button>' +
+     $('#vue-actions').innerHTML = '<button class="btn sm" id="pdf">Registre sanitaire</button>' +
        '<button class="btn clair sm" id="csv">CSV</button>';
    
      $('#page').innerHTML =
@@ -2888,7 +2894,7 @@ function modifierPeriode(per) {
    
        carte(entete('🛡️', 'Bouclier sanitaire',
          'Compile températures, nettoyage et lots ouverts en un document présentable à un contrôle.') +
-         '<button class="btn ciel bloc xl" id="pdf2">🛡️ Export PDF contrôle sanitaire</button>', 'ciel') +
+         '<button class="btn ciel bloc xl" id="pdf2">Export PDF contrôle sanitaire</button>', 'ciel') +
    
        (lignes.length
          ? '<div class="dense" style="margin-top:14px"><div class="dense-h">' +
@@ -2915,13 +2921,13 @@ function modifierPeriode(per) {
    
    function ouvrirBouclier() {
      showSheet(
-       '<h2 id="sheet-titre">🛡️ Registre pour un contrôle sanitaire</h2>' +
+       '<h2 id="sheet-titre">Registre pour un contrôle sanitaire</h2>' +
        '<p class="sub">Le document compile les relevés de température, le nettoyage et les lots ouverts, ' +
        'avec les noms et les heures de saisie.</p>' +
        '<div class="chips" id="bp">' +
        [[7, '7 jours'], [30, '30 jours'], [90, '3 mois']].map((x, i) =>
          '<button type="button" class="chip' + (i === 1 ? ' on' : '') + '" data-p="' + x[0] + '">' + x[1] + '</button>').join('') + '</div>' +
-       '<div class="alerte info" style="margin-top:16px"><span class="ai">🖨️</span><div><b>Enregistrer en PDF</b>' +
+       '<div class="alerte info" style="margin-top:16px"><span class="ai">•</span><div><b>Enregistrer en PDF</b>' +
        '<p>Dans la fenêtre d’impression, choisissez « Enregistrer au format PDF » comme destination.</p></div></div>' +
        '<div class="actions"><button class="btn clair" data-fermer>Annuler</button>' +
        '<button class="btn ciel" id="bg">Générer</button></div>');
@@ -3328,7 +3334,7 @@ function modifierPeriode(per) {
          : '') +
    
        (r.inconnus.length
-         ? '<div class="alerte warn" style="margin-top:14px"><span class="ai">⚠️</span>' +
+         ? '<div class="alerte warn" style="margin-top:14px"><span class="ai">•</span>' +
            '<div><b>' + r.inconnus.length + ' SKU sans grammage</b><p>' +
            esc(r.inconnus.slice(0, 8).join(', ')) + (r.inconnus.length > 8 ? '…' : '') +
            '. Leur glace n’est pas comptée dans les ventes, donc elle apparaîtra comme un manque.</p></div></div>'

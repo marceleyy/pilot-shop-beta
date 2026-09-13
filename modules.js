@@ -114,12 +114,12 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
      $('#page').innerHTML =
        carte(entete('🚚', 'Réception d’une livraison',
          'Deux scans : le bon de livraison, puis la DLC de chaque produit entrant.') +
-         '<button class="btn ciel bloc xl" id="scan-bl">📸 1. Scanner le bon de livraison</button>' +
+         '<button class="btn ciel bloc xl" id="scan-bl">1. Scanner le bon de livraison</button>' +
          '<button class="btn clair bloc" id="saisie-bl" style="margin-top:10px">Saisir sans scanner</button>', 'ciel') +
    
        (recus.length
          ? '<div class="entete"><h3>Reçu aujourd’hui</h3></div><div class="stack">' + recus.map(r =>
-             carte('<div class="rang"><span class="ci">' + (r.refuse ? '⛔' : '📦') + '</span>' +
+             carte('<div class="rang">' +
                '<div style="flex:1;min-width:0"><b>' + esc(r.fournisseur) + ' · ' + esc(r.numero) + '</b>' +
                '<div class="mini">' + r.lignes.length + ' référence(s) · sonde ' + (r.temp === '' ? '—' : r.temp + ' °C') +
                ' · ' + esc(r.par) + ' à ' + heure(r.at) + '</div></div>' +
@@ -211,7 +211,7 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
              '<div class="champ"><label class="f">N° de lot</label><input type="text" data-r="' + i + '.lot" value="' + esc(l.lot) + '"></div></div>' +
              '<div class="champ" style="margin-top:10px"><label class="f">DLC / DLUO</label>' +
              '<input type="date" data-r="' + i + '.dlc" value="' + l.dlc + '"></div>' +
-             '<button class="btn clair sm bloc" data-scandlc="' + i + '" style="margin-top:10px">📸 Scanner la DLC</button>' +
+             '<button class="btn clair sm bloc" data-scandlc="' + i + '" style="margin-top:10px">Scanner la DLC</button>' +
              '</div>').join('') + '</div>' +
            '<button class="btn clair bloc" id="rl-plus" style="margin-top:12px">+ Ajouter un produit</button>' +
            '<div class="actions"><button class="btn clair" data-fermer>Annuler</button>' +
@@ -282,7 +282,7 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
    
      $('#page').innerHTML =
        (alertes.length
-         ? '<div class="entete"><h3>⚠️ DLC qui approchent</h3></div><div class="stack">' + alertes.map(a =>
+         ? '<div class="entete"><h3>DLC qui approchent</h3></div><div class="stack">' + alertes.map(a =>
              '<div class="fifo ' + (a.niveau === 'jaune' ? 'orange' : a.niveau) + '">' +
              '<div class="fn"><b>' + esc(a.produit) + '</b>' +
              '<div class="fd">Non ouvert · reçu le ' + fmtDC(a.recuLe) + ' · ' + a.qte + ' ' + esc(a.unite) +
@@ -290,7 +290,7 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
              '<div class="fr"><b>' + (a.reste < 0 ? 'Périmé' : a.reste === 0 ? 'Dernier jour' : 'J−' + a.reste) + '</b>' +
              '<span>DLC ' + fmtDC(a.dlc) + '</span></div>' +
              '<button class="btn clair sm" data-ouvrir="' + a.id + '">Ouvrir</button></div>').join('') + '</div>'
-         : carte('<div class="alerte ok"><span class="ai">✓</span><div><b>Aucune DLC proche</b>' +
+         : carte('<div class="alerte ok"><span class="ai">•</span><div><b>Aucune DLC proche</b>' +
            '<p>Rien en stock fermé n’expire dans les ' + STOCK.alerteDlcJours + ' jours.</p></div></div>', 'plat')) +
    
        '<div class="entete"><h3>Stock fermé</h3><span class="pousse mini num">' + ferme.length + '</span></div>' +
@@ -321,7 +321,7 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
      showSheet(
        '<h2 id="sheet-titre">Ouvrir ' + esc(a.produit) + '</h2>' +
        '<p class="sub">Le produit sort du stock fermé et entre en traçabilité des produits ouverts.</p>' +
-       '<button class="btn ciel bloc" id="og-scan">📸 Scanner l’étiquette</button>' +
+       '<button class="btn ciel bloc" id="og-scan">Scanner l’étiquette</button>' +
        '<div class="champ" style="margin-top:14px"><label class="f">N° de lot</label>' +
        '<input type="text" id="og-lot" value="' + esc(a.lot || '') + '" autocapitalize="characters"></div>' +
        '<div class="champ" style="margin-top:14px"><label class="f">Produit confirmé</label>' +
@@ -413,7 +413,7 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
      '</span>' +
      (t.minuteur ? '<button class="btn clair sm" data-min="' + t.minuteur + '" data-nom="' + esc(t.t) + '">⏱️</button>' : '') +
      (besoinPhoto ? '<button class="btn ' + (preuve ? 'menthe' : 'clair') + ' sm" data-photo="' + t.id +
-       '" data-lib="' + esc(t.t) + '">' + (preuve ? '✓📷' : '📷') + '</button>' : '') +
+       '" data-lib="' + esc(t.t) + '">' + (preuve ? '✓ Photo' : 'Photo') + '</button>' : '') +
      (t.lien ? '<button class="btn clair sm" data-go="' + t.lien + '">→</button>' : '') +
          '</div>';
   };
@@ -432,7 +432,7 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
    
        (msgs.length ? '<div class="entete"><h3>Carnet de relève</h3>' +
          '<button class="btn fantome sm pousse" data-go="releve">Tout voir</button></div>' +
-         '<div class="stack">' + msgs.map(m => carte('<div class="rang"><span class="ci">💬</span>' +
+         '<div class="stack">' + msgs.map(m => carte('<div class="rang">' +
            '<div style="flex:1"><b>' + esc(m.texte) + '</b><div class="mini">' + esc(m.par) + ' · ' +
            fmtDC(m.jour) + '</div></div></div>', 'ambre')).join('') + '</div>' : '') +
    
@@ -448,7 +448,7 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
              'reception|🚚|Réceptionner une livraison', 'reas|📦|Signaler une rupture'].map(x => {
              const [id, ic, lb] = x.split('|');
              return '<button type="button" class="menu-item" data-go="' + id + '">' +
-             '<span class="mi-tx"><span class="mi-t">' + ic + ' ' + lb + '</span></span>' +
+             '<span class="mi-tx"><span class="mi-t">' + lb + '</span></span>' +
              '<span class="mi-fl">›</span></button>';
              }).join('') + '</div>')
    
@@ -461,7 +461,7 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
          faits + ' sur ' + total + ' tâches') +
             '<div class="jauge" style="margin-bottom:16px"><i style="width:' +
             (total ? Math.round(faits / total * 100) : 0) + '%"></i></div>' +
-            (vp ? '<div class="alerte ok" style="margin-bottom:14px"><span class="ai">✓</span>' +
+            (vp ? '<div class="alerte ok" style="margin-bottom:14px"><span class="ai">•</span>' +
               '<div><b>Procédure validée</b><p>Par ' + esc(vp.par) + ' à ' + heure(vp.at) + '.</p></div></div>' : '') +
             blocs.map(b => (blocs.length > 1 ? '<div class="entete"><h3>' + esc(b.bloc) + '</h3></div>' : '') +
               '<div class="stack">' + b.taches.map(t => ligne(t, ++n)).join('') + '</div>').join('') +
@@ -555,7 +555,7 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
        if (reste <= 0) {
          clearInterval(t);
          vibrer([200, 100, 200]);
-         box.innerHTML = '<h2>✅ Temps écoulé</h2><p class="sub">Vous pouvez rincer.</p>' +
+         box.innerHTML = '<h2>Temps écoulé</h2><p class="sub">Vous pouvez rincer.</p>' +
            '<div class="actions"><button class="btn menthe" data-fermer>Terminé</button></div>';
          $$('[data-fermer]').forEach(b => b.onclick = closeSheet);
          return;
@@ -638,7 +638,7 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
        } else {
          const d = +(num(o.fi) - attendu).toFixed(2);
          $('#ct-croise').innerHTML = Math.abs(d) < 0.01
-           ? '<div class="alerte ok"><span class="ai">✓</span><div><b>Fond conforme à la veille</b>' +
+           ? '<div class="alerte ok"><span class="ai">•</span><div><b>Fond conforme à la veille</b>' +
              '<p>' + eur(num(o.fi)) + ' comptés, identique au fond laissé hier soir.</p></div></div>'
            : '<div class="alerte bad"><span class="ai">▲</span><div><b>Écart avec la veille : ' + eur(d) + '</b>' +
              '<p>' + eur(attendu) + ' laissés hier par ' + esc(veille.par || '—') + ', ' + eur(num(o.fi)) +
@@ -655,7 +655,7 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
              rempli ? (eq.conforme ? 'ok' : 'bad') : '', 'Équation de caisse') + '</div>' +
          (rempli
            ? (eq.conforme
-               ? '<div class="alerte ok" style="margin-top:12px"><span class="ai">✅</span><div>' +
+               ? '<div class="alerte ok" style="margin-top:12px"><span class="ai">•</span><div>' +
                  '<b>Conforme</b><p>' + eur(num(o.tpe)) + ' TPE + ' + eur(eq.depot) + ' dépôt + ' +
                  eur(num(o.ff)) + ' fond final = ' + eur(num(o.fi)) + ' fond initial + ' + eur(eq.ca) + ' de CA.</p></div></div>'
                : '<div class="alerte bad" style="margin-top:12px"><span class="ai">▲</span><div>' +
@@ -705,7 +705,7 @@ V.lots = async function () {
   const bandeau = document.createElement('div');
      bandeau.innerHTML = carte(entete('#️⃣', 'Traçabilité pour l’ouverture de tout nouveau produit',
        'Le lot se note au moment où le produit est ouvert et mis en vitrine, jamais à la livraison.') +
-       '<button class="btn ciel bloc xl" id="tr-scan">📸 Scanner l’étiquette</button>' +
+       '<button class="btn ciel bloc xl" id="tr-scan">Scanner l’étiquette</button>' +
        '<button class="btn clair bloc" id="tr-stock" style="margin-top:10px">Ouvrir depuis le stock fermé</button>', 'ciel');
      h.insertBefore(bandeau.firstChild, h.firstChild);
    
@@ -738,11 +738,11 @@ V.lots = async function () {
         '<p class="sub">Le stock se met à jour automatiquement selon votre choix.</p>' +
         '<div class="stack">' +
         '<button type="button" class="menu-item" data-mode="stock">' +
-        '<span class="mi-tx"><span class="mi-t">📦 Entrée en stock</span>' +
+        '<span class="mi-tx"><span class="mi-t">Entrée en stock</span>' +
         '<span class="mi-s">Bac fermé, rangé en chambre froide — ajouté au stock</span></span>' +
         '<span class="mi-fl">›</span></button>' +
         '<button type="button" class="menu-item" data-mode="ouverture">' +
-        '<span class="mi-tx"><span class="mi-t">🍦 Ouverture d’un bac</span>' +
+        '<span class="mi-tx"><span class="mi-t">Ouverture d’un bac</span>' +
         '<span class="mi-s">Mis en vitrine — sorti du stock, DLC lancée</span></span>' +
         '<span class="mi-fl">›</span></button></div>' +
         '<div class="actions"><button class="btn clair" id="cm-x">Annuler</button></div>');
@@ -757,7 +757,7 @@ V.lots = async function () {
     return new Promise(resolve => {
       const taille = r.volume || FOURNISSEUR.tailleParDefaut;
       showSheet(
-        '<h2 id="sheet-titre">📦 Entrée en stock</h2>' +
+        '<h2 id="sheet-titre">Entrée en stock</h2>' +
         '<p class="sub">Lot <b>' + esc(r.lot || '—') + '</b>' +
         (r.volume ? ' · ' + r.volume + ' L lus sur l’étiquette' : '') + '</p>' +
         (r.dluo ? '<div class="alerte info"><span class="ai">⏱️</span><div><b>DLUO du bac fermé : ' +
@@ -877,7 +877,7 @@ V.lots = async function () {
 function confirmerHorsStock(produit, lot) {
   return new Promise(resolve => {
     showSheet(
-      '<h2 id="sheet-titre">⚠️ Absent du stock fermé</h2>' +
+      '<h2 id="sheet-titre">Absent du stock fermé</h2>' +
       '<p class="sub">' + esc(produit) + ' · lot ' + esc(lot) + '</p>' +
       '<div class="alerte warn"><span class="ai">●</span><div>' +
       '<b>Aucun bac correspondant en stock</b>' +
@@ -962,7 +962,7 @@ V.hebdo = async function () {
 
             '<div class="btn-row" style="margin-top:12px">' +
             '<button class="btn ' + (ph.length ? 'clair' : 'ciel') + '" data-ph="' + t.id + '"' +
-            (ph.length >= HEBDO.photosMax ? ' disabled' : '') + '>📷 ' +
+            (ph.length >= HEBDO.photosMax ? ' disabled' : '') + '>' +
             (ph.length ? 'Ajouter une photo' : 'Photographier') + '</button>' +
             '<button class="btn ' + (v.ok ? 'clair' : 'menthe') + '" data-v="' + t.id + '">' +
             (v.ok ? 'Annuler' : '✓ Valider') + '</button></div>',
@@ -973,7 +973,7 @@ V.hebdo = async function () {
     '<div class="entete"><h3>Responsables de la semaine</h3></div>' +
     '<div class="stack">' + RESPONSABLES.map(r => {
       const qui = resp[r.id] ? (EQUIPE.filter(e => e.id === resp[r.id])[0] || {}).prenom : null;
-      return carte('<div class="rang"><span class="ci">' + r.icone + '</span>' +
+      return carte('<div class="rang">' +
         '<div style="flex:1;min-width:0"><b>' + esc(r.libelle) + '</b></div>' +
         (qui ? pastille('ok', esc(qui)) : pastille('n', 'non attribué')) + '</div>',
         qui ? 'menthe' : 'sable');
@@ -1088,7 +1088,7 @@ V.temp = async function () {
       }).join('') + '</div>' +
 
       (vm
-        ? '<div class="alerte ok" style="margin-bottom:12px"><span class="ai">✓</span><div>' +
+        ? '<div class="alerte ok" style="margin-bottom:12px"><span class="ai">•</span><div>' +
           '<b>Relévé du ' + mom.label.toLowerCase() + ' validé</b>' +
           '<p>Par ' + esc(vm.par) + ' à ' + heure(vm.at) + '. Toute modification demandera ' +
           'une nouvelle validation.</p></div></div>'
@@ -1484,7 +1484,7 @@ async function attribuerResponsables() {
        carte(entete('🍦', 'Inventaire glace · ' + libellePeriode(per),
          'Un parfum peut exister en plusieurs formats : saisissez chaque taille séparément.') +
          (rec.valide
-           ? '<div class="alerte ok"><span class="ai">✓</span><div><b>Validé</b><p>' + esc(rec.par) + ' · ' +
+           ? '<div class="alerte ok"><span class="ai">•</span><div><b>Validé</b><p>' + esc(rec.par) + ' · ' +
              fmtD(rec.jour) + ' ' + heure(rec.at) + ' — ' + rec.bacs + ' bacs, ' + n1(rec.kg) + ' kg</p></div>' +
              '<span class="go"><button class="btn clair sm" id="rouvrir">Rouvrir</button></span></div>'
            : '<div class="grid g3">' +
@@ -1655,7 +1655,7 @@ async function attribuerResponsables() {
            '<span class="c w">' + pastille(l[1] === '200' ? 'ok' : 'bad', String(l[1])) + '</span>' +
            '<span class="c w">' + pastille(l[2] === '200' ? 'ok' : 'bad', String(l[2])) + '</span></div>').join('') +
          '</div>' +
-         (ok ? '<div class="alerte ok" style="margin-top:12px"><span class="ai">✓</span><div>' +
+         (ok ? '<div class="alerte ok" style="margin-top:12px"><span class="ai">•</span><div>' +
                '<b>Tout passe</b><p>Lecture et écriture fonctionnent sur les quatre tables testées.</p></div></div>'
              : '<div class="alerte bad" style="margin-top:12px"><span class="ai">▲</span><div>' +
                '<b>Blocage identifié</b><p>401 : droits manquants ou RLS active. 404 : table absente ou cache de schéma ' +
