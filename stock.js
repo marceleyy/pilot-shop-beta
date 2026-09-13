@@ -190,18 +190,22 @@ V.inventaire = async function () {
   const precedent = await DB.get('stock:inventaire', null);
   const saisie = {};          // cle -> quantité tapée
 
-  /* On propose d'emblée les articles déjà connus, plus tous les parfums de
-     glace dans les tailles au catalogue : c'est ce qu'on compte en chambre
-     froide, et il ne faut pas avoir à les créer un par un. */
-  const cles = new Set(Object.keys(articles));
-  PARFUMS.forEach(p => TAILLES_BAC.forEach(t => cles.add(cleArticle('glace', p, t))));
-  FAMILLES_PRODUIT.filter(f => !f.parfums).forEach(f => cles.add(cleArticle(f.id, '', '')));
-
-  const liste = [...cles].sort((a, b) => libelleArticle(a).localeCompare(libelleArticle(b)));
-  const parFamille = {};
-  liste.forEach(c => { const f = litArticle(c).famille; (parFamille[f] = parFamille[f] || []).push(c); });
+  /* Une ligne par parfum, avec ses quatre tailles côte à côte. En dépliant
+     chaque taille sur sa propre ligne, l'écran faisait 96 lignes — soit six
+     mètres de défilement pour un comptage de chambre froide. */
+  const autres = FAMILLES_PRODUIT.filter(f => !f.parfums);
 
   const total = () => Object.keys(saisie).reduce((s, c) => s + num(saisie[c]), 0);
+  const totalLitres = () => Object.keys(saisie).reduce((s, c) => {
+    const t = num(litArticle(c).taille);
+    return s + (t ? num(saisie[c]) * t : 0);
+  }, 0);
+
+  const majTotaux = () => {
+    const b = total(), l = totalLitres();
+    if ($('#inv-t')) $('#inv-t').textContent = b;
+    if ($('#inv-kg')) $('#inv-kg').textContent = n1(l * FOURNISSEUR.poidsMoyenLitre) + ' kg';
+  };
 
   const dessiner = () => {
     $('#vue-actions').innerHTML = '';
@@ -214,23 +218,34 @@ V.inventaire = async function () {
             fmtD(precedent.jour) + (precedent.par ? ' par ' + esc(precedent.par) : '') + '</p>'
           : ''), 'solide') +
 
-      '<div class="inv-total"><span>Total compté</span><b class="num" id="inv-t">0</b><span>bacs</span></div>' +
+      '<div class="inv-total"><b class="num" id="inv-t">0</b><span>bacs</span>' +
+      '<b class="num" id="inv-kg" style="margin-left:auto">0,0 kg</b></div>' +
 
-      Object.keys(parFamille).map(f => {
-        const fam = FAMILLES_PRODUIT.filter(x => x.id === f)[0];
-        return '<div class="entete"><h3>' + esc(fam ? fam.libelle : f) + '</h3></div>' +
-          '<div class="stack">' + parFamille[f].map(c => {
-            const a = litArticle(c);
-            const actuel = num(articles[c]);
-            return '<div class="invl">' +
-              '<span class="invn">' + esc(a.parfum || (fam ? fam.libelle : f)) +
-              (a.taille ? '<small>' + a.taille + ' L</small>' : '') + '</span>' +
-              (actuel ? '<span class="invc">actuel ' + actuel + '</span>' : '') +
+      '<div class="entete"><h3>Glaces</h3>' +
+      '<span class="pousse mini">' + TAILLES_BAC.join(' · ') + ' L</span></div>' +
+      '<div class="stack">' + PARFUMS.map(p => {
+        const enStock = TAILLES_BAC.reduce((s, t) => s + num(articles[cleArticle('glace', p, t)]), 0);
+        return '<div class="invp">' +
+          '<div class="invp-h"><b>' + esc(p) + '</b>' +
+          (enStock ? '<span class="invc">' + enStock + ' en stock</span>' : '') + '</div>' +
+          '<div class="invp-t">' + TAILLES_BAC.map(t => {
+            const c = cleArticle('glace', p, t);
+            return '<label><span>' + t + ' L</span>' +
               '<input type="number" inputmode="numeric" min="0" step="1" data-inv="' + c + '" ' +
-              'value="' + (saisie[c] !== undefined ? saisie[c] : '') + '" placeholder="0">' +
-              '</div>';
-          }).join('') + '</div>';
-      }).join('') +
+              'value="' + (saisie[c] !== undefined ? saisie[c] : '') + '" placeholder="0"></label>';
+          }).join('') + '</div></div>';
+      }).join('') + '</div>' +
+
+      '<div class="entete"><h3>Autres familles</h3></div>' +
+      '<div class="stack">' + autres.map(f => {
+        const c = cleArticle(f.id, '', '');
+        const q = num(articles[c]);
+        return '<div class="invl">' +
+          '<span class="invn">' + esc(f.libelle) + '</span>' +
+          (q ? '<span class="invc">' + q + ' en stock</span>' : '') +
+          '<input type="number" inputmode="numeric" min="0" step="1" data-inv="' + c + '" ' +
+          'value="' + (saisie[c] !== undefined ? saisie[c] : '') + '" placeholder="0"></div>';
+      }).join('') + '</div>' +
 
       '<div class="champ" style="margin-top:18px"><label class="f">Note</label>' +
       '<textarea id="inv-note" placeholder="Ce qui explique un écart, un bac abîmé, un doute."></textarea></div>' +
@@ -240,8 +255,9 @@ V.inventaire = async function () {
     $$('[data-inv]').forEach(i => i.oninput = () => {
       if (i.value === '') delete saisie[i.dataset.inv];
       else saisie[i.dataset.inv] = i.value;
-      $('#inv-t').textContent = total();
+      majTotaux();
     });
+    majTotaux();
 
     $('#inv-ok').onclick = async () => {
       const cptes = Object.keys(saisie);
