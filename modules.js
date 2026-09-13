@@ -469,7 +469,7 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
          let n = 0;
          const vp = rec['_valide_' + phase];
          return carte(entete(PHASES.filter(p => p.id === phase)[0].icone,
-           'Procédure d’' + (phase === 'ouverture' ? 'ouverture' : 'e fermeture'),
+           (phase === 'ouverture' ? 'Procédure d’ouverture' : 'Procédure de fermeture'),
          faits + ' sur ' + total + ' tâches') +
             '<div class="jauge" style="margin-bottom:16px"><i style="width:' +
             (total ? Math.round(faits / total * 100) : 0) + '%"></i></div>' +
@@ -557,8 +557,8 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
     const finir = async () => {
       rec['_valide_' + phase] = { par:STATE.user.prenom, id:STATE.user.id, at:nowISO() };
       await DB.set('checklist:' + j, rec);
-      await feed('ok', STATE.user.prenom + ' a validé la procédure d’' +
-        (phase === 'ouverture' ? 'ouverture' : 'e fermeture'));
+      await feed('ok', STATE.user.prenom + ' a validé la ' +
+        (phase === 'ouverture' ? 'procédure d’ouverture' : 'procédure de fermeture'));
       toast('Procédure validée');
       rendre('accueil');
     };

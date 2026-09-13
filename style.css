@@ -988,6 +988,31 @@ input[type=password],input[type=search],input[type=time],select,textarea{
 .tm-val.rouge{background:var(--ambre-l);border-color:#FDE68A;color:#92400E}
 .tm-val.crit{background:var(--rouge);border-color:var(--rouge);color:#fff}
 
+/* --- Détails restants ---------------------------------------------------- */
+
+/* Le dégradé bleuté en haut de page datait de l'ancienne charte : sur un fond
+   ardoise uni, il faisait une tache verdâtre dans le coin. */
+body::before{display:none!important}
+
+/* Barre du bas : 11 px était trop petit pour être lu d'un coup d'œil. */
+#tabbar button{font-size:11.5px;color:var(--brume);min-height:58px}
+#tabbar button.on{color:var(--encre)}
+#tabbar button .tl{font-weight:600}
+
+/* Jauge d'avancement : invisible à zéro, il faut qu'on voie le rail. */
+.jauge{background:var(--fond-2);height:8px;border-radius:99px;overflow:hidden}
+.jauge i{display:block;height:100%;background:var(--encre);border-radius:99px;
+  transition:width .25s ease}
+.jauge i.warn{background:var(--ambre-d)}
+
+/* Boutons pleine largeur : 40 px n'est pas une cible tactile. */
+.btn.bloc{min-height:48px}
+.btn.bloc.xl{min-height:54px;font-size:16px}
+.btn.sm{min-height:38px;font-size:13.5px}
+
+/* En-têtes de section : un peu plus contrastés */
+.entete h3{color:var(--brume);font-weight:700}
+
 /* --- 21. Impression : registre sanitaire -------------------------------- */
 #printview{display:none}
 @media print{
