@@ -1862,6 +1862,14 @@ function brancherNavJour(vue) {
   majBandeau();
   initFeedback();
   purgerPreuves();          // les photos de plus de trois mois s'effacent seules
+  /* Bouton de compte : le seul accès à « tout le reste » et à la déconnexion
+     pour l'équipe, dont la barre du bas n'a plus d'onglet « Plus ». */
+  const bc = $('#compte');
+  if (bc) {
+    bc.textContent = STATE.user.initiales || '';
+    bc.style.background = STATE.user.couleur || 'var(--encre)';
+    bc.onclick = ouvrirPlus;
+  }
   renderNav();
   /* Une première entrée d'historique, pour que le tout premier « retour »
      ramène à l'accueil au lieu de sortir de l'application. */
