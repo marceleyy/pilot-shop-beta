@@ -532,9 +532,22 @@ let fluxCamera = null;
 
 function geometrieCadre() {
   const L = window.innerWidth, H = window.innerHeight;
-  const w = Math.round(L * OCR.cadre.largeur);
-  const h = Math.round(w / OCR.cadre.ratio);
-  return { x: Math.round((L - w) / 2), y: Math.round((H - h) / 2 - H * 0.04), w: w, h: h };
+  let w = Math.round(L * OCR.cadre.largeur);
+  let h = Math.round(w / OCR.cadre.ratio);
+
+  /* En paysage sur téléphone, la largeur commande une hauteur supérieure à
+     l'écran : sur un iPhone 13 tenu à l'horizontale, le cadre débordait de
+     55 pixels vers le haut et son bord était invisible. On le borne à la
+     hauteur disponible, marges comprises, en conservant le rapport. */
+  const hMax = Math.round(H * 0.70);
+  if (h > hMax) { h = hMax; w = Math.round(h * OCR.cadre.ratio); }
+  if (w > L - 24) { w = L - 24; h = Math.round(w / OCR.cadre.ratio); }
+
+  const x = Math.round((L - w) / 2);
+  /* Décalage vers le haut pour laisser la place aux boutons, mais jamais
+     au point de sortir de l'écran. */
+  const y = Math.max(12, Math.round((H - h) / 2 - H * 0.04));
+  return { x: x, y: y, w: w, h: h };
 }
 function placerCadre() {
   const g = geometrieCadre(), c = document.getElementById('vs-cadre');
