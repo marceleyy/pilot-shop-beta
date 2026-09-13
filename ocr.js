@@ -328,7 +328,10 @@ const VERS_CHIFFRE = { O:'0', o:'0', Q:'0', D:'0', I:'1', l:'1', L:'1', '|':'1',
 const VERS_LETTRE  = { '0':'O', '1':'I', '5':'S', '8':'B', '6':'G', '2':'Z', '4':'A' };
 
 function extraireBatch(texte) {
-  const T = texte.toUpperCase();
+  /* Entrée non textuelle : l'appelant peut passer null si une passe OCR a
+     échoué. Sans cette garde, la lecture plantait au lieu de rendre « rien ». */
+  if (texte === null || texte === undefined) return null;
+  const T = String(texte).toUpperCase();
 
   /* 1. On s'ancre sur le mot BATCH. L'étiquette Amorino écrit
         « Batch N° : 14001A », et c'est la seule occurrence fiable.
@@ -374,7 +377,11 @@ function extraireBatch(texte) {
     }
     if (chiffres.length !== 5) continue;
     if (/^20[2-4]\d/.test(chiffres)) continue;
-    if (!reste) reste = t.slice(-1);
+    /* Sans lettre à la suite, on ne fabrique PAS de lot : la version précédente
+       reprenait le dernier caractère du jeton, si bien que « 12345 » donnait
+       « 12345S » — un numéro inventé, invérifiable lors d'un contrôle. Mieux
+       vaut ne rien proposer et laisser la personne saisir. */
+    if (!reste) continue;
     const l0 = reste[0];
     const lettre = VERS_LETTRE[l0] !== undefined ? VERS_LETTRE[l0] : l0;
     if (/[A-Z]/.test(lettre)) return { code: chiffres + lettre, corrige: true };
@@ -405,11 +412,16 @@ const sansAccents = s => String(s).normalize('NFD').replace(/[\u0300-\u036f]/g, 
 const CHIFFRE_EN_LETTRE = { '0':'o', '1':'i', '3':'e', '4':'a', '5':'s', '6':'g', '8':'b' };
 
 function extraireParfum(texte) {
+  if (texte === null || texte === undefined) return null;
   const nettoye = sansAccents(texte)
     .replace(/[0-9]/g, c => CHIFFRE_EN_LETTRE[c] !== undefined ? CHIFFRE_EN_LETTRE[c] : ' ')
     .replace(/[^a-z\s-]/g, ' ');
   const phrase = ' ' + nettoye.replace(/\s+/g, ' ').trim() + ' ';
-  const mots = nettoye.split(/\s+/).filter(m => m.length >= 3);
+  /* Borné : un texte OCR très bruité pouvait atteindre des milliers de mots,
+     et la comparaison est en O(mots × cibles). Mesuré à 615 ms sur 18 Ko,
+     soit une demi-seconde de gel après chaque scan. Une étiquette tient en
+     quelques dizaines de mots : au-delà, c'est du bruit. */
+  const mots = nettoye.split(/\s+/).filter(m => m.length >= 3).slice(0, 120);
   if (!mots.length) return null;
 
   /* Cibles : le nom français plus tous ses alias anglais et italiens.
@@ -417,27 +429,39 @@ function extraireParfum(texte) {
   const cibles = [];
   PARFUMS.forEach(p => {
     const vus = {};
-    const ajouter = s => { const c = sansAccents(s); if (c && !vus[c]) { vus[c] = 1; cibles.push({ p:p, c:c }); } };
-    ajouter(p);
-    ajouter(p.split(' ')[0]);
-    ((typeof PARFUMS_ALIAS !== 'undefined' && PARFUMS_ALIAS[p]) || []).forEach(ajouter);
+    const ajouter = (s, poids) => {
+      const c = sansAccents(s);
+      if (c && !vus[c]) { vus[c] = 1; cibles.push({ p:p, c:c, poids:poids }); }
+    };
+    ajouter(p, 1);
+    /* Le premier mot seul ne vaut qu'à défaut de mieux : « chocolat » est
+       commun à trois parfums, et il gagnait contre « équateur » qui, lui,
+       désigne un seul produit. « Chocolat équateur » devenait « Chocolat noir ». */
+    const tete = p.split(' ')[0];
+    if (tete !== p) ajouter(tete, 0.7);
+    ((typeof PARFUMS_ALIAS !== 'undefined' && PARFUMS_ALIAS[p]) || []).forEach(a => ajouter(a, 1));
   });
 
   let meilleur = null;
   const retenir = (p, score, lu) => {
     if (score > 0.62 && (!meilleur || score > meilleur.score)) meilleur = { parfum:p, score:score, lu:lu };
   };
+  /* Prime de spécificité : à correspondance égale, la cible la plus longue
+     l'emporte. Sans elle, « chocolate » battait « organic chocolate » et
+     « coconut » battait « pistachio » — c'est l'ordre du catalogue qui
+     tranchait, ce qui n'est pas un critère. */
+  const prime = c => Math.min(c.length, 20) / 1000;
 
   for (const t of cibles) {
     /* Expression composée (« passion fruit ») : on la cherche telle quelle */
     if (t.c.indexOf(' ') >= 0) {
-      if (phrase.indexOf(' ' + t.c + ' ') >= 0) retenir(t.p, 1, t.c);
+      if (phrase.indexOf(' ' + t.c + ' ') >= 0) retenir(t.p, 1 * t.poids + prime(t.c), t.c);
       continue;
     }
     for (const mot of mots) {
       const d = distance(mot, t.c);
       const ref = Math.max(mot.length, t.c.length);
-      retenir(t.p, 1 - d / Math.max(ref, 1), mot);
+      retenir(t.p, (1 - d / Math.max(ref, 1)) * t.poids + (d === 0 ? prime(t.c) : 0), mot);
     }
   }
   return meilleur;

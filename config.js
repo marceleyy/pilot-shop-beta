@@ -494,7 +494,12 @@ const PARFUMS_ALIAS = {
   'Caramel au beurre salé': ['salted butter caramel', 'salted caramel', 'caramello salato', 'caramel'],
   'Chocolat noir':          ['dark chocolate', 'chocolate', 'cioccolato fondente', 'cioccolato'],
   'Chocolat équateur':      ['ecuador chocolate', 'chocolate ecuador', 'cioccolato ecuador', 'equateur'],
-  'Chocolat bio (sorbet)':  ['organic chocolate', 'chocolate sorbet', 'cioccolato bio'],
+  /* « Chocolat bio » en alias : le nom au catalogue porte une parenthèse, et la
+     cible devient « chocolat bio sorbet » après nettoyage — une expression de
+     trois mots qui ne figure sur aucune étiquette. Sans cet alias, l'étiquette
+     « CHOCOLAT BIO » était tracée en « Chocolat noir ». */
+  'Chocolat bio (sorbet)':  ['organic chocolate', 'chocolate sorbet', 'cioccolato bio',
+                             'chocolat bio', 'choco bio'],
   'Citron bio':             ['lemon', 'organic lemon', 'limone'],
   'Citron vert basilic':    ['lime basil', 'lime and basil', 'lime basilico'],
   'Fraise':                 ['strawberry', 'fragola'],
