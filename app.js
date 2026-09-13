@@ -132,11 +132,16 @@
        const ctrl = new AbortController();
        const to = setTimeout(() => ctrl.abort(), OFFLINE.timeoutReseauMs);
        try {
+         /* Jeton de l'appareil plutôt que clé publique : depuis l'activation de
+            la sécurité au niveau des lignes, la clé seule ne donne accès à rien.
+            Sans rattachement, l'appel échoue et la saisie part en file d'attente,
+            exactement comme hors ligne. */
+         const jeton = (typeof jetonValide === 'function') ? await jetonValide() : null;
          const r = await fetch(SUPABASE.url + '/rest/v1/' + chemin, Object.assign({
            signal: ctrl.signal,
            headers: Object.assign({
              'apikey': SUPABASE.anonKey,
-             'Authorization': 'Bearer ' + SUPABASE.anonKey,
+             'Authorization': 'Bearer ' + (jeton || SUPABASE.anonKey),
              'Content-Type': 'application/json',
              'Accept-Profile': SUPABASE.schema,
              'Content-Profile': SUPABASE.schema
@@ -1819,6 +1824,39 @@ function brancherNavJour(vue) {
   }
 }
 
+/* -----------------------------------------------------------------------------
+   L'ÉQUIPE VIENT DE LA BASE, PLUS DU CODE SOURCE
+   Les codes PIN étaient écrits en clair dans config.js : n'importe qui affichant
+   la source de la page les lisait. Ils vivent maintenant dans la table
+   « equipe », servie au seul appareil rattaché. La liste est gardée localement
+   pour que la connexion fonctionne hors ligne.
+   -------------------------------------------------------------------------- */
+async function chargerEquipe() {
+  const local = (() => {
+    try { return JSON.parse(localStorage.getItem('pilotshop.v3:equipe') || 'null'); }
+    catch (e) { return null; }
+  })();
+  if (local && local.length) EQUIPE.splice(0, EQUIPE.length, ...local);
+
+  if (typeof appareilRattache === 'function' && !appareilRattache()) return;
+
+  try {
+    const jeton = await jetonValide();
+    if (!jeton) return;
+    const r = await fetch(SUPABASE.url + '/rest/v1/equipe?select=*&actif=eq.true&order=prenom', {
+      headers: { 'apikey': SUPABASE.anonKey, 'Authorization': 'Bearer ' + jeton }
+    });
+    if (!r.ok) return;
+    const l = await r.json();
+    if (!Array.isArray(l) || !l.length) return;
+    EQUIPE.splice(0, EQUIPE.length, ...l.map(e => ({
+      id: e.id, prenom: e.prenom, pin: String(e.pin), role: e.role,
+      couleur: e.couleur, initiales: e.initiales
+    })));
+    try { localStorage.setItem('pilotshop.v3:equipe', JSON.stringify(EQUIPE)); } catch (e) {}
+  } catch (e) { /* hors ligne : la liste locale suffit */ }
+}
+
 /* =============================================================================
    19. DÉMARRAGE
    ========================================================================== */
@@ -1891,6 +1929,14 @@ function brancherNavJour(vue) {
        setTimeout(function () { ecranRemiseAZero(true); }, 250);
        return;
      }
+
+     /* Rattachement de l'appareil : une seule fois, avant tout le reste. Sans
+        lui, la base ne répond rien depuis l'activation de la sécurité. */
+     if (typeof appareilRattache === 'function' && !appareilRattache()) {
+       await ecranRattachement();
+     }
+     if (typeof chargerEquipe === 'function') await chargerEquipe();
+     if (typeof renderQui === 'function') renderQui();
 
      const s = await DB.get('session', null);
      if (s && s.id && EQUIPE.filter(e => e.id === s.id)[0]) {

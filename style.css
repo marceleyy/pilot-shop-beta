@@ -872,6 +872,16 @@ body{font-size:var(--t-corps);line-height:1.5}
 #topbar{display:flex;align-items:center}
 #topbar .tt{flex:1;min-width:0}
 
+/* Écran de rattachement de l'appareil : même allure que la connexion, il
+   n'apparaît qu'une fois dans la vie de l'iPad. */
+#rattach{position:fixed;inset:0;z-index:900;background:var(--fond);
+  overflow-y:auto;padding:max(28px,var(--safe-t)) 18px calc(28px + var(--safe-b))}
+#rattach .in{max-width:440px;margin:0 auto;padding-top:6vh}
+#rattach .lg{text-align:center;margin-bottom:28px}
+#rattach .lg h1{font-family:var(--serif);font-size:32px;font-weight:600;letter-spacing:-.02em}
+#rattach .lg p{font-size:14px;color:var(--brume);margin-top:4px}
+#rattach input{font-size:16px}     /* 16 px minimum : en dessous, iOS zoome */
+
 /* --- 21. Impression : registre sanitaire -------------------------------- */
 #printview{display:none}
 @media print{

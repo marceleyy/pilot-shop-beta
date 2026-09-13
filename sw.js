@@ -12,6 +12,7 @@ const PRECACHE = [
   '/index.html',
   '/style.css',
   '/config.js',
+  '/auth.js',
   '/app.js',
   '/ocr.js',
   '/modules.js',
