@@ -1936,7 +1936,9 @@ async function chargerEquipe() {
        await ecranRattachement();
      }
      if (typeof chargerEquipe === 'function') await chargerEquipe();
-     if (typeof renderQui === 'function') renderQui();
+     /* La liste des prénoms a été dessinée par initLogin alors qu'EQUIPE était
+        encore vide : on la redessine une fois l'équipe chargée depuis la base. */
+     if (typeof initLogin === 'function') initLogin();
 
      const s = await DB.get('session', null);
      if (s && s.id && EQUIPE.filter(e => e.id === s.id)[0]) {

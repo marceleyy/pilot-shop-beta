@@ -148,6 +148,11 @@ function ecranRattachement() {
       etat('Connexion…');
       try {
         await rattacherAppareil(mail, mdp);
+        etat('Rattaché. Chargement de l’équipe…');
+        /* On charge l'équipe AVANT de retirer l'écran : sinon la liste des
+           prénoms apparaît vide le temps de l'aller-retour. */
+        if (typeof chargerEquipe === 'function') await chargerEquipe();
+        if (typeof initLogin === 'function') initLogin();
         d.remove();
         resolve(true);
       } catch (e) {
