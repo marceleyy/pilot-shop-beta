@@ -864,12 +864,149 @@ function renderNav() {
    /* =============================================================================
       9. VUE — MA JOURNÉE
       ========================================================================== */
-/* V.accueil : version retirée — elle était remplacée au chargement. */
+   V.accueil = async function () {
+     const j = STATE.jour;
+     STATE.phase = STATE.phase || phaseCourante();
+     const e = await etatJour(j);
+     const asy = await asyncDuJour(j);
+     const releve = await DB.get('releve', []);
+     const msgs = releve.filter(m => !m.lu || m.epingle).slice(-4).reverse();
+   
+     $('#vue-actions').innerHTML = STATE.service
+       ? '<button class="btn corail sm" id="ptg">Fin de service</button>'
+       : '<button class="btn menthe sm" id="ptg">Début de service</button>';
+   
+     const rappels = [];
+     if (!e.tempM) rappels.push(['bad', 'Frigos du matin non relevés', 'À faire dès l’ouverture, avant la mise en vitrine.', 'temp']);
+     else if (!e.tempS && STATE.phase === 'fermeture') rappels.push(['warn', 'Frigos du soir à relever', 'Avant de fermer la caisse.', 'temp']);
+     if (e.tempCrit) rappels.push(['bad', e.tempCrit + ' frigo(s) en limite critique', 'Transférez les produits et prévenez Eve.', 'temp']);
+     asy.filter(a => a.retard > 0).forEach(a => rappels.push(['warn', a.nom + ' en retard de ' + a.retard + ' jour(s)', a.consigne, 'clean']));
+   
+     const bloc = ph => {
+       const p = PHASES.filter(x => x.id === ph)[0];
+       const t = tachesDuJour(j).filter(x => x.phase === ph);
+       const rec = e;
+       const items = [];
+   
+       if (ph === 'ouverture') {
+         items.push(['Pointer mon arrivée', !!STATE.service, STATE.service ? 'Depuis ' + heure(STATE.service.debut) : 'Non pointé', null]);
+         items.push(['Relever les frigos', rec.tempM, rec.tempM ? 'Fait ce matin' : ENCEINTES.length + ' enceintes', 'temp']);
+         items.push(['Vérifier le réassort', rec.reassort >= rec.reassortTotal, rec.reassort + ' / ' + rec.reassortTotal + ' points', 'reas']);
+       }
+       if (ph === 'service') {
+         items.push(['Nettoyage en cours de service', rec.net > 0, rec.net + ' / ' + rec.netTotal + ' tâches', 'clean']);
+         items.push(['Déclarer une perte', false, 'Dès qu’un produit est jeté', 'pertes']);
+         items.push(['Saisir un numéro de lot', false, 'À chaque bac mis en vitrine', 'lots']);
+       }
+       if (ph === 'fermeture') {
+         items.push(['Relever les frigos du soir', rec.tempS, rec.tempS ? 'Fait ce soir' : ENCEINTES.length + ' enceintes', 'temp']);
+         items.push(['Terminer le nettoyage', rec.net >= rec.netTotal, rec.net + ' / ' + rec.netTotal + ' tâches', 'clean']);
+         items.push(['Fermer la caisse', rec.caisse, rec.caisse ? 'Écart ' + eur(rec.caisseEcart) : 'Ticket Z et TPE', 'caisse']);
+         items.push(['Laisser un mot à l’équipe', false, 'Carnet de relève', 'releve']);
+       }
+   
+       return carte(
+         entete(p.icone, p.label, t.length + ' tâche(s) de nettoyage sur cette phase') +
+         '<div class="stack">' + items.map(it =>
+           '<button type="button" class="tache' + (it[1] ? ' on' : '') + '"' +
+             (it[3] ? ' data-go="' + it[3] + '"' : ' data-ptg="1"') + '>' +
+             '<span class="box">✓</span>' +
+             '<span class="tx"><span class="tn">' + esc(it[0]) + '</span>' +
+             '<span class="tm">' + esc(it[2]) + '</span></span>' +
+           '</button>').join('') + '</div>',
+         p.couleur);
+     };
+   
+     $('#page').innerHTML =
+       carte(
+         '<div class="rang">' + avatar(STATE.user, 'av') +
+         '<div><h2>Bonjour ' + esc(STATE.user.prenom) + '</h2>' +
+         '<div class="mini">' + nomJour(j) + ' ' + fmtD(j) + ' · ' +
+         (STATE.service ? 'en service depuis ' + heure(STATE.service.debut) : 'pas encore pointé') + '</div></div>' +
+         '<span class="pousse">' + pastille(e.tempCrit ? 'bad' : 'ok',
+           e.tempCrit ? e.tempCrit + ' alerte(s)' : 'Tout va bien') + '</span></div>', 'solide') +
+   
+       (rappels.length ? '<div class="stack" style="margin-top:12px">' + rappels.map(r =>
+         '<div class="alerte ' + r[0] + '"><span class="ai">' + (r[0] === 'bad' ? '▲' : '●') + '</span>' +
+         '<div><b>' + esc(r[1]) + '</b><p>' + esc(r[2]) + '</p></div>' +
+         '<span class="go"><button class="btn clair sm" data-go="' + r[3] + '">Ouvrir</button></span></div>').join('') + '</div>' : '') +
+   
+       (msgs.length ? '<div class="entete"><h3>Carnet de relève</h3>' +
+         '<button class="btn fantome sm pousse" data-go="releve">Tout voir</button></div>' +
+         '<div class="stack">' + msgs.map(m => {
+           const c = (RELEVE.categories.filter(x => x.id === m.cat)[0] || RELEVE.categories[3]);
+           return carte('<div class="rang"><span class="ci">' + c.icone + '</span>' +
+             '<div style="flex:1"><b>' + esc(m.texte) + '</b>' +
+             '<div class="mini">' + esc(m.par) + ' · ' + fmtDC(m.jour) + ' ' + heure(m.at) + '</div></div>' +
+             (m.epingle ? '<span class="pill ambre">Épinglé</span>' : '') + '</div>', c.couleur);
+         }).join('') + '</div>' : '') +
+   
+       '<div class="phase-nav" style="margin-top:18px">' + PHASES.map(p =>
+         '<button type="button" data-ph="' + p.id + '" class="' + (STATE.phase === p.id ? 'on' : '') + '">' +
+         '<span class="pi">' + p.icone + '</span>' + esc(p.label) + '</button>').join('') + '</div>' +
+   
+       bloc(STATE.phase);
+   
+     $('#ptg').onclick = () => pointer(!STATE.service);
+     $$('[data-ptg]').forEach(b => b.onclick = () => pointer(!STATE.service));
+     $$('[data-ph]').forEach(b => b.onclick = () => { STATE.phase = b.dataset.ph; rendre('accueil'); });
+   };
    
    /* =============================================================================
       10. VUE — FRIGOS
       ========================================================================== */
-/* V.temp : version retirée — elle était remplacée au chargement. */
+   V.temp = async function () {
+     const j = STATE.jour;
+     const rec = await DB.get('temp:' + j, {});
+   
+     $('#page').innerHTML =
+       carte(entete('🌡️', 'Relevé du ' + fmtD(j),
+         'Appuyez sur la température lue. Vert : conforme. Rouge : hors cible. Rouge plein : limite critique.') +
+         ENCEINTES.map(e =>
+           '<div class="temp"><div class="th"><b>' + esc(e.nom) + '</b>' +
+           '<span class="mini">cible ' + e.cible + '</span>' +
+           '<span class="pousse" data-st="' + e.id + '">' + pastilleTemp(e, rec) + '</span></div>' +
+           RELEVES.moments.map(m =>
+             '<div class="tl">' + m.label + '</div><div class="degres">' +
+             boutonsDegres(e, m.id, rec[m.id + '_' + e.id]) + '</div>').join('') +
+           '</div>').join(''), 'solide') +
+   
+       carte(entete('📝', 'Action corrective', 'Obligatoire dès qu’une enceinte dépasse sa limite critique.') +
+         '<textarea id="obs" placeholder="Ex. vitrine gelato à −9 °C à 14 h : bacs transférés en chambre froide, technicien appelé.">' +
+         esc(rec.obs || '') + '</textarea>' +
+         '<p class="mini" id="sig" style="margin-top:10px">' +
+         (rec.par ? 'Signé par ' + esc(rec.par) + ' · ' + heure(rec.at) : 'Non signé') + '</p>');
+   
+     const sauver = async () => {
+       const o = { obs:$('#obs').value, par:STATE.user.prenom, id:STATE.user.id, at:nowISO() };
+       ENCEINTES.forEach(e => RELEVES.moments.forEach(m => {
+         const b = $('[data-t="' + m.id + '_' + e.id + '"].on');
+         o[m.id + '_' + e.id] = b ? b.dataset.v : '';
+       }));
+       await DB.set('temp:' + j, o);
+       $('#sig').textContent = 'Signé par ' + STATE.user.prenom + ' · ' + heure(nowISO());
+     };
+   
+     $$('.deg').forEach(b => b.onclick = async () => {
+       const cle = b.dataset.t, deja = b.classList.contains('on');
+       $$('[data-t="' + cle + '"]').forEach(x => x.classList.remove('on'));
+       if (!deja) b.classList.add('on');
+       const e = ENCEINTES.filter(x => x.id === cle.slice(2))[0];
+       const rc = {};
+       ENCEINTES.forEach(en => RELEVES.moments.forEach(m => {
+         const s = $('[data-t="' + m.id + '_' + en.id + '"].on');
+         rc[m.id + '_' + en.id] = s ? s.dataset.v : '';
+       }));
+       $('[data-st="' + e.id + '"]').innerHTML = pastilleTemp(e, rc);
+       vibrer(UI.vibration.ok);
+       await sauver();
+       if (!deja && etatTemp(e, b.dataset.v) === 'crit') {
+         await feed('bad', e.nom + ' relevée à ' + b.dataset.v + ' °C — limite critique');
+         alerteCritique(e, b.dataset.v);
+       }
+     });
+     $('#obs').oninput = debounce(sauver, 500);
+   };
    
    function boutonsDegres(e, mom, val) {
      let h = '';
@@ -1186,7 +1323,90 @@ async function purgerPreuves() {
    /* =============================================================================
       13. VUE — NUMÉROS DE LOT (scanner simulé)
       ========================================================================== */
-/* V.lots : version retirée — elle était remplacée au chargement. */
+   V.lots = async function () {
+     const m = monthKey(STATE.jour);
+     const rec = await DB.get('lots:' + m, {});
+     const src = PARFUMS.map(p => ({ cle:'g_' + p, nom:p, type:'g' }))
+       .concat(Object.keys(DLC_RULES).filter(k => k !== 'defaut' && k !== 'gelato')
+         .map(k => ({ cle:'c_' + k, nom:DLC_RULES[k].label, type:'c' })));
+   
+     const ouverts = src.filter(s => rec[s.cle] && rec[s.cle].lot).length;
+   
+     $('#page').innerHTML =
+       carte(entete('📸', 'Scanner l’étiquette', 'Photographiez l’étiquette plutôt que de recopier le numéro.') +
+         '<span class="demo">MODE DÉMONSTRATION</span>' +
+         '<button class="btn ciel bloc xl" id="scan" style="margin-top:14px">' +
+         'Scanner une étiquette</button>' +
+         '<p class="mini" style="margin-top:12px">Le lot se note à l’ouverture du produit, au moment de la mise en vitrine.</p>', 'ciel') +
+   
+       '<div class="entete"><h3>Produits ouverts ce mois</h3><span class="pousse mini num">' + ouverts + '</span></div>' +
+   
+       '<div class="stack">' + src.map(s => {
+         const v = rec[s.cle] || {};
+         const regle = regleDLC(s.nom, s.type);
+         return carte(
+           '<div class="rang"><div style="flex:1;min-width:0"><b>' + esc(s.nom) + '</b>' +
+           '<div class="mini">' + Math.round(DLC_RULES[regle].h / 24 * 10) / 10 + ' j après ouverture</div></div>' +
+           (v.lot ? pastille('ok', 'Lot ' + esc(v.lot)) : pastille('n', 'Non ouvert')) + '</div>' +
+           '<div class="grid g2" style="margin-top:12px">' +
+           '<div class="champ"><label class="f">N° de lot</label>' +
+           '<input type="text" inputmode="numeric" data-l="' + s.cle + '.lot" value="' + esc(v.lot || '') + '" placeholder="—"></div>' +
+           '<div class="champ"><label class="f">Ouvert le</label>' +
+           '<input type="date" data-l="' + s.cle + '.ouv" value="' + (v.ouv || '') + '"></div></div>' +
+           '<div class="btn-row" style="margin-top:12px">' +
+           '<button class="btn clair sm" data-scan="' + s.cle + '">Scanner</button>' +
+           '<button class="btn clair sm" data-now="' + s.cle + '">Ouvert aujourd’hui</button></div>',
+           v.lot ? 'menthe' : '');
+       }).join('') + '</div>';
+   
+     const sauver = debounce(async () => {
+       $$('[data-l]').forEach(i => {
+         const a = i.dataset.l.split('.');
+         if (!rec[a[0]]) rec[a[0]] = {};
+         rec[a[0]][a[1]] = i.value;
+         if (a[1] === 'lot' && i.value && !rec[a[0]].ouv) {
+           rec[a[0]].ouv = today();
+           const d = $('[data-l="' + a[0] + '.ouv"]');
+           if (d) d.value = today();
+         }
+         if (i.value) { rec[a[0]].par = STATE.user.prenom; rec[a[0]].at = nowISO(); }
+       });
+       await DB.set('lots:' + m, rec);
+     }, 400);
+   
+     $$('[data-l]').forEach(i => i.oninput = sauver);
+   
+     $$('[data-now]').forEach(b => b.onclick = () => {
+       $('[data-l="' + b.dataset.now + '.ouv"]').value = today();
+       sauver(); toast('Date du jour appliquée');
+     });
+   
+     $$('[data-scan]').forEach(b => b.onclick = () => lancerScan(b.dataset.scan));
+     $('#scan').onclick = () => lancerScan(null);
+   
+     async function lancerScan(cle) {
+       const r = await scannerPhoto('etiquette');
+       if (!r) return;
+       if (!cle) {
+         showSheet('<h2 id="sheet-titre">À quel produit ce lot appartient-il ?</h2>' +
+           '<p class="sub">Lot lu : <b>' + esc(r.lot) + '</b></p>' +
+           '<div class="chips">' + src.map(s =>
+             '<button type="button" class="chip" data-aff="' + s.cle + '">' + esc(s.nom) + '</button>').join('') + '</div>' +
+           '<div class="actions"><button class="btn clair" data-fermer>Annuler</button></div>');
+         $$('[data-aff]').forEach(x => x.onclick = () => { closeSheet(); appliquer(x.dataset.aff, r); });
+         return;
+       }
+       appliquer(cle, r);
+     }
+   
+     async function appliquer(cle, r) {
+       $('[data-l="' + cle + '.lot"]').value = r.lot;
+       $('[data-l="' + cle + '.ouv"]').value = r.ouv;
+       sauver();
+       await feed('ok', STATE.user.prenom + ' a ouvert un lot (' + r.lot + ')');
+       toast('Lot repris — vérifiez sur l’étiquette');
+     }
+   };
    
    function regleDLC(nom, type) {
      if (type === 'g') return 'gelato';
@@ -2506,7 +2726,61 @@ function ouvrirPremierePeriode() {
    /* =============================================================================
       26. CAISSE
       ========================================================================== */
-/* V.caisse : version retirée — elle était remplacée au chargement. */
+   V.caisse = async function () {
+     const j = STATE.jour;
+     const r = await DB.get('caisse:' + j, {});
+     const champ = (k, l, ph) =>
+       '<div class="champ"><label class="f">' + l + '</label>' +
+       '<input type="number" inputmode="decimal" step="0.01" data-k="' + k + '" value="' +
+       (r[k] === undefined ? '' : r[k]) + '" placeholder="' + (ph || '') + '"></div>';
+   
+     $('#vue-actions').innerHTML = '<input type="date" id="jj" value="' + j + '" style="width:auto;min-height:42px">';
+   
+     $('#page').innerHTML =
+       carte(entete('💶', 'Caisse du ' + fmtD(j), 'Suivez l’ordre de la fiche : ticket Z, TPE, puis comptage des espèces.') +
+         '<div class="grid g2">' + champ('fi', 'Fonds initial') + champ('ff', 'Fonds final') + '</div>' +
+         '<div class="grid g2" style="margin-top:14px">' + champ('cb', 'Recettes CB') + champ('esp', 'Recettes espèces') + '</div>' +
+         '<div class="grid g2" style="margin-top:14px">' + champ('tpe', 'Total TPE') + champ('ret', 'Retrait du soir') + '</div>' +
+         '<div class="champ" style="margin-top:14px"><label class="f">Commandes annulées</label>' +
+         '<input type="text" data-k="ann" value="' + esc(r.ann || '') + '" placeholder="Nombre, montant, personne"></div>' +
+         '<div class="champ" style="margin-top:14px"><label class="f">Commentaire</label>' +
+         '<textarea data-k="com" placeholder="Ex. erreur de rendu de monnaie sur une commande de 12 €.">' + esc(r.com || '') + '</textarea></div>', 'solide') +
+   
+       '<div class="grid g3" style="margin-top:12px">' +
+       kpi('Recette totale', '<span id="k1">—</span>', '', 'CB + espèces') +
+       kpi('Écart TPE / CB', '<span id="k2">—</span>', '', 'Seuil ' + eur(SEUILS.caisseJourEur)) +
+       kpi('Signature', esc(STATE.user.prenom), '', 'Session en cours') + '</div>' +
+   
+       '<button class="btn menthe bloc xl" id="cv" style="margin-top:16px">Enregistrer la feuille</button>' +
+       '<button class="btn fantome bloc" id="cf6" style="margin-top:8px">Voir la fiche « Clôture de caisse »</button>';
+   
+     const sauver = debounce(async (o, ec) => {
+       await DB.set('caisse:' + j, Object.assign({}, o, { ecart:ec, par:STATE.user.prenom, employe:STATE.user.id, at:nowISO() }));
+     }, 450);
+   
+     const refresh = () => {
+       const o = {};
+       $$('[data-k]').forEach(i => o[i.dataset.k] = i.value);
+       const ec = num(o.tpe) - num(o.cb);
+       $('#k1').textContent = eur(num(o.cb) + num(o.esp));
+       $('#k2').textContent = eur(ec);
+       const box = $('#k2').closest('.kpi');
+       box.className = 'kpi ' + (Math.abs(ec) > SEUILS.caisseJourEur ? 'bad' : Math.abs(ec) > 0.01 ? 'warn' : 'ok');
+       sauver(o, ec);
+       return ec;
+     };
+     $$('[data-k]').forEach(i => i.oninput = refresh);
+     refresh();
+   
+     $('#cv').onclick = async () => {
+       const ec = refresh();
+       await feed(Math.abs(ec) > SEUILS.caisseJourEur ? 'bad' : 'ok',
+         STATE.user.prenom + ' a fermé la caisse — écart ' + eur(ec));
+       toast(Math.abs(ec) > SEUILS.caisseJourEur ? 'Enregistré — écart à expliquer' : 'Feuille enregistrée');
+     };
+     $('#cf6').onclick = () => { rendre('fiches'); setTimeout(() => { const b = $('[data-f="f06"]'); if (b) b.click(); }, 300); };
+     $('#jj').onchange = e => { STATE.jour = e.target.value; rendre('caisse'); };
+   };
    
    /* =============================================================================
       27. ÉCARTS GLACE + DÉTECTEUR DE TENDANCES
@@ -3137,7 +3411,128 @@ function modifierPeriode(per) {
    /* =============================================================================
       31. RÉGLAGES
       ========================================================================== */
-/* V.reglages : version retirée — elle était remplacée au chargement. */
+   V.reglages = async function () {
+     const per = await periodeCourante();
+     const fb = await DB.get('feedback', []);
+     const seuils = await DB.get('seuils', SEUILS);
+   
+     $('#page').innerHTML =
+       carte(entete('⚙️', 'Seuils d’alerte', 'Ces valeurs déclenchent les alertes du tableau de bord.') +
+         '<div class="grid g2">' +
+         '<div class="champ"><label class="f">Écart glace toléré (±%)</label>' +
+         '<input type="number" step="0.5" id="s1" value="' + seuils.ecartGlacePct + '"></div>' +
+         '<div class="champ"><label class="f">Écart caisse — jour (€)</label>' +
+         '<input type="number" step="1" id="s2" value="' + seuils.caisseJourEur + '"></div>' +
+         '<div class="champ"><label class="f">Écart caisse — cumul (€)</label>' +
+         '<input type="number" step="1" id="s3" value="' + seuils.caisseCumulEur + '"></div>' +
+         '<div class="champ"><label class="f">Jours sans nettoyage tolérés</label>' +
+         '<input type="number" step="1" id="s4" value="' + seuils.joursSansNettoyage + '"></div></div>' +
+         '<button class="btn menthe bloc" id="sv" style="margin-top:16px">Enregistrer</button>', 'solide') +
+   
+       carte(entete('📅', 'Période en cours', libellePeriode(per)) +
+         '<button class="btn clair bloc" data-go="periodes">Gérer les clôtures</button>') +
+   
+       (fb.length ? '<div class="entete"><h3>Retours de l’équipe</h3><span class="pousse mini num">' + fb.length + '</span></div>' +
+         '<div class="dense"><div class="dense-h"><span class="c1">Message</span>' +
+         '<span class="c w">Vue</span><span class="c ww">Par</span></div><div class="dense-scroll">' +
+         fb.slice().reverse().map(f =>
+           '<div class="dl"><span class="c1">' + esc(f.texte) + '</span>' +
+           '<span class="c w">' + esc((PAGES[f.vue] || { titre:f.vue }).titre) + '</span>' +
+           '<span class="c ww">' + esc(f.par) + ' ' + fmtDC(f.at.slice(0, 10)) + '</span></div>').join('') +
+         '</div></div>' : '') +
+   
+       carte(entete('🗄️', 'Données',
+           (DB.configure ? 'Supabase · ' + APP.site : 'Cet appareil uniquement') + ' · ' + APP.version) +
+   
+         '<div id="sync-status" class="alerte info" style="margin-bottom:14px">' +
+         '<span class="ai" id="sync-ic">⏳</span><div><b id="sync-tx">Vérification…</b>' +
+         '<p id="sync-sub"></p></div></div>' +
+   
+         '<p class="mini">' + (DB.configure
+           ? 'Les saisies partent sur Supabase dès qu’il y a du réseau. Sans réseau, elles sont gardées ' +
+             'sur l’iPad et repartent toutes seules ensuite : la chambre froide ne fait rien perdre.'
+           : 'Aucune clé Supabase n’est configurée : tout reste sur cet appareil et disparaîtrait avec le cache. ' +
+             'Renseignez env.js pour activer la sauvegarde en ligne.') + '</p>' +
+   
+         '<button class="btn clair bloc" id="sync-now" style="margin-top:14px">Forcer la synchronisation</button>' +
+         '<button class="btn clair bloc" id="ex" style="margin-top:8px">Exporter toutes les données</button>' +
+         '<button class="btn fantome bloc" id="rz" style="margin-top:8px">Réinitialiser cet appareil</button>', 'plat');
+   
+     /* --- Indicateur de synchronisation, rafraîchi chaque seconde --- */
+     if (V.reglages._t) { clearInterval(V.reglages._t); V.reglages._t = null; }
+   
+     const majSync = () => {
+       const box = $('#sync-status');
+       if (!box) { clearInterval(V.reglages._t); V.reglages._t = null; return; }
+   
+       const ic = $('#sync-ic'), tx = $('#sync-tx'), sub = $('#sync-sub'), btn = $('#sync-now');
+       let classe, icone, texte, detail, couleur;
+   
+       if (!DB.configure) {
+         classe = 'warn'; icone = '⚪'; couleur = 'var(--brume)';
+         texte = 'Sauvegarde en ligne inactive';
+         detail = 'Les données restent sur cet iPad. Renseignez env.js pour activer Supabase.';
+       } else if (!STATE.enLigne) {
+         classe = 'bad'; icone = '🔴'; couleur = 'var(--corail-d)';
+         texte = 'Hors-ligne — En attente de réseau';
+         detail = STATE.fileAttente
+           ? STATE.fileAttente + ' saisie(s) gardée(s) sur l’iPad, elles partiront au retour du réseau.'
+           : 'Vos saisies continuent d’être enregistrées sur l’iPad.';
+       } else if (STATE.fileAttente > 0) {
+         classe = 'warn'; icone = '🟠'; couleur = 'var(--ambre-d)';
+         texte = STATE.fileAttente + ' saisie(s) en attente d’envoi';
+         detail = 'Laissez l’application ouverte le temps de l’envoi.';
+       } else {
+         classe = 'ok'; icone = '🟢'; couleur = 'var(--menthe-d)';
+         texte = 'Toutes les données sont synchronisées sur le Cloud';
+         detail = derniereSync
+           ? 'Dernier envoi réussi à ' + heure(derniereSync) + '.'
+           : 'Rien en attente.';
+       }
+   
+       box.className = 'alerte ' + classe;
+       ic.textContent = icone;
+       tx.textContent = texte;
+       tx.style.color = couleur;
+       sub.textContent = detail;
+       if (btn) btn.disabled = !DB.configure || !STATE.enLigne || STATE.fileAttente === 0;
+     };
+   
+     majSync();
+     V.reglages._t = setInterval(majSync, 1000);
+   
+     $('#sync-now').onclick = async () => {
+       if (!STATE.enLigne) return toast('Pas de réseau pour l’instant', 'erreur');
+       toast('Envoi en cours…');
+       await journaliserSync();
+       majSync();
+     };
+   
+     $('#sv').onclick = async () => {
+       const o = { ecartGlacePct:num($('#s1').value) || 3, caisseJourEur:num($('#s2').value) || 10,
+                   caisseCumulEur:num($('#s3').value) || 50, joursSansNettoyage:num($('#s4').value) || 2 };
+       Object.assign(SEUILS, o);
+       await DB.set('seuils', SEUILS);
+       toast('Seuils enregistrés');
+     };
+   
+     $('#ex').onclick = async () => {
+       const dump = {};
+       for (const k of await DB.list('')) dump[k] = await DB.get(k);
+       const a = document.createElement('a');
+       a.href = URL.createObjectURL(new Blob([JSON.stringify(dump, null, 2)], { type:'application/json' }));
+       a.download = 'pilot-shop-sauvegarde-' + today() + '.json';
+       a.click();
+       toast('Sauvegarde téléchargée');
+     };
+   
+     $('#rz').onclick = () => confirmer('Effacer toutes les données ?',
+       'Tous les registres de cet appareil seront supprimés définitivement. Exportez d’abord la sauvegarde.',
+       'Tout effacer', async () => {
+         for (const k of await DB.list('')) await DB.del(k);
+         location.reload();
+       });
+   };
    
    /* =============================================================================
       32. IMPORT DE L'EXPORT DE CAISSE

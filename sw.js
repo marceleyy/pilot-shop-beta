@@ -17,6 +17,12 @@ const PRECACHE = [
   '/ocr.js',
   '/modules.js',
   '/stock.js',
+  /* Reconnaissance de texte embarquée : sans elle, le scan ne marche pas
+     hors ligne, alors que c'est là qu'on en a le plus besoin. */
+  '/vendor/tesseract.min.js',
+  '/vendor/tesseract-worker.min.js',
+  '/vendor/tesseract-core-simd.wasm.js',
+  '/vendor/fra.traineddata.gz',
   '/manifest.webmanifest',
   '/icons/icon-192.png',
   '/icons/icon-512.png',

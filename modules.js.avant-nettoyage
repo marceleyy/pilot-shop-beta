@@ -279,7 +279,43 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
    /* =============================================================================
       E. STOCK FERMÉ — vue et alertes
       ========================================================================== */
-/* V.stock : version retirée — elle était remplacée au chargement. */
+   V.stock = async function () {
+     const ferme = await stockFerme();
+     const alertes = await alertesDLC();
+     const ouverts = (await DB.get('stock:ferme', [])).filter(x => x.ouvert).slice(-30).reverse();
+   
+     $('#page').innerHTML =
+       (alertes.length
+         ? '<div class="entete"><h3>DLC qui approchent</h3></div><div class="stack">' + alertes.map(a =>
+             '<div class="fifo ' + (a.niveau === 'jaune' ? 'orange' : a.niveau) + '">' +
+             '<div class="fn"><b>' + esc(a.produit) + '</b>' +
+             '<div class="fd">Non ouvert · reçu le ' + fmtDC(a.recuLe) + ' · ' + a.qte + ' ' + esc(a.unite) +
+             (a.lot ? ' · lot ' + esc(a.lot) : '') + '</div></div>' +
+             '<div class="fr"><b>' + (a.reste < 0 ? 'Périmé' : a.reste === 0 ? 'Dernier jour' : 'J−' + a.reste) + '</b>' +
+             '<span>DLC ' + fmtDC(a.dlc) + '</span></div>' +
+             '<button class="btn clair sm" data-ouvrir="' + a.id + '">Ouvrir</button></div>').join('') + '</div>'
+         : carte('<div class="alerte ok"><span class="ai">•</span><div><b>Aucune DLC proche</b>' +
+           '<p>Rien en stock fermé n’expire dans les ' + STOCK.alerteDlcJours + ' jours.</p></div></div>', 'plat')) +
+   
+       '<div class="entete"><h3>Stock fermé</h3><span class="pousse mini num">' + ferme.length + '</span></div>' +
+       (ferme.length
+         ? '<div class="stack">' + ferme.slice().sort((a, b) => String(a.dlc).localeCompare(String(b.dlc))).map(a =>
+             carte('<div class="rang"><div style="flex:1;min-width:0"><b>' + esc(a.produit) + '</b>' +
+               '<div class="mini">' + a.qte + ' ' + esc(a.unite) + (a.lot ? ' · lot ' + esc(a.lot) : '') +
+               ' · DLC ' + (a.dlc ? fmtDC(a.dlc) : '—') + '</div></div>' +
+               '<button class="btn menthe sm" data-ouvrir="' + a.id + '">Ouvrir</button></div>')).join('') + '</div>'
+         : vide('📦', 'Stock fermé vide. Passez par Réception après une livraison.')) +
+   
+       (ouverts.length ? '<div class="entete"><h3>Derniers produits ouverts</h3></div>' +
+         '<div class="dense"><div class="dense-h"><span class="c1">Produit</span>' +
+         '<span class="c w">Lot</span><span class="c ww">Ouvert le</span></div>' +
+         ouverts.map(a => '<div class="dl"><span class="c1">' + esc(a.produit) + '</span>' +
+           '<span class="c w">' + esc(a.lotOuverture || '—') + '</span>' +
+           '<span class="c ww">' + fmtDC(a.ouvertLe) + ' · ' + esc(a.ouvertPar || '') + '</span></div>').join('') +
+         '</div>' : '');
+   
+     $$('[data-ouvrir]').forEach(b => b.onclick = () => ouvertureGuidee(b.dataset.ouvrir));
+   };
    
    async function ouvertureGuidee(id) {
      const l = await DB.get('stock:ferme', []);
@@ -839,7 +875,188 @@ V.caisse = async function () {
       H. TRAÇABILITÉ — libellé et liste déroulante de confirmation
       ========================================================================== */
    const V_lots_origine = V.lots;
-/* V.lots : version retirée — elle était remplacée au chargement. */
+V.lots = async function () {
+   await V_lots_origine.call(this);
+   const h = $('#page');
+   if (!h) return;
+
+  /* La vue d'origine affiche déjà une carte « Scanner l'étiquette ». On la
+     retire avant d'ajouter la nôtre, sinon l'écran présente deux boutons
+     identiques qui font la même chose — signalé par l'équipe. */
+  const doublon = $('#scan');
+  if (doublon) {
+    const carteDoublon = doublon.closest('.card');
+    if (carteDoublon) carteDoublon.remove();
+  }
+
+  const bandeau = document.createElement('div');
+     bandeau.innerHTML = carte(entete('#️⃣', 'Traçabilité pour l’ouverture de tout nouveau produit',
+       'Le lot se note au moment où le produit est ouvert et mis en vitrine, jamais à la livraison.') +
+       '<button class="btn ciel bloc xl" id="tr-scan">Scanner l’étiquette</button>' +
+       '<button class="btn clair bloc" id="tr-stock" style="margin-top:10px">Ouvrir depuis le stock fermé</button>', 'ciel');
+     h.insertBefore(bandeau.firstChild, h.firstChild);
+   
+     $('#tr-scan').onclick = async () => {
+     const mode = await choisirModeScan();
+     if (!mode) return;
+     /* Mode chaîne : tant que l'équipier demande « le suivant », on renchîne. */
+     let compteur = 0;
+     for (;;) {
+     const r = await scannerPhoto('etiquette');
+     if (!r) break;
+     const enregistre = mode === 'stock'
+         ? await entrerEnStock(r)
+         : await choisirProduit(r, r.enchainer === true);
+       if (enregistre) compteur++;
+         if (!r.enchainer || !enregistre) break;
+       }
+    if (compteur) toast(compteur + (mode === 'stock' ? ' bac(s) entré(s) en stock' : ' produit(s) tracé(s)'));
+    rendre(mode === 'stock' ? 'stock' : 'lots');
+  };
+  $('#tr-stock').onclick = () => rendre('stock');
+
+  /* Deux gestes distincts, deux conséquences distinctes sur le stock :
+     l'entrée ajoute un bac fermé, l'ouverture le sort du stock et déclenche
+     le compte à rebours de la DLC. Les confondre fausse les deux. */
+  function choisirModeScan() {
+    return new Promise(resolve => {
+      showSheet(
+        '<h2 id="sheet-titre">Que scannez-vous ?</h2>' +
+        '<p class="sub">Le stock se met à jour automatiquement selon votre choix.</p>' +
+        '<div class="stack">' +
+        '<button type="button" class="menu-item" data-mode="stock">' +
+        '<span class="mi-tx"><span class="mi-t">Entrée en stock</span>' +
+        '<span class="mi-s">Bac fermé, rangé en chambre froide — ajouté au stock</span></span>' +
+        '<span class="mi-fl">›</span></button>' +
+        '<button type="button" class="menu-item" data-mode="ouverture">' +
+        '<span class="mi-tx"><span class="mi-t">Ouverture d’un bac</span>' +
+        '<span class="mi-s">Mis en vitrine — sorti du stock, DLC lancée</span></span>' +
+        '<span class="mi-fl">›</span></button></div>' +
+        '<div class="actions"><button class="btn clair" id="cm-x">Annuler</button></div>');
+      $('#cm-x').onclick = () => { closeSheet(); resolve(null); };
+      $$('[data-mode]').forEach(b => b.onclick = () => { closeSheet(); resolve(b.dataset.mode); });
+    });
+  }
+
+  /* Entrée en stock : le bac reste fermé. Le volume et le poids lus sur
+     l'étiquette préremplissent la fiche, il ne reste qu'à confirmer. */
+  function entrerEnStock(r) {
+    return new Promise(resolve => {
+      const taille = r.volume || FOURNISSEUR.tailleParDefaut;
+      showSheet(
+        '<h2 id="sheet-titre">Entrée en stock</h2>' +
+        '<p class="sub">Lot <b>' + esc(r.lot || '—') + '</b>' +
+        (r.volume ? ' · ' + r.volume + ' L lus sur l’étiquette' : '') + '</p>' +
+        (r.dluo ? '<div class="alerte info"><span class="ai">⏱️</span><div><b>DLUO du bac fermé : ' +
+          fmtD(r.dluo) + '</b><p>Les 10 jours de conservation ne commenceront qu’à l’ouverture.</p></div></div>' : '') +
+        '<div class="champ" style="margin-top:14px"><label class="f">Parfum</label>' +
+        '<select id="es-p"><option value="">— choisir —</option>' +
+        PARFUMS.map(p => '<option value="' + esc(p) + '"' + (p === r.parfum ? ' selected' : '') + '>' +
+          esc(p) + '</option>').join('') + '</select></div>' +
+        '<div class="grid g3" style="margin-top:14px">' +
+        '<div class="champ"><label class="f">Taille</label><select id="es-t">' +
+        TAILLES_BAC.map(x => '<option value="' + x + '"' + (x === taille ? ' selected' : '') + '>' +
+          x + ' L</option>').join('') + '</select></div>' +
+        '<div class="champ"><label class="f">Nombre</label>' +
+        '<input type="number" id="es-n" min="1" step="1" value="1"></div>' +
+        '<div class="champ"><label class="f">N° de lot</label>' +
+        '<input type="text" id="es-l" value="' + esc(r.lot || '') + '" autocapitalize="characters"></div></div>' +
+        '<div class="champ" style="margin-top:14px"><label class="f">DLUO (bac fermé)</label>' +
+        '<input type="date" id="es-d" value="' + (r.dluo || '') + '"></div>' +
+        '<div class="actions"><button class="btn clair" id="es-x">Annuler</button>' +
+        '<button class="btn menthe" id="es-ok">Ajouter au stock</button></div>');
+
+      $('#es-x').onclick = () => { closeSheet(); resolve(false); };
+      $('#es-ok').onclick = async () => {
+        const p = $('#es-p').value, lot = $('#es-l').value.trim().toUpperCase();
+        if (!p) return toast('Choisissez le parfum', 'erreur');
+        if (!lot) return toast('Le numéro de lot est obligatoire', 'erreur');
+        const t = num($('#es-t').value) || FOURNISSEUR.tailleParDefaut;
+        const n = Math.max(1, num($('#es-n').value) || 1);
+        const stock = await DB.get('stock:ferme', []);
+        stock.push({ id:uid(), produit:p, qte:n, unite:'bac', taille:t,
+                     lot:lot, dlc:$('#es-d').value, recuLe:today(),
+                     poidsNet:r.poidsNet || null, production:r.production || null,
+                     ouvert:false, par:STATE.user.prenom, source:'scan' });
+        await DB.set('stock:ferme', stock);
+        await feed('ok', STATE.user.prenom + ' a entré en stock ' + n + ' × ' + p +
+                   ' ' + t + ' L (lot ' + lot + ')');
+        closeSheet();
+        resolve(true);
+      };
+    });
+  }
+
+     /* Renvoie true si le produit a bien été enregistré. En mode chaîne, le choix
+     du produit est pré-rempli et validable d'un seul appui. */
+     function choisirProduit(r, chaine) {
+     return new Promise(resolve => {
+     const cibles = PARFUMS.map(p => ({ v:'g_' + p, l:p }))
+       .concat(Object.keys(DLC_RULES).filter(k => k !== 'defaut')
+         .map(k => ({ v:'c_' + k, l:DLC_RULES[k].label })));
+     showSheet(
+       '<h2 id="sheet-titre">Confirmer le produit</h2>' +
+       '<p class="sub">Lot lu : <b>' + esc(r.lot || '—') + '</b>' +
+       (r.parfum ? ' · proposition : ' + esc(r.parfum) : '') +
+         (chaine ? ' · <b>mode chaîne</b>' : '') + '</p>' +
+       '<div class="champ"><label class="f">Produit ouvert</label><select id="tr-p">' +
+       '<option value="">— choisir —</option>' +
+       cibles.map(c => '<option value="' + c.v + '"' +
+         (r.parfum && c.l === r.parfum ? ' selected' : '') + '>' + esc(c.l) + '</option>').join('') +
+       '</select></div>' +
+       '<div class="champ" style="margin-top:14px"><label class="f">N° de lot</label>' +
+       '<input type="text" id="tr-l" value="' + esc(r.lot || '') + '" autocapitalize="characters"></div>' +
+       '<div class="champ" style="margin-top:14px"><label class="f">Ouvert le</label>' +
+       '<input type="date" id="tr-d" value="' + today() + '"></div>' +
+         '<div class="actions"><button class="btn clair" id="tr-x">Annuler</button>' +
+           '<button class="btn menthe" id="tr-ok">Enregistrer</button></div>');
+      $('#tr-x').onclick = () => { closeSheet(); resolve(false); };
+      $('#tr-ok').onclick = async () => {
+        const cle = $('#tr-p').value, lot = $('#tr-l').value.trim().toUpperCase();
+        if (!cle) return toast('Choisissez le produit', 'erreur');
+        if (!lot) return toast('Le numéro de lot est obligatoire', 'erreur');
+        const m = monthKey(today());
+        const rec = await DB.get('lots:' + m, {});
+        rec[cle] = { lot:lot, ouv:$('#tr-d').value, par:STATE.user.prenom, at:nowISO() };
+        await DB.set('lots:' + m, rec);
+
+        /* Si ce lot existe en stock fermé, on l'en sort : c'est ce qui évite
+           d'avoir à tenir le stock à la main en plus de la traçabilité. */
+        const nomProduit = cle.slice(2);
+        const stock = await DB.get('stock:ferme', []);
+        const candidat = stock.filter(x => !x.ouvert && !x.jete &&
+          (x.lot === lot || x.produit === nomProduit))[0];
+
+        if (!candidat) {
+          /* Rien en stock : on trace quand même — la traçabilité HACCP prime —
+             mais on le dit, car c'est le signe d'une réception non saisie ou
+             d'un stock qui a décroché du réel. */
+          const suite = await confirmerHorsStock(nomProduit, lot);
+          if (!suite) return;
+        } else {
+          candidat.qte = Math.max(0, num(candidat.qte) - 1);
+          if (candidat.qte === 0) {
+            candidat.ouvert = true;
+            candidat.ouvertLe = $('#tr-d').value || today();
+            candidat.ouvertPar = STATE.user.prenom;
+            candidat.lotOuverture = lot;
+          } else {
+            stock.push(Object.assign({}, candidat, { id:uid(), qte:1, ouvert:true,
+              ouvertLe:$('#tr-d').value || today(), ouvertPar:STATE.user.prenom, lotOuverture:lot }));
+          }
+          await DB.set('stock:ferme', stock);
+          toast(nomProduit + ' sorti du stock fermé');
+        }
+
+        await feed(candidat ? 'ok' : 'warn',
+          STATE.user.prenom + ' a ouvert ' + nomProduit + ' (lot ' + lot + ')' +
+          (candidat ? '' : ' — absent du stock fermé'));
+        closeSheet();
+        resolve(true);
+      };
+    });
+  }
+};
    
    /* Ouverture d'un produit absent du stock fermé : on avertit sans bloquer.
    Bloquer empêcherait de tracer un bac réellement ouvert, ce qui serait pire
