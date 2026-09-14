@@ -1651,7 +1651,12 @@ function formulaireAnomalie() {
 /* =============================================================================
    J. RESTAURATION DES RÉGLAGES AU DÉMARRAGE
    ========================================================================== */
-   (async function appliquerReglages() {
+   /* Les réglages partagés sont relus périodiquement, pas une seule fois au
+      démarrage. Sans cela, un manager qui réorganise la semaine ou change une
+      enceinte sur son iPad laissait toute l'équipe sur l'ancienne version
+      jusqu'à ce que chacun ferme et rouvre l'application — ce que personne ne
+      fait en plein service. */
+   async function appliquerReglages() {
      try {
        const h = await DB.get('horaires', null);
        if (h) {
@@ -1664,11 +1669,22 @@ function formulaireAnomalie() {
        if (e && e.length) ENCEINTES = e;
        const hb = await DB.get('hebdo', null);
        if (hb) NETTOYAGE.zones.forEach(z => z.taches.forEach(t => { if (hb[t.id]) t.jours = hb[t.id]; }));
-    /* Plan hebdomadaire décidé par le manager */
-    const plan = await DB.get('hebdo:plan', null);
-    if (plan) TACHES_HEBDO.forEach(t => { if (plan[t.id]) Object.assign(t, plan[t.id]); });
+       /* Plan hebdomadaire décidé par le manager. On repart de la référence
+          d'usine avant d'appliquer : sinon une tâche retirée du plan gardait
+          ses anciens jours, puisqu'on ne faisait qu'ajouter par-dessus. */
+       const plan = await DB.get('hebdo:plan', null);
+       TACHES_HEBDO = TACHES_HEBDO_DEF.map(t => Object.assign({}, t));
+       if (plan) TACHES_HEBDO.forEach(t => { if (plan[t.id]) Object.assign(t, plan[t.id]); });
      } catch (err) { /* réglages d'usine */ }
-   })();
+   }
+   appliquerReglages();
+   /* Toutes les deux minutes : assez pour qu'un changement de planning arrive
+      dans la même heure, assez peu pour ne rien coûter en réseau. */
+   setInterval(appliquerReglages, 120000);
+   /* Et immédiatement quand on revient sur l'application. */
+   document.addEventListener('visibilitychange', function () {
+     if (document.visibilityState === 'visible') appliquerReglages();
+   });
    
    /* =============================================================================
       K. INVENTAIRE GLACE — plusieurs tailles pour un même parfum

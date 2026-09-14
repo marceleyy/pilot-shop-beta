@@ -1763,6 +1763,13 @@ async function chargerEquipe() {
   /* 4. Toujours rien : l'écran d'amorçage prendra le relais. */
 }
 
+/* L'équipe change rarement, mais quand elle change il faut que ça suive :
+   un code modifié ou une personne ajoutée sur un autre appareil ne remontait
+   jamais, la liste locale étant relue indéfiniment. */
+setInterval(function () {
+  if (typeof chargerEquipe === 'function' && STATE.enLigne) chargerEquipe();
+}, 300000);
+
 /* -----------------------------------------------------------------------------
    LA SÉCURITÉ EST-ELLE ACTIVE ?
    Plutôt que de supposer, on demande à la base. Tant que le rôle anonyme peut
@@ -2035,11 +2042,15 @@ window.addEventListener('error', function (ev) {
    /* Mémoire de session : sept vues appellent periodeCourante(), chacune
       relisait la base de son côté. Il suffisait qu'UNE lecture échoue — jeton
       pas encore prêt, réseau lent, délai dépassé — pour que la modale « première
-      période » se rouvre alors qu'une période existait. */
-   let _periode = null;
+      période » se rouvre alors qu'une période existait.
+      Bornée dans le temps : sans ça, un manager qui clôture la période sur un
+      autre appareil laissait celui-ci travailler sur l'ancienne jusqu'à la
+      fermeture de l'application. */
+   const PERIODE_CACHE_MS = 20000;
+   let _periode = null, _periodeAt = 0;
 
    async function periodeCourante() {
-     if (_periode) return _periode;
+     if (_periode && (Date.now() - _periodeAt) < PERIODE_CACHE_MS) return _periode;
 
      let p = await DB.get('periode:courante', null);
 
@@ -2088,11 +2099,12 @@ window.addEventListener('error', function (ev) {
        }
      }
      _periode = p;
+     _periodeAt = Date.now();
      return p;
    }
 
    /* À appeler dès qu'une période est créée, clôturée ou modifiée. */
-   function oublierPeriode() { _periode = null; }
+   function oublierPeriode() { _periode = null; _periodeAt = 0; }
 
 /* Modale bloquante : rendue à l'écran tant que le manager n'a pas tranché. */
 function ouvrirPremierePeriode() {

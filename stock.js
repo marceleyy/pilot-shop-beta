@@ -77,14 +77,20 @@ const STOCK_LIGNES_MAX = 2500;
    Un mois pèse une centaine de kilo-octets, et seul le mois courant est écrit. */
 const cleMois = d => 'stock:mv:' + String(d || today()).slice(0, 7);
 
-/* Cache du mois courant : évite l'aller-retour de lecture à chaque scan
-   pendant une série. Invalidé dès qu'on change de mois. */
-let _moisCache = { cle: null, lignes: null };
+/* Cache du mois courant. Borné dans le TEMPS et pas seulement par nos propres
+   écritures : sans cela, un scan fait sur un autre iPad n'apparaissait jamais
+   ici, puisqu'on relisait indéfiniment notre propre copie. Deux appareils en
+   boutique se voyaient chacun travailler seul. */
+const MOIS_CACHE_MS = 15000;
+let _moisCache = { cle: null, lignes: null, at: 0 };
 
 async function lireMois(cle) {
-  if (_moisCache.cle === cle && _moisCache.lignes) return _moisCache.lignes;
+  if (_moisCache.cle === cle && _moisCache.lignes &&
+      (Date.now() - _moisCache.at) < MOIS_CACHE_MS) {
+    return _moisCache.lignes;
+  }
   const l = await DB.get(cle, []);
-  _moisCache = { cle: cle, lignes: l };
+  _moisCache = { cle: cle, lignes: l, at: Date.now() };
   return l;
 }
 
@@ -113,7 +119,7 @@ async function ajouterMouvement(type, cle, qte, extra) {
   l.push(m);
 
   l = await purgerJournal(l);
-  _moisCache = { cle: cm, lignes: l };
+  _moisCache = { cle: cm, lignes: l, at: Date.now() };
   invaliderStock();
   await DB.set(cm, l);
   await noterMois(cm);
