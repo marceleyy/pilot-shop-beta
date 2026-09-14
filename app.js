@@ -118,6 +118,33 @@
    /* Clés propres à l'appareil : elles ne partent jamais sur le réseau. */
    const LOCALES = ['session', 'seuils', 'meteo', OFFLINE.fileAttente];
    
+   /* Clés partagées entre plusieurs personnes, modifiées par petits bouts :
+      une check-liste où chacune coche sa tâche, un relevé rempli à deux, un
+      réassort de 34 points. Sans fusion, la dernière écriture écrase tout ce
+      que l'autre venait de saisir — vérifié : deux tâches cochées en même
+      temps, une seule survit.
+      Pour ces clés, on relit la base juste avant d'écrire et on fusionne. */
+   const FUSIONNER = ['checklist:', 'hebdo:', 'temp:', 'caisse:', 'reassort:',
+                      'preuves:', 'ruptures', 'releve', 'lots:', 'clean:'];
+   const aFusionner = cle => FUSIONNER.some(p => cle.indexOf(p) === 0);
+
+   /* Fusion superficielle, champ par champ. Suffisante : chaque personne
+      touche des champs distincts — sa tâche, son enceinte, son point de
+      réassort. Les tableaux sont remplacés, jamais mélangés. */
+   function fusionner(distant, local) {
+     if (!distant || typeof distant !== 'object' || Array.isArray(distant)) return local;
+     if (!local   || typeof local   !== 'object' || Array.isArray(local))   return local;
+     const out = Object.assign({}, distant);
+     Object.keys(local).forEach(k => {
+       const a = distant[k], b = local[k];
+       out[k] = (a && b && typeof a === 'object' && typeof b === 'object' &&
+                 !Array.isArray(a) && !Array.isArray(b))
+         ? Object.assign({}, a, b)
+         : b;
+     });
+     return out;
+   }
+
    const DB = (function () {
      const P = OFFLINE.storeLocal + ':';
      let dispo = true;
@@ -282,10 +309,24 @@
          if (!STATE.enLigne) { await empiler('set', cle, valeur); return true; }
    
          try {
+           /* Clé partagée : on relit juste avant d'écrire et on fusionne, sinon
+              la saisie d'une collègue faite entre notre lecture et notre
+              écriture disparaît sans laisser de trace. */
+           let aEcrire = valeur;
+           if (aFusionner(cle)) {
+             try {
+               const l = await appel(table(cle) + '?id=eq.' + encodeURIComponent(cle) +
+                                     '&select=data&limit=1');
+               if (l && l.length && l[0].data) {
+                 aEcrire = fusionner(l[0].data, valeur);
+                 try { ecrire(cle, JSON.stringify(aEcrire)); } catch (x) {}
+               }
+             } catch (x) { /* relecture impossible : on écrit ce qu'on a */ }
+           }
            await appel(table(cle), {
              method: 'POST',
              headers: { 'Prefer': 'resolution=merge-duplicates,return=minimal' },
-             body: JSON.stringify({ id:cle, site:APP.site, data:valeur })
+             body: JSON.stringify({ id:cle, site:APP.site, data:aEcrire })
            });
            return true;
          } catch (e) { await empiler('set', cle, valeur); return true; }
