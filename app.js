@@ -107,7 +107,13 @@
      ['hebdo:',       'checklists'],
      ['hebdo',        'reglages'],
      ['async:',       'reglages']
-   ];
+   ].filter(function (r) {
+     /* Une route dont la table est introuvable est retirée dès le chargement :
+        mieux vaut garder la clé en local que d'interroger « undefined ». */
+     if (r[1] && r[1] !== 'undefined') return true;
+     console.warn('Route sans table, ignorée :', r[0]);
+     return false;
+   });
    
    /* Clés propres à l'appareil : elles ne partent jamais sur le réseau. */
    const LOCALES = ['session', 'seuils', 'meteo', OFFLINE.fileAttente];
@@ -128,7 +134,18 @@
    
      const table = cle => {
        const r = ROUTES.filter(x => cle.indexOf(x[0]) === 0)[0];
-       return r ? r[1] : null;
+       /* Garde-fou : une clé sans route ne doit JAMAIS partir sur le réseau.
+          Sans lui, l'URL contenait littéralement « /rest/v1/undefined », le
+          serveur répondait 404, et le bandeau « Table introuvable » restait
+          allumé en bloquant la synchronisation d'un iPad entier. */
+       const t = r ? r[1] : null;
+       if (!t || t === 'undefined') {
+         if (LOCALES.indexOf(cle) < 0) {
+           console.warn('Clé sans table, gardée en local :', cle);
+         }
+         return null;
+       }
+       return t;
      };
      const estLocale = cle => LOCALES.some(l => cle === l || cle.indexOf(l) === 0);
      const configuré = () => !!(SUPABASE.url && SUPABASE.anonKey);
@@ -272,9 +289,16 @@
          const locales = clesLocales().filter(k => k.indexOf(prefixe) === 0);
          if (!configuré() || !STATE.enLigne) return locales.sort();
    
-         const tables = prefixe
-           ? ROUTES.filter(r => r[0].indexOf(prefixe) === 0 || prefixe.indexOf(r[0]) === 0).map(r => r[1])
-           : ROUTES.map(r => r[1]);
+         /* Les tables absentes sont écartées ICI. Sans ce filtre, une route dont
+            la table n'existe pas produisait l'URL « /rest/v1/undefined » : le
+            serveur répondait 404, le bandeau « Table introuvable » s'allumait,
+            et toute la synchronisation d'un iPad restait bloquée derrière.
+            C'est par ce chemin que l'inventaire de Chamonix n'est jamais remonté. */
+         const tables = (prefixe
+           ? ROUTES.filter(r => r[0].indexOf(prefixe) === 0 || prefixe.indexOf(r[0]) === 0)
+           : ROUTES)
+           .map(r => r[1])
+           .filter(t => t && t !== 'undefined');
          const vues = {}, out = locales.slice();
          for (const t of tables.filter(t => { if (vues[t]) return false; vues[t] = 1; return true; })) {
            try {
