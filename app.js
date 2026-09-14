@@ -201,7 +201,13 @@
                ? 'Session expirée — rattachez cet appareil'
                : 'Appareil non rattaché';
            }
-           else if (r.status === 404) STATE.erreurBase = 'Table introuvable';
+           else if (r.status === 404) {
+             /* Une table manquante ne réapparaîtra pas d'elle-même : inutile de
+                réessayer cinq fois. On nomme la clé fautive dans le bandeau,
+                sinon il faut fouiller la console d'un iPad pour la trouver. */
+             err.definitif = true;
+             STATE.erreurBase = 'Table introuvable pour « ' + chemin.split('?')[0] + ' »';
+           }
            else if (r.status === 413) STATE.erreurBase = 'Donnée trop lourde';
            else STATE.erreurBase = 'Base en erreur (' + r.status + ')';
            STATE.dernierEchec = { chemin:chemin.split('?')[0], status:r.status,
@@ -391,6 +397,13 @@
            });
          }
        } catch (e) {
+         /* Échec définitif — table absente : on n'insiste pas, la donnée reste
+            en local et le bandeau nomme la clé. Cinq tentatives inutiles ne
+            faisaient que rallumer l'alerte pendant deux minutes. */
+         if (e && e.definitif) {
+           console.warn('Écriture abandonnée (table absente) :', item.cle);
+           continue;
+         }
          item.essais = (item.essais || 0) + 1;
          if (item.essais < OFFLINE.tentatives) restants.push(item);
          else console.warn('Écriture abandonnée après ' + item.essais + ' essais :', item.cle);
