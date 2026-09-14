@@ -527,7 +527,12 @@ const FOURNISSEUR = {
   prefixeReference: '$',
   formatReference: /^\$([A-Z]+)(\d{2})$/,     // $AMARENA25
   bacsParPalette: 176,
-  taillesBac: [3, 4, 5, 7],
+  /* Le 4 litres ne circule pas à Paccard : il encombrait l'inventaire d'une
+     colonne toujours vide. Le 7 litres existe mais reste rare — il n'apparaît
+     qu'à la demande, pour garder l'écran de comptage lisible. */
+  taillesBac: [3, 5, 7],
+  taillesCourantes: [3, 5],
+  taillesRares: [7],
   tailleParDefaut: 5,
   /* Mesuré sur étiquette Amorino : 2,525 kg pour 3 L, soit 0,84167 kg/L.
      L'ancienne valeur du classeur surestimait le stock de 0,58 %, soit environ

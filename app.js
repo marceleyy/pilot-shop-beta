@@ -1695,16 +1695,27 @@ async function chargerEquipe() {
     return true;
   };
 
-  /* 2. Table dédiée « equipe », si elle existe et qu'on a un jeton. */
-  try {
-    const jeton = (typeof jetonValide === 'function') ? await jetonValide() : null;
-    if (jeton) {
-      const r = await fetch(SUPABASE.url + '/rest/v1/equipe?select=*&actif=eq.true&order=prenom', {
-        headers: { 'apikey': SUPABASE.anonKey, 'Authorization': 'Bearer ' + jeton }
-      });
-      if (r.ok && garder(await r.json())) return;
-    }
-  } catch (e) { /* table absente ou hors ligne : on continue */ }
+  /* 2. Table dédiée « equipe », si elle existe. Elle n'a PAS été créée : le
+     script SQL simplifié l'a abandonnée au profit d'une ligne dans reglages.
+     L'interroger renvoyait 404 et allumait le bandeau « Table introuvable » à
+     chaque démarrage. On ne la sollicite que si on l'a déjà vue répondre. */
+  const tableDediee = (() => {
+    try { return localStorage.getItem('pilotshop.v3:table-equipe') === 'oui'; }
+    catch (e) { return false; }
+  })();
+  if (tableDediee) {
+    try {
+      const jeton = (typeof jetonValide === 'function') ? await jetonValide() : null;
+      if (jeton) {
+        const r = await fetch(SUPABASE.url + '/rest/v1/equipe?select=*&actif=eq.true&order=prenom', {
+          headers: { 'apikey': SUPABASE.anonKey, 'Authorization': 'Bearer ' + jeton }
+        });
+        if (r.status === 404) {
+          try { localStorage.removeItem('pilotshop.v3:table-equipe'); } catch (e) {}
+        } else if (r.ok && garder(await r.json())) return;
+      }
+    } catch (e) { /* hors ligne : on continue */ }
+  }
 
   /* 3. Repli : une ligne dans la table des réglages. Ne demande aucune
      migration de schéma, donc fonctionne dès maintenant. */

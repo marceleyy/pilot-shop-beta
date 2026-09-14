@@ -280,17 +280,22 @@ function litMouvement(m) {
   };
 }
 
-/* Total en bacs et en litres, pour le calcul d'écart. */
+/* Total en bacs et en litres, pour le calcul d'écart.
+   On distingue les bacs de glace, qui ont une contenance, des autres familles
+   comptées à l'unité — chantilly, coulis, toppings. Les mélanger donnait un
+   total de 163 « bacs » pour 473 litres, soit 2,9 L de moyenne : en dessous du
+   plus petit format, donc une moyenne qui ne veut rien dire. */
 function totauxStock(articles) {
-  let bacs = 0, litres = 0;
+  let bacs = 0, litres = 0, unites = 0;
   Object.keys(articles).forEach(c => {
     const q = num(articles[c]);
     if (q === 0) return;
-    bacs += q;
     const t = num(litArticle(c).taille);
-    if (t) litres += q * t;
+    if (t) { bacs += q; litres += q * t; }
+    else   { unites += q; }
   });
-  return { bacs: bacs, litres: litres, kg: litres * FOURNISSEUR.poidsMoyenLitre };
+  return { bacs: bacs, unites: unites, litres: litres,
+           kg: litres * FOURNISSEUR.poidsMoyenLitre };
 }
 
 /* -----------------------------------------------------------------------------
@@ -354,9 +359,9 @@ V.stock = async function () {
   $('#vue-actions').innerHTML = '';
   $('#page').innerHTML =
     carte('<div class="grid g3">' +
-      kpi('Bacs', t.bacs, '', 'En stock') +
-      kpi('Litres', n1(t.litres), '', 'Volume total') +
-      kpi('Poids', n1(t.kg) + ' kg', '', 'Stock réel') + '</div>' +
+      kpi('Bacs de glace', t.bacs, '', n1(t.litres) + ' L') +
+      kpi('Autres produits', t.unites, '', 'comptés à l’unité') +
+      kpi('Poids', n1(t.kg) + ' kg', '', 'glace seule') + '</div>' +
       '<p class="mini" style="margin-top:12px">' +
       (inventaire
         ? 'Dernier inventaire le ' + fmtD(inventaire.jour) +
@@ -440,9 +445,21 @@ V.inventaire = async function () {
       JSON.stringify({ jour: today(), lignes: saisie, at: nowISO() })); } catch (e) {}
   };
 
-  /* Une ligne par parfum, avec ses quatre tailles côte à côte. En dépliant
-     chaque taille sur sa propre ligne, l'écran faisait 96 lignes — soit six
-     mètres de défilement pour un comptage de chambre froide. */
+  /* Une ligne par parfum, avec ses tailles côte à côte. Le 7 litres est rare :
+     il reste masqué tant qu'on n'en a pas, pour éviter une colonne de zéros. */
+  const COURANTES = FOURNISSEUR.taillesCourantes || TAILLES_BAC;
+  const RARES     = FOURNISSEUR.taillesRares || [];
+  /* Tailles retirées du catalogue mais encore en stock — les 4 litres comptés
+     avant leur suppression. Sans cette reprise, ils resteraient dans le total
+     sans jamais pouvoir être recomptés ni corrigés : du stock fantôme. */
+  const ORPHELINES = [...new Set(Object.keys(articles)
+    .filter(c => num(articles[c]) !== 0 && litArticle(c).famille === 'glace')
+    .map(c => num(litArticle(c).taille))
+    .filter(t => t && COURANTES.indexOf(t) < 0 && RARES.indexOf(t) < 0))].sort();
+  /* On déplie d'office si un bac rare est déjà en stock ou déjà compté. */
+  let montrerRares = RARES.some(t =>
+    PARFUMS.some(p => num(articles[cleArticle('glace', p, t)]) !== 0 ||
+                      saisie[cleArticle('glace', p, t)] !== undefined));
   const autres = FAMILLES_PRODUIT.filter(f => !f.parfums);
 
   const total = () => Object.keys(saisie).reduce((s, c) => s + num(saisie[c]), 0);
@@ -472,13 +489,19 @@ V.inventaire = async function () {
       '<b class="num" id="inv-kg" style="margin-left:auto">0,0 kg</b></div>' +
 
       '<div class="entete"><h3>Glaces</h3>' +
-      '<span class="pousse mini">' + TAILLES_BAC.join(' · ') + ' L</span></div>' +
+      '<button class="btn clair sm pousse" id="inv-rares">' +
+      (montrerRares ? 'Masquer le 7 L' : '+ 7 L') + '</button></div>' +
       '<div class="stack">' + PARFUMS.map(p => {
-        const enStock = TAILLES_BAC.reduce((s, t) => s + num(articles[cleArticle('glace', p, t)]), 0);
+        const base = montrerRares ? COURANTES.concat(RARES) : COURANTES;
+        /* Une taille orpheline n'apparaît que pour les parfums qui en ont. */
+        const sup = ORPHELINES.filter(t => num(articles[cleArticle('glace', p, t)]) !== 0 ||
+                                           saisie[cleArticle('glace', p, t)] !== undefined);
+        const tailles = base.concat(sup).sort((a, b) => a - b);
+        const enStock = tailles.reduce((s, t) => s + num(articles[cleArticle('glace', p, t)]), 0);
         return '<div class="invp">' +
           '<div class="invp-h"><b>' + esc(p) + '</b>' +
           (enStock ? '<span class="invc">' + enStock + ' en stock</span>' : '') + '</div>' +
-          '<div class="invp-t">' + TAILLES_BAC.map(t => {
+          '<div class="invp-t">' + tailles.map(t => {
             const c = cleArticle('glace', p, t);
             return '<label><span>' + t + ' L</span>' +
               '<input type="number" inputmode="numeric" min="0" step="1" data-inv="' + c + '" ' +
@@ -509,6 +532,8 @@ V.inventaire = async function () {
       majTotaux();
     });
     majTotaux();
+
+    $('#inv-rares').onclick = () => { montrerRares = !montrerRares; dessiner(); };
 
     $('#inv-ok').onclick = async () => {
       const cptes = Object.keys(saisie);
