@@ -160,16 +160,24 @@
             Sans rattachement, l'appel échoue et la saisie part en file d'attente,
             exactement comme hors ligne. */
          const jeton = (typeof jetonValide === 'function') ? await jetonValide() : null;
-         const r = await fetch(SUPABASE.url + '/rest/v1/' + chemin, Object.assign({
-           signal: ctrl.signal,
-           headers: Object.assign({
-             'apikey': SUPABASE.anonKey,
-             'Authorization': 'Bearer ' + (jeton || SUPABASE.anonKey),
-             'Content-Type': 'application/json',
-             'Accept-Profile': SUPABASE.schema,
-             'Content-Profile': SUPABASE.schema
-           }, (options && options.headers) || {})
-         }, options || {}));
+         /* Les en-têtes sont fusionnés D'ABORD, puis posés APRèS options.
+            L'ordre inverse laissait options écraser l'objet headers entier :
+            toute écriture qui passe ses propres en-têtes — « Prefer: merge-
+            duplicates », c'est-à-dire TOUTES les écritures — partait sans
+            apikey ni Authorization. Le serveur répondait « No API key found »
+            en 401, l'application croyait sa session expirée, et empilait.
+            Les lectures, elles, n'ont pas d'en-tête propre : elles marchaient.
+            D'où une base qui se lit mais ne s'écrit jamais. */
+         const entetes = Object.assign({
+           'apikey': SUPABASE.anonKey,
+           'Authorization': 'Bearer ' + (jeton || SUPABASE.anonKey),
+           'Content-Type': 'application/json',
+           'Accept-Profile': SUPABASE.schema,
+           'Content-Profile': SUPABASE.schema
+         }, (options && options.headers) || {});
+
+         const r = await fetch(SUPABASE.url + '/rest/v1/' + chemin,
+           Object.assign({ signal: ctrl.signal }, options || {}, { headers: entetes }));
          clearTimeout(to);
          /* Le réseau a répondu : on est en ligne, même si le serveur refuse. */
          if (!STATE.enLigne) { STATE.enLigne = true; STATE.erreurBase = null; majBandeau(); }
