@@ -362,15 +362,22 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
                par: v ? v.par : null, at: v ? v.at : null };
     }
     if (t.lien === 'caisse') {
+      /* La caisse a changé de nommage : m_fond, s_cb, s_esp, s_tpe, s_retrait,
+         s_fond. Cette vérification cherchait encore fi, cb, esp, tpe, depot, ff
+         — les anciens champs — si bien que l'étape ne se cochait JAMAIS, même
+         après un comptage validé. On lit les deux nommages. */
+      const rempli = k => caisseJour[k] !== undefined && caisseJour[k] !== '';
       if (phase === 'fermeture') {
-        const champs = ['cb', 'esp', 'tpe', 'depot', 'ff'];
-        const ok = champs.every(c => caisseJour[c] !== undefined && caisseJour[c] !== '');
-        return { fait: ok, ou: 'caisse', quoi: 'la clôture de caisse',
-                 par: caisseJour.par, at: caisseJour.at };
+        const nouveau = ['s_cb', 's_esp', 's_tpe', 's_retrait', 's_fond'].every(rempli);
+        const ancien  = ['cb', 'esp', 'tpe', 'depot', 'ff'].every(rempli);
+        const v = caisseJour.s_valide;
+        return { fait: nouveau || ancien, ou: 'caisse', quoi: 'la clôture de caisse',
+                 par: v ? v.par : caisseJour.par, at: v ? v.at : caisseJour.at };
       }
-      const ok = caisseJour.fi !== undefined && caisseJour.fi !== '';
-      return { fait: ok, ou: 'caisse', quoi: 'le comptage du fond de caisse',
-               par: caisseJour.par, at: caisseJour.at };
+      const v = caisseJour.m_valide;
+      return { fait: rempli('m_fond') || rempli('fi'), ou: 'caisse',
+               quoi: 'le comptage du fond de caisse',
+               par: v ? v.par : caisseJour.par, at: v ? v.at : caisseJour.at };
     }
     return null;
   };
@@ -632,6 +639,15 @@ function equilibreCaisse(o) {
 V.caisse = async function () {
   const j = STATE.jour;
   const r = await DB.get('caisse:' + j, {});
+  /* Reprise d'une saisie interrompue. Safari décharge les onglets sous pression
+     mémoire, et l'application vient de prendre 7,7 Mo pour le moteur de lecture :
+     une personne qui compte sa caisse ne doit pas tout retaper pour autant. */
+  try {
+    const brouillon = JSON.parse(localStorage.getItem('pilotshop.v3:brouillon:caisse:' + j) || 'null');
+    if (brouillon) Object.keys(brouillon).forEach(k => {
+      if (r[k] === undefined || r[k] === '') r[k] = brouillon[k];
+    });
+  } catch (e) {}
   const veille = await DB.get('caisse:' + addD(j, -1), null);
 
   /* Fond laissé hier soir : nouvelle clé, sinon l'ancienne. */
@@ -816,6 +832,9 @@ V.caisse = async function () {
     $$('[data-k]').forEach(i => i.oninput = () => {
       r[i.dataset.k] = i.value;
       if (r[mom + '_valide']) delete r[mom + '_valide'];
+      /* Écriture locale IMMÉDIATE, avant l'enregistrement différé : si l'onglet
+         est déchargé entre deux frappes, rien n'est perdu. */
+      try { localStorage.setItem('pilotshop.v3:brouillon:caisse:' + j, JSON.stringify(r)); } catch (e) {}
       sauver();
       verdict();
     });

@@ -428,6 +428,18 @@ V.inventaire = async function () {
   const precedent = await DB.get('stock:inventaire', null);
   const saisie = {};          // cle -> quantité tapée
 
+  /* Reprise d'un comptage interrompu : trente lignes à remplir en chambre
+     froide, et l'onglet peut être déchargé entre deux. Personne ne recompte. */
+  const CLE_BROUILLON = 'pilotshop.v3:brouillon:inventaire';
+  try {
+    const b = JSON.parse(localStorage.getItem(CLE_BROUILLON) || 'null');
+    if (b && b.jour === today()) Object.assign(saisie, b.lignes || {});
+  } catch (e) {}
+  const garderBrouillon = () => {
+    try { localStorage.setItem(CLE_BROUILLON,
+      JSON.stringify({ jour: today(), lignes: saisie, at: nowISO() })); } catch (e) {}
+  };
+
   /* Une ligne par parfum, avec ses quatre tailles côte à côte. En dépliant
      chaque taille sur sa propre ligne, l'écran faisait 96 lignes — soit six
      mètres de défilement pour un comptage de chambre froide. */
@@ -493,6 +505,7 @@ V.inventaire = async function () {
     $$('[data-inv]').forEach(i => i.oninput = () => {
       if (i.value === '') delete saisie[i.dataset.inv];
       else saisie[i.dataset.inv] = i.value;
+      garderBrouillon();
       majTotaux();
     });
     majTotaux();
@@ -511,6 +524,7 @@ V.inventaire = async function () {
         'précède ne sera plus compté.',
         'Valider', async () => {
           await enregistrerInventaire(lignes, $('#inv-note') ? $('#inv-note').value : '');
+          try { localStorage.removeItem(CLE_BROUILLON); } catch (e) {}
           await feed('ok', STATE.user.prenom + ' a fait l’inventaire — ' +
             t.bacs + ' bacs, ' + n1(t.kg) + ' kg');
           toast('Inventaire enregistré');

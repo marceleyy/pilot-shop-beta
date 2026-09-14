@@ -479,7 +479,8 @@ const FICHES = [
    -------------------------------------------------------------------------- */
 const PARFUMS = [
   'Amarena','Banane','Café','Caramel au beurre salé','Chocolat noir','Chocolat équateur',
-  'Chocolat bio (sorbet)','Citron bio','Citron vert basilic','Fraise','Framboise',
+  'Chocolat bio (sorbet)','Citron bio','Citron vert basilic','Dulce de leche',
+  'Fraise','Framboise',
   'Fruit de la passion','Inimitable','Mangue','Noisette','Noix de coco','Orange sanguine',
   'Pistache','Stracciatella','Tiramisu','Vanille','Yogurt'
 ];
@@ -502,6 +503,9 @@ const PARFUMS_ALIAS = {
                              'chocolat bio', 'choco bio'],
   'Citron bio':             ['lemon', 'organic lemon', 'limone'],
   'Citron vert basilic':    ['lime basil', 'lime and basil', 'lime basilico'],
+  /* Dulce de leche : lait concentré caramélisé, distinct du caramel au beurre
+     salé. Les confondre reviendrait à tracer un produit sous un autre nom. */
+  'Dulce de leche':         ['dulce de leche', 'dulce', 'doce de leite', 'caramel au lait'],
   'Fraise':                 ['strawberry', 'fragola'],
   'Framboise':              ['raspberry', 'lampone'],
   'Fruit de la passion':    ['passion fruit', 'passionfruit', 'passione', 'frutto della passione'],
