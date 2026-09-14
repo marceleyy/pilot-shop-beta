@@ -341,15 +341,34 @@ function extraireBatch(texte) {
   const ancre = T.match(/BAT[CGO]H[^0-9A-Z]{0,12}(?:N[^0-9A-Z]{0,4})?([\s\S]{0,24})/);
 
   const chercher = src => {
-    const brut = src.replace(/[^0-9A-Z]/g, ' ');
-    const re = /(\d{5})\s*([A-Z])/g;
-    let m;
-    while ((m = re.exec(brut)) !== null) {
-      const n = m[1];
-      /* Un groupe qui commence par une année plausible est une date, pas un lot */
-      if (/^20[2-4]\d/.test(n)) continue;
-      if (n.slice(1) === '2026' || n.slice(1) === '2027' || n.slice(1) === '2028') continue;
-      return { code: n + m[2], corrige: false };
+    /* On travaille LIGNE PAR LIGNE. En aplatissant tout le texte, un nombre
+       de fin de ligne se recollait à la lettre isolée de la ligne suivante :
+       « M3345M45700 » puis « A » donnaient un lot « 45700A » qui n'existe pas,
+       et il gagnait contre le vrai « 14001A » situé plus bas. */
+    const lignes = String(src).split(/[\r\n]+/);
+    const candidats = [];
+    for (const ligne of lignes) {
+      const brut = ligne.replace(/[^0-9A-Z]/g, ' ');
+      /* Le lot est un jeton AUTONOME : cinq chiffres et une lettre, rien
+         d'autre collé autour. « M3345M45700 » est donc écarté. */
+      for (const jeton of brut.split(/\s+/)) {
+        const m = jeton.match(/^(\d{5})([A-Z])$/);
+        if (!m) continue;
+        if (/^20[2-4]\d/.test(m[1])) continue;
+        candidats.push({ code: m[1] + m[2], autonome: true });
+      }
+    }
+    if (candidats.length) return { code: candidats[0].code, corrige: false };
+
+    /* Repli : motif non autonome, mais toujours à l'intérieur d'une seule ligne. */
+    for (const ligne of lignes) {
+      const brut = ligne.replace(/[^0-9A-Z]/g, ' ');
+      const re = /(\d{5})\s*([A-Z])/g;
+      let m;
+      while ((m = re.exec(brut)) !== null) {
+        if (/^20[2-4]\d/.test(m[1])) continue;
+        return { code: m[1] + m[2], corrige: true };
+      }
     }
     return null;
   };
