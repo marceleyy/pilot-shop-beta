@@ -2014,21 +2014,67 @@ window.addEventListener('error', function (ev) {
    /* =============================================================================
       20. PÉRIODES — fenêtre de calcul courante
       ========================================================================== */
+   /* Mémoire de session : sept vues appellent periodeCourante(), chacune
+      relisait la base de son côté. Il suffisait qu'UNE lecture échoue — jeton
+      pas encore prêt, réseau lent, délai dépassé — pour que la modale « première
+      période » se rouvre alors qu'une période existait. */
+   let _periode = null;
+
    async function periodeCourante() {
-   let p = await DB.get('periode:courante', null);
-   if (!p) {
-   /* Plus de création silencieuse : sans période définie, aucun écart n'a de
-   sens. Le manager choisit lui-même la ligne de départ, l'équipier est
-      informé qu'il doit attendre. */
-     if (STATE.user && STATE.user.role === 'manager') {
-       p = await ouvrirPremierePeriode();
-    } else {
-      p = { id:'attente', type:PERIODES.parDefaut, debut:today(), fin:today(),
-            ouverte:false, nonInitialisee:true };
-    }
-  }
-  return p;
-}
+     if (_periode) return _periode;
+
+     let p = await DB.get('periode:courante', null);
+
+     /* Une lecture ratée ne prouve RIEN. Avant de conclure à l'absence de
+        période, on vérifie qu'on a bien pu joindre la base : sinon on attend
+        plutôt que de faire recréer une période qui existe déjà — ce qui
+        créerait deux lignes de départ concurrentes. */
+     if (!p && STATE.enLigne && DB.configure) {
+       try {
+         const jeton = (typeof jetonValide === 'function') ? await jetonValide() : null;
+         if (jeton) {
+           const r = await fetch(SUPABASE.url + '/rest/v1/' +
+             SUPABASE.tables.periodes + '?id=eq.' + encodeURIComponent('periode:courante') +
+             '&select=data&limit=1',
+             { headers: { apikey: SUPABASE.anonKey, Authorization: 'Bearer ' + jeton } });
+           if (r.ok) {
+             const l = await r.json();
+             if (l && l.length && l[0].data) {
+               p = l[0].data;
+               try { DB._ecrire('periode:courante', JSON.stringify(p)); } catch (e) {}
+             }
+           } else {
+             /* La base n'a pas répondu : on ne conclut pas. */
+             return { id:'attente', type:PERIODES.parDefaut, debut:today(), fin:today(),
+                      ouverte:false, nonInitialisee:true, indisponible:true };
+           }
+         } else {
+           return { id:'attente', type:PERIODES.parDefaut, debut:today(), fin:today(),
+                    ouverte:false, nonInitialisee:true, indisponible:true };
+         }
+       } catch (e) {
+         return { id:'attente', type:PERIODES.parDefaut, debut:today(), fin:today(),
+                  ouverte:false, nonInitialisee:true, indisponible:true };
+       }
+     }
+
+     if (!p) {
+       /* Plus de création silencieuse : sans période définie, aucun écart n'a de
+          sens. Le manager choisit lui-même la ligne de départ, l'équipier est
+          informé qu'il doit attendre. */
+       if (STATE.user && STATE.user.role === 'manager') {
+         p = await ouvrirPremierePeriode();
+       } else {
+         return { id:'attente', type:PERIODES.parDefaut, debut:today(), fin:today(),
+                  ouverte:false, nonInitialisee:true };
+       }
+     }
+     _periode = p;
+     return p;
+   }
+
+   /* À appeler dès qu'une période est créée, clôturée ou modifiée. */
+   function oublierPeriode() { _periode = null; }
 
 /* Modale bloquante : rendue à l'écran tant que le manager n'a pas tranché. */
 function ouvrirPremierePeriode() {
@@ -2111,6 +2157,7 @@ function ouvrirPremierePeriode() {
       const p = { id:uid(), type:type, debut:d1, fin:d2, ouverte:true,
                   creee:nowISO(), creeePar:STATE.user ? STATE.user.prenom : '—', premiere:true };
       await DB.set('periode:courante', p);
+      oublierPeriode();
       await feed('ok', (STATE.user ? STATE.user.prenom : '—') +
                  ' a ouvert la première période : ' + libellePeriode(p));
       closeSheet();
@@ -2898,6 +2945,7 @@ function modifierPeriode(per) {
     Object.assign(per, { type:type, debut:d1, fin:d2,
                          modifiee:nowISO(), modifieePar:STATE.user.prenom });
     await DB.set('periode:courante', per);
+    oublierPeriode();
     await feed('ok', STATE.user.prenom + ' a modifié la période : ' + avant + ' → ' + libellePeriode(per));
     closeSheet();
     toast('Période mise à jour');
@@ -2992,6 +3040,7 @@ function modifierPeriode(per) {
        const suivante = { id:uid(), type:type, debut:d1, fin:d2, ouverte:true,
                           precedente:per.id, creee:nowISO(), creeePar:STATE.user.prenom };
        await DB.set('periode:courante', suivante);
+       oublierPeriode();
        await DB.patch('ecart:' + suivante.id, { debut:{ kg:c.reel }, litrageBL:0, jeteL:0, jeteKg:0, ventes:{} });
    
        await feed('ok', STATE.user.prenom + ' a clôturé ' + libellePeriode(per) +
