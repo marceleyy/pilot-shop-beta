@@ -151,7 +151,7 @@
      const configuré = () => !!(SUPABASE.url && SUPABASE.anonKey);
      const distant = cle => configuré() && !estLocale(cle) && !!table(cle);
    
-     async function appel(chemin, options) {
+     async function appel(chemin, options, secondeChance) {
        const ctrl = new AbortController();
        const to = setTimeout(() => ctrl.abort(), OFFLINE.timeoutReseauMs);
        try {
@@ -183,18 +183,19 @@
            try { motif = (await r.text()).slice(0, 300); } catch (x) {}
            err.motif = motif;
            if (r.status === 401 || r.status === 403) {
-             /* Avant d'alarmer, on tente un renouvellement silencieux : une
-                session qui vient d'expirer se répare toute seule, et l'équipe
-                n'a rien à savoir. On n'affiche le bandeau que si ça échoue. */
-             let repare = false;
-             if (typeof renouveler === 'function' && typeof appareilRattache === 'function'
-                 && appareilRattache()) {
+             /* Session expirée : on renouvelle et on REJOUE l'appel une fois.
+                La version précédente levait une erreur marquée « pas HTTP »,
+                que le bloc de secours prenait pour une panne réseau : chaque
+                renouvellement réussi faisait passer l'application « hors ligne »
+                et empilait la saisie. La file grossissait à chaque écriture. */
+             if (!secondeChance && typeof renouveler === 'function' &&
+                 typeof appareilRattache === 'function' && appareilRattache()) {
+               let repare = false;
                try { repare = !!(await renouveler()); } catch (x) {}
-             }
-             if (repare) {
-               STATE.erreurBase = null;
-               clearTimeout(to);
-               throw Object.assign(new Error('jeton renouvelé, à rejouer'), { http:false, rejouer:true });
+               if (repare) {
+                 STATE.erreurBase = null;
+                 return await appel(chemin, options, true);
+               }
              }
              const rattache = (typeof appareilRattache === 'function') ? appareilRattache() : true;
              STATE.erreurBase = rattache
@@ -223,8 +224,13 @@
          return txt ? JSON.parse(txt) : null;
        } catch (e) {
          clearTimeout(to);
-         /* Seule une vraie panne réseau bascule l'application hors ligne. */
-         if (!e.http && STATE.enLigne) { STATE.enLigne = false; majBandeau(); }
+         /* Seule une vraie panne réseau bascule l'application hors ligne.
+            Un dépassement de délai sur UNE requête n'en est pas une : le Wi-Fi
+            d'une boutique peut traîner sans être coupé. On laisse la sonde
+            trancher plutôt que de déclarer la panne sur un seul incident. */
+         const estAbandon = e && (e.name === 'AbortError' ||
+                                  /abort/i.test(String(e.message || '')));
+         if (!e.http && !estAbandon && STATE.enLigne) { STATE.enLigne = false; majBandeau(); }
          throw e;
        }
      }

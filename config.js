@@ -75,8 +75,11 @@ const OFFLINE = {
   /* Au-delà, l'écriture reste locale : c'est le cas des journées de photos en
      base64, dont l'envoi échouait en boucle et rallumait le bandeau d'erreur. */
   tailleMaxOctets: 900000,
-  /* Les lectures servies depuis le cache si le réseau ne répond pas à temps */
-  timeoutReseauMs: 3500,
+  /* Les lectures servies depuis le cache si le réseau ne répond pas à temps.
+     3,5 s était trop court : sur le Wi-Fi d'une boutique de montagne, une
+     écriture dépassait régulièrement ce délai, partait en file d'attente, et
+     l'application se déclarait hors ligne alors qu'elle ne l'était pas. */
+  timeoutReseauMs: 8000,
   /* Écritures autorisées hors-ligne (les autres sont bloquées avec message) */
   ecrituresOffline: ['temperatures','nettoyage','reassort','ruptures','pertes','lots','caisse','releve','feed'],
   /* Résolution de conflit : la saisie terrain gagne, l'historique est conservé */
