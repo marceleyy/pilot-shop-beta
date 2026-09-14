@@ -339,6 +339,13 @@
        if (propres.length !== f.length) {
          try { DB._ecrire(OFFLINE.fileAttente, JSON.stringify(propres)); } catch (e) {}
        }
+       /* Le compteur suit TOUJOURS la file. Sans cette ligne, une purge
+          silencieuse laissait « 2 en attente » affiché alors que la file était
+          vide — un reproche permanent pour un travail déjà fait. */
+       if (STATE.fileAttente !== propres.length) {
+         STATE.fileAttente = propres.length;
+         majBandeau();
+       }
        return propres;
      } catch (e) { return []; }
    }
@@ -467,11 +474,16 @@
          : STATE.erreurBase + ' — vos saisies restent sur l’iPad';
      } else if (!STATE.enLigne) {
        b.classList.add('on');
-       if (msg) msg.textContent = PWA.bannerOffline;
+       /* Le message ne parle de saisies en attente que s'il y en a vraiment. */
+       if (msg) msg.textContent = STATE.fileAttente
+         ? 'Hors ligne — vos saisies partiront toutes seules'
+         : 'Hors ligne — vous pouvez continuer normalement';
      } else {
        b.classList.remove('on');
      }
-     $('#offline-n').textContent = STATE.fileAttente ? '· ' + STATE.fileAttente + ' en attente' : '';
+     $('#offline-n').textContent = STATE.fileAttente
+       ? '· ' + STATE.fileAttente + (STATE.fileAttente > 1 ? ' saisies' : ' saisie') + ' en attente'
+       : '';
    }
 
    /* Réparation en un geste : on tente d'abord un renouvellement silencieux,
@@ -1940,6 +1952,12 @@ window.addEventListener('error', function (ev) {
   document.title = APP.nom + ' — ' + APP.site;
   STATE.jour = today();       // chaque connexion repart du jour en cours
   STATE.phase = phaseCourante();
+  /* Le compteur de file part de la réalité, pas de zéro : sans ça il restait
+     à sa dernière valeur connue, même après que la file se soit vidée. */
+  fileLire();
+  /* Une erreur héritée d'une session précédente ne doit pas s'afficher avant
+     qu'on ait vérifié qu'elle existe encore. */
+  STATE.erreurBase = null;
   majBandeau();
   initFeedback();
   purgerPreuves();          // les photos de plus de trois mois s'effacent seules
