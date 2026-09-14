@@ -534,12 +534,19 @@
    
    /* Sonde légère : rétablit l'état en ligne dès que la base répond de nouveau. */
    let sondeEnCours = false;
+   /* Table de sondage résolue UNE FOIS, avec repli. SUPABASE.tables.journal
+      n'existe pas — la clé correcte est « feed ». La sonde appelait donc
+      « /rest/v1/undefined » toutes les quinze secondes, ce qui rallumait le
+      bandeau à l'infini. Pire : la sonde ne tourne QUE s'il y a une erreur,
+      et elle en créait une — l'alerte ne pouvait plus jamais s'éteindre. */
+   const TABLE_SONDE = SUPABASE.tables.feed || SUPABASE.tables.journal || 'journal';
+
    async function sonderReseau() {
      if (sondeEnCours || !navigator.onLine || !DB.configure) return;
      if (STATE.enLigne && !STATE.erreurBase) return;
      sondeEnCours = true;
      try {
-       await DB._appel(SUPABASE.tables.journal + '?select=id&limit=1');
+       await DB._appel(TABLE_SONDE + '?select=id&limit=1');
        STATE.enLigne = true; STATE.erreurBase = null;
        majBandeau();
        journaliserSync();

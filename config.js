@@ -46,6 +46,12 @@ const SUPABASE = {
     periodes:     'periodes',
     releve:       'carnet_releve',   // messages de passation
     feed:         'journal',
+    /* Alias : du code référençait SUPABASE.tables.journal et .reglages, qui
+       n'existaient pas. Résultat, des appels vers « /rest/v1/undefined » qui
+       rallumaient le bandeau « Table introuvable » en boucle. Plutôt que de
+       traquer chaque usage, on nomme les deux entrées manquantes. */
+    journal:      'journal',
+    reglages:     'reglages',
     feedback:     'feedback'
   },
   realtime: ['journal', 'ruptures', 'carnet_releve'],
