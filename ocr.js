@@ -25,7 +25,11 @@ const OCR = {
   cotePx:        1400,         // côté long envoyé à Tesseract
   cotePreviewPx: 900,
   tailleMaxMo:   25,
-  sauvola:       { k: 0.34, R: 128, divFenetre: 18 },
+/* Prétraitement adouci. Un k de 0,34 épaissit les traits fins : sur une
+   étiquette Amorino photographiée à travers une vitrine, la boucle du 9 se
+   referme et il devient un 8 — « 13996A » lu « 13896A ». Un k plus élevé
+   binarise plus prudemment, et une fenêtre plus large suit mieux les reflets. */
+  sauvola:       { k: 0.42, R: 128, divFenetre: 12 },
   inactiviteMs:  90000,        // arrêt du worker après ce délai sans usage
   batch:         /(\d{5})\s*([A-Z])/g,
   /* Viseur intégré : cadre de visée et recadrage sur la zone utile. */
@@ -300,6 +304,23 @@ function reporterArret() {
 
 const MAJUSCULES = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
 const LETTRES    = MAJUSCULES + 'abcdefghijklmnopqrstuvwxyzÀÂÇÉÈÊËÎÏÔÛÙÜàâçéèêëîïôûùüœ -';
+
+/* Lecture double : on soumet à Tesseract l'image binarisée ET l'image en
+   niveaux de gris, puis on garde la plus sûre des deux.
+
+   Le noir et blanc aide quand l'éclairage est inégal — c'est pour ça qu'on l'a
+   mis. Mais il abîme les caractères fins : un 9 épaissi devient un 8. Sur une
+   étiquette bien éclairée, le gris donne un meilleur résultat. Plutôt que de
+   choisir à l'avance, on essaie les deux : l'OCR rend un indice de confiance,
+   autant s'en servir. Le coût est d'environ une seconde de plus par scan. */
+async function lireMeilleur(canvasNB, canvasGris, profil) {
+  const a = await lire(canvasNB, profil);
+  /* Si le noir et blanc est déjà très sûr, inutile de payer la seconde passe. */
+  if (a.confiance >= 0.75 || !canvasGris) return a;
+  let b;
+  try { b = await lire(canvasGris, profil); } catch (e) { return a; }
+  return (b.confiance > a.confiance) ? b : a;
+}
 
 async function lire(canvas, profil) {
   const w = await obtenirWorker();
@@ -694,12 +715,16 @@ async function analyserCanvas(type, canvas, nom, resolve) {
   try {
     etape('Lecture de l’étiquette', 'Nettoyage des reflets…');
     await new Promise(r => setTimeout(r, 30));
+    /* On garde une copie en niveaux de gris AVANT de binariser : elle servira
+       de seconde lecture si le noir et blanc rend un résultat incertain. */
+    const gris = copierCanvas(canvas);
     pretraiter(canvas);
     try { apercu = canvas.toDataURL('image/jpeg', 0.6); } catch (e) {}
 
     etape('Lecture de l’étiquette', 'Reconnaissance du texte…');
-    const code   = await lire(canvas, 'code');
-    const parfum = await lire(canvas, 'parfum');
+    const code   = await lireMeilleur(canvas, gris, 'code');
+    const parfum = await lireMeilleur(canvas, gris, 'parfum');
+    libererCanvas(gris);
 
     const batch = extraireBatch(code.texte + '\n' + parfum.texte);
     const trouve = extraireParfum(parfum.texte + '\n' + code.texte);
@@ -786,12 +811,14 @@ function scannerPhotoNatif(type) {
 
         etape('Lecture de l’étiquette', 'Nettoyage des reflets…');
         await new Promise(r => setTimeout(r, 30));          // laisse l'écran se rafraîchir
+        const gris2 = copierCanvas(canvas);
         pretraiter(canvas);
         try { apercu = canvas.toDataURL('image/jpeg', 0.6); } catch (e) {}
 
         etape('Lecture de l’étiquette', 'Reconnaissance du texte…');
-        const code   = await lire(canvas, 'code');
-        const parfum = await lire(canvas, 'parfum');
+        const code   = await lireMeilleur(canvas, gris2, 'code');
+        const parfum = await lireMeilleur(canvas, gris2, 'parfum');
+        libererCanvas(gris2);
 
         const batch = extraireBatch(code.texte + '\n' + parfum.texte);
         const trouve = extraireParfum(parfum.texte);
@@ -820,6 +847,14 @@ function scannerPhotoNatif(type) {
 
     cam.click();
   });
+}
+
+/* Copie d'un canvas avant binarisation : Tesseract lira les deux versions. */
+function copierCanvas(src) {
+  const cv = document.createElement('canvas');
+  cv.width = src.width; cv.height = src.height;
+  cv.getContext('2d').drawImage(src, 0, 0);
+  return cv;
 }
 
 function libererCanvas(cv) {
