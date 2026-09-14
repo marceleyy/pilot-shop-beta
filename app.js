@@ -145,6 +145,19 @@
      return out;
    }
 
+   /* Une clé partagée ne s'écrit qu'UNE à LA FOIS. Sans cette file par clé,
+      trois écritures lancées au même instant relisaient toutes le même état
+      d'origine avant qu'aucune n'ait fini : la fusion ne servait à rien et une
+      saisie disparaissait quand même. Vérifié : deux tâches sur trois. */
+   const _verrous = {};
+   function enFile(cle, travail) {
+     const precedent = _verrous[cle] || Promise.resolve();
+     const suite = precedent.then(travail, travail);
+     /* On libère le verrou quoi qu'il arrive, sinon un échec bloque la clé. */
+     _verrous[cle] = suite.then(() => {}, () => {});
+     return suite;
+   }
+
    const DB = (function () {
      const P = OFFLINE.storeLocal + ':';
      let dispo = true;
@@ -308,28 +321,30 @@
 
          if (!STATE.enLigne) { await empiler('set', cle, valeur); return true; }
    
-         try {
-           /* Clé partagée : on relit juste avant d'écrire et on fusionne, sinon
-              la saisie d'une collègue faite entre notre lecture et notre
-              écriture disparaît sans laisser de trace. */
-           let aEcrire = valeur;
-           if (aFusionner(cle)) {
-             try {
-               const l = await appel(table(cle) + '?id=eq.' + encodeURIComponent(cle) +
-                                     '&select=data&limit=1');
-               if (l && l.length && l[0].data) {
-                 aEcrire = fusionner(l[0].data, valeur);
-                 try { ecrire(cle, JSON.stringify(aEcrire)); } catch (x) {}
-               }
-             } catch (x) { /* relecture impossible : on écrit ce qu'on a */ }
-           }
-           await appel(table(cle), {
-             method: 'POST',
-             headers: { 'Prefer': 'resolution=merge-duplicates,return=minimal' },
-             body: JSON.stringify({ id:cle, site:APP.site, data:aEcrire })
-           });
-           return true;
-         } catch (e) { await empiler('set', cle, valeur); return true; }
+         /* Les clés partagées passent par une file : relire puis écrire doit
+            être insensible aux écritures concurrentes. */
+         const envoyer = async () => {
+           try {
+             let aEcrire = valeur;
+             if (aFusionner(cle)) {
+               try {
+                 const l = await appel(table(cle) + '?id=eq.' + encodeURIComponent(cle) +
+                                       '&select=data&limit=1');
+                 if (l && l.length && l[0].data) {
+                   aEcrire = fusionner(l[0].data, valeur);
+                   try { ecrire(cle, JSON.stringify(aEcrire)); } catch (x) {}
+                 }
+               } catch (x) { /* relecture impossible : on écrit ce qu'on a */ }
+             }
+             await appel(table(cle), {
+               method: 'POST',
+               headers: { 'Prefer': 'resolution=merge-duplicates,return=minimal' },
+               body: JSON.stringify({ id:cle, site:APP.site, data:aEcrire })
+             });
+             return true;
+           } catch (e) { await empiler('set', cle, valeur); return true; }
+         };
+         return aFusionner(cle) ? enFile(cle, envoyer) : envoyer();
        },
    
        async push(cle, element) {
