@@ -817,8 +817,16 @@ V.caisse = async function () {
       : '<p class="verdict ok">' + lignes.map(l => esc(l.t)).join(' ') + '</p>';
   }
 
+  /* Champs de saisie UNIQUEMENT. Le sélecteur large [data-k] ramassait aussi
+     les touches du pavé numérique de l'écran de connexion, qui portent le même
+     attribut : la caisse enregistrait douze champs parasites nommés 0 à 9,
+     annuler et effacer. Sans conséquence sur les calculs, mais chaque relevé
+     en était pollué et le diagnostic devenait illisible. */
+  const champsSaisie = () =>
+    $$('#page input[data-k], #page textarea[data-k], #page select[data-k]');
+
   const sauver = debounce(async () => {
-    $$('[data-k]').forEach(i => { r[i.dataset.k] = i.value; });
+    champsSaisie().forEach(i => { r[i.dataset.k] = i.value; });
     await DB.set('caisse:' + j, r);
   }, 400);
 
@@ -829,7 +837,7 @@ V.caisse = async function () {
       if (b.dataset.mom === mom) return;
       mom = b.dataset.mom; V.caisse._m = mom; dessiner();
     });
-    $$('[data-k]').forEach(i => i.oninput = () => {
+    champsSaisie().forEach(i => i.oninput = () => {
       r[i.dataset.k] = i.value;
       if (r[mom + '_valide']) delete r[mom + '_valide'];
       /* Écriture locale IMMÉDIATE, avant l'enregistrement différé : si l'onglet
@@ -846,7 +854,7 @@ V.caisse = async function () {
         ? 'Renseignez le fond de caisse initial'
         : 'Renseignez tous les montants du soir', 'erreur');
       r[mom + '_valide'] = { par:STATE.user.prenom, id:STATE.user.id, at:nowISO() };
-      $$('[data-k]').forEach(i => { r[i.dataset.k] = i.value; });
+      champsSaisie().forEach(i => { r[i.dataset.k] = i.value; });
       await DB.set('caisse:' + j, r);
       await feed('ok', STATE.user.prenom + ' a validé le comptage ' +
         (mom === 'm' ? 'd’ouverture' : 'de fermeture'));

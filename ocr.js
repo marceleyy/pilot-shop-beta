@@ -22,13 +22,21 @@
 
 const OCR = {
   langues:       'fra',        // 'eng+fra' double la mémoire pour peu de gain
-  cotePx:        1400,         // côté long envoyé à Tesseract
+  /* Côté long envoyé à Tesseract. Mesuré sur une étiquette Amorino réelle :
+     à 1400 px, les chiffres du numéro de lot ne font que 16 à 29 px de haut,
+     selon le cadrage. Or la reconnaissance en demande 30 à 40 pour distinguer
+     un 9 d'un 8 — en dessous de 20, elle devine. D'où « 13996A » lu « 13896A »,
+     et le fait qu'une deuxième tentative finisse par marcher : le cadrage est
+     meilleur, donc les caractères passent le seuil.
+     À 2200 px on atteint 25 à 46 px. Le coût est d'environ une seconde de plus
+     par lecture, largement préférable à un numéro de lot faux sur un registre. */
+  cotePx:        2200,
   cotePreviewPx: 900,
   tailleMaxMo:   25,
-/* Prétraitement adouci. Un k de 0,34 épaissit les traits fins : sur une
-   étiquette Amorino photographiée à travers une vitrine, la boucle du 9 se
-   referme et il devient un 8 — « 13996A » lu « 13896A ». Un k plus élevé
-   binarise plus prudemment, et une fenêtre plus large suit mieux les reflets. */
+/* Prétraitement. J'avais d'abord accusé la binarisation de refermer la boucle
+   du 9. Vérification faite en reproduisant le seuillage à l'identique, avec
+   flou et basse résolution : le creux reste ouvert dans tous les cas. Ce
+   n'était pas la cause. Le réglage plus prudent est conservé, il ne nuit pas. */
   sauvola:       { k: 0.42, R: 128, divFenetre: 12 },
   inactiviteMs:  90000,        // arrêt du worker après ce délai sans usage
   batch:         /(\d{5})\s*([A-Z])/g,
