@@ -59,7 +59,7 @@
       <input type="range" id="haut" min="10" max="70" value="31">
     </div>
 
-    <button id="go">Enregistrer les trois icônes</button>
+    <button id="go">Enregistrer les cinq icônes</button>
     <button class="clair" id="reset">Revenir au cadrage proposé</button>
     <div class="etat" id="etat">Ajustez si besoin, puis enregistrez.</div>
   </div>
@@ -68,7 +68,16 @@
 <script>
 /* On lit am.png à la racine du projet — ce fichier vit dans scripts/. */
 const SOURCE = '../am.png';
-const TAILLES = [192, 512, 180];
+/* Cinq fichiers : trois normaux, deux « maskable ». Android recadre ces
+   dernières en cercle ou en goutte selon le téléphone, en ne gardant que les
+   80 % centraux — il leur faut donc une marge, sinon la rose est rognée. */
+const FICHIERS = [
+  { nom:'icon-192.png',          taille:192, marge:0 },
+  { nom:'icon-512.png',          taille:512, marge:0 },
+  { nom:'icon-180.png',          taille:180, marge:0 },
+  { nom:'icon-192-maskable.png', taille:192, marge:0.20 },
+  { nom:'icon-512-maskable.png', taille:512, marge:0.20 }
+];
 
 const img = new Image();
 let pret = false;
@@ -83,7 +92,8 @@ img.src = SOURCE;
 
 /* Découpe carrée, contraste et saturation relevés — une photo réduite perd les
    deux —, puis coins arrondis comme une icône d'application. */
-function fabriquer(taille) {
+function fabriquer(taille, marge) {
+  marge = marge || 0;
   const zoom = +document.getElementById('zoom').value / 100;
   const haut = +document.getElementById('haut').value / 100;
 
@@ -95,6 +105,18 @@ function fabriquer(taille) {
   const cv = document.createElement('canvas');
   cv.width = cv.height = taille;
   const ctx = cv.getContext('2d');
+
+  if (marge) {
+    /* Une maskable remplit tout le carré, coins compris : c'est le système
+       qui découpe la forme. On pose un fond crème repris de la photo. */
+    ctx.fillStyle = '#EFE3D5';
+    ctx.fillRect(0, 0, taille, taille);
+    const d = Math.round(taille * marge);
+    ctx.imageSmoothingQuality = 'high';
+    ctx.filter = 'saturate(1.18) contrast(1.12)';
+    ctx.drawImage(img, sx, sy, cote, cote, d, d, taille - d * 2, taille - d * 2);
+    return cv;
+  }
 
   const r = taille * 0.18;
   ctx.beginPath();
@@ -117,7 +139,7 @@ function dessiner() {
   const zone = document.getElementById('apercus');
   zone.innerHTML = '';
   [[128, 'aperçu'], [64, 'écran d’accueil'], [32, 'barre d’adresse']].forEach(([n, lb]) => {
-    const cv = fabriquer(n);
+    const cv = fabriquer(n, 0);
     const d = document.createElement('div');
     d.className = 'ap' + (n === 32 ? ' petit' : '');
     const i = new Image();
@@ -141,19 +163,19 @@ document.getElementById('reset').onclick = () => {
 
 document.getElementById('go').onclick = () => {
   if (!pret) return;
-  TAILLES.forEach((n, k) => {
+  FICHIERS.forEach((f, k) => {
     setTimeout(() => {
-      fabriquer(n).toBlob(b => {
+      fabriquer(f.taille, f.marge).toBlob(b => {
         const a = document.createElement('a');
         a.href = URL.createObjectURL(b);
-        a.download = 'icon-' + n + '.png';
+        a.download = f.nom;
         a.click();
         setTimeout(() => URL.revokeObjectURL(a.href), 2000);
       }, 'image/png');
     }, k * 350);
   });
   document.getElementById('etat').textContent =
-    'Trois fichiers téléchargés. Déplacez-les dans icons/ en écrasant les anciens.';
+    'Cinq fichiers téléchargés. Déplacez-les dans icons/ en écrasant les anciens.';
 };
 </script>
 </html>
