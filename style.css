@@ -1139,6 +1139,17 @@ body::before{display:none!important}
   width:44px;height:44px;border-radius:50%;border:0;
   background:rgba(255,255,255,.16);color:#fff;font-size:19px;cursor:pointer}
 
+/* Détail du contrôle de caisse, réservé au manager. Un équipier a besoin de
+   savoir si ça tombe juste ; un manager a besoin de savoir pourquoi ça ne tombe
+   pas, et où chercher. */
+.detail-t{display:block;font-size:12px;font-weight:700;letter-spacing:.06em;
+  text-transform:uppercase;color:var(--brume);margin-bottom:10px}
+.detail-l{padding:5px 0;align-items:baseline}
+.detail-l span{flex:1;min-width:0;font-size:14px;color:var(--ardoise)}
+.detail-l .num{font-size:15px;font-weight:600;font-variant-numeric:tabular-nums}
+.detail-l .num.fort{font-size:19px;font-weight:700}
+.detail-sep{height:1px;background:var(--line);margin:8px 0}
+
 /* --- 21. Impression : registre sanitaire -------------------------------- */
 #printview{display:none}
 @media print{

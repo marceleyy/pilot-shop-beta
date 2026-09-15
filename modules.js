@@ -874,11 +874,79 @@ V.caisse = async function () {
 
       '<button class="btn ' + (valide ? 'clair' : 'menthe') + ' bloc xl" id="cv" style="margin-top:16px">' +
       (valide ? '✓ Déjà validé — revalider'
-              : 'Valider le comptage ' + (mom === 'm' ? 'd’ouverture' : 'de fermeture')) + '</button>';
+              : 'Valider le comptage ' + (mom === 'm' ? 'd’ouverture' : 'de fermeture')) + '</button>' +
+
+      /* Le manager voit le détail du calcul, pas seulement le verdict.
+         Un équipier a besoin de savoir si ça tombe juste ; un manager a besoin
+         de savoir POURQUOI ça ne tombe pas, et où chercher. */
+      (STATE.user.role === 'manager' ? blocManager() : '');
 
     brancher();
     verdict();
   };
+
+  /* Détail réservé au manager : les deux contrôles posés en clair. */
+  function blocManager() {
+    const fi = num(lire('m_fond')), cb = num(lire('s_cb')), esp = num(lire('s_esp'));
+    const tpe = num(lire('s_tpe')), ret = num(lire('s_retrait')), ff = num(lire('s_fond'));
+    const rempli = ['s_cb','s_esp','s_tpe','s_retrait','s_fond'].some(k => lire(k) !== '');
+    if (!rempli) return '';
+
+    const dCarte = tpe - cb;
+    const attendu = fi + esp - ret;
+    const dEsp = ff - attendu;
+    const seuil = (typeof SEUILS !== 'undefined' && SEUILS.ecartFondEur) ? SEUILS.ecartFondEur : 5;
+    const ligne = (lb, v, fort) =>
+      '<div class="rang detail-l"><span>' + lb + '</span>' +
+      '<b class="num' + (fort ? ' fort' : '') + '">' + eur(v) + '</b></div>';
+
+    return '<div class="entete" style="margin-top:22px"><h3>Détail du contrôle</h3>' +
+      '<span class="pousse mini">manager</span></div>' +
+
+      carte('<b class="detail-t">Carte</b>' +
+        ligne('Encaissé sur la caisse', cb) +
+        ligne('Relevé sur le TPE', tpe) +
+        '<div class="detail-sep"></div>' +
+        ligne('Écart', dCarte, true) +
+        '<p class="mini">' + (Math.abs(dCarte) < 0.01
+          ? 'Les deux totaux concordent.'
+          : dCarte > 0
+          ? 'Le TPE a encaissé plus que ce qui est saisi en caisse : une vente n’a pas été enregistrée.'
+          : 'La caisse annonce plus que le TPE : une vente a été saisie en carte sans passer par le terminal.') +
+        '</p>',
+        Math.abs(dCarte) >= seuil ? 'corail' : Math.abs(dCarte) < 0.01 ? '' : 'ambre') +
+
+      carte('<b class="detail-t">Espèces</b>' +
+        ligne('Fond du matin', fi) +
+        ligne('Recettes espèces', esp) +
+        ligne('Retrait', -ret) +
+        '<div class="detail-sep"></div>' +
+        ligne('Fond attendu ce soir', attendu) +
+        ligne('Fond compté', ff) +
+        ligne('Écart', dEsp, true) +
+        '<p class="mini">' + (Math.abs(dEsp) < 0.01
+          ? 'Le tiroir correspond exactement au calcul.'
+          : dEsp < 0
+          ? 'Il manque ' + eur(-dEsp) + ' : rendu de monnaie, vente non saisie, ou erreur de comptage.'
+          : 'Il y a ' + eur(dEsp) + ' de trop : monnaie rendue en moins, ou recette non déclarée.') +
+        '</p>',
+        Math.abs(dEsp) >= seuil ? 'corail' : Math.abs(dEsp) < 0.01 ? '' : 'ambre') +
+
+      carte('<b class="detail-t">Journée</b>' +
+        ligne('Recettes totales', cb + esp) +
+        ligne('dont carte', cb) +
+        ligne('dont espèces', esp) +
+        '<div class="detail-sep"></div>' +
+        '<div class="rang detail-l"><span>Part carte</span><b class="num">' +
+        ((cb + esp) ? Math.round(cb / (cb + esp) * 100) : 0) + ' %</b></div>' +
+        (r.m_valide ? '<p class="mini">Ouverture validée par ' + esc(r.m_valide.par) +
+          ' à ' + heure(r.m_valide.at) + '.</p>' : '') +
+        (r.s_valide ? '<p class="mini">Fermeture validée par ' + esc(r.s_valide.par) +
+          ' à ' + heure(r.s_valide.at) + '.</p>' : '') +
+        (r.m_ecartSignale ? '<p class="mini">Écart du matin signalé par ' +
+          esc(r.m_ecartSignale.par) + ' : ' + eur(r.m_ecartSignale.montant) + '.</p>' : ''),
+        'plat');
+  }
 
   /* --- Les deux contrôles, réduits à une phrase ------------------------- */
   function verdict() {
