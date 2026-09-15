@@ -567,14 +567,28 @@ V.controle = async function () {
      -------------------------------------------------------------------------- */
   const anomalies = (await DB.get('anomalies', [])).filter(a => !a.resolue);
   if (anomalies.length) {
-    const bloquantes = anomalies.filter(a => a.gravite === 'bloquant');
+    /* Ce qui remonte en tête : les signalements bloquants, ET tout ce qui
+       touche au froid ou à la sécurité alimentaire, quelle que soit la gravité
+       choisie par la personne.
+
+       « Congélateur crêpe gaufre » avait été classé en « gêne » : c'est
+       compréhensible du point de vue de l'équipe, qui juge la façon dont ça
+       perturbe le service. Mais une unité froide qui défaille est un risque
+       sanitaire, pas une gêne, et ça ne peut pas attendre en bas de page. */
+    const urgente = a => a.gravite === 'bloquant' ||
+                         a.categorie === 'froid' || a.categorie === 'securite' ||
+                         /congélateur|congelateur|frigo|vitrine|chambre froide|température/i
+                           .test((a.titre || '') + ' ' + (a.detail || ''));
+    const urgentes = anomalies.filter(urgente);
+    const ordre = urgentes.concat(anomalies.filter(a => !urgente(a)));
+
     const bloc = document.createElement('div');
     bloc.innerHTML =
       '<div class="entete" style="margin-top:18px"><h3>Signalements en attente</h3>' +
       '<span class="pousse mini num">' + anomalies.length + '</span></div>' +
       '<div class="stack">' +
-      anomalies.slice().reverse().slice(0, 6).map(a => {
-        const cat = (ANOMALIES.categories.filter(c => c.id === a.categorie)[0] || {}).label || a.categorie;
+      ordre.slice(0, 6).map(a => {
+        const cat = (ANOMALIES.categories.filter(c => c.id === a.categorie)[0] || {}).libelle || a.categorie;
         return carte('<div class="rang" style="align-items:flex-start">' +
           '<div style="flex:1;min-width:0"><b>' + esc(a.titre) + '</b>' +
           '<p class="mini" style="margin-top:3px">' + esc(cat) + ' · ' +
@@ -582,7 +596,7 @@ V.controle = async function () {
           (a.detail ? '<p class="mini" style="margin-top:4px">' + esc(a.detail) + '</p>' : '') +
           '</div>' +
           '<button class="btn clair sm" data-anores="' + esc(a.id) + '">Traité</button></div>',
-          a.gravite === 'bloquant' ? 'corail' : 'ambre');
+          urgente(a) ? 'corail' : 'ambre');
       }).join('') +
       (anomalies.length > 6
         ? '<button class="btn clair bloc" data-go="anomalie">Voir les ' +
@@ -590,8 +604,8 @@ V.controle = async function () {
         : '') +
       '</div>';
 
-    /* En tête de page si un signalement bloque le service. */
-    if (bloquantes.length) page.insertBefore(bloc, page.firstChild.nextSibling);
+    /* En tête de page dès qu'un signalement touche le froid ou bloque le service. */
+    if (urgentes.length) page.insertBefore(bloc, page.firstChild.nextSibling);
     else page.appendChild(bloc);
 
     $$('#page [data-anores]').forEach(b => b.onclick = async () => {
@@ -1065,6 +1079,24 @@ function confirmerOuverture(r) {
     async function poser(fam, lot) {
       const cle = cleArticle(fam.id, fam.parfums ? parfum : '', fam.parfums ? taille : '');
       await ajouterMouvement('ouverture', cle, 1, { lot: lot, famille: fam.id, parfum: parfum });
+
+      /* Le frigo virtuel lit la clé « lots: », pas le journal de stock : sans
+         cette écriture il restait désespérément vide alors que l'équipe scannait
+         tous les jours. C'est lui qui suit les DLC après ouverture — la
+         chantilly à 48 h, le gelato à dix jours — donc le manquer revient à
+         perdre la surveillance des péremptions.
+
+         Les glaces sont indexées par parfum, les autres familles par leur
+         règle de DLC : c'est ce que calculFIFO attend. */
+      const m = monthKey(today());
+      const lots = await DB.get('lots:' + m, {});
+      const cleFifo = (fam.id === 'glace' && parfum)
+        ? 'g_' + parfum
+        : 'a_' + (fam.dlc || 'defaut');
+      lots[cleFifo] = { lot: lot, ouv: today(), par: STATE.user.prenom, at: nowISO(),
+                        famille: fam.id, taille: fam.parfums ? taille : null };
+      await DB.set('lots:' + m, lots);
+
       await feed('ok', STATE.user.prenom + ' a ouvert ' +
         (parfum || fam.libelle) + ' — lot ' + lot);
       closeSheet();
