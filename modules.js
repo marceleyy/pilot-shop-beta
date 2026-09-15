@@ -327,7 +327,11 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
       ========================================================================== */
    function tachesChecklist(phase, jour) {
      const j = jourISO(jour);
-     const src = CHECKLISTS[phase === 'fermeture' ? 'fermeture' : 'ouverture'];
+     /* Cette ligne ne connaissait que deux phases : tout ce qui n'était pas
+        « fermeture » retombait sur « ouverture ». La liste du service existait
+        bien, mais on affichait celle de l'ouverture à sa place. */
+     const src = CHECKLISTS[phase];
+     if (!src) return [];
      return src.map(b => ({
        bloc: b.bloc,
        taches: b.taches.filter(t =>
