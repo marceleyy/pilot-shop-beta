@@ -469,7 +469,12 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
        ic(p.id === 'ouverture' ? 'matin' : p.id === 'fermeture' ? 'soir' : 'service', 20) +
      '<span>' + esc(p.label) + '</span></button>').join('') + '</div>' +
    
-       (phase === 'service'
+       /* Le service affichait un menu de raccourcis À LA PLACE de la check-liste :
+          l'écran restait donc vide de tâches, alors que les sept existaient bien.
+          On dessine maintenant la check-liste pour les trois phases, et les
+          raccourcis viennent en dessous — ils restent utiles pendant le service,
+          où tout arrive sans prévenir. */
+       (false
          ? carte(entete('⚡', 'Service', 'Ce qui se déclare au fil de la journée.') +
              '<div class="stack">' +
              ['clean|🧽|Nettoyage en cours de service', 'pertes|🗑️|Déclarer une perte',
@@ -500,7 +505,20 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
             (vp ? '✓ Déjà validée — revalider'
                 : 'Valider la procédure' + (faits < total ? ' (' + (total - faits) + ' restante' + (total - faits > 1 ? 's' : '') + ')' : '')) +
             '</button>', 'solide');
-        })());
+        })()) +
+
+       (phase === 'service'
+         ? '<div class="entete"><h3>À tout moment</h3></div><div class="stack">' +
+           ['clean|Nettoyage en cours de service', 'pertes|Déclarer une perte',
+            'lots|Traçabilité à l’ouverture d’un produit',
+            'reception|Réceptionner une livraison', 'reas|Signaler une rupture',
+            'anomalie|Signaler un problème'].map(x => {
+             const [id, lb] = x.split('|');
+             return '<button type="button" class="menu-item" data-go="' + id + '">' +
+               '<span class="mi-tx"><span class="mi-t">' + lb + '</span></span>' +
+               '<span class="mi-fl">›</span></button>';
+           }).join('') + '</div>'
+         : '');
    
      $('#ptg').onclick = () => pointer(!STATE.service);
      $$('[data-ph]').forEach(b => b.onclick = () => { STATE.phase = b.dataset.ph; rendre('accueil'); });
