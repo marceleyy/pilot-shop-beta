@@ -1078,6 +1078,27 @@ body::before{display:none!important}
 .duo.compact .btn.ko.on{background:var(--rouge);border-color:var(--rouge);color:#fff}
 #page .card .rang{align-items:center}
 
+/* Bande d'accueil : salutation à gauche, météo à droite, sur une seule ligne.
+   La météo était réservée au manager alors qu'elle sert d'abord en boutique :
+   elle dit l'affluence à venir, donc ce qu'il faut sortir en vitrine. */
+.accueil-haut{display:flex;align-items:center;gap:14px;margin:0 0 14px;
+  padding:12px 16px;background:var(--blanc);border:1px solid var(--line);
+  border-radius:var(--r-carte);box-shadow:var(--ombre)}
+.salut-bloc{flex:1;min-width:0}
+.salut-bloc b{display:block;font-size:17px;font-weight:700;line-height:1.2;
+  letter-spacing:-.01em}
+.salut-bloc span{display:block;font-size:12.5px;color:var(--brume);margin-top:2px}
+
+.meteo-mini{flex:0 0 auto;text-align:right;line-height:1.2}
+.meteo-mini .mm-t{display:block;font-size:24px;font-weight:700;
+  font-variant-numeric:tabular-nums}
+.meteo-mini .mm-d{display:block;font-size:12.5px;color:var(--ardoise);font-weight:600}
+.meteo-mini .mm-p{display:block;font-size:11.5px;color:var(--brume);margin-top:1px}
+
+@media (max-width:360px){
+  .meteo-mini .mm-p{display:none}
+}
+
 /* --- 21. Impression : registre sanitaire -------------------------------- */
 #printview{display:none}
 @media print{

@@ -442,13 +442,25 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
          '</div>';
   };
    
-     $('#page').innerHTML =
-       /* La salutation occupait une carte entière sans porter d'action, alors que
-          le prénom figure déjà dans le bouton de compte. On la réduit à une ligne,
-          et on donne la place à ce qui compte : ce qu'il reste à faire. */
-       '<p class="salut">' + nomJour(j) + ' ' + fmtD(j) + ' · ' +
-       (STATE.service ? 'en service depuis ' + heure(STATE.service.debut) : 'pas encore pointé') +
-       '</p>' +
+     const m = (typeof meteo === 'function') ? await meteo().catch(() => null) : null;
+
+  $('#page').innerHTML =
+     /* Salutation et météo sur une seule bande : le prénom parce qu'on tient
+        un outil qui sait qui on est, la météo parce qu'elle détermine
+        l'affluence — et donc ce qu'il faut sortir en vitrine. Elle n'était
+        visible que du manager, alors qu'elle sert surtout en boutique. */
+     '<div class="accueil-haut">' +
+     '<div class="salut-bloc"><b>Bonjour ' + esc(STATE.user.prenom) + '</b>' +
+     '<span>' + nomJour(j) + ' ' + fmtD(j) + ' · ' +
+     (STATE.service ? 'en service depuis ' + heure(STATE.service.debut) : 'pas encore pointé') +
+     '</span></div>' +
+     (m ? (function () {
+       const c = METEO.codes[m.code] || METEO.codes[3];
+       return '<div class="meteo-mini"><span class="mm-t">' + m.t + '°</span>' +
+              '<span class="mm-d">' + esc(c.l) + '</span>' +
+              '<span class="mm-p">max ' + m.max + '° · pluie ' + m.pluie + ' %</span></div>';
+     })() : '') +
+     '</div>' +
 
        (R.length
          ? '<div class="stack">' + R.slice(0, 4).map(r =>
