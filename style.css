@@ -1101,10 +1101,21 @@ body::before{display:none!important}
 }
 
 /* Vignettes de preuve : plusieurs clichés par tâche, alignés sous elle.
-   Le bouton passe au nombre — « ✓ 3 » — pour qu'on sache combien sans compter. */
+   Le bouton passe au nombre — « ✓ 3 » — pour qu'on sache combien sans compter.
+   Chaque vignette s'ouvre : 58 px ne permettent pas de vérifier qu'on a bien
+   cadré le joint, et une photo ratée doit pouvoir être retirée. */
 .vignettes{gap:6px;margin-top:10px;flex-wrap:wrap}
-.vign{width:58px;height:58px;object-fit:cover;border-radius:9px;
-  border:1px solid var(--line)}
+.vign{width:58px;height:58px;padding:0;border:1px solid var(--line);
+  border-radius:9px;overflow:hidden;background:var(--fond-2);
+  cursor:pointer;flex:0 0 auto;position:relative}
+.vign img{width:100%;height:100%;object-fit:cover;display:block}
+.vign:active{transform:scale(.94)}
+.vign::after{content:'';position:absolute;inset:0;
+  box-shadow:inset 0 0 0 1px rgba(0,0,0,.05);border-radius:9px}
+
+/* Photo en grand dans la feuille */
+.preuve-plein{display:block;width:100%;max-height:58vh;object-fit:contain;
+  border-radius:12px;background:var(--fond-2);margin-top:14px}
 
 /* Détail des tailles sur la ligne du parfum : « 4×3 L  2×5 L ». Sans lui,
    un total de 6 ne disait pas ce qu'il y a réellement dans la chambre froide,

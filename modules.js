@@ -70,6 +70,62 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
      await feed('ok', STATE.user.prenom + ' a photographié : ' + libelle);
      return p;
    }
+
+   /* -----------------------------------------------------------------------------
+      VOIR ET SUPPRIMER UNE PREUVE
+      Une vignette de 58 px ne permet pas de vérifier qu'on a bien cadré le joint
+      ou le fond du bac. Et une photo ratée — floue, dans le vide, prise par
+      erreur — restait dans le registre sans moyen de la retirer.
+      -------------------------------------------------------------------------- */
+   function voirPreuve(jour, idPreuve, apresSuppression) {
+     (async function () {
+       const cle = 'preuves:' + jour;
+       const l = await DB.get(cle, []);
+       const p = l.filter(x => x.id === idPreuve)[0];
+       if (!p) return toast('Photo introuvable', 'erreur');
+
+       showSheet(
+         '<h2 id="sheet-titre">' + esc(p.libelle || 'Photo') + '</h2>' +
+         '<p class="cs">' + esc(p.par || '—') + ' · ' + fmtD(jour) +
+         (p.at ? ' à ' + heure(p.at) : '') + '</p>' +
+         '<img src="' + p.img + '" alt="" class="preuve-plein">' +
+         '<div class="actions">' +
+         '<button class="btn clair" data-fermer>Fermer</button>' +
+         '<button class="btn corail" id="pv-suppr">Supprimer</button></div>');
+
+       $('#pv-suppr').onclick = () => {
+         confirmer('Supprimer cette photo ?',
+           'Elle ne servira plus de preuve pour « ' + (p.libelle || 'cette tâche') + ' ». ' +
+           'La tâche reste cochée, mais si la photo était obligatoire il faudra ' +
+           'en reprendre une.',
+           'Supprimer', async () => {
+             const l2 = await DB.get(cle, []);
+             await DB.set(cle, l2.filter(x => x.id !== idPreuve));
+             await feed('warn', STATE.user.prenom + ' a supprimé une photo : ' +
+               (p.libelle || 'sans libellé'));
+             closeSheet();
+             toast('Photo supprimée');
+             if (typeof apresSuppression === 'function') apresSuppression();
+           });
+       };
+     })();
+   }
+
+   /* Vignettes cliquables, factorisées : quatre écrans les affichaient chacun
+      à sa façon, et aucun ne permettait de les ouvrir. */
+   function vignettes(liste, jour) {
+     if (!liste || !liste.length) return '';
+     return '<div class="rang vignettes">' + liste.map(p =>
+       '<button type="button" class="vign" data-vign="' + esc(p.id) + '" ' +
+       'data-vjour="' + esc(jour) + '" aria-label="Voir la photo">' +
+       '<img src="' + p.img + '" alt=""></button>').join('') + '</div>';
+   }
+
+   /* À appeler après chaque rendu qui contient des vignettes. */
+   function brancherVignettes(revenir) {
+     $$('[data-vign]').forEach(b => b.onclick = () =>
+       voirPreuve(b.dataset.vjour, b.dataset.vign, revenir));
+   }
    
    /* =============================================================================
       C. STOCK FERMÉ / OUVERT
@@ -318,6 +374,26 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
      $('#og-ok').onclick = async () => {
        const lot = $('#og-lot').value.trim().toUpperCase();
        if (!lot) return toast('Le numéro de lot est obligatoire', 'erreur');
+
+       /* Ce lot a-t-il déjà été ouvert ? Un bac ne sort qu'une fois de la
+          chambre froide. Rescanner un bac déjà en vitrine — par habitude, ou
+          parce qu'on ne sait plus si c'est fait — décompterait un second bac
+          qui n'existe pas. C'est arrivé : onze bacs fantômes en une matinée. */
+       if (typeof lotDejaOuvert === 'function') {
+         const deja = await lotDejaOuvert(lot).catch(() => null);
+         if (deja) {
+           return confirmer('Ce lot est déjà ouvert',
+             'Le lot ' + lot + ' a été ouvert le ' + fmtD(deja.jour) + '. ' +
+             'Ce bac est donc déjà en vitrine et déjà décompté du stock. ' +
+             'Si vous confirmez, un second bac sera retiré — à ne faire que ' +
+             's’il s’agit réellement d’un autre bac portant le même numéro.',
+             'Ouvrir quand même', async () => { await validerOuverture(lot); });
+         }
+       }
+       await validerOuverture(lot);
+     };
+
+     async function validerOuverture(lot) {
        a.produit = $('#og-prod').value;
        await ouvrirArticle(id, lot);
        const m = monthKey(today());
@@ -465,11 +541,9 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
      (t.lien ? '<button class="btn ' + (lie && !lie.fait ? 'menthe' : 'clair') + ' sm" data-go="' + t.lien + '">' +
        (lie && !lie.fait ? 'Y aller' : '→') + '</button>' : '') +
          '</div>' +
-         /* Vignettes sous la tâche : plusieurs clichés possibles, avant et après. */
-         (clichés.length
-           ? '<div class="rang vignettes">' + clichés.map(p =>
-               '<img src="' + p.img + '" alt="" class="vign">').join('') + '</div>'
-           : '');
+         /* Vignettes sous la tâche : plusieurs clichés possibles, avant et après.
+            Cliquables pour voir en grand et supprimer. */
+         vignettes(clichés, j);
   };
    
      const m = (typeof meteo === 'function') ? await meteo().catch(() => null) : null;
@@ -601,6 +675,7 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
     if (actif) await feed('ok', STATE.user.prenom + ' : ' + ligne2.querySelector('.tn').textContent);
   });
    
+     brancherVignettes(() => rendre('accueil'));
      $$('[data-photo]').forEach(b => b.onclick = async () => {
        const p = await attacherPreuve(j, b.dataset.photo, b.dataset.lib);
        if (p) { toast('Photo enregistrée (' + p.poids + ' Ko)'); rendre('accueil'); }

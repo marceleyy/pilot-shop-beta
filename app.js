@@ -1150,7 +1150,9 @@ async function purgerPreuves() {
       '</div>' +
       (clichés.length
         ? '<div class="rang vignettes">' + clichés.map(p =>
-            '<img src="' + p.img + '" alt="" class="vign">').join('') + '</div>'
+            '<button type="button" class="vign" data-vign="' + esc(p.id) + '" ' +
+            'data-vjour="' + esc(j) + '" aria-label="Voir la photo">' +
+            '<img src="' + p.img + '" alt=""></button>').join('') + '</div>'
         : '');
   };
    
@@ -1187,7 +1189,9 @@ async function purgerPreuves() {
              '</div>' +
              (clichesA.length
                ? '<div class="rang vignettes">' + clichesA.map(p =>
-                   '<img src="' + p.img + '" alt="" class="vign">').join('') + '</div>'
+                   '<button type="button" class="vign" data-vign="' + esc(p.id) + '" ' +
+                   'data-vjour="' + esc(j) + '" aria-label="Voir la photo">' +
+                   '<img src="' + p.img + '" alt=""></button>').join('') + '</div>'
                : '') +
              '<p class="mini" style="margin-top:8px">' + esc(a.consigne) + '</p>',
              a.retard ? 'corail' : 'ambre');
@@ -1230,6 +1234,7 @@ async function purgerPreuves() {
     }
   });
 
+  if (typeof brancherVignettes === 'function') brancherVignettes(() => rendre('clean'));
   $$('[data-photo]').forEach(b => b.onclick = async () => {
     const p = await attacherPreuve(j, b.dataset.photo, b.dataset.lib);
     if (p) { toast('Photo enregistrée (' + p.poids + ' Ko)'); rendre('clean'); }
