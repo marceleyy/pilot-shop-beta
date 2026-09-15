@@ -27,6 +27,10 @@ if (MENU_PLUS.manager.indexOf('reception') < 0) MENU_PLUS.manager.splice(2, 0, '
   const i = MENU_PLUS[r].indexOf('inv');
   if (i >= 0) MENU_PLUS[r].splice(i, 1);
 });
+/* Le manager n'avait aucun accès à l'écran Anomalie : ni dans sa barre, ni dans
+   son menu. Les signalements de l'équipe étaient donc enregistrés sans que
+   personne ne puisse les consulter ni les marquer traités. */
+if (MENU_PLUS.manager.indexOf('anomalie') < 0) MENU_PLUS.manager.unshift('anomalie');
 if (MENU_PLUS.manager.indexOf('parametres') < 0) MENU_PLUS.manager.push('parametres');
 /* Les tâches hebdomadaires méritent leur onglet : c'est le tableau que l'équipe
    consultait au mur, consulté plusieurs fois par jour. */

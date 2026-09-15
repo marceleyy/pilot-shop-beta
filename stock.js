@@ -558,6 +558,53 @@ V.controle = async function () {
   const page = $('#page');
   if (!page) return;
 
+  /* -----------------------------------------------------------------------------
+     ANOMALIES SIGNALÉES
+     Elles étaient enregistrées et affichées à l'équipe, mais la tour de contrôle
+     ne les lisait jamais : le manager ne voyait donc rien remonter. Une panne
+     signalée à 14 h restait invisible tant que personne n'ouvrait l'écran
+     Anomalie — qui n'est même pas dans la barre du manager.
+     -------------------------------------------------------------------------- */
+  const anomalies = (await DB.get('anomalies', [])).filter(a => !a.resolue);
+  if (anomalies.length) {
+    const bloquantes = anomalies.filter(a => a.gravite === 'bloquant');
+    const bloc = document.createElement('div');
+    bloc.innerHTML =
+      '<div class="entete" style="margin-top:18px"><h3>Signalements en attente</h3>' +
+      '<span class="pousse mini num">' + anomalies.length + '</span></div>' +
+      '<div class="stack">' +
+      anomalies.slice().reverse().slice(0, 6).map(a => {
+        const cat = (ANOMALIES.categories.filter(c => c.id === a.categorie)[0] || {}).label || a.categorie;
+        return carte('<div class="rang" style="align-items:flex-start">' +
+          '<div style="flex:1;min-width:0"><b>' + esc(a.titre) + '</b>' +
+          '<p class="mini" style="margin-top:3px">' + esc(cat) + ' · ' +
+          esc(a.par) + ' · ' + fmtD(a.jour) + (a.at ? ' à ' + heure(a.at) : '') + '</p>' +
+          (a.detail ? '<p class="mini" style="margin-top:4px">' + esc(a.detail) + '</p>' : '') +
+          '</div>' +
+          '<button class="btn clair sm" data-anores="' + esc(a.id) + '">Traité</button></div>',
+          a.gravite === 'bloquant' ? 'corail' : 'ambre');
+      }).join('') +
+      (anomalies.length > 6
+        ? '<button class="btn clair bloc" data-go="anomalie">Voir les ' +
+          anomalies.length + ' signalements</button>'
+        : '') +
+      '</div>';
+
+    /* En tête de page si un signalement bloque le service. */
+    if (bloquantes.length) page.insertBefore(bloc, page.firstChild.nextSibling);
+    else page.appendChild(bloc);
+
+    $$('#page [data-anores]').forEach(b => b.onclick = async () => {
+      const l = await DB.get('anomalies', []);
+      const a = l.filter(x => x.id === b.dataset.anores)[0];
+      if (a) { a.resolue = true; a.resoluePar = STATE.user.prenom; a.resolueAt = nowISO(); }
+      await DB.set('anomalies', l);
+      if (a) await feed('ok', STATE.user.prenom + ' a traité : ' + a.titre);
+      rendre('controle');
+    });
+    $$('#page [data-go]').forEach(b => b.onclick = () => rendre(b.dataset.go));
+  }
+
   const { articles } = await stockReel();
   const alertes = anomaliesStock(articles);
   if (!alertes.length) return;

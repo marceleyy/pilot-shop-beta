@@ -2965,12 +2965,32 @@ function ouvrirPremierePeriode() {
       ========================================================================== */
    async function blocagesCloture(per) {
      const B = [];
-     const invG = await DB.get('invglace:' + per.id, null);
-     const invS = await DB.get('invsec:' + per.id, null);
      const e = await DB.get('ecart:' + per.id, {});
-   
-     if (!invG || !invG.valide) B.push({ id:'inv_glace', txt:'Inventaire glace non validé', go:'inv' });
-     if (!invS || !invS.valide) B.push({ id:'inv_sec', txt:'Inventaire sec non validé', go:'inv' });
+
+     /* L'inventaire est la condition première : sans comptage réel de fin, le
+        stock est une invention et l'écart calculé ne veut rien dire.
+        On lit le NOUVEL inventaire — l'ancien écran « Glace et sec » a été
+        retiré, et ce blocage pointait encore vers lui : il exigeait donc un
+        comptage sur un écran devenu inaccessible. */
+     const invStock = await DB.get('stock:inventaire', null);
+     const invSec   = await DB.get('stock:sec', null);
+
+     /* Un inventaire antérieur au début de la période ne clôture rien :
+        il faut un comptage fait PENDANT la période qu'on ferme. */
+     const dansLaPeriode = inv => inv && inv.jour >= per.debut;
+
+     if (!dansLaPeriode(invStock)) {
+       B.push({ id:'inv_glace', go:'inventaire',
+         txt: invStock
+           ? 'Chambre froide comptée le ' + fmtD(invStock.jour) + ', avant la période'
+           : 'Chambre froide jamais comptée' });
+     }
+     if (!dansLaPeriode(invSec)) {
+       B.push({ id:'inv_sec', go:'inventaire',
+         txt: invSec
+           ? 'Sec compté le ' + fmtD(invSec.jour) + ', avant la période'
+           : 'Sec jamais compté' });
+     }
      if (!num(e.litrageBL))     B.push({ id:'achats', txt:'Achats de la période non saisis', go:'ecarts' });
    
      for (const d of joursEntre(per.debut, today() < per.fin ? today() : per.fin)) {

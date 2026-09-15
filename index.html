@@ -133,8 +133,13 @@
   <video id="vs-video" playsinline muted autoplay></video>
   <div id="vs-cadre"><i></i><i></i><i></i><i></i></div>
   <div id="vs-aide">
-    <b id="vs-titre">Alignez l’étiquette du lot dans le cadre</b>
-    <span>Posez l’étiquette à plat · évitez le reflet direct sur l’inox</span>
+    <b id="vs-titre">Cadrez la ligne « Batch N° »</b>
+    <!-- La consigne la plus utile n'est pas « alignez l'étiquette » mais
+         « approchez » : mesuré sur une étiquette réelle, les chiffres du lot
+         arrivaient à 16 px de haut quand le cadre était à moitié rempli, là où
+         la reconnaissance en demande 30. C'est ce qui obligeait à scanner deux
+         fois. -->
+    <span id="vs-sous">Approchez jusqu’à remplir le cadre · évitez le reflet sur l’inox</span>
   </div>
   <div id="vs-flash"></div>
   <div id="vs-barre">
