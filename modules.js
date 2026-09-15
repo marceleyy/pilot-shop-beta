@@ -869,7 +869,10 @@ V.caisse = async function () {
    /* =============================================================================
       H. TRAÇABILITÉ — libellé et liste déroulante de confirmation
       ========================================================================== */
-   const V_lots_origine = V.lots;
+   /* Même situation que pour V.reglages : la version d'app.js a été retirée,
+      et stock.js redéfinit complètement V.lots. Cette enveloppe ne sert donc
+      plus à rien, mais elle doit rester inoffensive. */
+   const V_lots_origine = (typeof V.lots === 'function') ? V.lots : null;
 /* V.lots : version retirée — elle était remplacée au chargement. */
    
    /* Ouverture d'un produit absent du stock fermé : on avertit sans bloquer.
@@ -1844,9 +1847,26 @@ function formulaireAnomalie() {
       Ajouté à Réglages : au lieu d'un bandeau qui dit « Table introuvable » sans
       dire laquelle, on affiche la dernière requête refusée et un bouton de test.
       ========================================================================== */
+   /* La version d'app.js a été retirée lors du nettoyage du code mort. Or cette
+      vue-ci la COMPLÈTE au lieu de la remplacer : elle ajoute le bloc Diagnostic
+      sous les réglages existants. Sans garde, l'écran ne s'ouvrait plus du tout
+      — « Cannot read properties of undefined (reading 'call') ».
+      On dessine donc les réglages nous-mêmes si la version d'origine a disparu. */
    const V_reglages_origine = V.reglages;
    V.reglages = async function () {
-     await V_reglages_origine.call(this);
+     if (typeof V_reglages_origine === 'function') {
+       await V_reglages_origine.call(this);
+     } else {
+       $('#vue-actions').innerHTML = '';
+       $('#page').innerHTML =
+         carte('<h2>Réglages</h2><div class="cs">Paramètres de la boutique ' +
+           esc(APP.site) + ' · version ' + esc(APP.version) + '.</div>' +
+           '<button class="btn clair bloc" data-go="parametres" style="margin-top:14px">' +
+           'Back-office — tâches, horaires et unités froides</button>' +
+           '<button class="btn clair bloc" data-go="equipe" style="margin-top:8px">Équipe</button>',
+           'solide');
+       $$('#page [data-go]').forEach(b => b.onclick = () => rendre(b.dataset.go));
+     }
      const page = $('#page');
      if (!page) return;
    
