@@ -539,12 +539,17 @@ const FOURNISSEUR = {
 
 const TAILLES_BAC = FOURNISSEUR.taillesBac;
 
+/* Liste du sec. Elle datait du début du projet ; elle suit maintenant celle du
+   réassort, qui vient du terrain — mêmes intitulés, mêmes regroupements, pour
+   qu'on retrouve la même chose des deux côtés. */
 const INVENTAIRE_SEC = [
-  'Cornets classiques','Cornets sans gluten','Cônes chocolat','Pots 550 ml','Pots 1100 ml',
-  'Couvercles','Cuillères dégustation','Cuillères longues','Serviettes','Sacs papier',
-  'Gobelets','Boîtes macarons','Café en grains','Lait','Chantilly','Coulis caramel',
-  'Coulis chocolat','Coulis gianduja','Coulis pistache','Toppings','Pâte à gaufre',
-  'Pâte à crêpe','Macarons','Boissons','Bactalim','Dégraissant','Lavettes','Gants jetables'
+  'Cornets, choco-cône, sans gluten','Papier protège-cornet','Pots','Couvercles',
+  'Cuillères à glace','Serviettes','Barquettes à crêpe','Sacs papier','Gobelets',
+  'Boîtes macarons','Capsules à café','Sachets de chocolat chaud','Café en grains',
+  'Lait','Crème pour chantilly','Coulis caramel','Coulis chocolat','Coulis gianduja',
+  'Coulis pistache','Toppings','Pâte à gaufre','Pâte à crêpe','Boissons','Pailles',
+  'Papier TPE','Sopalin','Bactalim','Dégraissant','Produit à vitres','Savon',
+  'Lavettes','Gants jetables'
 ];
 
 const MOTIFS_PERTE = [
