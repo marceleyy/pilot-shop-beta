@@ -1099,6 +1099,12 @@ body::before{display:none!important}
   .meteo-mini .mm-p{display:none}
 }
 
+/* Vignettes de preuve : plusieurs clichés par tâche, alignés sous elle.
+   Le bouton passe au nombre — « ✓ 3 » — pour qu'on sache combien sans compter. */
+.vignettes{gap:6px;margin-top:10px;flex-wrap:wrap}
+.vign{width:58px;height:58px;object-fit:cover;border-radius:9px;
+  border:1px solid var(--line)}
+
 /* --- 21. Impression : registre sanitaire -------------------------------- */
 #printview{display:none}
 @media print{

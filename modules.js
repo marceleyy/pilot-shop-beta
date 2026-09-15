@@ -430,7 +430,8 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
    
      const ligne = (t, n) => {
      const v = rec[t.id] || {};
-     const preuve = preuves.filter(p => p.tache === t.id)[0];
+     const clichés = preuves.filter(p => p.tache === t.id);
+     const preuve = clichés[0];
      const lie = etatLie(t, phase);
      const besoinPhoto = PREUVE.actif &&
      (PREUVE.tachesObligatoires.indexOf(t.id) >= 0 ||
@@ -454,10 +455,16 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
      '</span>' +
      (t.minuteur ? '<button class="btn clair sm" data-min="' + t.minuteur + '" data-nom="' + esc(t.t) + '">⏱️</button>' : '') +
      (besoinPhoto && !lie ? '<button class="btn ' + (preuve ? 'menthe' : 'clair') + ' sm" data-photo="' + t.id +
-       '" data-lib="' + esc(t.t) + '">' + (preuve ? '✓ Photo' : 'Photo') + '</button>' : '') +
+       '" data-lib="' + esc(t.t) + '">' +
+       (clichés.length ? '✓ ' + clichés.length : 'Photo') + '</button>' : '') +
      (t.lien ? '<button class="btn ' + (lie && !lie.fait ? 'menthe' : 'clair') + ' sm" data-go="' + t.lien + '">' +
        (lie && !lie.fait ? 'Y aller' : '→') + '</button>' : '') +
-         '</div>';
+         '</div>' +
+         /* Vignettes sous la tâche : plusieurs clichés possibles, avant et après. */
+         (clichés.length
+           ? '<div class="rang vignettes">' + clichés.map(p =>
+               '<img src="' + p.img + '" alt="" class="vign">').join('') + '</div>'
+           : '');
   };
    
      const m = (typeof meteo === 'function') ? await meteo().catch(() => null) : null;

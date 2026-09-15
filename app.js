@@ -1131,7 +1131,11 @@ async function purgerPreuves() {
      const ligne = t => {
      const v = rec[t.id] || {};
      const photo = exigePhoto(t);
-     const prise = preuves.filter(p => p.tache === t.id)[0];
+     /* Toutes les photos de cette tâche, pas seulement la première : on peut
+        vouloir montrer l'avant, l'après et un détail. Les autres écrans le
+        permettaient déjà, celui-ci s'arrêtait à un cliché. */
+     const clichés = preuves.filter(p => p.tache === t.id);
+     const prise = clichés[0];
      return '<div class="tache' + (v.ok ? ' on' : '') + '">' +
      '<button class="box" data-c="' + t.id + '">✓</button>' +
      '<span class="tx"><span class="tn">' + esc(t.nom) + '</span>' +
@@ -1141,8 +1145,13 @@ async function purgerPreuves() {
            t.recurrence === 'mensuel' ? 'Une fois par mois' : 'Une fois par an')) +
       (photo ? ' · photo requise' : '') + '</span></span>' +
       (photo ? '<button class="btn ' + (prise ? 'menthe' : 'clair') + ' sm" data-photo="' + t.id +
-        '" data-lib="' + esc(t.nom) + '">' + (prise ? '✓ Photo' : 'Photo') + '</button>' : '') +
-      '</div>';
+        '" data-lib="' + esc(t.nom) + '">' +
+        (clichés.length ? '✓ ' + clichés.length : 'Photo') + '</button>' : '') +
+      '</div>' +
+      (clichés.length
+        ? '<div class="rang vignettes">' + clichés.map(p =>
+            '<img src="' + p.img + '" alt="" class="vign">').join('') + '</div>'
+        : '');
   };
    
      $('#page').innerHTML =
@@ -1161,7 +1170,8 @@ async function purgerPreuves() {
               mais le bouton pour prendre la photo n'était pas affiché — on
               demandait donc une preuve impossible à fournir. */
            const photo = exigePhoto({ id:cle, recurrence:'async' });
-           const prise = preuves.filter(p => p.tache === cle)[0];
+           const clichesA = preuves.filter(p => p.tache === cle);
+           const prise = clichesA[0];
            return carte('<div class="tache' + (v.ok ? ' on' : '') + '">' +
              '<button class="box" data-c="' + cle + '">✓</button>' +
              '<span class="tx"><span class="tn">' + esc(a.nom) + '</span>' +
@@ -1172,8 +1182,13 @@ async function purgerPreuves() {
              (a.retard ? ' · en retard de ' + a.retard + ' j' : '') +
              (photo ? ' · photo requise' : '') + '</span></span>' +
              (photo ? '<button class="btn ' + (prise ? 'menthe' : 'clair') + ' sm" data-photo="' + cle +
-               '" data-lib="' + esc(a.nom) + '">' + (prise ? '✓ Photo' : 'Photo') + '</button>' : '') +
+               '" data-lib="' + esc(a.nom) + '">' +
+               (clichesA.length ? '✓ ' + clichesA.length : 'Photo') + '</button>' : '') +
              '</div>' +
+             (clichesA.length
+               ? '<div class="rang vignettes">' + clichesA.map(p =>
+                   '<img src="' + p.img + '" alt="" class="vign">').join('') + '</div>'
+               : '') +
              '<p class="mini" style="margin-top:8px">' + esc(a.consigne) + '</p>',
              a.retard ? 'corail' : 'ambre');
          }).join('') + '</div>' : '') +
