@@ -214,20 +214,62 @@ async function purgerJournal(l) {
   return garde.concat(recents);
 }
 
-/* Un inventaire remplace le précédent : il fixe la référence. */
-async function enregistrerInventaire(lignes, note) {
+/* Un inventaire remplace le précédent : il fixe la référence.
+   Et il enregistre les ÉCARTS constatés : chaque bac manquant est un bac ouvert
+   sans avoir été tracé — c'est la seule explication possible, puisque le stock
+   ne baisse que par la traçabilité. Ces écarts serviront au calcul de fin de
+   période : théoriquement on devait vendre tant, on a vendu tant. */
+async function enregistrerInventaire(lignes, note, avant) {
+  const ecarts = {};
+  let manquants = 0, surplus = 0;
+  if (avant) {
+    const cles = new Set(Object.keys(avant).concat(Object.keys(lignes)));
+    cles.forEach(c => {
+      const d = num(lignes[c] || 0) - num(avant[c] || 0);
+      if (d === 0) return;
+      ecarts[c] = d;
+      if (d < 0) manquants += -d; else surplus += d;
+    });
+  }
+
   const inv = {
     jour: today(), at: nowISO(),
     par: STATE.user ? STATE.user.prenom : null,
     employe: STATE.user ? STATE.user.id : null,
     note: note || '',
-    lignes: lignes            // { cleArticle : quantité }
+    lignes: lignes,            // { cleArticle : quantité }
+    ecarts: ecarts,            // écart constaté par article
+    manquants: manquants,      // bacs disparus sans traçabilité
+    surplus: surplus           // bacs trouvés en trop : réception non saisie
   };
-  /* On garde les précédents pour l'historique, mais seul le dernier compte. */
+
   const hist = await DB.get('stock:inventaires', []);
   hist.push(inv);
   await DB.set('stock:inventaires', hist.slice(-36));
   await DB.set('stock:inventaire', inv);
+
+  /* Le calcul d'écart de période lit encore l'ancienne clé. On l'alimente pour
+     qu'un seul comptage serve aux deux usages, plutôt que deux écrans qui ne
+     se parlent pas. */
+  try {
+    const per = (typeof periodeCourante === 'function') ? await periodeCourante() : null;
+    if (per && per.id && per.id !== 'attente') {
+      const parParfum = {};
+      Object.keys(lignes).forEach(c => {
+        const a = litArticle(c);
+        if (a.famille !== 'glace' || !a.parfum) return;
+        parParfum[a.parfum] = parParfum[a.parfum] || {};
+        parParfum[a.parfum][a.taille] = num(lignes[c]);
+      });
+      const cle = 'invglace:' + per.id;
+      const ex = await DB.get(cle, {});
+      ex[inv.jour <= per.debut ? 'debut' : 'fin'] = {
+        parfums: parParfum, par: inv.par, at: inv.at
+      };
+      await DB.set(cle, ex);
+    }
+  } catch (e) { /* l'inventaire reste valide même sans période */ }
+
   invaliderStock();
   return inv;
 }
@@ -343,6 +385,53 @@ function anomaliesStock(articles) {
     });
   }
   return out;
+}
+
+/* -----------------------------------------------------------------------------
+   RECOMPTAGE DÉCLENCHÉ PAR UN ÉCART
+   Le stock ne baisse que par la traçabilité. Un bac annoncé présent mais absent
+   de la chambre froide veut donc dire qu'on l'a ouvert sans le scanner — et si
+   c'est arrivé une fois, c'est probablement arrivé plusieurs. On ne corrige pas
+   la ligne : on redemande un comptage complet.
+
+   Limité à la chambre froide. Recompter les cornets, gobelets et serviettes
+   prendrait une heure pour ce que ça rapporte ; les bacs, ça va vite.
+   -------------------------------------------------------------------------- */
+async function recomptageDemande() {
+  const { articles, inventaire } = await stockReel();
+
+  /* Un négatif est la preuve d'un scan manquant : on a sorti plus que ce qu'on
+     avait. C'est le signal le plus sûr. */
+  const negatifs = Object.keys(articles).filter(c =>
+    num(articles[c]) < 0 && litArticle(c).famille === 'glace');
+  if (!negatifs.length) return null;
+
+  /* Un recomptage fait après la détection solde la demande. */
+  const dejaFait = inventaire && negatifs.every(c => {
+    const l = inventaire.lignes || {};
+    return l[c] !== undefined && num(l[c]) >= 0;
+  });
+  if (dejaFait) return null;
+
+  return {
+    articles: negatifs,
+    combien: negatifs.reduce((s, c) => s + Math.abs(num(articles[c])), 0),
+    exemple: libelleArticle(negatifs[0])
+  };
+}
+
+/* Tâche ajoutée à la journée quand un écart est constaté. */
+async function tacheRecomptage() {
+  const d = await recomptageDemande();
+  if (!d) return null;
+  return {
+    id: 'recomptage',
+    t: 'Recompter la chambre froide — ' + d.combien + ' bac(s) manquant(s)',
+    lien: 'inventaire',
+    urgent: true,
+    detail: d.exemple + ' et ' + (d.articles.length - 1) + ' autre(s). ' +
+            'Un bac a été ouvert sans être scanné.'
+  };
 }
 
 /* -----------------------------------------------------------------------------
@@ -549,15 +638,25 @@ V.inventaire = async function () {
       cptes.forEach(c => { lignes[c] = num(saisie[c]); });
       const t = totauxStock(lignes);
 
+      /* État AVANT le comptage : c'est lui qui révèle les bacs disparus. */
+      const avant = (await stockReel()).articles;
+      const ecart = Object.keys(lignes).reduce((s, c) =>
+        s + (num(lignes[c]) - num(avant[c] || 0)), 0);
+
       confirmer('Valider l’inventaire ?',
         t.bacs + ' bacs comptés sur ' + cptes.length + ' référence(s), soit ' +
-        n1(t.kg) + ' kg. Ce relevé remplace la référence actuelle : tout ce qui ' +
-        'précède ne sera plus compté.',
+        n1(t.kg) + ' kg. ' +
+        (ecart === 0 ? 'Cela correspond exactement au stock attendu.'
+         : ecart < 0 ? Math.abs(ecart) + ' bac(s) de moins qu’attendu — des ouvertures non tracées.'
+         : ecart + ' bac(s) de plus qu’attendu — une réception non saisie.') +
+        ' Ce relevé devient la nouvelle référence.',
         'Valider', async () => {
-          await enregistrerInventaire(lignes, $('#inv-note') ? $('#inv-note').value : '');
+          const inv = await enregistrerInventaire(lignes,
+            $('#inv-note') ? $('#inv-note').value : '', avant);
           try { localStorage.removeItem(CLE_BROUILLON); } catch (e) {}
-          await feed('ok', STATE.user.prenom + ' a fait l’inventaire — ' +
-            t.bacs + ' bacs, ' + n1(t.kg) + ' kg');
+          await feed(inv.manquants ? 'warn' : 'ok',
+            STATE.user.prenom + ' a fait l’inventaire — ' + t.bacs + ' bacs, ' + n1(t.kg) + ' kg' +
+            (inv.manquants ? ' · ' + inv.manquants + ' bac(s) manquant(s)' : ''));
           toast('Inventaire enregistré');
           rendre('stock');
         });

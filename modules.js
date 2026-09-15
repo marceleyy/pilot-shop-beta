@@ -10,8 +10,8 @@
       A. NAVIGATION — nouvelles entrées
       ========================================================================== */
    PAGES.reception  = { titre:'Réception',   sous:'Livraison, DLC et stock fermé' };
-PAGES.stock      = { titre:'Stock réel', sous:'Inventaire, réceptions et ouvertures' };
-PAGES.inventaire = { titre:'Inventaire', sous:'Comptage physique du stock' };
+PAGES.stock      = { titre:'Stock réel', sous:'Ce qui reste en chambre froide' };
+PAGES.inventaire = { titre:'Faire l’inventaire', sous:'Compter ce qui est physiquement là' };
 PAGES.parametres = { titre:'Back-office', sous:'Tâches, horaires et unités froides' };
 PAGES.hebdo      = { titre:'Tâches du jour', sous:'Plan hebdomadaire de la boutique' };
 PAGES.lots.titre = 'Traçabilité';
@@ -19,6 +19,14 @@ PAGES.lots.sous  = 'Ouverture de tout nouveau produit';
    
    if (MENU_PLUS.equipe.indexOf('reception') < 0)  MENU_PLUS.equipe.splice(2, 0, 'reception', 'stock', 'inventaire');
 if (MENU_PLUS.manager.indexOf('reception') < 0) MENU_PLUS.manager.splice(2, 0, 'reception', 'stock', 'inventaire');
+/* L'ancien écran « Glace et sec » faisait doublon avec « Faire l'inventaire »,
+   dans une autre table : un comptage fait dans l'un n'alimentait pas l'autre,
+   et rien ne disait lequel choisir. On le retire du menu ; ses données restent
+   en base pour l'historique. */
+['equipe', 'manager'].forEach(r => {
+  const i = MENU_PLUS[r].indexOf('inv');
+  if (i >= 0) MENU_PLUS[r].splice(i, 1);
+});
 if (MENU_PLUS.manager.indexOf('parametres') < 0) MENU_PLUS.manager.push('parametres');
 /* Les tâches hebdomadaires méritent leur onglet : c'est le tableau que l'équipe
    consultait au mur, consulté plusieurs fois par jour. */
@@ -401,6 +409,16 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
      /* Le service a désormais sa propre liste : réassort, remontée des glaces,
         remplissage des biberons et des sucres. Elle était vide jusqu'ici. */
      const blocs = tachesChecklist(phase, j);
+     /* Recomptage déclenché par un écart de stock : il s'ajoute à la journée
+        au lieu d'attendre que quelqu'un pense à ouvrir l'écran Stock. */
+     const recompte = (typeof tacheRecomptage === 'function')
+       ? await tacheRecomptage().catch(() => null) : null;
+     if (recompte && blocs.length) {
+       blocs[0] = { bloc: blocs[0].bloc,
+                    taches: [recompte].concat(blocs[0].taches) };
+     } else if (recompte) {
+       blocs.push({ bloc: 'À faire en priorité', taches: [recompte] });
+     }
      const total = blocs.reduce((s, b) => s + b.taches.length, 0);
      /* Une étape liée compte comme faite quand l'action réelle a eu lieu, pas
       quand la case est cochée — elle ne l'est plus à la main. */
