@@ -1774,8 +1774,14 @@ function formulaireAnomalie() {
 
       '<button class="btn ' + (photo ? 'menthe' : 'ciel') + ' bloc" id="an-ph" style="margin-top:14px">' +
       (photo ? '✓ Photo jointe — en reprendre une' : 'Photographier le problème') + '</button>' +
-      (photo ? '<img src="' + photo + '" alt="" style="width:100%;max-height:170px;object-fit:cover;' +
-        'border-radius:10px;margin-top:10px">' : '') +
+      /* On peut la voir en grand et la retirer : une photo ratée ne doit pas
+         rester attachée à un signalement qu'on transmet au manager. */
+      (photo
+        ? '<img src="' + photo + '" alt="" id="an-apercu" style="width:100%;max-height:200px;' +
+          'object-fit:cover;border-radius:10px;margin-top:10px;cursor:pointer">' +
+          '<button class="btn fantome bloc sm" id="an-ph-suppr" style="margin-top:6px">' +
+          'Retirer la photo</button>'
+        : '') +
 
       '<div class="actions"><button class="btn clair" data-fermer>Annuler</button>' +
       '<button class="btn corail" id="an-ok">Signaler</button></div>';
