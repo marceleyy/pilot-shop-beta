@@ -543,8 +543,18 @@ V.inventaire = async function () {
   const saisie = {};        // chambre froide : cleArticle -> quantité
   const saisieSec = {};     // sec : libellé -> quantité
 
+  /* Un inventaire déjà validé aujourd'hui se rouvre AVEC ses quantités.
+     Sans cela, corriger une seule ligne obligeait à tout recompter : les
+     champs repartaient vides et une validation partielle aurait effacé le
+     reste, puisque l'inventaire remplace la référence au lieu de la compléter. */
+  const dejaFaitAujourdhui = precedent && precedent.jour === today();
+  if (dejaFaitAujourdhui) Object.assign(saisie, precedent.lignes || {});
+  const secDejaFait = secPrec && secPrec.jour === today();
+  if (secDejaFait) Object.assign(saisieSec, secPrec.lignes || {});
+
   /* Reprise d'un comptage interrompu : cinquante lignes à remplir debout dans
-     une chambre froide, et l'onglet peut être déchargé entre deux. */
+     une chambre froide, et l'onglet peut être déchargé entre deux.
+     Le brouillon passe APRÈS : une saisie en cours prime sur le validé. */
   const CLE_BROUILLON = 'pilotshop.v3:brouillon:inventaire';
   try {
     const b = JSON.parse(localStorage.getItem(CLE_BROUILLON) || 'null');
@@ -653,13 +663,18 @@ V.inventaire = async function () {
   const dessiner = () => {
     $('#vue-actions').innerHTML = '';
     const dernier = partie === 'froid' ? precedent : secPrec;
+    const dejaCeJour = partie === 'froid' ? dejaFaitAujourdhui : secDejaFait;
     $('#page').innerHTML =
-      carte('<h2>Faire l’inventaire</h2>' +
-        '<div class="cs">Comptez ce qui est physiquement présent. Ce relevé ' +
-        'devient la nouvelle référence.</div>' +
+      carte('<h2>' + (dejaCeJour ? 'Corriger l’inventaire' : 'Faire l’inventaire') + '</h2>' +
+        '<div class="cs">' + (dejaCeJour
+          ? 'Les quantités comptées sont préremplies. Modifiez ce qu’il faut, ' +
+            'puis revalidez — le reste est conservé.'
+          : 'Comptez ce qui est physiquement présent. Ce relevé devient la ' +
+            'nouvelle référence.') + '</div>' +
         (dernier
-          ? '<p class="rappel" style="margin-top:12px">Dernier comptage : ' +
-            fmtD(dernier.jour) + (dernier.par ? ' par ' + esc(dernier.par) : '') + '</p>'
+          ? '<p class="rappel" style="margin-top:12px">' +
+            (dejaCeJour ? 'Validé aujourd’hui à ' + heure(dernier.at) : 'Dernier comptage : ' + fmtD(dernier.jour)) +
+            (dernier.par ? ' par ' + esc(dernier.par) : '') + '</p>'
           : ''), 'solide') +
 
       '<div class="tseg">' +
@@ -679,7 +694,10 @@ V.inventaire = async function () {
       '<textarea id="inv-note" placeholder="Ce qui explique un écart, un bac abîmé, un doute."></textarea></div>' +
 
       '<button class="btn menthe bloc xl" id="inv-ok" style="margin-top:16px">' +
-      (partie === 'froid' ? 'Valider la chambre froide' : 'Valider le sec') + '</button>';
+      (dejaCeJour
+        ? (partie === 'froid' ? 'Revalider la chambre froide' : 'Revalider le sec')
+        : (partie === 'froid' ? 'Valider la chambre froide'   : 'Valider le sec')) +
+      '</button>';
 
     $$('[data-partie]').forEach(b => b.onclick = () => {
       if (b.dataset.partie === partie) return;
@@ -729,8 +747,10 @@ V.inventaire = async function () {
       'Valider', async () => {
         const inv = await enregistrerInventaire(lignes,
           $('#inv-note') ? $('#inv-note').value : '', avant);
-        Object.keys(saisie).forEach(k => delete saisie[k]);
-        garderBrouillon();
+        /* Le brouillon est effacé — il n'a plus lieu d'être puisque c'est
+           validé — mais PAS la saisie : revenir sur l'écran doit montrer les
+           quantités enregistrées, pas un formulaire vide. */
+        try { localStorage.removeItem(CLE_BROUILLON); } catch (e) {}
         await feed(inv.manquants ? 'warn' : 'ok',
           STATE.user.prenom + ' a compté la chambre froide — ' + t.bacs + ' bacs, ' + n1(t.kg) + ' kg' +
           (inv.manquants ? ' · ' + inv.manquants + ' bac(s) manquant(s)' : ''));
@@ -755,8 +775,7 @@ V.inventaire = async function () {
           note: $('#inv-note') ? $('#inv-note').value : '',
           lignes: lignes
         });
-        Object.keys(saisieSec).forEach(k => delete saisieSec[k]);
-        garderBrouillon();
+        try { localStorage.removeItem(CLE_BROUILLON); } catch (e) {}
         await feed('ok', STATE.user.prenom + ' a compté le sec — ' + cptes.length + ' références');
         toast('Inventaire du sec enregistré');
         rendre('stock');
