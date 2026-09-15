@@ -1404,14 +1404,19 @@ async function purgerPreuves() {
            '<div class="stack">' + items.map(r => {
              const v = rec[r.id] || {};
              return carte(
-               '<div class="rang"><div style="flex:1;min-width:0"><b>' + esc(r.nom) + '</b>' +
-               '<div class="mini">' + (v.ok ? 'Vérifié par ' + esc(v.par) + ' · ' + heure(v.at)
-                 : v.rupture ? 'Reste ' + v.reste + ' ' + r.unite + ' — signalé' : 'En ' + r.unite) + '</div></div></div>' +
-               '<div class="duo" style="margin-top:12px">' +
+               /* Compact : les deux boutons sur la même ligne que le libellé.
+                  En les mettant dessous, chaque point occupait 120 px et le
+                  réassort demandait cinq écrans de défilement. */
+               '<div class="rang"><div style="flex:1;min-width:0">' +
+               '<b>' + esc(r.nom) + '</b>' +
+               '<div class="mini">' + (v.ok ? '✓ ' + esc(v.par) + ' · ' + heure(v.at)
+                 : v.rupture ? 'Reste ' + v.reste + ' ' + r.unite
+                 : (r.detail ? esc(r.detail) : 'En ' + r.unite)) + '</div></div>' +
+               '<div class="duo compact">' +
                '<button type="button" class="btn ok' + (v.ok ? ' on' : '') + '" data-ok="' + r.id + '">' +
-       ic('valide', 18) + '<span>Fait</span></button>' +
-               '<button type="button" class="btn ko' + (v.rupture ? ' on' : '') + '" data-ko="' + r.id + '">Rupture</button>' +
-               '</div>', v.rupture ? 'corail' : v.ok ? 'menthe' : c.couleur);
+               ic('valide', 17) + '</button>' +
+               '<button type="button" class="btn ko' + (v.rupture ? ' on' : '') + '" data-ko="' + r.id + '">!</button>' +
+               '</div></div>', v.rupture ? 'corail' : v.ok ? 'menthe' : c.couleur);
            }).join('') + '</div>';
        }).join('');
    

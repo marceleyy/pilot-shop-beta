@@ -1066,6 +1066,18 @@ body::before{display:none!important}
 #offline.agir .msg{text-decoration:underline;text-underline-offset:3px}
 #offline.agir:active{filter:brightness(.94)}
 
+/* Réassort compact : les deux boutons à droite du libellé, carrés, taille
+   tactile conservée. Chaque point passe de 120 à 68 px de haut — vingt-trois
+   points tiennent en deux écrans au lieu de cinq. */
+.duo.compact{display:flex;gap:8px;flex:0 0 auto;margin:0}
+.duo.compact .btn{width:54px;min-width:54px;min-height:48px;padding:0;
+  display:flex;align-items:center;justify-content:center;font-size:19px;font-weight:700}
+.duo.compact .btn.ok{background:var(--blanc);border:1px solid var(--line-fort);color:var(--vert)}
+.duo.compact .btn.ok.on{background:var(--vert);border-color:var(--vert);color:#fff}
+.duo.compact .btn.ko{background:var(--blanc);border:1px solid var(--line-fort);color:var(--ambre-d)}
+.duo.compact .btn.ko.on{background:var(--rouge);border-color:var(--rouge);color:#fff}
+#page .card .rang{align-items:center}
+
 /* --- 21. Impression : registre sanitaire -------------------------------- */
 #printview{display:none}
 @media print{
