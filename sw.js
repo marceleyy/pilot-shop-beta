@@ -8,8 +8,8 @@
    elle qui déclenche le re-téléchargement. Un appareil déjà installé garderait
    sinon l'ancien cache, et n'irait jamais chercher les fichiers ajoutés — le
    scan hors ligne ne marcherait que sur les appareils neufs. */
-const CACHE   = 'pilotshop-cache-v5';
-const RUNTIME = 'pilotshop-runtime-v5';
+const CACHE   = 'pilotshop-cache-v6';
+const RUNTIME = 'pilotshop-runtime-v6';
 
 const PRECACHE = [
   '/',

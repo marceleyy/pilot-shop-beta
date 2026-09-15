@@ -1,0 +1,159 @@
+<!doctype html>
+<html lang="fr">
+<meta charset="utf-8">
+<title>Icônes Pilot-Shop</title>
+<!--
+  scripts/icones.html
+  Génère les trois icônes de l'application à partir de am.png.
+
+  Le transfert des images depuis l'assistant coûterait un demi-mégaoctet encodé ;
+  le navigateur fait le même travail en une seconde, sur votre poste.
+
+  MODE D'EMPLOI
+    1. Ouvrir ce fichier dans Chrome (double-clic).
+    2. Vérifier l'aperçu, notamment la vignette à 32 px : c'est la taille réelle
+       dans la barre d'adresse, et c'est là qu'une photo devient illisible.
+    3. Cliquer sur « Enregistrer les trois icônes ».
+    4. Déplacer les fichiers téléchargés dans le dossier icons/, en écrasant
+       les anciens.
+-->
+<style>
+  body{font:15px/1.5 -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
+       background:#F1F5F9;color:#0F172A;margin:0;padding:32px;display:flex;
+       justify-content:center}
+  .in{max-width:640px;width:100%}
+  h1{font-size:22px;font-weight:800;letter-spacing:-.02em;margin:0 0 4px}
+  p.sub{color:#64748B;margin:0 0 24px;font-size:14px}
+  .card{background:#fff;border:1px solid #E2E8F0;border-radius:14px;
+        box-shadow:0 1px 4px rgba(0,0,0,.04);padding:20px;margin-bottom:14px}
+  .apercus{display:flex;align-items:flex-end;gap:22px;flex-wrap:wrap}
+  .ap{text-align:center}
+  .ap img{display:block;border-radius:12px;background:#E9EEF4}
+  .ap span{display:block;font-size:11.5px;color:#64748B;margin-top:6px}
+  .ap.petit img{border-radius:4px;image-rendering:pixelated}
+  button{width:100%;min-height:52px;border:0;border-radius:12px;background:#0F172A;
+         color:#fff;font-size:16px;font-weight:600;cursor:pointer;margin-top:8px}
+  button:active{background:#000}
+  button.clair{background:#fff;color:#0F172A;border:1px solid #CBD5E1;min-height:44px;
+               font-size:14px}
+  .reglage{display:flex;align-items:center;gap:12px;margin-top:14px}
+  .reglage label{flex:0 0 110px;font-size:13px;font-weight:600;color:#64748B}
+  .reglage input{flex:1}
+  .etat{font-size:13px;color:#64748B;margin-top:12px;text-align:center}
+  .err{background:#FEF2F2;color:#991B1B;border-radius:12px;padding:14px;font-size:14px}
+</style>
+
+<div class="in">
+  <h1>Icônes Pilot-Shop</h1>
+  <p class="sub">Générées depuis am.png. Rien n'est envoyé : tout se passe dans ce navigateur.</p>
+
+  <div class="card">
+    <div class="apercus" id="apercus"></div>
+
+    <div class="reglage">
+      <label for="zoom">Cadrage</label>
+      <input type="range" id="zoom" min="24" max="70" value="36">
+    </div>
+    <div class="reglage">
+      <label for="haut">Hauteur</label>
+      <input type="range" id="haut" min="10" max="70" value="31">
+    </div>
+
+    <button id="go">Enregistrer les trois icônes</button>
+    <button class="clair" id="reset">Revenir au cadrage proposé</button>
+    <div class="etat" id="etat">Ajustez si besoin, puis enregistrez.</div>
+  </div>
+</div>
+
+<script>
+/* On lit am.png à la racine du projet — ce fichier vit dans scripts/. */
+const SOURCE = '../am.png';
+const TAILLES = [192, 512, 180];
+
+const img = new Image();
+let pret = false;
+
+img.onload = () => { pret = true; dessiner(); };
+img.onerror = () => {
+  document.getElementById('apercus').innerHTML =
+    '<div class="err">am.png introuvable. Ce fichier doit rester dans scripts/, ' +
+    'et am.png à la racine du projet.</div>';
+};
+img.src = SOURCE;
+
+/* Découpe carrée, contraste et saturation relevés — une photo réduite perd les
+   deux —, puis coins arrondis comme une icône d'application. */
+function fabriquer(taille) {
+  const zoom = +document.getElementById('zoom').value / 100;
+  const haut = +document.getElementById('haut').value / 100;
+
+  const cote = Math.min(img.width, img.height) * zoom;
+  const cx = img.width * 0.49, cy = img.height * haut;
+  const sx = Math.max(0, Math.min(cx - cote / 2, img.width - cote));
+  const sy = Math.max(0, Math.min(cy - cote / 2, img.height - cote));
+
+  const cv = document.createElement('canvas');
+  cv.width = cv.height = taille;
+  const ctx = cv.getContext('2d');
+
+  const r = taille * 0.18;
+  ctx.beginPath();
+  ctx.moveTo(r, 0);
+  ctx.arcTo(taille, 0, taille, taille, r);
+  ctx.arcTo(taille, taille, 0, taille, r);
+  ctx.arcTo(0, taille, 0, 0, r);
+  ctx.arcTo(0, 0, taille, 0, r);
+  ctx.closePath();
+  ctx.clip();
+
+  ctx.imageSmoothingQuality = 'high';
+  ctx.filter = 'saturate(1.18) contrast(1.12)';
+  ctx.drawImage(img, sx, sy, cote, cote, 0, 0, taille, taille);
+  return cv;
+}
+
+function dessiner() {
+  if (!pret) return;
+  const zone = document.getElementById('apercus');
+  zone.innerHTML = '';
+  [[128, 'aperçu'], [64, 'écran d’accueil'], [32, 'barre d’adresse']].forEach(([n, lb]) => {
+    const cv = fabriquer(n);
+    const d = document.createElement('div');
+    d.className = 'ap' + (n === 32 ? ' petit' : '');
+    const i = new Image();
+    i.src = cv.toDataURL('image/png');
+    i.width = i.height = n === 32 ? 64 : n;
+    d.appendChild(i);
+    const s = document.createElement('span');
+    s.textContent = n + ' px · ' + lb;
+    d.appendChild(s);
+    zone.appendChild(d);
+  });
+}
+
+document.getElementById('zoom').oninput = dessiner;
+document.getElementById('haut').oninput = dessiner;
+document.getElementById('reset').onclick = () => {
+  document.getElementById('zoom').value = 36;
+  document.getElementById('haut').value = 31;
+  dessiner();
+};
+
+document.getElementById('go').onclick = () => {
+  if (!pret) return;
+  TAILLES.forEach((n, k) => {
+    setTimeout(() => {
+      fabriquer(n).toBlob(b => {
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(b);
+        a.download = 'icon-' + n + '.png';
+        a.click();
+        setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+      }, 'image/png');
+    }, k * 350);
+  });
+  document.getElementById('etat').textContent =
+    'Trois fichiers téléchargés. Déplacez-les dans icons/ en écrasant les anciens.';
+};
+</script>
+</html>
