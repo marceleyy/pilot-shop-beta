@@ -858,6 +858,7 @@ body{font-size:var(--t-corps);line-height:1.5}
 .invl + .invl{margin-top:6px}
 .invn{flex:1;min-width:0;font-size:15px;font-weight:600;
   overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.invn small{display:block;font-size:11.5px;font-weight:400;color:var(--brume);margin-top:1px}
 .invc{flex:0 0 auto;font-size:11.5px;color:var(--brume)}
 .invl input{width:84px;flex:0 0 auto;min-height:46px;text-align:center;
   font-size:17px;font-weight:600;font-variant-numeric:tabular-nums}

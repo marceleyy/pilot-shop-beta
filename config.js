@@ -716,16 +716,29 @@ const METEO = {
 /* Familles de produits pour la traçabilité : la liste des 22 parfums était
    trop longue à l'écran. On classe d'abord par famille, le parfum ne sert
    qu'aux glaces. */
+/* L'unité compte autant que le libellé : sans elle, l'écran annonçait
+   « Gaufre · 6 bacs ». Une gaufre n'est pas un bac, et mélanger les deux dans un
+   total fausse la moyenne — on obtenait 2,9 litres par bac, soit moins que le
+   plus petit format existant. */
 const FAMILLES_PRODUIT = [
-  { id:'glace',        libelle:'Glace',              parfums:true,  dlc:'gelato' },
-  { id:'mac_classico', libelle:'Macarons Classico',  parfums:false, dlc:'macaron_gelato' },
-  { id:'mac_grandioso',libelle:'Macarons Grandioso', parfums:false, dlc:'macaron_gelato' },
-  { id:'gianduiotto',  libelle:'Gianduiotto',        parfums:false, dlc:'gianduiotto' },
-  { id:'gaufre',       libelle:'Gaufre',             parfums:false, dlc:'gaufre' },
-  { id:'crepe',        libelle:'Crêpe',              parfums:false, dlc:'crepe_negatif' },
-  { id:'chantilly',    libelle:'Chantilly',          parfums:false, dlc:'chantilly' },
-  { id:'coulis',       libelle:'Coulis',             parfums:false, dlc:'coulis' },
-  { id:'topping',      libelle:'Topping',            parfums:false, dlc:'topping' }
+  { id:'glace',        libelle:'Glace',              parfums:true,  dlc:'gelato',
+    unite:'bac',    unites:'bacs' },
+  { id:'mac_classico', libelle:'Macarons Classico',  parfums:false, dlc:'macaron_gelato',
+    unite:'boîte',  unites:'boîtes' },
+  { id:'mac_grandioso',libelle:'Macarons Grandioso', parfums:false, dlc:'macaron_gelato',
+    unite:'boîte',  unites:'boîtes' },
+  { id:'gianduiotto',  libelle:'Gianduiotto',        parfums:false, dlc:'gianduiotto',
+    unite:'boîte',  unites:'boîtes' },
+  { id:'gaufre',       libelle:'Gaufre',             parfums:false, dlc:'gaufre',
+    unite:'paquet', unites:'paquets' },
+  { id:'crepe',        libelle:'Crêpe',              parfums:false, dlc:'crepe_negatif',
+    unite:'paquet', unites:'paquets' },
+  { id:'chantilly',    libelle:'Chantilly',          parfums:false, dlc:'chantilly',
+    unite:'brique', unites:'briques' },
+  { id:'coulis',       libelle:'Coulis',             parfums:false, dlc:'coulis',
+    unite:'flacon', unites:'flacons' },
+  { id:'topping',      libelle:'Topping',            parfums:false, dlc:'topping',
+    unite:'pot',    unites:'pots' }
 ];
 
 /* Anomalies constatées en boutique — nouveau module demandé par l'équipe */

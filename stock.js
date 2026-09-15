@@ -474,13 +474,18 @@ V.stock = async function () {
       ? Object.keys(parFamille).map(f => {
           const fam = FAMILLES_PRODUIT.filter(x => x.id === f)[0];
           const sous = parFamille[f].reduce((s, c) => s + num(articles[c]), 0);
+          /* Chaque famille a son unité. Annoncer « Gaufre · 6 bacs » était faux
+             et brouillait la lecture : une gaufre se compte en paquets, une
+             chantilly en briques, un topping en pots. */
+          const u = fam ? (Math.abs(sous) > 1 ? fam.unites : fam.unite) : 'unité(s)';
           return '<div class="entete"><h3>' + esc(fam ? fam.libelle : f) + '</h3>' +
-            '<span class="pousse mini num">' + sous + ' bac(s)</span></div>' +
+            '<span class="pousse mini num">' + sous + ' ' + u + '</span></div>' +
             '<div class="stack">' + parFamille[f].map(c => {
               const a = litArticle(c), q = num(articles[c]);
               return carte('<div class="rang">' +
                 '<div style="flex:1;min-width:0"><b>' + esc(a.parfum || (fam ? fam.libelle : f)) + '</b>' +
-                (a.taille ? '<div class="mini">Bac de ' + a.taille + ' L</div>' : '') + '</div>' +
+                (a.taille ? '<div class="mini">Bac de ' + a.taille + ' L</div>'
+                  : fam ? '<div class="mini">En ' + esc(fam.unites) + '</div>' : '') + '</div>' +
                 '<b class="num" style="font-size:20px">' + q + '</b></div>',
                 q < 0 ? 'corail' : '');
             }).join('') + '</div>';
@@ -579,9 +584,17 @@ V.inventaire = async function () {
 
   const majTotaux = () => {
     if (partie === 'froid') {
-      if ($('#inv-t'))  $('#inv-t').textContent  = totalBacs();
-      if ($('#inv-u'))  $('#inv-u').textContent  = 'bacs';
-      if ($('#inv-kg')) $('#inv-kg').textContent = n1(totalLitres() * FOURNISSEUR.poidsMoyenLitre) + ' kg';
+      /* Deux compteurs distincts : les bacs de glace, qui ont une contenance,
+         et les autres familles comptées à l'unité. Les additionner donnait
+         « 163 bacs » pour 473 litres, soit 2,9 L de moyenne — en dessous du
+         plus petit format, donc une moyenne qui ne veut rien dire. */
+      const t = totauxStock(Object.keys(saisie).reduce((o, c) => {
+        o[c] = num(saisie[c]); return o;
+      }, {}));
+      if ($('#inv-t'))  $('#inv-t').textContent  = t.bacs;
+      if ($('#inv-u'))  $('#inv-u').textContent  = t.bacs > 1 ? 'bacs' : 'bac';
+      if ($('#inv-kg')) $('#inv-kg').textContent =
+        n1(t.kg) + ' kg' + (t.unites ? ' · ' + t.unites + ' unités' : '');
     } else {
       if ($('#inv-t'))  $('#inv-t').textContent  = totalSec();
       if ($('#inv-u'))  $('#inv-u').textContent  = 'unités';
@@ -611,15 +624,17 @@ V.inventaire = async function () {
         }).join('') + '</div></div>';
     }).join('') + '</div>' +
 
-    '<div class="entete"><h3>Autres familles</h3></div>' +
+    '<div class="entete"><h3>Autres familles</h3>' +
+    '<span class="pousse mini">comptées à l’unité</span></div>' +
     '<div class="stack">' + autres.map(f => {
-      const c = cleArticle(f.id, '', '');
-      const q = num(articles[c]);
-      return '<div class="invl">' +
-        '<span class="invn">' + esc(f.libelle) + '</span>' +
-        (q ? '<span class="invc">' + q + ' en stock</span>' : '') +
-        '<input type="number" inputmode="numeric" min="0" step="1" data-inv="' + c + '" ' +
-        'value="' + (saisie[c] !== undefined ? saisie[c] : '') + '" placeholder="0"></div>';
+    const c = cleArticle(f.id, '', '');
+    const q = num(articles[c]);
+    return '<div class="invl">' +
+    '<span class="invn">' + esc(f.libelle) +
+    '<small>en ' + esc(f.unites) + '</small></span>' +
+    (q ? '<span class="invc">' + q + ' en stock</span>' : '') +
+          '<input type="number" inputmode="numeric" min="0" step="1" data-inv="' + c + '" ' +
+          'value="' + (saisie[c] !== undefined ? saisie[c] : '') + '" placeholder="0"></div>';
     }).join('') + '</div>';
 
   /* --- Sec : une ligne par référence -------------------------------------- */
