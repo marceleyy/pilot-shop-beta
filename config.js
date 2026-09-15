@@ -935,6 +935,21 @@ const CHECKLISTS = {
       { id:'o11', t:'Compter le fond de caisse', lien:'caisse', obligatoire:true }
     ]}
   ],
+  /* Le service n'avait aucune check-liste : l'écran restait vide entre
+     l'ouverture et la fermeture, alors que c'est le moment où se prépare tout
+     ce qui tiendra la journée. Relévé en boutique. */
+  service: [
+    { bloc: 'Pendant le service', taches: [
+      { id:'s01', t:'Faire le réassort complet, sec et surgelé', lien:'reas' },
+      { id:'s02', t:'Remonter les glaces pour la journée' },
+      { id:'s03', t:'Remplir les biberons de coulis' },
+      { id:'s04', t:'Remplir le sucre glace, le sucre cristal et le cacao' },
+      { id:'s05', t:'Remplir les produits de nettoyage : vitres, Bactalim, savon' },
+      { id:'s06', t:'Faire les tâches hebdomadaires du jour', lien:'clean' },
+      { id:'s07', t:'Pré-assembler les sets de couverts : cuillère, fourchette et couteau' }
+    ]}
+  ],
+
   fermeture: [
     { bloc: 'Avant la fermeture aux clients', taches: [
       { id:'f01', t:'Ajouter les quarts de glace possibles', min:8 },

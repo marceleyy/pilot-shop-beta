@@ -394,7 +394,9 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
        'Produit non ouvert reçu le ' + fmtDC(a.recuLe) + '. À écouler ou à jeter.', 'stock']));
    
      const phase = STATE.phase === 'service' ? 'service' : STATE.phase;
-     const blocs = phase === 'service' ? [] : tachesChecklist(phase, j);
+     /* Le service a désormais sa propre liste : réassort, remontée des glaces,
+        remplissage des biberons et des sucres. Elle était vide jusqu'ici. */
+     const blocs = tachesChecklist(phase, j);
      const total = blocs.reduce((s, b) => s + b.taches.length, 0);
      /* Une étape liée compte comme faite quand l'action réelle a eu lieu, pas
       quand la case est cochée — elle ne l'est plus à la main. */
@@ -480,7 +482,9 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
          let n = 0;
          const vp = rec['_valide_' + phase];
          return carte(entete(PHASES.filter(p => p.id === phase)[0].icone,
-           (phase === 'ouverture' ? 'Procédure d’ouverture' : 'Procédure de fermeture'),
+           (phase === 'ouverture' ? 'Procédure d’ouverture'
+            : phase === 'service' ? 'Pendant le service'
+            : 'Procédure de fermeture'),
          faits + ' sur ' + total + ' tâches') +
             '<div class="jauge" style="margin-bottom:16px"><i style="width:' +
             (total ? Math.round(faits / total * 100) : 0) + '%"></i></div>' +
@@ -568,8 +572,10 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
     const finir = async () => {
       rec['_valide_' + phase] = { par:STATE.user.prenom, id:STATE.user.id, at:nowISO() };
       await DB.set('checklist:' + j, rec);
-      await feed('ok', STATE.user.prenom + ' a validé la ' +
-        (phase === 'ouverture' ? 'procédure d’ouverture' : 'procédure de fermeture'));
+      await feed('ok', STATE.user.prenom + ' a validé ' +
+        (phase === 'ouverture' ? 'la procédure d’ouverture'
+         : phase === 'service' ? 'les tâches du service'
+         : 'la procédure de fermeture'));
       toast('Procédure validée');
       rendre('accueil');
     };
