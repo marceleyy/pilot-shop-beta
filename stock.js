@@ -478,21 +478,48 @@ V.stock = async function () {
       ? Object.keys(parFamille).map(f => {
           const fam = FAMILLES_PRODUIT.filter(x => x.id === f)[0];
           const sous = parFamille[f].reduce((s, c) => s + num(articles[c]), 0);
-          /* Chaque famille a son unité. Annoncer « Gaufre · 6 bacs » était faux
-             et brouillait la lecture : une gaufre se compte en paquets, une
-             chantilly en briques, un topping en pots. */
           const u = fam ? (Math.abs(sous) > 1 ? fam.unites : fam.unite) : 'unité(s)';
+
+          /* Les glaces se regroupent par PARFUM, avec le détail des tailles sur
+             la même ligne. En listant une ligne par taille, « 6 Amarena » ne
+             disait pas s'il s'agissait de six bacs de 3 L ou d'un mélange — et
+             c'est précisément ce qu'on a besoin de savoir devant la chambre
+             froide pour vérifier ce qui est réellement là. */
+          const lignes = (f === 'glace')
+            ? (function () {
+                const parParfum = {};
+                parFamille[f].forEach(c => {
+                  const a = litArticle(c);
+                  (parParfum[a.parfum] = parParfum[a.parfum] || []).push(c);
+                });
+                return Object.keys(parParfum).sort((x, y) => x.localeCompare(y)).map(p => {
+                  const tailles = parParfum[p]
+                    .sort((x, y) => num(litArticle(x).taille) - num(litArticle(y).taille));
+                  const n = tailles.reduce((s, c) => s + num(articles[c]), 0);
+                  const negatif = tailles.some(c => num(articles[c]) < 0);
+                  return carte('<div class="rang">' +
+                    '<div style="flex:1;min-width:0"><b>' + esc(p) + '</b>' +
+                    '<div class="mini tailles">' + tailles.map(c => {
+                      const q = num(articles[c]);
+                      return '<span class="tq' + (q < 0 ? ' neg' : '') + '">' +
+                             '<b>' + q + '</b>×' + litArticle(c).taille + ' L</span>';
+                    }).join('') + '</div></div>' +
+                    '<b class="num" style="font-size:20px">' + n + '</b></div>',
+                    negatif ? 'corail' : '');
+                }).join('');
+              })()
+            : parFamille[f].map(c => {
+                const a = litArticle(c), q = num(articles[c]);
+                return carte('<div class="rang">' +
+                  '<div style="flex:1;min-width:0"><b>' + esc(a.parfum || (fam ? fam.libelle : f)) + '</b>' +
+                  (fam ? '<div class="mini">En ' + esc(fam.unites) + '</div>' : '') + '</div>' +
+                  '<b class="num" style="font-size:20px">' + q + '</b></div>',
+                  q < 0 ? 'corail' : '');
+              }).join('');
+
           return '<div class="entete"><h3>' + esc(fam ? fam.libelle : f) + '</h3>' +
             '<span class="pousse mini num">' + sous + ' ' + u + '</span></div>' +
-            '<div class="stack">' + parFamille[f].map(c => {
-              const a = litArticle(c), q = num(articles[c]);
-              return carte('<div class="rang">' +
-                '<div style="flex:1;min-width:0"><b>' + esc(a.parfum || (fam ? fam.libelle : f)) + '</b>' +
-                (a.taille ? '<div class="mini">Bac de ' + a.taille + ' L</div>'
-                  : fam ? '<div class="mini">En ' + esc(fam.unites) + '</div>' : '') + '</div>' +
-                '<b class="num" style="font-size:20px">' + q + '</b></div>',
-                q < 0 ? 'corail' : '');
-            }).join('') + '</div>';
+            '<div class="stack">' + lignes + '</div>';
         }).join('')
       : vide('', 'Stock vide. Commencez par un inventaire.'));
 
