@@ -1712,6 +1712,36 @@ V.anomalie = async function () {
       : '');
 
   $('#an-new').onclick = formulaireAnomalie;
+  /* Photo en grand, avec la possibilité de la retirer du signalement. */
+  $$('[data-anoph]').forEach(im => im.onclick = async () => {
+    const l = await DB.get('anomalies', []);
+    const a = l.filter(x => x.id === im.dataset.anoph)[0];
+    if (!a || !a.photo) return;
+    const plein = document.createElement('div');
+    plein.className = 'photo-plein';
+    plein.innerHTML = '<img src="' + a.photo + '" alt="">' +
+      '<div class="pp-barre">' +
+      '<button type="button" class="btn clair sm" data-pp-fermer>Fermer</button>' +
+      (a.resolue ? '' : '<button type="button" class="btn corail sm" data-pp-suppr>Retirer la photo</button>') +
+      '</div>';
+    document.body.appendChild(plein);
+    plein.querySelector('[data-pp-fermer]').onclick = () => plein.remove();
+    const bs = plein.querySelector('[data-pp-suppr]');
+    if (bs) bs.onclick = () => {
+      plein.remove();
+      confirmer('Retirer la photo ?',
+        'Le signalement « ' + (a.titre || '') + ' » restera, sans son illustration.',
+        'Retirer', async () => {
+          const l2 = await DB.get('anomalies', []);
+          const a2 = l2.filter(x => x.id === a.id)[0];
+          if (a2) delete a2.photo;
+          await DB.set('anomalies', l2);
+          await feed('warn', STATE.user.prenom + ' a retiré la photo de : ' + a.titre);
+          toast('Photo retirée');
+          rendre('anomalie');
+        });
+    };
+  });
   $$('[data-res]').forEach(b => b.onclick = async () => {
     const l = await DB.get('anomalies', []);
     const a = l.filter(x => x.id === b.dataset.res)[0];
@@ -1733,8 +1763,12 @@ function carteAnomalie(a) {
     '<div class="mini" style="margin-top:4px">' + esc(a.par) + ' · ' + fmtDC(a.jour) + ' ' + heure(a.at) +
     (a.resolue ? ' · traitée par ' + esc(a.resoluePar) : '') + '</div></div>' +
     pastille(a.resolue ? 'n' : g.couleur, a.resolue ? 'Traitée' : g.id) + '</div>' +
-    (a.photo ? '<img src="' + a.photo + '" alt="" style="width:100%;max-height:190px;' +
-      'object-fit:cover;border-radius:10px;margin-top:10px">' : '') +
+    /* Cliquable : l'aperçu est rogné en hauteur, et c'est justement le détail
+       qu'on a photographié — une fuite, un joint, une pièce cassée — qu'on a
+       besoin de voir en entier. */
+    (a.photo ? '<img src="' + a.photo + '" alt="" data-anoph="' + esc(a.id) + '" ' +
+      'style="width:100%;max-height:190px;object-fit:cover;border-radius:10px;' +
+      'margin-top:10px;cursor:pointer">' : '') +
     (a.resolue ? '' : '<button class="btn clair bloc sm" data-res="' + a.id +
       '" style="margin-top:10px">Marquer comme traitée</button>'),
     a.resolue ? 'plat' : (g.couleur === 'bad' ? 'corail' : g.couleur === 'warn' ? 'ambre' : ''));
@@ -1794,6 +1828,24 @@ function formulaireAnomalie() {
       const p = await prendrePhoto();
       if (p) photo = p.img;
       dessiner();
+    };
+    /* Voir en grand : l'aperçu est rogné, on ne vérifie pas dessus qu'on a bien
+       cadré la fuite ou la pièce cassée. */
+    const ap = $('#an-apercu');
+    if (ap) ap.onclick = () => {
+      const plein = document.createElement('div');
+      plein.className = 'photo-plein';
+      plein.innerHTML = '<img src="' + photo + '" alt="">' +
+        '<button type="button" class="pp-fermer" aria-label="Fermer">✕</button>';
+      plein.onclick = () => plein.remove();
+      document.body.appendChild(plein);
+    };
+    const sup = $('#an-ph-suppr');
+    if (sup) sup.onclick = () => {
+      garder();
+      photo = null;
+      dessiner();
+      toast('Photo retirée');
     };
     $('#an-ok').onclick = async () => {
       garder();
