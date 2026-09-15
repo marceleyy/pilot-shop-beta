@@ -6,12 +6,20 @@ env.js
 *.heic
 *.jpg
 *.jpeg
+*.PNG
+20.png
+21.png
+7?.png
+!am.png
 !icons/*
 photos/
+*.m4a
+Pilot-Shop*.pdf
 
 # Fichiers parasites créés en collant du JavaScript dans CMD
 localStorage.removeItem*
 *))
+cd
 
 # Dépendances et artefacts
 node_modules/
@@ -22,4 +30,12 @@ Thumbs.db
 
 # Sauvegardes de l'application
 pilot-shop-sauvegarde-*.json
-config.js.avec-pins 
+
+# Sauvegardes créées par les scripts de modification.
+# ATTENTION : la ligne « config.js.avec-pins » se terminait par une ESPACE,
+# ce qui la rendait inopérante — Git cherchait un fichier dont le nom finit
+# par une espace. Les cinq codes PIN de l'équipe étaient donc versionnés,
+# alors qu'on les avait justement retirés de config.js pour cette raison.
+config.js.avec-pins
+*.avant-*
+*.avec-pins
