@@ -375,19 +375,19 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
        const lot = $('#og-lot').value.trim().toUpperCase();
        if (!lot) return toast('Le numéro de lot est obligatoire', 'erreur');
 
-       /* Ce lot a-t-il déjà été ouvert ? Un bac ne sort qu'une fois de la
-          chambre froide. Rescanner un bac déjà en vitrine — par habitude, ou
-          parce qu'on ne sait plus si c'est fait — décompterait un second bac
-          qui n'existe pas. C'est arrivé : onze bacs fantômes en une matinée. */
-       if (typeof lotDejaOuvert === 'function') {
-         const deja = await lotDejaOuvert(lot).catch(() => null);
-         if (deja) {
-           return confirmer('Ce lot est déjà ouvert',
-             'Le lot ' + lot + ' a été ouvert le ' + fmtD(deja.jour) + '. ' +
-             'Ce bac est donc déjà en vitrine et déjà décompté du stock. ' +
-             'Si vous confirmez, un second bac sera retiré — à ne faire que ' +
-             's’il s’agit réellement d’un autre bac portant le même numéro.',
-             'Ouvrir quand même', async () => { await validerOuverture(lot); });
+       /* Le lot n'identifie pas un bac : deux bacs d'une même production portent
+          souvent le même numéro, et c'est l'inventaire qui donne la quantité.
+          Le vrai signal est donc le stock, pas le lot. */
+       if (typeof stockInsuffisant === 'function') {
+         const cle = cleArticle('glace', $('#og-prod').value, FOURNISSEUR.tailleParDefaut);
+         const manque = await stockInsuffisant(cle).catch(() => null);
+         if (manque) {
+           return confirmer('Ce bac n’est plus au stock',
+             'L’application n’a plus de ' + manque.article + ' en réserve' +
+             (manque.reste < 0 ? ' — le compte est déjà à ' + manque.reste + '.' : '.') +
+             ' Soit une ouverture précédente n’a pas été scannée, soit une livraison ' +
+             'n’a pas été saisie. Confirmez si le bac est bien là.',
+             'Confirmer l’ouverture', async () => { await validerOuverture(lot); });
          }
        }
        await validerOuverture(lot);

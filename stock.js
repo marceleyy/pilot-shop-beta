@@ -94,29 +94,25 @@ async function lireMois(cle) {
   return l;
 }
 
-/* Un lot déjà ouvert ne se réouvre pas. C'est la règle métier, pas une
-   commodité : un bac sort de la chambre froide, on l'ouvre, il monte en
-   vitrine. Un seul geste, une seule fois. Le rescanner plus tard — par
-   habitude, ou parce qu'on ne sait plus s'il a été fait — décompterait un
-   second bac qui n'existe pas.
+/* Le numéro de lot n'identifie PAS un bac : deux bacs de vanille d'une même
+   production portent souvent le même numéro. C'est l'inventaire qui fait foi —
+   s'il dit quatre vanilles, il y a quatre bacs, quels que soient leurs numéros.
 
-   C'est arrivé : quinze bacs scannés un matin, dont onze déjà ouverts la
-   veille. Le stock a perdu onze bacs fantômes et il a fallu corriger à la main.
+   Le bon repère est donc le stock disponible, pas le lot. On alerte quand on
+   ouvre un bac qu'on n'a plus : le stock est à zéro ou déjà négatif.
 
-   On cherche sur trente jours : au-delà, un numéro de lot peut légitimement
-   revenir sur une nouvelle livraison. */
-async function lotDejaOuvert(lot) {
-  if (!lot) return null;
-  const L = String(lot).toUpperCase().replace(/\s/g, '');
-  const mouv = await tousMouvements(null);
-  const limite = addD(today(), -30);
-  for (let i = mouv.length - 1; i >= 0; i--) {
-    const m = litMouvement(mouv[i]);
-    if (m.type !== 'ouverture') continue;
-    if (m.jour < limite) break;
-    if (String(m.lot || '').toUpperCase().replace(/\s/g, '') === L) return m;
-  }
-  return null;
+   Une alerte fondée sur le lot se serait déclenchée à chaque ouverture
+   légitime. Et une alerte qui se trompe souvent ne sert plus à rien : on prend
+   l'habitude de confirmer sans lire, et le jour où elle a raison, on confirme
+   aussi. */
+async function stockInsuffisant(cle) {
+  try {
+    const s = await stockReel();
+    const q = num(s.articles[cle] || 0);
+    if (q > 0) return null;
+    return { reste: q, article: libelleArticle(cle),
+             depuis: s.inventaire ? s.inventaire.jour : null };
+  } catch (e) { return null; }
 }
 
 async function ajouterMouvement(type, cle, qte, extra) {
@@ -1000,18 +996,21 @@ function confirmerOuverture(r) {
       const lot = (r.lot || '').trim().toUpperCase();
       if (!lot) return toast('Le numéro de lot est obligatoire', 'erreur');
 
-      /* Un bac ne sort qu'une fois de la chambre froide : sortie, ouverture et
-         mise en vitrine sont le même geste. Rescanner un bac déjà en vitrine —
-         par habitude, ou parce qu'on ne sait plus si c'est fait — décompterait
-         un second bac qui n'existe pas. C'est arrivé le 15 septembre : quinze
-         scans en une matinée, dont onze sur des bacs ouverts la veille. */
-      const deja = await lotDejaOuvert(lot).catch(() => null);
-      if (deja) {
-        return confirmer('Ce lot est déjà ouvert',
-          'Le lot ' + lot + ' a été ouvert le ' + fmtD(deja.jour) + '. Ce bac est ' +
-          'donc déjà en vitrine, et déjà retiré du stock. Confirmer en retirerait ' +
-          'un second — à ne faire que s’il s’agit vraiment d’un autre bac.',
-          'Ouvrir quand même', () => { poser(fam, lot); });
+      /* Le lot n'identifie pas un bac — deux bacs de vanille peuvent porter le
+         même numéro. Le vrai signal est le stock : ouvrir un bac qu'on n'a plus
+         veut dire qu'une ouverture précédente n'a pas été scannée, ou qu'une
+         livraison n'a pas été saisie. */
+      const manque = await stockInsuffisant(
+        cleArticle(fam.id, fam.parfums ? parfum : '', fam.parfums ? taille : '')
+      ).catch(() => null);
+      if (manque) {
+        return confirmer('Ce bac n’est plus au stock',
+          'L’application n’a plus de ' + manque.article + ' en réserve' +
+          (manque.reste < 0 ? ' — le compte est déjà à ' + manque.reste + '.' : '.') +
+          ' Soit une ouverture précédente n’a pas été scannée, soit une livraison ' +
+          'n’a pas été saisie. Confirmez si le bac est bien là : un recomptage ' +
+          'sera proposé pour remettre les compteurs à plat.',
+          'Confirmer l’ouverture', () => { poser(fam, lot); });
       }
       await poser(fam, lot);
     }
