@@ -244,7 +244,11 @@ async function enregistrerInventaire(lignes, note, avant) {
   };
 
   const hist = await DB.get('stock:inventaires', []);
-  hist.push(inv);
+  /* Une correction du même jour REMPLACE son entrée au lieu d'en ajouter une :
+     rouvrir et revalider trois fois ne doit pas laisser trois lignes dans
+     l'historique, dont deux qui ne correspondent à aucun comptage réel. */
+  const i = hist.findIndex(h => h.jour === inv.jour);
+  if (i >= 0) hist[i] = inv; else hist.push(inv);
   await DB.set('stock:inventaires', hist.slice(-36));
   await DB.set('stock:inventaire', inv);
 
@@ -532,6 +536,7 @@ V.inventaire = async function () {
   const { articles } = await stockReel();
   const precedent = await DB.get('stock:inventaire', null);
   const secPrec   = await DB.get('stock:sec', null);
+  const historique = await DB.get('stock:inventaires', []);
 
   /* Deux comptages distincts. La chambre froide se compte vite et alimente le
      calcul d'écart ; le sec se compte rarement et porte des unités variées.
@@ -543,14 +548,22 @@ V.inventaire = async function () {
   const saisie = {};        // chambre froide : cleArticle -> quantité
   const saisieSec = {};     // sec : libellé -> quantité
 
-  /* Un inventaire déjà validé aujourd'hui se rouvre AVEC ses quantités.
-     Sans cela, corriger une seule ligne obligeait à tout recompter : les
-     champs repartaient vides et une validation partielle aurait effacé le
-     reste, puisque l'inventaire remplace la référence au lieu de la compléter. */
+  /* Un inventaire validé est VERROUILLÉ, pas modifiable au fil de l'eau.
+     Le geste correct est celui des commandes : c'est figé, et si un doute
+     surgit — « il devait y avoir du citron » — on rouvre explicitement, on
+     corrige, on revalide. L'ouverture permanente laissait croire qu'on peut
+     tripoter les chiffres après coup, ce qui n'a pas sa place sur un registre.
+
+     Et ça ne vaut QUE pour la journée en cours : le lendemain, on ne revient
+     pas sur l'inventaire de la veille, on en fait un nouveau. */
   const dejaFaitAujourdhui = precedent && precedent.jour === today();
   if (dejaFaitAujourdhui) Object.assign(saisie, precedent.lignes || {});
   const secDejaFait = secPrec && secPrec.jour === today();
   if (secDejaFait) Object.assign(saisieSec, secPrec.lignes || {});
+
+  /* Verrouillé tant que la personne n'a pas demandé à rouvrir. */
+  let ouvertFroid = !dejaFaitAujourdhui;
+  let ouvertSec   = !secDejaFait;
 
   /* Reprise d'un comptage interrompu : cinquante lignes à remplir debout dans
      une chambre froide, et l'onglet peut être déchargé entre deux.
@@ -664,17 +677,27 @@ V.inventaire = async function () {
     $('#vue-actions').innerHTML = '';
     const dernier = partie === 'froid' ? precedent : secPrec;
     const dejaCeJour = partie === 'froid' ? dejaFaitAujourdhui : secDejaFait;
+    const ouvert = partie === 'froid' ? ouvertFroid : ouvertSec;
+
     $('#page').innerHTML =
-      carte('<h2>' + (dejaCeJour ? 'Corriger l’inventaire' : 'Faire l’inventaire') + '</h2>' +
-        '<div class="cs">' + (dejaCeJour
-          ? 'Les quantités comptées sont préremplies. Modifiez ce qu’il faut, ' +
-            'puis revalidez — le reste est conservé.'
+      carte('<h2>' + (dejaCeJour && !ouvert ? 'Inventaire du jour'
+                    : ouvert && dejaCeJour ? 'Corriger l’inventaire'
+                    : 'Faire l’inventaire') + '</h2>' +
+        '<div class="cs">' + (dejaCeJour && !ouvert
+          ? 'Compté et enregistré. Rouvrez si un chiffre doit être corrigé.'
+          : ouvert && dejaCeJour
+          ? 'Modifiez ce qu’il faut, puis revalidez.'
           : 'Comptez ce qui est physiquement présent. Ce relevé devient la ' +
             'nouvelle référence.') + '</div>' +
         (dernier
-          ? '<p class="rappel" style="margin-top:12px">' +
-            (dejaCeJour ? 'Validé aujourd’hui à ' + heure(dernier.at) : 'Dernier comptage : ' + fmtD(dernier.jour)) +
-            (dernier.par ? ' par ' + esc(dernier.par) : '') + '</p>'
+          ? (dejaCeJour
+            ? '<div class="alerte ok" style="margin-top:12px">' +
+              '<div style="flex:1;min-width:0"><b>Validé à ' + heure(dernier.at) + '</b>' +
+              '<p>Par ' + esc(dernier.par || '—') + '.</p></div>' +
+              (ouvert ? '' : '<button class="btn clair sm" id="inv-rouvrir">Rouvrir</button>') +
+              '</div>'
+            : '<p class="rappel" style="margin-top:12px">Dernier comptage : ' +
+              fmtD(dernier.jour) + (dernier.par ? ' par ' + esc(dernier.par) : '') + '</p>')
           : ''), 'solide') +
 
       '<div class="tseg">' +
@@ -693,11 +716,38 @@ V.inventaire = async function () {
       '<div class="champ" style="margin-top:18px"><label class="f">Note</label>' +
       '<textarea id="inv-note" placeholder="Ce qui explique un écart, un bac abîmé, un doute."></textarea></div>' +
 
-      '<button class="btn menthe bloc xl" id="inv-ok" style="margin-top:16px">' +
-      (dejaCeJour
-        ? (partie === 'froid' ? 'Revalider la chambre froide' : 'Revalider le sec')
-        : (partie === 'froid' ? 'Valider la chambre froide'   : 'Valider le sec')) +
-      '</button>';
+      '<button class="btn menthe bloc xl" id="inv-ok" style="margin-top:16px"' +
+      (ouvert ? '' : ' disabled') + '>' +
+      (!ouvert ? 'Inventaire verrouillé'
+       : dejaCeJour
+       ? (partie === 'froid' ? 'Revalider la chambre froide' : 'Revalider le sec')
+       : (partie === 'froid' ? 'Vérifier et valider la chambre froide' : 'Vérifier et valider le sec')) +
+      '</button>' +
+
+      /* Historique, comme sur la traçabilité : savoir qui a compté quoi et
+         quand, sans avoir à fouiller le journal d'activité. */
+      (historique.length
+        ? '<div class="entete" style="margin-top:22px"><h3>Inventaires précédents</h3></div>' +
+          '<div class="stack">' + historique.slice().reverse().slice(0, 12).map(h => {
+            const t = totauxStock(h.lignes || {});
+            return '<div class="invl">' +
+              '<span class="invn">' + fmtD(h.jour) +
+              '<small>' + esc(h.par || '—') + ' · ' + heure(h.at) +
+              (h.manquants ? ' · ' + h.manquants + ' manquant(s)' : '') + '</small></span>' +
+              '<span class="invc">' + t.bacs + ' bacs · ' + n1(t.kg) + ' kg</span></div>';
+          }).join('') + '</div>'
+        : '');
+
+    const bRouvrir = $('#inv-rouvrir');
+    if (bRouvrir) bRouvrir.onclick = () => {
+      confirmer('Rouvrir l’inventaire ?',
+        'Les quantités comptées restent en place. Vous pourrez les corriger, ' +
+        'puis il faudra revalider pour enregistrer.',
+        'Rouvrir', () => {
+          if (partie === 'froid') ouvertFroid = true; else ouvertSec = true;
+          dessiner();
+        });
+    };
 
     $$('[data-partie]').forEach(b => b.onclick = () => {
       if (b.dataset.partie === partie) return;
@@ -705,18 +755,26 @@ V.inventaire = async function () {
       dessiner();
     });
 
-    $$('[data-inv]').forEach(i => i.oninput = () => {
-      if (i.value === '') delete saisie[i.dataset.inv];
-      else saisie[i.dataset.inv] = i.value;
-      garderBrouillon();
-      majTotaux();
+    $$('[data-inv]').forEach(i => {
+      i.disabled = !ouvert;
+      i.oninput = () => {
+        if (i.value === '') delete saisie[i.dataset.inv];
+        else saisie[i.dataset.inv] = i.value;
+        garderBrouillon();
+        majTotaux();
+      };
     });
-    $$('[data-sec]').forEach(i => i.oninput = () => {
-      if (i.value === '') delete saisieSec[i.dataset.sec];
-      else saisieSec[i.dataset.sec] = i.value;
-      garderBrouillon();
-      majTotaux();
+    $$('[data-sec]').forEach(i => {
+      i.disabled = !ouvert;
+      i.oninput = () => {
+        if (i.value === '') delete saisieSec[i.dataset.sec];
+        else saisieSec[i.dataset.sec] = i.value;
+        garderBrouillon();
+        majTotaux();
+      };
     });
+    const zn = $('#inv-note');
+    if (zn) zn.disabled = !ouvert;
     majTotaux();
 
     const br = $('#inv-rares');
