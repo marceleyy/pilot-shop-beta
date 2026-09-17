@@ -432,6 +432,9 @@ const FICHES = [
     id: 'f04', cat: 'Produit', titre: 'Mise en vitrine d’un bac', icone: '🍦', duree: '3 min',
     resume: 'Le numéro de lot se saisit à l’ouverture, pas à la livraison.',
     etapes: [
+      /* −20 °C est bien le bas de la cible de la chambre froide, qui vise
+         −20 à −17. J'avais « corrigé » en −18 sur un souvenir : vérification
+         faite dans ENCEINTES, la fiche avait raison. */
       'Sortir le bac de la chambre froide −20 °C.',
       'Contrôler l’aspect, l’absence de cristaux et l’intégrité du film.',
       'Scanner ou saisir le numéro de lot dans l’application.',
@@ -462,7 +465,11 @@ const FICHES = [
       'Éditer le totalisateur du TPE.',
       'Compter les espèces, fonds de caisse déduit.',
       'Saisir CB, espèces et TPE dans l’application.',
-      'Expliquer tout écart supérieur à 10 € dans le commentaire.'
+      /* Le seuil annoncé ici était de 10 € alors que l'application alerte à
+         partir de 5 € : la fiche autorisait donc à ne pas expliquer un écart
+         que l'écran signale en rouge. Deux consignes contradictoires sur le
+         même geste, et c'est celle du papier qu'on retient. */
+      'Expliquer tout écart supérieur à 5 € dans le commentaire.'
     ],
     securite: 'Aucun retrait d’espèces sans le noter.',
     validite: 'Chaque soir'
@@ -974,7 +981,7 @@ const CHECKLISTS = {
     { bloc: 'Fermeture', taches: [
       { id:'f01', t:'Ajouter les quarts de glace' },
       { id:'f02', t:'Nettoyer les bacs de glace' },
-      { id:'f03', t:'Ranger les glaces et macarons dans le frigo −13 °C' },
+      { id:'f03', t:'Ranger les glaces et macarons dans l’armoire froide −13 °C' },
       { id:'f04', t:'Éteindre la vitrine et nettoyer les surfaces en inox' },
       { id:'f05', t:'Nettoyer la machine à chantilly' },
       { id:'f06', t:'Éteindre les appareils à crêpes et gaufres' },
