@@ -924,6 +924,11 @@ function extraireLignesBL(texte) {
     const design = (mLot ? avant.slice(0, avant.length - mLot[0].length) : avant).trim();
     if (design.length < 4) return;
 
+    /* Lignes qui ne sont pas des produits : frais de port, total, sous-total.
+       Sans ce filtre, le « Total Litres = 348,00 » devenait une ligne de 348
+       unités, et les frais de port un article à réceptionner. */
+    if (/^total|total\s+litres|frais\s+de\s+port|emballage|palette\s*n|^page\b/i.test(design)) return;
+
     /* Contenance : « 3 litres » pour un bac, « (14x6p) » pour un carton. */
     const mL = design.match(/(\d+)\s*litres?/i);
     const mC = design.match(/\((\d+)\s*[x×]\s*(\d+)\s*p\)/i);
