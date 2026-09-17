@@ -116,6 +116,20 @@ async function stockInsuffisant(cle) {
 }
 
 async function ajouterMouvement(type, cle, qte, extra) {
+  /* Garde-fous d'entrée. Une quantité négative sur une réception équivaut à
+     une sortie déguisée, et un type non prévu ne compterait nulle part :
+     mieux vaut refuser que d'écrire une ligne que le calcul ignorera. */
+  const TYPES = ['reception', 'ouverture', 'perte'];
+  if (TYPES.indexOf(type) < 0) {
+    console.error('Type de mouvement refusé :', type);
+    return null;
+  }
+  const q = Math.abs(num(qte));
+  if (!q) {
+    console.warn('Mouvement de quantité nulle, ignoré :', type, cle);
+    return null;
+  }
+
   const cm = cleMois();
   let l = await lireMois(cm);
 
@@ -132,7 +146,7 @@ async function ajouterMouvement(type, cle, qte, extra) {
   }
 
   /* Champs courts : t=type, c=clé, q=quantité, a=horodatage, e=employé, l=lot */
-  const m = { t:type, c:cle, q:num(qte), a:nowISO(),
+  const m = { t:type, c:cle, q:q, a:nowISO(),
               e: STATE.user ? STATE.user.id : null };
   if (extra && extra.lot) m.l = extra.lot;
   if (extra && extra.bl)  m.b = extra.bl;
@@ -331,8 +345,15 @@ async function stockReel() {
     if (!c) return;
     if (dateInv && at <= dateInv) return;   // déjà compris dans l'inventaire
     if (out[c] === undefined) out[c] = 0;
-    if (type === 'reception') out[c] += q;
-    else if (type === 'ouverture' || type === 'perte') out[c] -= q;
+    /* Les trois types sont nommés explicitement, et rien d'autre n'agit sur le
+       stock. La version précédente décrémentait pour TOUT ce qui n'était pas une
+       réception : le jour où j'ajouterai un « transfert » ou un « retour
+       fournisseur » sans toucher à cette ligne, il aurait faussé le stock en
+       silence — le pire type d'erreur, celui qu'on ne voit qu'à l'inventaire. */
+    if (type === 'reception')      out[c] += q;
+    else if (type === 'ouverture') out[c] -= q;
+    else if (type === 'perte')     out[c] -= q;
+    else console.warn('Type de mouvement inconnu, ignoré :', type, c);
   });
 
   const resultat = { articles: out, inventaire: inv, depuis: inv ? inv.jour : null };
