@@ -1007,8 +1007,21 @@ function renderNav() {
    }
    
    async function etatNettoyage(jour) {
-     const rec = await DB.get('clean:' + jour, {});
-     const liste = tachesDuJour(jour);
+     /* L'écran Nettoyage écrit dans « hebdo: » depuis qu'il n'affiche plus que
+        les tâches hebdomadaires du jour. Cette fonction lisait encore « clean: »,
+        la clé de l'ancien registre quotidien : elle annonçait donc « 0 sur 17 »
+        alors que l'équipe avait tout fait, et la clôture de période était
+        bloquée par un reproche infondé.
+        On lit les deux — l'ancienne clé porte encore l'historique. */
+     const hebdo   = await DB.get('hebdo:' + jour, {});
+     const ancien  = await DB.get('clean:' + jour, {});
+     const rec = Object.assign({}, ancien, hebdo);
+
+     /* La liste de référence suit la même logique : ce sont les tâches
+        hebdomadaires programmées ce jour-là qu'il faut compter. */
+     const liste = (typeof tachesHebdoDuJour === 'function')
+       ? tachesHebdoDuJour(jour)
+       : tachesDuJour(jour);
      const faits = liste.filter(t => rec[t.id] && rec[t.id].ok).length;
      return { rec:rec, liste:liste, faits:faits, total:liste.length };
    }
