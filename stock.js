@@ -452,17 +452,20 @@ async function recomptageDemande() {
     num(articles[c]) < 0 && litArticle(c).famille === 'glace');
   if (!negatifs.length) return null;
 
-  /* Un recomptage fait après la détection solde la demande. */
-  const dejaFait = inventaire && negatifs.every(c => {
-    const l = inventaire.lignes || {};
-    return l[c] !== undefined && num(l[c]) >= 0;
-  });
-  if (dejaFait) return null;
+  /* Un recomptage ne solde la demande que s'il a eu lieu APRÈS le négatif.
+     La version précédente vérifiait seulement que l'article figurait dans
+     l'inventaire à une valeur positive ou nulle. Or un parfum compté à zéro
+     puis ouvert donne −1, et ce comptage est bien antérieur au problème :
+     l'alerte restait donc muette précisément dans le cas qu'elle devait
+     détecter. Vérifié sur le Citron bio à −1, aucun recomptage n'était demandé.
 
+     La seule preuve qu'un recomptage a eu lieu depuis, c'est qu'il ne reste
+     plus de négatif. Et on vient de constater qu'il y en a. */
   return {
     articles: negatifs,
     combien: negatifs.reduce((s, c) => s + Math.abs(num(articles[c])), 0),
-    exemple: libelleArticle(negatifs[0])
+    exemple: libelleArticle(negatifs[0]),
+    depuis: inventaire ? inventaire.jour : null
   };
 }
 
@@ -475,8 +478,9 @@ async function tacheRecomptage() {
     t: 'Recompter la chambre froide — ' + d.combien + ' bac(s) manquant(s)',
     lien: 'inventaire',
     urgent: true,
-    detail: d.exemple + ' et ' + (d.articles.length - 1) + ' autre(s). ' +
-            'Un bac a été ouvert sans être scanné.'
+    detail: d.exemple + (d.articles.length > 1
+      ? ' et ' + (d.articles.length - 1) + ' autre(s)' : '') +
+      '. Un bac a été ouvert sans être scanné, ou une livraison n’a pas été saisie.'
   };
 }
 
