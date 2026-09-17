@@ -22,6 +22,52 @@
 
 /* Devine la famille d'un produit d'après son libellé. En cas de doute, on
    retombe sur la glace : c'est 90 % des références d'une livraison Jetfreeze. */
+/* Reconnaît le parfum dans une désignation de bon de livraison.
+   « Glace Cerise Griotte 3 litres » doit devenir « Amarena », pas la phrase
+   entière : sans ça la réception crée un article fantôme que l'inventaire ne
+   retrouvera jamais, et le stock se dédouble silencieusement.
+
+   Les désignations Jetfreeze n'emploient pas les mêmes mots que notre
+   catalogue : Cerise Griotte pour Amarena, Cioccolato pour Chocolat noir,
+   Limone Bio pour Citron bio. */
+const DESIGNATION_PARFUM = [
+  [/cerise|griotte|amarena/i,              'Amarena'],
+  [/banan/i,                               'Banane'],
+  [/caff|café|cafe\b|coffee/i,             'Café'],
+  [/caramel/i,                             'Caramel au beurre salé'],
+  [/cioccolato amorino|chocolat amorino/i, 'Chocolat noir'],
+  [/equateur|équateur/i,                   'Chocolat équateur'],
+  [/chocolat.*bio|cioccolato.*bio/i,       'Chocolat bio (sorbet)'],
+  [/limone.*b|citron bio/i,                'Citron bio'],
+  [/basilic|basilico/i,                    'Citron vert basilic'],
+  [/dulce|leche/i,                         'Dulce de leche'],
+  [/fragola|fraise|strawberr/i,            'Fraise'],
+  [/lampone|framboise|raspberr/i,          'Framboise'],
+  [/passion/i,                             'Fruit de la passion'],
+  [/inimitable/i,                          'Inimitable'],
+  [/mango|mangue/i,                        'Mangue'],
+  [/nocciola|noisette|hazelnut/i,          'Noisette'],
+  [/cocco|coco\b/i,                        'Noix de coco'],
+  [/sanguin|arancia/i,                     'Orange sanguine'],
+  [/pista/i,                               'Pistache'],
+  [/stracciatella/i,                       'Stracciatella'],
+  [/tiramis/i,                             'Tiramisu'],
+  [/vanig|vanille|vaniglia|vanilla/i,      'Vanille'],
+  [/yogurt|yaourt/i,                       'Yogurt']
+];
+
+function parfumDepuisDesignation(nom) {
+  const n = String(nom || '');
+  for (const [re, p] of DESIGNATION_PARFUM) if (re.test(n)) return p;
+  return null;
+}
+
+/* Taille du bac lue dans la désignation : « Glace Café 3 litres ». */
+function tailleDepuisDesignation(nom) {
+  const m = String(nom || '').match(/(\d+)\s*litres?/i);
+  return m ? +m[1] : null;
+}
+
 function devinerFamille(nom) {
   const n = String(nom || '').toLowerCase();
   if (/macaron/.test(n) && /grandioso/.test(n)) return FAMILLES_PRODUIT[2];

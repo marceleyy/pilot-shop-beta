@@ -42,7 +42,12 @@ const OCR = {
   batch:         /(\d{5})\s*([A-Z])/g,
   /* Viseur intégré : cadre de visée et recadrage sur la zone utile. */
   viseur:        true,         // false = retour à l'appareil photo natif
+  /* Deux cadres, parce que ce sont deux objets différents. Une étiquette de bac
+     est large et basse ; un bon de livraison est une feuille A4 en portrait.
+     Avec un seul cadre en paysage, le bon débordait en haut et en bas et seule
+     sa moitié centrale était photographiée — la moitié des lignes manquait. */
   cadre:         { largeur: 0.86, ratio: 1.55 },  // part de l'écran, largeur/hauteur
+  cadreBL:       { largeur: 0.92, ratio: 0.707 }, // A4 portrait : 210/297
   margeCadre:    0.05,         // tolérance ajoutée autour du cadre au recadrage
   _worker: null,
   _minuteur: null
@@ -578,18 +583,21 @@ function extraireChamps(texte) {
    ========================================================================== */
 let fluxCamera = null;
 
-function geometrieCadre() {
+function geometrieCadre(type) {
+  /* Le bon de livraison a son propre cadre, en portrait. */
+  const cfg = (type === 'bl' && OCR.cadreBL) ? OCR.cadreBL : OCR.cadre;
   const L = window.innerWidth, H = window.innerHeight;
-  let w = Math.round(L * OCR.cadre.largeur);
-  let h = Math.round(w / OCR.cadre.ratio);
+  let w = Math.round(L * cfg.largeur);
+  let h = Math.round(w / cfg.ratio);
 
   /* En paysage sur téléphone, la largeur commande une hauteur supérieure à
      l'écran : sur un iPhone 13 tenu à l'horizontale, le cadre débordait de
      55 pixels vers le haut et son bord était invisible. On le borne à la
-     hauteur disponible, marges comprises, en conservant le rapport. */
-  const hMax = Math.round(H * 0.70);
-  if (h > hMax) { h = hMax; w = Math.round(h * OCR.cadre.ratio); }
-  if (w > L - 24) { w = L - 24; h = Math.round(w / OCR.cadre.ratio); }
+     hauteur disponible, marges comprises, en conservant le rapport.
+     Pour un A4 en portrait c'est la hauteur qui commande presque toujours. */
+  const hMax = Math.round(H * (type === 'bl' ? 0.74 : 0.70));
+  if (h > hMax) { h = hMax; w = Math.round(h * cfg.ratio); }
+  if (w > L - 24) { w = L - 24; h = Math.round(w / cfg.ratio); }
 
   const x = Math.round((L - w) / 2);
   /* Décalage vers le haut pour laisser la place aux boutons, mais jamais
@@ -597,8 +605,8 @@ function geometrieCadre() {
   const y = Math.max(12, Math.round((H - h) / 2 - H * 0.04));
   return { x: x, y: y, w: w, h: h };
 }
-function placerCadre() {
-  const g = geometrieCadre(), c = document.getElementById('vs-cadre');
+function placerCadre(type) {
+  const g = geometrieCadre(type), c = document.getElementById('vs-cadre');
   if (!c) return g;
   c.style.left = g.x + 'px'; c.style.top = g.y + 'px';
   c.style.width = g.w + 'px'; c.style.height = g.h + 'px';
@@ -614,7 +622,7 @@ function fermerViseur() {
 
 /* Résout avec un canvas recadré, la chaîne 'fichier' si la personne préfère la
    galerie, ou null si elle annule. Rejette si la caméra est indisponible. */
-function ouvrirViseur(aide) {
+function ouvrirViseur(aide, type) {
   return new Promise(async (resolve, reject) => {
     const v = document.getElementById('viseur');
     if (!OCR.viseur || !v || !navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
@@ -634,8 +642,8 @@ function ouvrirViseur(aide) {
     const t = document.getElementById('vs-titre');
     if (t && aide) t.textContent = aide;
     v.classList.add('on');
-    placerCadre();
-    const surRedim = () => placerCadre();
+    placerCadre(type);
+    const surRedim = () => placerCadre(type);
     window.addEventListener('resize', surRedim);
     window.addEventListener('orientationchange', surRedim);
 
@@ -654,7 +662,7 @@ function ouvrirViseur(aide) {
       fl.classList.add('on'); setTimeout(() => fl.classList.remove('on'), 60);
       vibrer(UI.vibration.ok);
 
-      const g = geometrieCadre();
+      const g = geometrieCadre(type);
       const vw = video.videoWidth, vh = video.videoHeight;
       if (!vw || !vh) return finir(null);
 
@@ -767,7 +775,7 @@ function scannerPhoto(type) {
 
     /* 1. Viseur intégré, avec recadrage exact sur la zone visée */
     try {
-      const vu = await ouvrirViseur(aide);
+      const vu = await ouvrirViseur(aide, type);
       if (vu === null) return resolve(null);
       if (vu && vu.canvas) return analyserCanvas(type, vu.canvas, vu.nom, resolve);
       /* vu === 'fichier' : la personne préfère la galerie, on enchaîne */
@@ -872,6 +880,73 @@ function libererCanvas(cv) {
 /* =============================================================================
    7. CONFIRMATION — rien n'entre dans un registre sans relecture humaine
    ========================================================================== */
+/* -----------------------------------------------------------------------------
+   LECTURE D'UN BON DE LIVRAISON
+   Un bon n'est pas une étiquette : c'est un tableau de vingt lignes, chacune
+   avec sa référence, sa désignation, son lot et sa quantité. Jusqu'ici on lui
+   appliquait l'extraction d'étiquette, qui cherche UN lot — d'où l'échec
+   systématique constaté en boutique.
+
+   Relévé sur un bon Jetfreeze réel du 16/09 :
+     $AMARENA25  Glace Cerise Griotte 3 litres      14002A   12,00
+     CREPE       Crêpes de Froment 31cm (14x6p)     210261    4,00
+     MACCIOC     Macaron à la glace Cioccolato      L5260A    2,00
+
+   Trois formats de lot coexistent : 14002A pour les glaces, L5260A pour les
+   macarons, 210261 pour les crêpes. La taille du bac est dans la désignation,
+   la quantité dans sa colonne : on n'a donc PAS besoin de deviner combien de
+   bacs contient un carton, le bon le dit.
+   -------------------------------------------------------------------------- */
+function extraireLignesBL(texte) {
+  if (!texte) return { lignes: [], bl: null, total: null };
+  const brut = String(texte);
+
+  /* Numéro du bon et total en litres, pour recouper la saisie. */
+  const mBL = brut.match(/\bBL\s*(\d{5,8})\b/i);
+  const mTot = brut.match(/Total\s+Litres[^\d]*(\d+[.,]?\d*)/i);
+
+  const lignes = [];
+  brut.split(/[\r\n]+/).forEach(l => {
+    const t = l.replace(/\s+/g, ' ').trim();
+    if (t.length < 12) return;
+
+    /* La quantité est le dernier nombre décimal de la ligne. */
+    const mQ = t.match(/(\d+[.,]\d{2})\s*$/);
+    if (!mQ) return;
+    const qte = parseFloat(mQ[1].replace(',', '.'));
+    if (!isFinite(qte) || qte <= 0) return;
+
+    /* Le lot précède la quantité. Trois formats acceptés. */
+    const avant = t.slice(0, t.length - mQ[0].length).trim();
+    const mLot = avant.match(/([A-Z]?\d{4,6}[A-Z]?)\s*$/);
+    const lot = mLot ? mLot[1] : '';
+
+    const design = (mLot ? avant.slice(0, avant.length - mLot[0].length) : avant).trim();
+    if (design.length < 4) return;
+
+    /* Contenance : « 3 litres » pour un bac, « (14x6p) » pour un carton. */
+    const mL = design.match(/(\d+)\s*litres?/i);
+    const mC = design.match(/\((\d+)\s*[x×]\s*(\d+)\s*p\)/i);
+    const mU = design.match(/\((\d+)\s*p\)/i);
+
+    lignes.push({
+      designation: design.replace(/^[\$A-Z0-9]+\s+/, '').trim() || design,
+      reference: (design.match(/^([\$A-Z0-9]+)\s/) || [])[1] || '',
+      lot: lot,
+      qte: qte,
+      taille: mL ? +mL[1] : null,
+      /* Unités par colis, quand le conditionnement est indiqué. */
+      parColis: mC ? (+mC[1] * +mC[2]) : (mU ? +mU[1] : null)
+    });
+  });
+
+  return {
+    lignes: lignes,
+    bl: mBL ? 'BL' + mBL[1] : null,
+    total: mTot ? parseFloat(mTot[1].replace(',', '.')) : null
+  };
+}
+
 function confirmerLecture(type, r, apercu, resolve) {
   const sur  = r.confiance >= 0.72 && r.lot && !r.corrige;
   const rien = !r.lot && !r.parfum;
