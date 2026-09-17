@@ -15,7 +15,14 @@
    const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c =>
      ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
    
-   const num = v => { const x = parseFloat(String(v).replace(',', '.')); return isFinite(x) ? x : 0; };
+   /* Conversion tolérante aux saisies réelles : virgule française, signe euro
+      collé, espace insécable venu d'un copier-coller. isFinite écarte déjà
+      Infinity, qui contaminerait tout total où il entrerait. */
+   const num = v => {
+     if (v === null || v === undefined) return 0;
+     const x = parseFloat(String(v).replace(/[\s\u00a0\u202f€]/g, '').replace(',', '.'));
+     return isFinite(x) ? x : 0;
+   };
    /* Une décimale, à la française. La version précédente rendait « 1234.6 » :
       point décimal anglais et aucun séparateur de milliers, alors que eur()
       juste à côté affiche « 1 234,56 € ». Les deux se côtoient dans l'écran
@@ -1034,8 +1041,16 @@ function renderNav() {
    
    function etatTemp(e, v) {
      if (v === 'HS') return '';          // enceinte hors service : ni conforme ni critique
-     if (v === '' || v === null || v === undefined || isNaN(v)) return '';
+     /* Une chaîne faite d'espaces n'est PAS une mesure. Sans le trim,
+        Number(' ') vaut 0 : un espace tapé par erreur dans le champ d'une
+        vitrine donnait « critique » — alerte rouge et action corrective exigée
+        pour un champ que personne n'avait rempli. Une fausse alerte use la
+        vigilance plus sûrement qu'une alerte absente. */
+     if (v === null || v === undefined) return '';
+     if (typeof v === 'string' && v.trim() === '') return '';
+     if (isNaN(v)) return '';
      v = Number(v);
+     if (!isFinite(v)) return '';
      /* Comparaison large et non stricte : une enceinte pile à sa limite critique
         doit alerter. Avec un > strict, une vitrine à −10 °C tout juste était
         classée « hors cible » et n'exigeait aucune action corrective. */
