@@ -1150,6 +1150,20 @@ body::before{display:none!important}
 .detail-l .num.fort{font-size:19px;font-weight:700}
 .detail-sep{height:1px;background:var(--line);margin:8px 0}
 
+/* Pastilles de choix : famille de produit, taille de bac. J'ai écrit le HTML
+   avec les classes « pastilles » et « pas » sans jamais les définir ici.
+   Résultat : des boutons sans bordure ni fond, qui ressemblent à du texte
+   brut — Eve a cru qu'il était impossible de choisir Crêpe, alors que la zone
+   cliquable existait mais ne se voyait pas. */
+.pastilles{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px}
+.pas{min-height:44px;padding:0 16px;border-radius:12px;
+  border:1px solid var(--line-fort);background:var(--blanc);
+  color:var(--encre);font-size:14.5px;font-weight:600;cursor:pointer;
+  display:inline-flex;align-items:center;justify-content:center;
+  white-space:nowrap;transition:background .12s,border-color .12s}
+.pas:active{transform:scale(.96)}
+.pas.on{background:var(--encre);border-color:var(--encre);color:#fff}
+
 /* --- 21. Impression : registre sanitaire -------------------------------- */
 #printview{display:none}
 @media print{
