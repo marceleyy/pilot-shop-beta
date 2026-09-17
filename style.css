@@ -1164,6 +1164,14 @@ body::before{display:none!important}
 .pas:active{transform:scale(.96)}
 .pas.on{background:var(--encre);border-color:var(--encre);color:#fff}
 
+/* Numéro d'étape des tâches hebdomadaires. Comme les pastilles, la classe était
+   utilisée sans être définie : le chiffre s'affichait collé au libellé, sans
+   pastille ni alignement. */
+.stepnum{flex:0 0 auto;width:26px;height:26px;border-radius:8px;
+  background:var(--fond-2);color:var(--ardoise);
+  font-size:13px;font-weight:700;font-variant-numeric:tabular-nums;
+  display:inline-flex;align-items:center;justify-content:center;margin-top:1px}
+
 /* --- 21. Impression : registre sanitaire -------------------------------- */
 #printview{display:none}
 @media print{
