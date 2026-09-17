@@ -772,7 +772,15 @@ V.inventaire = async function () {
       const enStock = tailles.reduce((s, t) => s + num(articles[cleArticle('glace', p, t)]), 0);
       return '<div class="invp">' +
         '<div class="invp-h"><b>' + esc(p) + '</b>' +
-        (enStock ? '<span class="invc">' + enStock + ' en stock</span>' : '') + '</div>' +
+        /* Le détail par taille, pas seulement le total. « 6 en stock » ne dit pas
+           s'il s'agit de six bacs de 3 L ou d'un mélange — or c'est précisément
+           ce qu'on vérifie, bac par bac, devant la chambre froide. Corrigé sur
+           l'écran Stock, oublié ici. */
+        (enStock
+          ? '<span class="invc">' + tailles.filter(t => num(articles[cleArticle('glace', p, t)]))
+              .map(t => num(articles[cleArticle('glace', p, t)]) + '×' + t + ' L').join('  ') +
+            '</span>'
+          : '') + '</div>' +
         '<div class="invp-t">' + tailles.map(t => {
           const c = cleArticle('glace', p, t);
           return '<label><span>' + t + ' L</span>' +
