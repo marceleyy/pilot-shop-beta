@@ -65,10 +65,28 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
      if (!p) return null;
      const cle = 'preuves:' + jour;
      const l = await DB.get(cle, []);
-     if (l.length >= PREUVE.maxParJour) {
-       toast('Trop de photos aujourd’hui — les plus anciennes sont conservées', 'erreur');
+
+     /* Le plafond au NOMBRE ne protégeait pas : douze photos de 82 Ko font
+        984 Ko, au-dessus du seuil de 879 Ko au-delà duquel une clé cesse d'être
+        envoyée à Supabase. La journée entraînait alors sa propre disparition,
+        en silence. Mesuré le 14 septembre : 511 Ko pour neuf photos, il n'en
+        restait que six avant blocage.
+        On borne donc au poids, avec une marge sous le seuil. */
+     const POIDS_MAX = Math.round(OFFLINE.tailleMaxOctets * 0.65);   // ~570 Ko
+     const poidsActuel = JSON.stringify(l).length;
+     const poidsNouvelle = (p.img || '').length;
+
+     if (poidsActuel + poidsNouvelle > POIDS_MAX) {
+       toast('Trop de photos aujourd’hui — celle-ci ne peut pas être ajoutée', 'erreur');
+       await feed('warn', 'Photo refusée : la journée atteint ' +
+         Math.round(poidsActuel / 1024) + ' Ko. Supprimez-en une pour en reprendre.');
        return null;
      }
+     if (l.length >= PREUVE.maxParJour) {
+       toast('Maximum de ' + PREUVE.maxParJour + ' photos par jour atteint', 'erreur');
+       return null;
+     }
+
      l.push(Object.assign({ id:uid(), tache:cleTache, libelle:libelle }, p));
      await DB.set(cle, l);
      await feed('ok', STATE.user.prenom + ' a photographié : ' + libelle);
