@@ -1018,12 +1018,14 @@ function renderNav() {
      const rec = Object.assign({}, ancien, hebdo);
 
      /* La liste de référence suit la même logique : ce sont les tâches
-        hebdomadaires programmées ce jour-là qu'il faut compter. */
+        hebdomadaires programmées ce jour-là qu'il faut compter.
+        tachesHebdoDuJour est ASYNCHRONE — elle lit le plan du manager en base.
+        Sans await, elle rendait une promesse et filter() n'existait pas. */
      const liste = (typeof tachesHebdoDuJour === 'function')
-       ? tachesHebdoDuJour(jour)
+       ? await tachesHebdoDuJour(jour)
        : tachesDuJour(jour);
-     const faits = liste.filter(t => rec[t.id] && rec[t.id].ok).length;
-     return { rec:rec, liste:liste, faits:faits, total:liste.length };
+     const faits = (liste || []).filter(t => rec[t.id] && rec[t.id].ok).length;
+     return { rec:rec, liste:liste || [], faits:faits, total:(liste || []).length };
    }
    
    /* =============================================================================
