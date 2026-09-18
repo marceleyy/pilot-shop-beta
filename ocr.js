@@ -952,7 +952,105 @@ function extraireLignesBL(texte) {
   };
 }
 
+/* -----------------------------------------------------------------------------
+   VRAISEMBLANCE D'UN NUMÉRO DE LOT
+   Tous les lots Amorino observés commencent par 135, 136, 139, 140 ou 141 :
+   13539A, 13906A, 13996A, 14002A, 14109A… Un « 84111F » lu à 21 % de confiance
+   n'en est pas un, et l'afficher dans le champ invite à le valider — ce qui
+   inscrit un numéro inventé dans un registre sanitaire.
+
+   On ne REFUSE pas le lot : deux fournisseurs, deux formats, et la règle peut
+   changer. On refuse seulement de le PROPOSER quand tout concorde pour dire
+   qu'il est faux : confiance basse ET préfixe inconnu.
+   -------------------------------------------------------------------------- */
+function lotVraisemblable(lot) {
+  if (!lot) return false;
+  const L = String(lot).toUpperCase();
+  /* Format Amorino : cinq chiffres + une lettre, série 135xx à 141xx. */
+  if (/^1[34]\d{3}[A-Z]$/.test(L)) return true;
+  /* Format macarons : L + cinq chiffres + lettre. */
+  if (/^L\d{4}[A-Z]$/.test(L)) return true;
+  /* Format crêpes et gaufres : six chiffres sans lettre. */
+  if (/^\d{6}$/.test(L)) return true;
+  /* Crème fondente IRCA : huit chiffres. */
+  if (/^\d{8}$/.test(L)) return true;
+  return false;
+}
+
+/* -----------------------------------------------------------------------------
+   ÉTIQUETTE DE CARTON
+   Différente de celle d'un bac : elle porte le conditionnement et la date
+   d'expiration du produit fermé.
+
+   Relévé sur un carton Amorino réel :
+     Production Date 29/06/2026 · BBD 27/06/2028 · LOT N° 13996A
+     NET WEIGHT 10,1 KG · 4 x 3 Litre · $CARAMB25 · SALTED BUTTER CARAMEL
+
+   Le « 4 x 3 Litre » dit quatre bacs de trois litres : on n'a plus à deviner
+   combien de bacs contient un carton, ni à scanner les quatre un par un.
+   Et le BBD est l'horloge du produit FERMÉ, celle qui court depuis la
+   livraison — distincte de la DLC après ouverture que l'application suit déjà.
+   C'est elle qui manquait quand un carton de macarons vanille a périmé sans
+   que rien ne prévienne.
+   -------------------------------------------------------------------------- */
+function extraireCarton(texte) {
+  if (!texte) return null;
+  const T = String(texte).toUpperCase();
+
+  /* Conditionnement : « 4 x 3 Litre », « 4x3 L », « 2 × 5 litres ». */
+  const mC = T.match(/(\d{1,2})\s*[X×]\s*(\d{1,2})\s*L(?:ITRES?)?\b/);
+  const mW = T.match(/(\d{1,3}[.,]\d)\s*KG/);
+  const mR = T.match(/\$([A-Z0-9]{3,14})/);
+
+  const iso = d => { const p = d.split(/[\/.\-]/); return p[2] + '-' + p[1] + '-' + p[0]; };
+
+  /* Les dates. L'ancrage sur le libellé ne suffit pas : l'étiquette Amorino est
+     en COLONNES — les libellés « Production Date / BBD / LOT N° » sur une ligne,
+     les valeurs « 29/06/2026  27/06/2028  13996A » sur la suivante. Chercher
+     « BBD » suivi d'une date rendait donc toujours rien.
+
+     La règle qui tient : parmi les dates de l'étiquette, la PLUS LOINTAINE est
+     l'expiration et la plus proche la production. Un produit ne périme jamais
+     avant d'être fabriqué. */
+  const brutes = (T.match(/\b(\d{2})[\/.\-](\d{2})[\/.\-](\d{4})\b/g) || [])
+    .map(iso)
+    .filter(d => /^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/.test(d))
+    .sort();
+
+  /* L'ancrage reste prioritaire quand il fonctionne : sur une étiquette où le
+     libellé précède bien sa date, il lève toute ambiguïté. */
+  const mB = T.match(/(?:BBD|BEST\s*BEFORE|CONSOMMER\s+DE\s+PRÉFÉRENCE[^\d]{0,40}|CONSUMARSI[^\d]{0,40})[^\d]{0,20}(\d{2}[\/.\-]\d{2}[\/.\-]\d{4})/);
+  const mP = T.match(/(?:PRODUCTION\s*DATE|DATA\s*PRODUZIONE|DATE\s+DE\s+PRODUCTION)[^\d]{0,20}(\d{2}[\/.\-]\d{2}[\/.\-]\d{4})/);
+
+  const expiration = mB ? iso(mB[1])
+    : (brutes.length >= 2 ? brutes[brutes.length - 1]
+    : (brutes.length === 1 ? brutes[0] : null));
+  const production = mP ? iso(mP[1])
+    : (brutes.length >= 2 ? brutes[0] : null);
+
+  return {
+    parBac:    mC ? +mC[1] : null,     // nombre de bacs dans le carton
+    taille:    mC ? +mC[2] : null,     // contenance d'un bac, en litres
+    expiration: expiration,
+    production: production,
+    poidsKg:   mW ? parseFloat(mW[1].replace(',', '.')) : null,
+    reference: mR ? '$' + mR[1] : null,
+    /* Contrôle : le poids doit correspondre au volume annoncé, à 5 % près.
+       10,1 kg pour 4×3 L fait 0,842 kg/L, la densité mesurée du gelato. */
+    coherent: (mC && mW)
+      ? Math.abs(parseFloat(mW[1].replace(',', '.')) /
+                 (+mC[1] * +mC[2]) - FOURNISSEUR.poidsMoyenLitre) < 0.05
+      : null
+  };
+}
+
 function confirmerLecture(type, r, apercu, resolve) {
+  /* Un lot improbable lu avec peu de confiance est écarté plutôt que proposé :
+     mieux vaut demander de taper que d'inscrire un numéro faux. */
+  if (r.lot && r.confiance < 0.40 && !lotVraisemblable(r.lot)) {
+    r.lotRejete = r.lot;
+    r.lot = '';
+  }
   const sur  = r.confiance >= 0.72 && r.lot && !r.corrige;
   const rien = !r.lot && !r.parfum;
 
