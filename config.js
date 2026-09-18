@@ -742,10 +742,14 @@ const FAMILLES_PRODUIT = [
     unite:'paquet', unites:'paquets' },
   { id:'chantilly',    libelle:'Chantilly',          parfums:false, dlc:'chantilly',
     unite:'brique', unites:'briques' },
-  { id:'coulis',       libelle:'Coulis',             parfums:false, dlc:'coulis',
-    unite:'flacon', unites:'flacons' },
-  { id:'topping',      libelle:'Topping',            parfums:false, dlc:'topping',
-    unite:'pot',    unites:'pots' }
+  /* Coulis et toppings ont des saveurs, comme les glaces ont des parfums.
+     Le gianduja est ce que l'équipe appelle la crème fondue. */
+  { id:'coulis',       libelle:'Coulis',             parfums:true,  dlc:'coulis',
+    unite:'flacon', unites:'flacons',
+    saveurs:['Gianduja','Chocolat','Caramel','Pistache','Dulce de leche'] },
+  { id:'topping',      libelle:'Topping',            parfums:true,  dlc:'topping',
+    unite:'pot',    unites:'pots',
+    saveurs:['Pistache','Noisette','Caramel','Café'] }
 ];
 
 /* Anomalies constatées en boutique — nouveau module demandé par l'équipe */

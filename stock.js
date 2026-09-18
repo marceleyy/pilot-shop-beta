@@ -776,7 +776,7 @@ V.inventaire = async function () {
     PARFUMS.some(p => num(articles[cleArticle('glace', p, t)]) !== 0 ||
                       saisie[cleArticle('glace', p, t)] !== undefined));
 
-  const autres = FAMILLES_PRODUIT.filter(f => !f.parfums);
+  const autres = FAMILLES_PRODUIT.filter(f => f.id !== 'glace');
 
   const totalBacs   = () => Object.keys(saisie).reduce((s, c) => s + num(saisie[c]), 0);
   const totalLitres = () => Object.keys(saisie).reduce((s, c) => {
@@ -838,12 +838,29 @@ V.inventaire = async function () {
     '<div class="entete"><h3>Autres familles</h3>' +
     '<span class="pousse mini">comptées à l’unité</span></div>' +
     '<div class="stack">' + autres.map(f => {
-    const c = cleArticle(f.id, '', '');
-    const q = num(articles[c]);
-    return '<div class="invl">' +
-    '<span class="invn">' + esc(f.libelle) +
-    '<small>en ' + esc(f.unites) + '</small></span>' +
-    (q ? '<span class="invc">' + q + ' en stock</span>' : '') +
+    /* Les familles à saveurs se comptent saveur par saveur : un coulis
+       pistache et un coulis caramel ne se remplacent pas l'un l'autre,
+       et « Coulis : 4 » ne disait pas lequel manquait. */
+    if (f.saveurs) {
+    return '<div class="invp">' +
+      '<div class="invp-h"><b>' + esc(f.libelle) + '</b>' +
+      '<span class="invc">en ' + esc(f.unites) + '</span></div>' +
+      '<div class="stack">' + f.saveurs.map(sv => {
+              const c = cleArticle(f.id, sv, '');
+              const q = num(articles[c]);
+              return '<div class="invl">' +
+                '<span class="invn">' + esc(sv) + '</span>' +
+                (q ? '<span class="invc">' + q + '</span>' : '') +
+                '<input type="number" inputmode="numeric" min="0" step="1" data-inv="' + c + '" ' +
+                'value="' + (saisie[c] !== undefined ? saisie[c] : '') + '" placeholder="0"></div>';
+            }).join('') + '</div></div>';
+        }
+        const c = cleArticle(f.id, '', '');
+        const q = num(articles[c]);
+        return '<div class="invl">' +
+          '<span class="invn">' + esc(f.libelle) +
+          '<small>en ' + esc(f.unites) + '</small></span>' +
+          (q ? '<span class="invc">' + q + ' en stock</span>' : '') +
           '<input type="number" inputmode="numeric" min="0" step="1" data-inv="' + c + '" ' +
           'value="' + (saisie[c] !== undefined ? saisie[c] : '') + '" placeholder="0"></div>';
     }).join('') + '</div>';
@@ -1096,14 +1113,20 @@ function confirmerOuverture(r) {
           '" data-fam="' + f.id + '">' + esc(f.libelle) + '</button>').join('') + '</div></div>' +
 
         (fam && fam.parfums
-          ? '<div class="champ" style="margin-top:14px"><label class="f">Parfum</label>' +
-            '<select id="co-parfum">' + PARFUMS.map(p =>
+          ? '<div class="champ" style="margin-top:14px"><label class="f">' +
+            (fam.saveurs ? 'Saveur' : 'Parfum') + '</label>' +
+            /* Les coulis et toppings ont leurs propres saveurs : proposer les
+               vingt-trois parfums de glace pour un flacon de coulis n'avait
+               aucun sens et rendait le choix impraticable. */
+            '<select id="co-parfum">' + (fam.saveurs || PARFUMS).map(p =>
               '<option' + (p === parfum ? ' selected' : '') + '>' + esc(p) + '</option>').join('') +
             '</select></div>' +
-            '<div class="champ" style="margin-top:14px"><label class="f">Taille du bac</label>' +
-            '<div class="pastilles">' + (FOURNISSEUR.taillesBac || TAILLES_BAC).map(t =>
-              '<button type="button" class="pas' + (num(t) === num(taille) ? ' on' : '') +
-              '" data-taille="' + t + '">' + t + ' L</button>').join('') + '</div></div>'
+            (fam.id === 'glace'
+              ? '<div class="champ" style="margin-top:14px"><label class="f">Taille du bac</label>' +
+                '<div class="pastilles">' + (FOURNISSEUR.taillesBac || TAILLES_BAC).map(t =>
+                  '<button type="button" class="pas' + (num(t) === num(taille) ? ' on' : '') +
+                  '" data-taille="' + t + '">' + t + ' L</button>').join('') + '</div></div>'
+              : '')
           : '') +
 
         '<div class="champ" style="margin-top:14px"><label class="f">Numéro de lot</label>' +
@@ -1156,7 +1179,11 @@ function confirmerOuverture(r) {
     }
 
     async function poser(fam, lot) {
-      const cle = cleArticle(fam.id, fam.parfums ? parfum : '', fam.parfums ? taille : '');
+      /* Seules les glaces ont une taille de bac ; un coulis ou un topping n'en
+         a pas, mais il a une saveur qu'il faut garder dans la clé. */
+      const cle = cleArticle(fam.id,
+        fam.parfums ? parfum : '',
+        fam.id === 'glace' ? taille : '');
       await ajouterMouvement('ouverture', cle, 1, { lot: lot, famille: fam.id, parfum: parfum });
 
       /* Le frigo virtuel lit la clé « lots: », pas le journal de stock : sans
