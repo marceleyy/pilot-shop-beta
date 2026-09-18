@@ -1015,7 +1015,12 @@ body::before{display:none!important}
 /* Boutons pleine largeur : 40 px n'est pas une cible tactile. */
 .btn.bloc{min-height:48px}
 .btn.bloc.xl{min-height:54px;font-size:16px}
-.btn.sm{min-height:38px;font-size:13.5px}
+/* Petits boutons : « Traité », « Ouvrir », « Y aller ». Trois définitions
+   successives les ont rabotés de 42 à 40 puis 38 px, chacune écrasant la
+   précédente sans que personne ne s'en aperçoive. 38 px, c'est sous le minimum
+   tactile de 44 — et ces boutons se pressent avec des mains mouillées, dans
+   une chambre froide, souvent avec des gants. */
+.btn.sm{min-height:44px;font-size:13.5px}
 
 /* En-têtes de section : un peu plus contrastés */
 .entete h3{color:var(--brume);font-weight:700}
@@ -1181,6 +1186,19 @@ body::before{display:none!important}
   text-underline-offset:3px;text-decoration-thickness:1px}
 .btn.fantome.sm{min-height:44px;font-size:13.5px}
 .btn.fantome:active{color:var(--rouge);text-decoration-color:var(--rouge)}
+
+/* Les champs d'heure étaient oubliés des règles de saisie : 28 px de haut, la
+   moitié d'une cible tactile. Ce sont les horaires d'ouverture et de fermeture
+   du Back-office — rarement modifiés, mais impossibles à viser quand on le
+   fait. Safari applique son propre rendu aux champs time, d'où l'appearance. */
+input[type="time"], input[type="date"], input[type="datetime-local"]{
+  min-height:48px;padding:0 14px;width:100%;
+  -webkit-appearance:none;appearance:none;
+  background:var(--blanc);border:1px solid var(--line-fort);
+  border-radius:12px;font-size:16px;font-variant-numeric:tabular-nums;
+  color:var(--encre);font-family:inherit}
+input[type="time"]:focus, input[type="date"]:focus{
+  border-color:var(--encre);outline:none}
 
 /* --- 21. Impression : registre sanitaire -------------------------------- */
 #printview{display:none}
