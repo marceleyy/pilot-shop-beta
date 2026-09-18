@@ -1056,6 +1056,17 @@ function extraireCarton(texte) {
   });
   const dates = [...new Set(brutes.filter(valide))].sort();
 
+  /* Contrôle de cohérence entre les deux dates. Sur une étiquette Amorino,
+     l'écart production → expiration vaut toujours 24 mois à quelques jours
+     près. Un écart aberrant trahit un chiffre mal lu : mesuré en conditions
+     dégradées, le moteur a rendu « 27706 2028 » au lieu de « 27/06/2028 »,
+     en insérant un 7 parasite. */
+  let ecartMois = null;
+  if (dates.length >= 2) {
+    const a = new Date(dates[0]), b = new Date(dates[dates.length - 1]);
+    ecartMois = Math.round((b - a) / (1000 * 60 * 60 * 24 * 30.44));
+  }
+
   /* L'ancrage reste prioritaire quand il fonctionne : sur une étiquette où le
      libellé précède bien sa date, il lève toute ambiguïté. */
   const mB = T.match(/(?:BBD|BEST\s*BEFORE|CONSOMMER\s+DE\s+PRÉFÉRENCE[^\d]{0,40}|CONSUMARSI[^\d]{0,40})[^\d]{0,20}(\d{2}[\/.\-]\d{2}[\/.\-]\d{4})/);
@@ -1074,6 +1085,10 @@ function extraireCarton(texte) {
     production: production,
     poidsKg:   mW ? parseFloat(mW[1].replace(',', '.')) : null,
     reference: mR ? '$' + mR[1] : null,
+    /* Écart entre production et expiration, en mois. Hors de la plage
+       attendue, la lecture est douteuse et mérite une vérification humaine. */
+    ecartMois: ecartMois,
+    datesCoherentes: ecartMois === null ? null : (ecartMois >= 6 && ecartMois <= 36),
     /* Contrôle : le poids doit correspondre au volume annoncé, à 5 % près.
        10,1 kg pour 4×3 L fait 0,842 kg/L, la densité mesurée du gelato. */
     coherent: (mC && mW)
