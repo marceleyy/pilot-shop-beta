@@ -515,6 +515,26 @@ function extraireParfum(texte) {
       const d = distance(mot, t.c);
       const ref = Math.max(mot.length, t.c.length);
       retenir(t.p, (1 - d / Math.max(ref, 1)) * t.poids + (d === 0 ? prime(t.c) : 0), mot);
+
+      /* Mots collés par l'OCR. Sur une étiquette réelle, « PISTACHIO MAWARDI »
+         a été lu « PISTACHIOHAWARDI » : l'espace a disparu. La distance porte
+         alors sur seize lettres contre neuf, le score tombe à 0,56 et passe
+         sous le seuil — le parfum n'était pas reconnu du tout.
+         On cherche donc aussi la cible À L'INTÉRIEUR du mot, sur une fenêtre
+         de sa longueur. */
+      if (mot.length > t.c.length + 2 && t.c.length >= 5) {
+        let meilleurDedans = 99;
+        for (let i = 0; i + t.c.length <= mot.length; i++) {
+          const d2 = distance(mot.substr(i, t.c.length), t.c);
+          if (d2 < meilleurDedans) meilleurDedans = d2;
+          if (!d2) break;
+        }
+        if (meilleurDedans <= Math.max(1, Math.floor(t.c.length * 0.2))) {
+          /* Légèrement moins sûr qu'une correspondance sur le mot entier :
+             on retranche une marge pour qu'un mot exact reste prioritaire. */
+          retenir(t.p, (1 - meilleurDedans / t.c.length) * t.poids * 0.97, mot);
+        }
+      }
     }
   }
   return meilleur;
