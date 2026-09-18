@@ -1024,18 +1024,37 @@ function extraireCarton(texte) {
 
   const iso = d => { const p = d.split(/[\/.\-]/); return p[2] + '-' + p[1] + '-' + p[0]; };
 
-  /* Les dates. L'ancrage sur le libellé ne suffit pas : l'étiquette Amorino est
-     en COLONNES — les libellés « Production Date / BBD / LOT N° » sur une ligne,
-     les valeurs « 29/06/2026  27/06/2028  13996A » sur la suivante. Chercher
-     « BBD » suivi d'une date rendait donc toujours rien.
+  /* Les dates. Deux difficultés cumulées, constatées en passant une vraie image
+     dans le moteur de lecture :
 
-     La règle qui tient : parmi les dates de l'étiquette, la PLUS LOINTAINE est
-     l'expiration et la plus proche la production. Un produit ne périme jamais
-     avant d'être fabriqué. */
-  const brutes = (T.match(/\b(\d{2})[\/.\-](\d{2})[\/.\-](\d{4})\b/g) || [])
-    .map(iso)
-    .filter(d => /^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/.test(d))
-    .sort();
+     • l'étiquette Amorino est en COLONNES — les libellés « Production Date /
+       BBD / LOT N° » sur une ligne, les valeurs sur la suivante. Chercher
+       « BBD » suivi d'une date ne rendait jamais rien ;
+
+     • le profil de lecture des codes filtre les séparateurs. La ligne revient
+       collée : « 290620262706202813996AN25253L ». Une date au format jj/mm/aaaa
+       n'y existe plus.
+
+     On lit donc les deux formes, et on retient la date la PLUS LOINTAINE comme
+     expiration : un produit ne périme jamais avant d'être fabriqué. */
+  const valide = d => {
+    if (!/^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/.test(d)) return false;
+    const an = +d.slice(0, 4);
+    return an >= 2020 && an <= 2040;
+  };
+  const brutes = [];
+  (T.match(/\b\d{2}[\/.\-]\d{2}[\/.\-]\d{4}\b/g) || []).forEach(d => brutes.push(iso(d)));
+  /* Forme collée : huit chiffres, jjmmaaaa. On balaie sans exiger de frontière
+     de mot, puisque tout est soudé. */
+  const sansSep = T.replace(/[^0-9]/g, ' ');
+  (sansSep.match(/\d{8,}/g) || []).forEach(bloc => {
+    for (let i = 0; i + 8 <= bloc.length; i++) {
+      const d = bloc.substr(i, 8);
+      const c = d.slice(4) + '-' + d.slice(2, 4) + '-' + d.slice(0, 2);
+      if (valide(c)) brutes.push(c);
+    }
+  });
+  const dates = [...new Set(brutes.filter(valide))].sort();
 
   /* L'ancrage reste prioritaire quand il fonctionne : sur une étiquette où le
      libellé précède bien sa date, il lève toute ambiguïté. */
@@ -1043,10 +1062,10 @@ function extraireCarton(texte) {
   const mP = T.match(/(?:PRODUCTION\s*DATE|DATA\s*PRODUZIONE|DATE\s+DE\s+PRODUCTION)[^\d]{0,20}(\d{2}[\/.\-]\d{2}[\/.\-]\d{4})/);
 
   const expiration = mB ? iso(mB[1])
-    : (brutes.length >= 2 ? brutes[brutes.length - 1]
-    : (brutes.length === 1 ? brutes[0] : null));
+    : (dates.length >= 2 ? dates[dates.length - 1]
+    : (dates.length === 1 ? dates[0] : null));
   const production = mP ? iso(mP[1])
-    : (brutes.length >= 2 ? brutes[0] : null);
+    : (dates.length >= 2 ? dates[0] : null);
 
   return {
     parBac:    mC ? +mC[1] : null,     // nombre de bacs dans le carton
@@ -1066,10 +1085,22 @@ function extraireCarton(texte) {
 
 function confirmerLecture(type, r, apercu, resolve) {
   /* Un lot improbable lu avec peu de confiance est écarté plutôt que proposé :
-     mieux vaut demander de taper que d'inscrire un numéro faux. */
-  if (r.lot && r.confiance < 0.40 && !lotVraisemblable(r.lot)) {
+     mieux vaut demander de taper que d'inscrire un numéro faux.
+
+     Mais la confiance de Tesseract s'effondre sur un texte sans espaces — une
+     étiquette en colonnes revient collée, et il rend 0 % alors que la lecture
+     est parfaite. Mesuré : « 13996A » correctement lu, confiance 0 %.
+     La forme du numéro est donc le critère fiable, pas le score : un lot qui
+     respecte un format connu est conservé quelle que soit la confiance. */
+  if (r.lot && !lotVraisemblable(r.lot) && r.confiance < 0.40) {
     r.lotRejete = r.lot;
     r.lot = '';
+  }
+  /* Un lot de forme valide vaut mieux qu'un score : on relève la confiance
+     affichée pour ne pas alarmer sur une lecture qui, elle, est bonne. */
+  if (r.lot && lotVraisemblable(r.lot) && r.confiance < 0.55) {
+    r.confiance = 0.55;
+    r.formeValide = true;
   }
   const sur  = r.confiance >= 0.72 && r.lot && !r.corrige;
   const rien = !r.lot && !r.parfum;
