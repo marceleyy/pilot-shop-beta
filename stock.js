@@ -493,10 +493,19 @@ async function recomptageDemande() {
   const { articles, inventaire } = await stockReel();
 
   /* Un négatif est la preuve d'un scan manquant : on a sorti plus que ce qu'on
-     avait. C'est le signal le plus sûr. */
-  const negatifs = Object.keys(articles).filter(c =>
-    num(articles[c]) < 0 && litArticle(c).famille === 'glace');
+     avait. C'est le signal le plus sûr.
+
+     Toutes les familles comptent, pas seulement les glaces. Un coulis à −1 dit
+     la même chose qu'un bac à −1 : une ouverture non tracée ou une livraison
+     non saisie. Le filtre sur la seule famille « glace » laissait passer en
+     silence les coulis, toppings, chantilly, macarons et gaufres — vérifié sur
+     un Coulis à −1 qui ne déclenchait aucune demande.
+
+     La chambre froide reste prioritaire dans le libellé de la tâche, parce que
+     c'est là que le recomptage va vite. */
+  const negatifs = Object.keys(articles).filter(c => num(articles[c]) < 0);
   if (!negatifs.length) return null;
+  const froid = negatifs.filter(c => litArticle(c).famille === 'glace');
 
   /* Un recomptage ne solde la demande que s'il a eu lieu APRÈS le négatif.
      La version précédente vérifiait seulement que l'article figurait dans
@@ -509,6 +518,7 @@ async function recomptageDemande() {
      plus de négatif. Et on vient de constater qu'il y en a. */
   return {
     articles: negatifs,
+    froid: froid.length,
     combien: negatifs.reduce((s, c) => s + Math.abs(num(articles[c])), 0),
     exemple: libelleArticle(negatifs[0]),
     depuis: inventaire ? inventaire.jour : null
@@ -521,12 +531,14 @@ async function tacheRecomptage() {
   if (!d) return null;
   return {
     id: 'recomptage',
-    t: 'Recompter la chambre froide — ' + d.combien + ' bac(s) manquant(s)',
+    t: d.froid
+      ? 'Recompter la chambre froide — ' + d.combien + ' manquant(s)'
+      : 'Recompter le stock — ' + d.combien + ' manquant(s)',
     lien: 'inventaire',
     urgent: true,
     detail: d.exemple + (d.articles.length > 1
       ? ' et ' + (d.articles.length - 1) + ' autre(s)' : '') +
-      '. Un bac a été ouvert sans être scanné, ou une livraison n’a pas été saisie.'
+      '. Un produit a été ouvert sans être scanné, ou une livraison n’a pas été saisie.'
   };
 }
 
