@@ -1172,6 +1172,16 @@ body::before{display:none!important}
   font-size:13px;font-weight:700;font-variant-numeric:tabular-nums;
   display:inline-flex;align-items:center;justify-content:center;margin-top:1px}
 
+/* Bouton fantôme : sans fond ni bordure, pour les actions destructives qu'on
+   ne doit pas cliquer par réflexe — supprimer une unité, vider la file.
+   L'effacement est voulu, mais la CIBLE ne doit pas l'être : 38 px était sous
+   le minimum tactile de 44 px, et ces boutons commandent justement ce qui ne
+   se rattrape pas. Le soulignement les rend identifiables comme cliquables. */
+.btn.fantome{background:none;border:0;color:var(--brume);text-decoration:underline;
+  text-underline-offset:3px;text-decoration-thickness:1px}
+.btn.fantome.sm{min-height:44px;font-size:13.5px}
+.btn.fantome:active{color:var(--rouge);text-decoration-color:var(--rouge)}
+
 /* --- 21. Impression : registre sanitaire -------------------------------- */
 #printview{display:none}
 @media print{
