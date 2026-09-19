@@ -39,9 +39,9 @@ const NOUVEAU = `/* Le sec, avec ses déclinaisons. Chaque entrée porte un iden
    Sinon, la référence se déplie et chaque variante se compte à part. */
 const INVENTAIRE_SEC = [
   { id:'cornet',    nom:'Cornets',                  unite:'sachet',
-    variantes:['Piccola','Classico','Grande'] },
+    variantes:['Bambino','Piccolo','Classico','Grande'] },
   { id:'chococone', nom:'Choco-cônes',              unite:'sachet',
-    variantes:['Piccola','Classico','Grande'] },
+    variantes:['Bambino','Piccolo','Classico','Grande'] },
   { id:'cornetsg',  nom:'Cornets sans gluten',      unite:'sachet' },
   { id:'protege',   nom:'Papier protège-cornet',    unite:'paquet',
     variantes:['Moyen','Grand'] },
@@ -62,10 +62,15 @@ const INVENTAIRE_SEC = [
   { id:'cafegrain', nom:'Café en grains',           unite:'paquet' },
   { id:'lait',      nom:'Lait',                     unite:'brique' },
   { id:'creme',     nom:'Crème pour chantilly',     unite:'brique' },
+  /* La carte de la boutique liste quatre coulis : gianduja, chocolat noir,
+     caramel, pistache. Le dulce de leche n'y figure pas. */
   { id:'coulis',    nom:'Coulis',                   unite:'flacon',
-    variantes:['Gianduja','Chocolat','Caramel','Pistache','Dulce de leche'] },
+    variantes:['Gianduja','Chocolat noir','Caramel','Pistache'] },
   { id:'topping',   nom:'Toppings',                 unite:'pot',
     variantes:['Pistache','Noisette','Caramel','Café'] },
+  /* Relévés sur étiquette : éclats de caramel 500 g, mocca beans 1,1 kg. */
+  { id:'eclats',    nom:'Éclats de caramel',         unite:'pot' },
+  { id:'mocca',     nom:'Mocca beans',              unite:'boîte' },
   { id:'gaufre',    nom:'Gaufres',                  unite:'paquet' },
   { id:'crepe',     nom:'Crêpes',                   unite:'paquet' },
   { id:'boisson',   nom:'Boissons',                 unite:'pack',

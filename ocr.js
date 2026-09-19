@@ -988,12 +988,16 @@ function lotVraisemblable(lot) {
   const L = String(lot).toUpperCase();
   /* Format Amorino : cinq chiffres + une lettre, série 135xx à 141xx. */
   if (/^1[34]\d{3}[A-Z]$/.test(L)) return true;
-  /* Format macarons : L + cinq chiffres + lettre. */
+  /* Format macarons : L + quatre chiffres + lettre. */
   if (/^L\d{4}[A-Z]$/.test(L)) return true;
   /* Format crêpes et gaufres : six chiffres sans lettre. */
   if (/^\d{6}$/.test(L)) return true;
   /* Crème fondente IRCA : huit chiffres. */
   if (/^\d{8}$/.test(L)) return true;
+  /* Mocca beans : neuf chiffres, étiquette à « DLUO ». */
+  if (/^\d{9}$/.test(L)) return true;
+  /* Éclats de caramel : deux chiffres, une lettre, sept chiffres — 26F1511703. */
+  if (/^\d{2}[A-Z]\d{7}$/.test(L)) return true;
   return false;
 }
 
@@ -1022,7 +1026,13 @@ function extraireCarton(texte) {
   const mW = T.match(/(\d{1,3}[.,]\d)\s*KG/);
   const mR = T.match(/\$([A-Z0-9]{3,14})/);
 
-  const iso = d => { const p = d.split(/[\/.\-]/); return p[2] + '-' + p[1] + '-' + p[0]; };
+  /* Un jour ou un mois peut s'écrire sur un seul chiffre : « 28-7-2028 » sur
+     l'étiquette des mocca beans. On normalise sur deux chiffres. */
+  const iso = d => {
+    const p = d.split(/[\/.\-]/);
+    const dd = ('0' + p[0]).slice(-2), mm = ('0' + p[1]).slice(-2);
+    return p[2] + '-' + mm + '-' + dd;
+  };
 
   /* Les dates. Deux difficultés cumulées, constatées en passant une vraie image
      dans le moteur de lecture :
@@ -1043,7 +1053,7 @@ function extraireCarton(texte) {
     return an >= 2020 && an <= 2040;
   };
   const brutes = [];
-  (T.match(/\b\d{2}[\/.\-]\d{2}[\/.\-]\d{4}\b/g) || []).forEach(d => brutes.push(iso(d)));
+  (T.match(/\b\d{1,2}[\/.\-]\d{1,2}[\/.\-]\d{4}\b/g) || []).forEach(d => brutes.push(iso(d)));
   /* Forme collée : huit chiffres, jjmmaaaa. On balaie sans exiger de frontière
      de mot, puisque tout est soudé. */
   const sansSep = T.replace(/[^0-9]/g, ' ');
@@ -1069,8 +1079,8 @@ function extraireCarton(texte) {
 
   /* L'ancrage reste prioritaire quand il fonctionne : sur une étiquette où le
      libellé précède bien sa date, il lève toute ambiguïté. */
-  const mB = T.match(/(?:BBD|BEST\s*BEFORE|CONSOMMER\s+DE\s+PRÉFÉRENCE[^\d]{0,40}|CONSUMARSI[^\d]{0,40})[^\d]{0,20}(\d{2}[\/.\-]\d{2}[\/.\-]\d{4})/);
-  const mP = T.match(/(?:PRODUCTION\s*DATE|DATA\s*PRODUZIONE|DATE\s+DE\s+PRODUCTION)[^\d]{0,20}(\d{2}[\/.\-]\d{2}[\/.\-]\d{4})/);
+  const mB = T.match(/(?:BBD|BEST\s*(?:USED\s*)?BEFORE|DLUO|CONSOMMER\s+DE\s+PRÉFÉRENCE[^\d]{0,40}|CONSUMARSI[^\d]{0,40})[^\d]{0,20}(\d{1,2}[\/.\-]\d{1,2}[\/.\-]\d{4})/);
+  const mP = T.match(/(?:PRODUCTION\s*DATE|DATA\s*PRODUZIONE|DATE\s+DE\s+PRODUCTION|DATE\s+CONDITIONNEMENT)[^\d]{0,24}(\d{1,2}[\/.\-]\d{1,2}[\/.\-]\d{4})/);
 
   const expiration = mB ? iso(mB[1])
     : (dates.length >= 2 ? dates[dates.length - 1]
