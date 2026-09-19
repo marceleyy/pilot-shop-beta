@@ -56,7 +56,7 @@ const INVENTAIRE_SEC = [
     variantes:['Taille 1','Taille 2','Taille 3','Taille 4'] },
   { id:'capsule',   nom:'Capsules à café',          unite:'boîte',
     variantes:['Simple','Double','Décaféiné'] },
-  { id:'chocochaud',nom:'Sachets de chocolat chaud',unite:'boîte',
+  { id:'chocochaud',nom:'Chocolat chaud',           unite:'boîte',
     variantes:['Noir','Lait','Blanc','Gianduja','Noisette',
                'Aztèque','Orange cannelle','Caramel','Amande','Coco'] },
   { id:'cafegrain', nom:'Café en grains',           unite:'paquet' },

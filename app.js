@@ -1441,11 +1441,20 @@ async function purgerPreuves() {
      const norm = s => String(s || '').toLowerCase()
        .normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z]/g, '');
      const cible = norm(r.nom);
-     const ref = INVENTAIRE_SEC.filter(x =>
-       typeof x === 'object' && x.variantes && x.variantes.length &&
-       (norm(x.nom) === cible || norm(x.nom).indexOf(cible) === 0 ||
-        cible.indexOf(norm(x.nom)) === 0))[0];
-     return ref ? ref.variantes : [];
+     /* Correspondance EXACTE d'abord. La correspondance par préfixe rattachait
+        « Cornets sans gluten » aux tailles de « Cornets », alors qu'il n'en a
+        pas, et « Chocolat chaud » ne trouvait pas « Sachets de chocolat chaud ».
+        On tente l'égalité, puis l'inclusion dans les deux sens, du plus long
+        nom au plus court pour que le libellé le plus spécifique gagne. */
+     const refs = INVENTAIRE_SEC.filter(x =>
+       typeof x === 'object' && x.variantes && x.variantes.length);
+     const exact = refs.filter(x => norm(x.nom) === cible)[0];
+     if (exact) return exact.variantes;
+     const proches = refs.filter(x => {
+       const n = norm(x.nom);
+       return n.indexOf(cible) >= 0 || cible.indexOf(n) >= 0;
+     }).sort((a, b) => norm(b.nom).length - norm(a.nom).length);
+     return proches.length ? proches[0].variantes : [];
    }
 
    V.reas = async function () {
@@ -1464,54 +1473,68 @@ async function purgerPreuves() {
    
        REASSORT_CATS.map(c => {
          const items = REASSORT.filter(r => r.cat === c.id);
-         const ok = items.filter(r => rec[r.id] && rec[r.id].ok).length;
+         /* Une référence est faite quand elle est cochée, ou quand toutes ses
+            déclinaisons le sont. */
+         const estFaite = r => {
+           const dc = declinaisonsReassort(r);
+           if (!dc.length) return !!(rec[r.id] && rec[r.id].ok);
+           return dc.every(x => (rec[r.id + '|' + x] || {}).ok);
+         };
+         const ok = items.filter(estFaite).length;
+
          return '<div class="entete"><h3>' + esc(c.id) + '</h3>' +
            '<span class="pousse mini num">' + ok + '/' + items.length + '</span></div>' +
            '<div class="stack">' + items.map(r => {
              const v = rec[r.id] || {};
-             /* Déclinaisons : un cornet bambino et un cornet grande ne se
-                remplacent pas. On déplie au clic, et chaque taille se signale
-                séparément. */
-             const decl = declinaisonsReassort(r);
+             const dc = declinaisonsReassort(r);
              const ouvert = deplies[r.id];
-             const enRupture = decl.filter(x => (rec[r.id + '|' + x] || {}).rupture);
-             const faites = decl.filter(x => (rec[r.id + '|' + x] || {}).ok).length;
+             const rupt = dc.filter(x => (rec[r.id + '|' + x] || {}).rupture);
+             const faites = dc.filter(x => (rec[r.id + '|' + x] || {}).ok).length;
+             const fait = estFaite(r);
+             const enRupture = rupt.length || v.rupture;
 
+             /* Toutes les lignes ont la MÊME structure : libellé à gauche,
+                deux boutons compacts à droite, chevron en plus si la référence
+                a des déclinaisons. Avant, dix-sept lignes portaient de gros
+                boutons pleine largeur et douze des boutons compacts — le même
+                écran avait deux apparences. */
              return carte(
-               '<div class="rang"><div style="flex:1;min-width:0">' +
+               '<div class="rang">' +
+               '<div style="flex:1;min-width:0">' +
                '<b>' + esc(r.nom) + '</b>' +
                '<div class="mini">' + (
-                 enRupture.length ? esc(enRupture.join(', ')) + ' — signalé'
-                 : v.ok ? 'Vérifié par ' + esc(v.par) + ' · ' + heure(v.at)
-                 : v.rupture ? 'Reste ' + v.reste + ' ' + r.unite + ' — signalé'
-                 : decl.length ? faites + '/' + decl.length + ' · ' + esc(r.detail || ('en ' + r.unite))
-                 : (r.detail ? esc(r.detail) : 'En ' + r.unite)) + '</div></div>' +
-               (decl.length
-                 ? '<button type="button" class="chev" data-deplier="' + r.id + '">' +
-                   (ouvert ? '−' : '+') + '</button>'
-                 : '') + '</div>' +
+                 rupt.length ? esc(rupt.join(', ')) + ' — en rupture'
+                 : v.rupture ? 'Reste ' + v.reste + ' ' + esc(r.unite) + ' — signalé'
+                 : fait && !dc.length ? 'Vérifié par ' + esc(v.par || '') + ' · ' + heure(v.at)
+                 : dc.length ? faites + '/' + dc.length + ' · ' + esc(r.detail || ('en ' + r.unite))
+                 : esc(r.detail || ('en ' + r.unite))) + '</div></div>' +
 
-               (decl.length && ouvert
-                 ? '<div class="stack" style="margin-top:10px">' + decl.map(x => {
+               (dc.length
+                 ? '<button type="button" class="chev" data-deplier="' + r.id + '" ' +
+                   'aria-label="Voir les déclinaisons">' + (ouvert ? '−' : '+') + '</button>'
+                 : '<div class="duo compact">' +
+                   '<button type="button" class="btn ok' + (v.ok ? ' on' : '') +
+                   '" data-ok="' + r.id + '" aria-label="Fait">' + ic('valide', 17) + '</button>' +
+                   '<button type="button" class="btn ko' + (v.rupture ? ' on' : '') +
+                   '" data-ko="' + r.id + '" aria-label="Rupture">!</button></div>') +
+               '</div>' +
+
+               (dc.length && ouvert
+                 ? '<div class="stack" style="margin-top:10px">' + dc.map(x => {
                      const k = r.id + '|' + x;
                      const vd = rec[k] || {};
                      return '<div class="rang decl">' +
                        '<span class="invn">' + esc(x) +
                        (vd.ok ? '<small>✓ ' + esc(vd.par || '') + '</small>'
-                        : vd.rupture ? '<small>rupture signalée</small>' : '') + '</span>' +
+                        : vd.rupture ? '<small>en rupture</small>' : '') + '</span>' +
                        '<div class="duo compact">' +
                        '<button type="button" class="btn ok' + (vd.ok ? ' on' : '') +
-                       '" data-ok="' + k + '">' + ic('valide', 16) + '</button>' +
+                       '" data-ok="' + k + '" aria-label="Fait">' + ic('valide', 16) + '</button>' +
                        '<button type="button" class="btn ko' + (vd.rupture ? ' on' : '') +
-                       '" data-ko="' + k + '">!</button></div></div>';
+                       '" data-ko="' + k + '" aria-label="Rupture">!</button></div></div>';
                    }).join('') + '</div>'
-                 : decl.length ? ''
-                 : '<div class="duo" style="margin-top:12px">' +
-                   '<button type="button" class="btn ok' + (v.ok ? ' on' : '') + '" data-ok="' + r.id + '">' +
-                   ic('valide', 18) + '<span>Fait</span></button>' +
-                   '<button type="button" class="btn ko' + (v.rupture ? ' on' : '') + '" data-ko="' + r.id + '">Rupture</button>' +
-                   '</div>'),
-               (v.rupture || enRupture.length) ? 'corail' : (v.ok || (decl.length && faites === decl.length)) ? 'menthe' : c.couleur);
+                 : ''),
+               enRupture ? 'corail' : fait ? 'menthe' : c.couleur);
            }).join('') + '</div>';
        }).join('');
    
