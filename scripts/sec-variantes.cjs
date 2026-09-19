@@ -73,6 +73,20 @@ const INVENTAIRE_SEC = [
   { id:'mocca',     nom:'Mocca beans',              unite:'boîte' },
   { id:'gaufre',    nom:'Gaufres',                  unite:'paquet' },
   { id:'crepe',     nom:'Crêpes',                   unite:'paquet' },
+  /* Macarons et gianduiotti : parfums relévés sur amorino.com en septembre 2026.
+     Les deux gammes de macarons sont distinctes — le bon Jetfreeze livre les
+     Classico en 8×10 pièces et les Grandioso en 4×6, avec des parfums propres. */
+  { id:'macclassico', nom:'Macarons Classico',      unite:'boîte',
+    variantes:['Cioccolato Amorino','Pistacchio','Vaniglia','Caramello',
+               'Lampone','Tiramisù','Fior di latte & coulis exotique',
+               'Litchi framboise rose','Cacahuète','Mangue'] },
+  { id:'macgrandioso',nom:'Macarons Grandioso',     unite:'boîte',
+    variantes:['Cioccolato','Pistacchio','Vaniglia','Lampone'] },
+  { id:'gianduiotto', nom:'Gianduiotto',            unite:'boîte',
+    variantes:['Chocolat noir & gelato chocolat',
+               'Chocolat au lait & gelato noisette',
+               'Chocolat blanc & gelato pistache'] },
+  { id:'cookie',    nom:'Cookies',                  unite:'paquet' },
   { id:'boisson',   nom:'Boissons',                 unite:'pack',
     variantes:['Coca','Coca zéro','Evian 50 cl','Evian 1 L','San Pellegrino','Ice tea'] },
   { id:'paille',    nom:'Pailles',                  unite:'paquet' },

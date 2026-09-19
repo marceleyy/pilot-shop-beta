@@ -49,13 +49,17 @@ const NOUVEAU = `const REASSORT = [
   { id: 'r22', cat: 'Sec', nom: 'Sopalin',                detail: '1 rouleau', unite: 'rouleau' },
   { id: 'r23', cat: 'Sec', nom: 'Lavettes',               detail: 'rose, jaune, bleue, verte', unite: 'paquet' },
 
-  /* --- SURGELÉ : ce qui remonte de la chambre froide --- */
+  /* --- SURGELÉ : ce qui remonte de la chambre froide ---
+     Macarons et gianduiotti relevés sur amorino.com. Le bon de livraison
+     Jetfreeze distingue deux gammes de macarons : Classico (8×10 pièces) et
+     Grandioso (4×6), avec des parfums différents pour chacune. */
   { id: 'r30', cat: 'Surgelé', nom: 'Glaces pour la journée', unite: 'bac' },
-  { id: 'r31', cat: 'Surgelé', nom: 'Macarons',               detail: 'classico et grandioso', unite: 'boîte' },
-  { id: 'r32', cat: 'Surgelé', nom: 'Gianduiotto',            unite: 'boîte' },
-  { id: 'r33', cat: 'Surgelé', nom: 'Crêpes',                 unite: 'paquet' },
-  { id: 'r34', cat: 'Surgelé', nom: 'Gaufres',                unite: 'paquet' },
-  { id: 'r35', cat: 'Surgelé', nom: 'Cookies',                unite: 'paquet' }
+  { id: 'r31', cat: 'Surgelé', nom: 'Macarons Classico',      detail: '10 parfums', unite: 'boîte' },
+  { id: 'r32', cat: 'Surgelé', nom: 'Macarons Grandioso',     detail: '4 parfums', unite: 'boîte' },
+  { id: 'r33', cat: 'Surgelé', nom: 'Gianduiotto',            detail: '3 enrobages', unite: 'boîte' },
+  { id: 'r34', cat: 'Surgelé', nom: 'Crêpes',                 unite: 'paquet' },
+  { id: 'r35', cat: 'Surgelé', nom: 'Gaufres',                unite: 'paquet' },
+  { id: 'r36', cat: 'Surgelé', nom: 'Cookies',                unite: 'paquet' }
 ];`;
 
 const d = src.indexOf('const REASSORT = [');
