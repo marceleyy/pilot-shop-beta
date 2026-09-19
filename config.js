@@ -546,18 +546,59 @@ const FOURNISSEUR = {
 
 const TAILLES_BAC = FOURNISSEUR.taillesBac;
 
-/* Liste du sec. Elle datait du début du projet ; elle suit maintenant celle du
-   réassort, qui vient du terrain — mêmes intitulés, mêmes regroupements, pour
-   qu'on retrouve la même chose des deux côtés. */
+/* Le sec, avec ses déclinaisons. Chaque entrée porte un identifiant stable :
+   c'est lui qui sert de clé de comptage, pas le libellé, pour qu'un
+   changement de nom ne perde pas l'historique.
+
+   « variantes » vide ou absent = une seule ligne à compter.
+   Sinon, la référence se déplie et chaque variante se compte à part. */
 const INVENTAIRE_SEC = [
-  'Cornets, choco-cône, sans gluten','Papier protège-cornet','Pots','Couvercles',
-  'Cuillères à glace','Serviettes','Barquettes à crêpe','Sacs papier','Gobelets',
-  'Boîtes macarons','Capsules à café','Sachets de chocolat chaud','Café en grains',
-  'Lait','Crème pour chantilly','Coulis caramel','Coulis chocolat','Coulis gianduja',
-  'Coulis pistache','Toppings','Pâte à gaufre','Pâte à crêpe','Boissons','Pailles',
-  'Papier TPE','Sopalin','Bactalim','Dégraissant','Produit à vitres','Savon',
-  'Lavettes','Gants jetables'
+  { id:'cornet',    nom:'Cornets',                  unite:'sachet',
+    variantes:['Piccola','Classico','Grande'] },
+  { id:'chococone', nom:'Choco-cônes',              unite:'sachet',
+    variantes:['Piccola','Classico','Grande'] },
+  { id:'cornetsg',  nom:'Cornets sans gluten',      unite:'sachet' },
+  { id:'protege',   nom:'Papier protège-cornet',    unite:'paquet',
+    variantes:['Moyen','Grand'] },
+  { id:'pot',       nom:'Pots',                     unite:'pile',
+    variantes:['Piccolo','Classico','Grande','Grandissimo'] },
+  { id:'couvercle', nom:'Couvercles',               unite:'pile',
+    variantes:['Couteau','Cuillère','Fourchette'] },
+  { id:'cuillere',  nom:'Cuillères à glace',        unite:'sachet' },
+  { id:'serviette', nom:'Serviettes',               unite:'paquet' },
+  { id:'barquette', nom:'Barquettes à crêpe',       unite:'paquet' },
+  { id:'gobelet',   nom:'Gobelets',                 unite:'pile',
+    variantes:['Taille 1','Taille 2','Taille 3','Taille 4'] },
+  { id:'capsule',   nom:'Capsules à café',          unite:'boîte',
+    variantes:['Simple','Double','Décaféiné'] },
+  { id:'chocochaud',nom:'Sachets de chocolat chaud',unite:'boîte',
+    variantes:['Nature','Noisette','Caramel'] },
+  { id:'cafegrain', nom:'Café en grains',           unite:'paquet' },
+  { id:'lait',      nom:'Lait',                     unite:'brique' },
+  { id:'creme',     nom:'Crème pour chantilly',     unite:'brique' },
+  { id:'coulis',    nom:'Coulis',                   unite:'flacon',
+    variantes:['Gianduja','Chocolat','Caramel','Pistache','Dulce de leche'] },
+  { id:'topping',   nom:'Toppings',                 unite:'pot',
+    variantes:['Pistache','Noisette','Caramel','Café'] },
+  { id:'gaufre',    nom:'Gaufres',                  unite:'paquet' },
+  { id:'crepe',     nom:'Crêpes',                   unite:'paquet' },
+  { id:'boisson',   nom:'Boissons',                 unite:'pack',
+    variantes:['Coca','Coca zéro','Evian','San Pellegrino','Ice tea'] },
+  { id:'paille',    nom:'Pailles',                  unite:'paquet' },
+  { id:'papiertpe', nom:'Papier TPE',               unite:'rouleau' },
+  { id:'sopalin',   nom:'Sopalin',                  unite:'rouleau' },
+  { id:'bactalim',  nom:'Bactalim',                 unite:'flacon' },
+  { id:'degraissant',nom:'Dégraissant',             unite:'flacon' },
+  { id:'vitres',    nom:'Produit à vitres',         unite:'flacon' },
+  { id:'savon',     nom:'Savon',                    unite:'flacon' },
+  { id:'lavette',   nom:'Lavettes',                 unite:'paquet',
+    variantes:['Rose','Jaune','Bleue','Verte'] },
+  { id:'gants',     nom:'Gants jetables',           unite:'boîte' }
 ];
+
+/* Nombre de lignes réellement à compter, déclinaisons comprises. */
+const SEC_LIGNES = INVENTAIRE_SEC.reduce(
+  (n, r) => n + (r.variantes ? r.variantes.length : 1), 0);
 
 const MOTIFS_PERTE = [
   { id: 'perime',    label: 'Périmé',    icone: '📅', mots: ['périm','perim','dlc','date','dépassé'] },

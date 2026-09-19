@@ -835,10 +835,11 @@ V.inventaire = async function () {
            ce qu'on vérifie, bac par bac, devant la chambre froide. Corrigé sur
            l'écran Stock, oublié ici. */
         (enStock
-          ? '<span class="invc">' + tailles.filter(t => num(articles[cleArticle('glace', p, t)]))
-              .map(t => num(articles[cleArticle('glace', p, t)]) + '×' + t + ' L').join('  ') +
+          ? '<span class="invc">attendu · ' +
+            tailles.filter(t => num(articles[cleArticle('glace', p, t)]))
+              .map(t => num(articles[cleArticle('glace', p, t)]) + '×' + t + ' L').join(', ') +
             '</span>'
-          : '') + '</div>' +
+          : '<span class="invc faible">rien attendu</span>') + '</div>' +
         '<div class="invp-t">' + tailles.map(t => {
           const c = cleArticle('glace', p, t);
           return '<label><span>' + t + ' L</span>' +
@@ -877,17 +878,54 @@ V.inventaire = async function () {
           'value="' + (saisie[c] !== undefined ? saisie[c] : '') + '" placeholder="0"></div>';
     }).join('') + '</div>';
 
-  /* --- Sec : une ligne par référence -------------------------------------- */
+  /* --- Sec : une ligne par référence, dépliable quand elle a des déclinaisons
+     Une référence sans variante se compte d'un seul champ. Une référence qui
+     en a se déplie : « Cornets : 4 » ne disait pas lequel manquait, alors que
+     c'est précisément ce qu'on a besoin de savoir pour commander. */
+  let deplies = {};
+  const cleSec = (r, v) => 'sec|' + r.id + '|' + (v || '');
+
   const blocSec = () =>
     '<div class="entete"><h3>Consommables et produits non congelés</h3>' +
-    '<span class="pousse mini num">' + INVENTAIRE_SEC.length + '</span></div>' +
-    '<div class="stack">' + INVENTAIRE_SEC.map(nom => {
-      const ancien = secPrec && secPrec.lignes ? secPrec.lignes[nom] : undefined;
-      return '<div class="invl">' +
-        '<span class="invn">' + esc(nom) + '</span>' +
-        (ancien !== undefined ? '<span class="invc">précédent ' + ancien + '</span>' : '') +
-        '<input type="number" inputmode="numeric" min="0" step="1" data-sec="' + esc(nom) + '" ' +
-        'value="' + (saisieSec[nom] !== undefined ? saisieSec[nom] : '') + '" placeholder="0"></div>';
+    '<span class="pousse mini num">' + (typeof SEC_LIGNES !== 'undefined'
+      ? SEC_LIGNES : INVENTAIRE_SEC.length) + '</span></div>' +
+    '<div class="stack">' + INVENTAIRE_SEC.map(r => {
+      /* Compatibilité : l'ancien catalogue était une simple liste de textes. */
+      if (typeof r === 'string') r = { id:r, nom:r, unite:'unité' };
+      const anc = secPrec && secPrec.lignes ? secPrec.lignes : {};
+
+      if (!r.variantes || !r.variantes.length) {
+        const c = cleSec(r, '');
+        return '<div class="invl">' +
+          '<span class="invn">' + esc(r.nom) +
+          '<small>en ' + esc(r.unite) + '</small></span>' +
+          (anc[c] !== undefined ? '<span class="invc faible">préc. ' + anc[c] + '</span>' : '') +
+          '<input type="number" inputmode="numeric" min="0" step="1" data-sec="' + c + '" ' +
+          'value="' + (saisieSec[c] !== undefined ? saisieSec[c] : '') + '" placeholder="0"></div>';
+      }
+
+      const ouvert = deplies[r.id];
+      const saisis = r.variantes.filter(v => saisieSec[cleSec(r, v)] !== undefined).length;
+      const total  = r.variantes.reduce((s, v) => s + num(saisieSec[cleSec(r, v)] || 0), 0);
+
+      return '<div class="invp">' +
+        '<button type="button" class="invp-h depliable" data-deplier="' + r.id + '">' +
+        '<b>' + esc(r.nom) + '</b>' +
+        '<span class="invc">' + (saisis
+          ? total + ' ' + esc(r.unite) + (total > 1 ? 's' : '') + ' · ' + saisis + '/' + r.variantes.length
+          : r.variantes.length + ' déclinaisons') + '</span>' +
+        '<span class="chev">' + (ouvert ? '−' : '+') + '</span></button>' +
+        (ouvert
+          ? '<div class="stack" style="margin-top:8px">' + r.variantes.map(v => {
+              const c = cleSec(r, v);
+              return '<div class="invl">' +
+                '<span class="invn">' + esc(v) + '</span>' +
+                (anc[c] !== undefined ? '<span class="invc faible">préc. ' + anc[c] + '</span>' : '') +
+                '<input type="number" inputmode="numeric" min="0" step="1" data-sec="' + c + '" ' +
+                'value="' + (saisieSec[c] !== undefined ? saisieSec[c] : '') + '" placeholder="0"></div>';
+            }).join('') + '</div>'
+          : '') +
+        '</div>';
     }).join('') + '</div>';
 
   const dessiner = () => {
@@ -954,6 +992,11 @@ V.inventaire = async function () {
               '<span class="invc">' + t.bacs + ' bacs · ' + n1(t.kg) + ' kg</span></div>';
           }).join('') + '</div>'
         : '');
+
+    $$('[data-deplier]').forEach(b => b.onclick = () => {
+      deplies[b.dataset.deplier] = !deplies[b.dataset.deplier];
+      dessiner();
+    });
 
     const bRouvrir = $('#inv-rouvrir');
     if (bRouvrir) bRouvrir.onclick = () => {

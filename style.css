@@ -1200,6 +1200,20 @@ input[type="time"], input[type="date"], input[type="datetime-local"]{
 input[type="time"]:focus, input[type="date"]:focus{
   border-color:var(--encre);outline:none}
 
+/* Référence dépliable de l'inventaire du sec. Presque chaque produit existe en
+   plusieurs déclinaisons — trois tailles de cornet, quatre de pot, cinq saveurs
+   de coulis. Les compter ensemble ne disait pas laquelle manquait, et c'est
+   précisément ce qu'on a besoin de savoir pour commander. */
+.invp-h.depliable{display:flex;align-items:center;gap:10px;width:100%;
+  min-height:48px;padding:0;border:0;background:none;cursor:pointer;
+  font-family:inherit;color:var(--encre);text-align:left}
+.invp-h.depliable b{flex:1;min-width:0;font-size:15px;font-weight:600}
+.invp-h.depliable .chev{flex:0 0 auto;width:26px;height:26px;border-radius:8px;
+  background:var(--fond-2);color:var(--ardoise);font-size:15px;font-weight:700;
+  display:flex;align-items:center;justify-content:center}
+.invp-h.depliable:active .chev{background:var(--encre);color:#fff}
+.invc.faible{opacity:.62}
+
 /* --- 21. Impression : registre sanitaire -------------------------------- */
 #printview{display:none}
 @media print{
