@@ -1432,6 +1432,22 @@ async function purgerPreuves() {
    /* =============================================================================
       14. VUE — RÉASSORT
       ========================================================================== */
+   /* Déclinaisons d'un point de réassort. Elles viennent d'INVENTAIRE_SEC,
+      par correspondance de nom : une seule source de vérité, et le vocabulaire
+      reste le même entre le réassort et l'inventaire. */
+   const deplies = {};
+   function declinaisonsReassort(r) {
+     if (typeof INVENTAIRE_SEC === 'undefined') return [];
+     const norm = s => String(s || '').toLowerCase()
+       .normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z]/g, '');
+     const cible = norm(r.nom);
+     const ref = INVENTAIRE_SEC.filter(x =>
+       typeof x === 'object' && x.variantes && x.variantes.length &&
+       (norm(x.nom) === cible || norm(x.nom).indexOf(cible) === 0 ||
+        cible.indexOf(norm(x.nom)) === 0))[0];
+     return ref ? ref.variantes : [];
+   }
+
    V.reas = async function () {
      const j = STATE.jour;
      const rec = await DB.get('reassort:' + j, {});
@@ -1453,23 +1469,57 @@ async function purgerPreuves() {
            '<span class="pousse mini num">' + ok + '/' + items.length + '</span></div>' +
            '<div class="stack">' + items.map(r => {
              const v = rec[r.id] || {};
+             /* Déclinaisons : un cornet bambino et un cornet grande ne se
+                remplacent pas. On déplie au clic, et chaque taille se signale
+                séparément. */
+             const decl = declinaisonsReassort(r);
+             const ouvert = deplies[r.id];
+             const enRupture = decl.filter(x => (rec[r.id + '|' + x] || {}).rupture);
+             const faites = decl.filter(x => (rec[r.id + '|' + x] || {}).ok).length;
+
              return carte(
-               /* Compact : les deux boutons sur la même ligne que le libellé.
-                  En les mettant dessous, chaque point occupait 120 px et le
-                  réassort demandait cinq écrans de défilement. */
                '<div class="rang"><div style="flex:1;min-width:0">' +
                '<b>' + esc(r.nom) + '</b>' +
-               '<div class="mini">' + (v.ok ? '✓ ' + esc(v.par) + ' · ' + heure(v.at)
-                 : v.rupture ? 'Reste ' + v.reste + ' ' + r.unite
+               '<div class="mini">' + (
+                 enRupture.length ? esc(enRupture.join(', ')) + ' — signalé'
+                 : v.ok ? 'Vérifié par ' + esc(v.par) + ' · ' + heure(v.at)
+                 : v.rupture ? 'Reste ' + v.reste + ' ' + r.unite + ' — signalé'
+                 : decl.length ? faites + '/' + decl.length + ' · ' + esc(r.detail || ('en ' + r.unite))
                  : (r.detail ? esc(r.detail) : 'En ' + r.unite)) + '</div></div>' +
-               '<div class="duo compact">' +
-               '<button type="button" class="btn ok' + (v.ok ? ' on' : '') + '" data-ok="' + r.id + '">' +
-               ic('valide', 17) + '</button>' +
-               '<button type="button" class="btn ko' + (v.rupture ? ' on' : '') + '" data-ko="' + r.id + '">!</button>' +
-               '</div></div>', v.rupture ? 'corail' : v.ok ? 'menthe' : c.couleur);
+               (decl.length
+                 ? '<button type="button" class="chev" data-deplier="' + r.id + '">' +
+                   (ouvert ? '−' : '+') + '</button>'
+                 : '') + '</div>' +
+
+               (decl.length && ouvert
+                 ? '<div class="stack" style="margin-top:10px">' + decl.map(x => {
+                     const k = r.id + '|' + x;
+                     const vd = rec[k] || {};
+                     return '<div class="rang decl">' +
+                       '<span class="invn">' + esc(x) +
+                       (vd.ok ? '<small>✓ ' + esc(vd.par || '') + '</small>'
+                        : vd.rupture ? '<small>rupture signalée</small>' : '') + '</span>' +
+                       '<div class="duo compact">' +
+                       '<button type="button" class="btn ok' + (vd.ok ? ' on' : '') +
+                       '" data-ok="' + k + '">' + ic('valide', 16) + '</button>' +
+                       '<button type="button" class="btn ko' + (vd.rupture ? ' on' : '') +
+                       '" data-ko="' + k + '">!</button></div></div>';
+                   }).join('') + '</div>'
+                 : decl.length ? ''
+                 : '<div class="duo" style="margin-top:12px">' +
+                   '<button type="button" class="btn ok' + (v.ok ? ' on' : '') + '" data-ok="' + r.id + '">' +
+                   ic('valide', 18) + '<span>Fait</span></button>' +
+                   '<button type="button" class="btn ko' + (v.rupture ? ' on' : '') + '" data-ko="' + r.id + '">Rupture</button>' +
+                   '</div>'),
+               (v.rupture || enRupture.length) ? 'corail' : (v.ok || (decl.length && faites === decl.length)) ? 'menthe' : c.couleur);
            }).join('') + '</div>';
        }).join('');
    
+     $$('[data-deplier]').forEach(b => b.onclick = () => {
+       deplies[b.dataset.deplier] = !deplies[b.dataset.deplier];
+       rendre('reas');
+     });
+
      $$('[data-ok]').forEach(b => b.onclick = async () => {
        const id = b.dataset.ok, actif = !b.classList.contains('on');
        rec[id] = { ok:actif ? 1 : 0, rupture:0, par:STATE.user.prenom, at:nowISO() };
