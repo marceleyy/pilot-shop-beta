@@ -112,10 +112,23 @@ let deb = d;
 const avant = src.lastIndexOf('/*', d);
 if (avant > 0 && src.slice(avant, d).indexOf('*/') === src.slice(avant, d).lastIndexOf('*/')
     && d - avant < 600) deb = avant;
-const f = src.indexOf('];', d);
-if (f < 0) { console.error('Fin du tableau introuvable.'); process.exit(1); }
 
-const resultat = src.slice(0, deb) + NOUVEAU + src.slice(f + 2);
+/* Fin du bloc à remplacer. Le script est REJOUABLE : s'il a déjà tourné,
+   SEC_LIGNES existe déjà juste après le tableau et doit être englobé — sinon on
+   en crée un second et le fichier ne compile plus :
+   « Identifier 'SEC_LIGNES' has already been declared ». */
+let f = src.indexOf('];', d);
+if (f < 0) { console.error('Fin du tableau introuvable.'); process.exit(1); }
+f += 2;
+
+const suite = src.slice(f, f + 800);
+const iL = suite.indexOf('const SEC_LIGNES');
+if (iL >= 0) {
+  const finL = suite.indexOf(';', iL);
+  if (finL >= 0) f += finL + 1;
+}
+
+const resultat = src.slice(0, deb) + NOUVEAU + src.slice(f);
 
 try { new Function(resultat); }
 catch (e) { console.error('ABANDON — ne compile pas : ' + e.message); process.exit(1); }
