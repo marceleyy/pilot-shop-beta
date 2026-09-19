@@ -1214,6 +1214,22 @@ input[type="time"]:focus, input[type="date"]:focus{
 .invp-h.depliable:active .chev{background:var(--encre);color:#fff}
 .invc.faible{opacity:.62}
 
+/* Chevron de dépliage, partagé par le réassort et l'inventaire du sec. */
+.chev{flex:0 0 auto;width:34px;height:34px;border-radius:9px;border:1px solid var(--line);
+  background:var(--fond-2);color:var(--ardoise);font-size:17px;font-weight:700;
+  cursor:pointer;font-family:inherit;
+  display:flex;align-items:center;justify-content:center}
+.chev:active{background:var(--encre);border-color:var(--encre);color:#fff}
+
+/* Ligne de déclinaison : même gabarit tactile que la ligne parente. */
+.rang.decl{align-items:center;gap:10px;padding:7px 0;
+  border-top:1px solid var(--line)}
+.rang.decl:first-child{border-top:0}
+.rang.decl .invn{flex:1;min-width:0;font-size:14.5px;font-weight:500;
+  white-space:normal}
+.rang.decl .invn small{display:block;font-size:11.5px;color:var(--brume);
+  font-weight:400;margin-top:1px}
+
 /* --- 21. Impression : registre sanitaire -------------------------------- */
 #printview{display:none}
 @media print{

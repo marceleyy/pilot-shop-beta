@@ -2412,25 +2412,59 @@ function ouvrirPremierePeriode() {
    
      const jours = joursEntre(per.debut, j > per.fin ? per.fin : j);
      let cumulCaisse = 0, sansNet = 0, tempCrit = 0;
+     /* On retient QUELLES enceintes ont dépassé, pas seulement combien :
+        une vitrine et une chambre froide n'appellent pas la même réaction. */
+     const enceintesCrit = [];
      for (const d of jours) {
        const k = await DB.get('caisse:' + d, null);
        if (k) cumulCaisse += num(k.ecart);
        const n = await etatNettoyage(d);
        if (n.total && n.faits === 0) sansNet++;
        const t = await DB.get('temp:' + d, {});
-       tempCrit += ENCEINTES.filter(en => ['m','s'].some(mo => etatTemp(en, t[mo + '_' + en.id]) === 'crit')).length;
+       ENCEINTES.forEach(en => {
+         ['m','s'].forEach(mo => {
+           if (etatTemp(en, t[mo + '_' + en.id]) === 'crit') {
+             tempCrit++;
+             if (enceintesCrit.indexOf(en.nom) < 0) enceintesCrit.push(en.nom);
+           }
+         });
+       });
      }
    
      const equipeJour = await DB.get('pointage:' + j, []);
      const enService = equipeJour.filter(s => !s.fin);
    
      const A = [];
-     if (ruptures.length) A.push(['bad', ruptures.length + ' rupture(s) non traitée(s)', 'Signalées par l’équipe lors du réassort.', 'controle']);
-     if (perimes) A.push(['bad', perimes + ' produit(s) dépassé(s)', 'À retirer de la vitrine immédiatement.', 'frigo']);
-     if (tempCrit) A.push(['bad', tempCrit + ' relevé(s) en limite critique', 'Chaque dépassement doit avoir une action corrective écrite.', 'temp']);
+     /* Une alerte doit nommer le produit. « 2 ruptures non traitées » oblige le
+        manager à ouvrir un autre écran pour savoir s'il s'agit de cornets ou
+        de lait — et donc s'il doit appeler le fournisseur maintenant. */
+     if (ruptures.length) {
+       const noms = [...new Set(ruptures.map(r => r.article).filter(Boolean))];
+       A.push(['bad', ruptures.length + ' rupture(s) non traitée(s)',
+         noms.length
+           ? noms.slice(0, 4).join(', ') + (noms.length > 4 ? ' et ' + (noms.length - 4) + ' autre(s)' : '') + '.'
+           : 'Signalées par l’équipe lors du réassort.',
+         'controle']);
+     }
+     if (perimes) {
+       const quoi = [...new Set((fifo || []).filter(x => x.c === 'rouge')
+         .map(x => x.nom).filter(Boolean))];
+       A.push(['bad', perimes + ' produit(s) dépassé(s)',
+         (quoi.length ? quoi.slice(0, 4).join(', ') + '. ' : '') +
+         'À retirer de la vitrine immédiatement.', 'frigo']);
+     }
+     if (tempCrit) A.push(['bad', tempCrit + ' relevé(s) en limite critique',
+       (enceintesCrit.length ? enceintesCrit.slice(0, 3).join(', ') + '. ' : '') +
+       'Chaque dépassement doit avoir une action corrective écrite.', 'temp']);
      if (Math.abs(cumulCaisse) > SEUILS.caisseCumulEur) A.push(['warn', 'Écart de caisse cumulé : ' + eur(cumulCaisse), 'Au-delà de ' + eur(SEUILS.caisseCumulEur) + ' sur la période.', 'caisse']);
      if (sansNet >= SEUILS.joursSansNettoyage) A.push(['warn', sansNet + ' jour(s) sans nettoyage validé', 'À reprendre avec l’équipe.', 'clean']);
-     if (bientot) A.push(['warn', bientot + ' produit(s) à écouler vite', 'Moins de 48 h de vie restante.', 'frigo']);
+     if (bientot) {
+       const quoi = [...new Set((fifo || []).filter(x => x.c === 'orange')
+         .map(x => x.nom).filter(Boolean))];
+       A.push(['warn', bientot + ' produit(s) à écouler vite',
+         (quoi.length ? quoi.slice(0, 4).join(', ') + '. ' : '') +
+         'Moins de 48 h de vie restante.', 'frigo']);
+     }
    
      badge('controle', A.filter(a => a[0] === 'bad').length, true);
      $('#vue-actions').innerHTML =
