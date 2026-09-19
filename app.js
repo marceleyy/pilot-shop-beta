@@ -3479,8 +3479,21 @@ function modifierPeriode(per) {
        if (ok.length) {
          const liste = (typeof tachesHebdoDuJour === 'function')
            ? await tachesHebdoDuJour(d) : tachesDuJour(d);
+         /* On garde le LIBELLÉ de chaque tâche, pas seulement le compte.
+            « 4 postes validés » ne prouve rien devant un contrôleur : il veut
+            savoir que l'évier a été nettoyé, pas qu'on a coché quatre cases. */
+         const nom = k => {
+           const t = (liste || []).filter(x => x.id === k)[0] ||
+                     (typeof TACHES_HEBDO_DEF !== 'undefined'
+                       ? TACHES_HEBDO_DEF.filter(x => x.id === k)[0] : null) ||
+                     (typeof tachesDuJour === 'function'
+                       ? (tachesDuJour(d) || []).filter(x => x.id === k)[0] : null);
+           return t ? (t.libelle || t.nom || k) : k;
+         };
          nets.push({ d:d, n:ok.length, total:(liste || []).length,
-           par:ok.map(k => c[k].par).filter((v, i, a) => v && a.indexOf(v) === i).join(', ') });
+           par:ok.map(k => c[k].par).filter((v, i, a) => v && a.indexOf(v) === i).join(', '),
+           taches: ok.map(k => ({ nom: nom(k), par: c[k].par || '',
+                                  at: c[k].at || '' })) });
        }
      }
      const fifo = await calculFIFO(monthKey(fin));
@@ -3509,10 +3522,22 @@ function modifierPeriode(per) {
    
        '<div class="pv-s">2. Nettoyage et désinfection</div>' +
        (nets.length
-         ? '<table><thead><tr><th>Date</th><th>Jour</th><th>Postes validés</th><th>Prévus</th><th>Par</th></tr></thead><tbody>' +
-           nets.map(x => '<tr><td>' + x.d.split('-').reverse().join('/') + '</td><td>' + nomJour(x.d) + '</td>' +
-             '<td>' + x.n + '</td><td>' + x.total + '</td><td>' + esc(x.par) + '</td></tr>').join('') + '</tbody></table>' +
-           '<div style="font-size:9.5px">Plan de nettoyage : ' +
+         ? '<table><thead><tr><th>Date</th><th>Jour</th><th>Tâche validée</th>' +
+           '<th>Par</th><th>Heure</th></tr></thead><tbody>' +
+           /* Une ligne par TÂCHE, pas par jour : c'est le libellé qui atteste,
+              pas le compte. La date n'est répétée que sur la première ligne du
+              jour, pour que le tableau reste lisible. */
+           nets.map(x => (x.taches || []).map((t, i) =>
+             '<tr><td>' + (i ? '' : x.d.split('-').reverse().join('/')) + '</td>' +
+             '<td>' + (i ? '' : nomJour(x.d)) + '</td>' +
+             '<td>' + esc(t.nom) + '</td>' +
+             '<td>' + esc(t.par) + '</td>' +
+             '<td>' + (t.at ? heure(t.at) : '') + '</td></tr>').join('')
+           ).join('') +
+           '</tbody></table>' +
+           '<div style="font-size:9.5px">' +
+           nets.map(x => x.d.split('-').reverse().join('/') + ' : ' + x.n + '/' + x.total).join(' · ') +
+           '. Plan de nettoyage : ' +
            NETTOYAGE.asynchrones.map(a => a.nom + ' (' + (a.type === 'jours-fixes'
              ? a.jours.map(j => JOURS_SEMAINE[j].toLowerCase()).join(', ')
              : 'tous les ' + a.intervalleJours + ' jours') + ')').join(' · ') + '.</div>'
