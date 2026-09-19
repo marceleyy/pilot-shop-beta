@@ -3464,11 +3464,23 @@ function modifierPeriode(per) {
      for (const d of joursEntre(debut, fin)) {
        const t = await DB.get('temp:' + d, null);
        if (t) temps.push({ d:d, t:t });
-       const c = await DB.get('clean:' + d, null);
-       if (c) {
-         const ok = Object.keys(c).filter(k => c[k] && c[k].ok);
-         if (ok.length) nets.push({ d:d, n:ok.length, total:tachesDuJour(d).length,
-           par:ok.map(k => c[k].par).filter((v, i, a) => a.indexOf(v) === i).join(', ') });
+
+       /* Le registre lisait la clé « clean: », l'ancien registre quotidien.
+          L'écran Nettoyage écrit dans « hebdo: » depuis qu'il n'affiche plus que
+          les tâches hebdomadaires du jour. Le registre imprimé annonçait donc
+          « aucun enregistrement de nettoyage » alors que l'équipe validait tous
+          les jours — sur un document destiné à un contrôleur, c'est le pire
+          endroit où perdre une preuve.
+          On lit les DEUX clés : l'ancienne porte encore l'historique. */
+       const hebdo  = await DB.get('hebdo:' + d, null);
+       const ancien = await DB.get('clean:' + d, null);
+       const c = Object.assign({}, ancien || {}, hebdo || {});
+       const ok = Object.keys(c).filter(k => c[k] && c[k].ok);
+       if (ok.length) {
+         const liste = (typeof tachesHebdoDuJour === 'function')
+           ? await tachesHebdoDuJour(d) : tachesDuJour(d);
+         nets.push({ d:d, n:ok.length, total:(liste || []).length,
+           par:ok.map(k => c[k].par).filter((v, i, a) => v && a.indexOf(v) === i).join(', ') });
        }
      }
      const fifo = await calculFIFO(monthKey(fin));
