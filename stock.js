@@ -1125,10 +1125,18 @@ V.lots = async function () {
         '<div class="stack">' + ouvertures.map(m => {
           const a = litArticle(m.cle);
           const f = FAMILLES_PRODUIT.filter(x => x.id === a.famille)[0];
+          /* Le titre porte la saveur ou le parfum ; la famille ne vient en
+             sous-titre QUE si elle apporte quelque chose. Sans ce test, un
+             coulis sans saveur s'affichait « Coulis · Coulis », ce qui ne dit
+             ni de quel coulis il s'agit ni pourquoi c'est répété. */
+          const titre = a.parfum || (f ? f.libelle : a.famille);
+          const sous = [];
+          if (f && f.libelle !== titre) sous.push(f.libelle);
+          if (a.taille) sous.push(a.taille + ' L');
+          if (!a.parfum && f && f.saveurs) sous.push('saveur non précisée');
           return '<div class="lotl">' +
-            '<span class="invn">' + esc(a.parfum || (f ? f.libelle : a.famille)) +
-            '<small>' + (f ? esc(f.libelle) : '') +
-            (a.taille ? ' · ' + a.taille + ' L' : '') + '</small></span>' +
+            '<span class="invn">' + esc(titre) +
+            (sous.length ? '<small>' + esc(sous.join(' · ')) + '</small>' : '') + '</span>' +
             '<span class="invc">' + fmtD(m.jour) + '<br>' + esc(m.lot || '—') + '</span></div>';
         }).join('') + '</div>'
       : vide('', 'Aucune ouverture enregistrée.'));
