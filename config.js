@@ -309,35 +309,43 @@ const NETTOYAGE = {
 };
 
 /* -----------------------------------------------------------------------------
-   8. RÉASSORT — 34 points, groupés par catégorie
+   8. RÉASSORT — sec et surgelé, groupés par section
    -------------------------------------------------------------------------- */
 const REASSORT = [
-  /* --- SEC : ce qui se recharge depuis la réserve --- */
-  { id: 'r01', cat: 'Sec', nom: 'Cornets, choco-cône, sans gluten', detail: 'toutes tailles', unite: 'sachet' },
-  { id: 'r02', cat: 'Sec', nom: 'Papier protège-cornet',           unite: 'paquet' },
-  { id: 'r03', cat: 'Sec', nom: 'Pots',                            detail: 'toutes tailles', unite: 'pile' },
-  { id: 'r04', cat: 'Sec', nom: 'Cuillères à glace',               detail: '2 sachets', unite: 'sachet' },
-  { id: 'r05', cat: 'Sec', nom: 'Serviettes',                      detail: '4 paquets', unite: 'paquet' },
-  { id: 'r06', cat: 'Sec', nom: 'Barquettes à crêpe',              unite: 'paquet' },
-  { id: 'r07', cat: 'Sec', nom: 'Toppings',                        detail: 'pistache, noisette, caramel, café', unite: 'pot' },
-  { id: 'r08', cat: 'Sec', nom: 'Coulis',                          detail: 'gianduja, chocolat, caramel, pistache', unite: 'flacon' },
-  { id: 'r09', cat: 'Sec', nom: 'Sopalin',                         detail: '1 rouleau', unite: 'rouleau' },
-  { id: 'r10', cat: 'Sec', nom: 'Gobelets',                        detail: '4 tailles', unite: 'pile' },
-  { id: 'r11', cat: 'Sec', nom: 'Capsules à café',                 detail: 'simple, double, décaféiné', unite: 'boîte' },
-  { id: 'r12', cat: 'Sec', nom: 'Sachets de chocolat chaud',       unite: 'boîte' },
-  { id: 'r13', cat: 'Sec', nom: 'Boissons',                        detail: 'coca, Evian…', unite: 'pack' },
-  { id: 'r14', cat: 'Sec', nom: 'Lait et crème pour chantilly',    unite: 'brique' },
-  { id: 'r15', cat: 'Sec', nom: 'Pailles',                         unite: 'paquet' },
-  { id: 'r16', cat: 'Sec', nom: 'Papier TPE',                      unite: 'rouleau' },
-  { id: 'r17', cat: 'Sec', nom: 'Lavettes',                        detail: 'rose, jaune, bleue, verte', unite: 'paquet' },
+  /* --- SEC : ce qui se recharge depuis la réserve ---
+     Les intitulés reprennent ceux de l'inventaire : même vocabulaire des deux
+     côtés, sinon on ne retrouve pas le produit qu'on vient de signaler. */
+  { id: 'r01', cat: 'Sec', nom: 'Cornets',                detail: 'bambino, piccolo, classico, grande', unite: 'sachet' },
+  { id: 'r02', cat: 'Sec', nom: 'Choco-cônes',            detail: 'toutes tailles', unite: 'sachet' },
+  { id: 'r03', cat: 'Sec', nom: 'Cornets sans gluten',    unite: 'sachet' },
+  { id: 'r04', cat: 'Sec', nom: 'Papier protège-cornet',  detail: 'moyen et grand', unite: 'paquet' },
+  { id: 'r05', cat: 'Sec', nom: 'Pots',                   detail: 'piccolo à grandissimo', unite: 'pile' },
+  { id: 'r06', cat: 'Sec', nom: 'Couvercles',             detail: 'couteau, cuillère, fourchette', unite: 'pile' },
+  { id: 'r07', cat: 'Sec', nom: 'Cuillères à glace',      detail: '2 sachets', unite: 'sachet' },
+  { id: 'r08', cat: 'Sec', nom: 'Serviettes',             detail: '4 paquets', unite: 'paquet' },
+  { id: 'r09', cat: 'Sec', nom: 'Barquettes à crêpe',     unite: 'paquet' },
+  { id: 'r10', cat: 'Sec', nom: 'Gobelets',               detail: '4 tailles', unite: 'pile' },
+  { id: 'r11', cat: 'Sec', nom: 'Capsules à café',        detail: 'simple, double, décaféiné', unite: 'boîte' },
+  { id: 'r12', cat: 'Sec', nom: 'Chocolat chaud',         detail: '10 parfums', unite: 'boîte' },
+  { id: 'r13', cat: 'Sec', nom: 'Toppings',               detail: 'pistache, noisette, caramel, café', unite: 'pot' },
+  { id: 'r14', cat: 'Sec', nom: 'Coulis',                 detail: 'gianduja, chocolat noir, caramel, pistache', unite: 'flacon' },
+  { id: 'r15', cat: 'Sec', nom: 'Éclats de caramel',      unite: 'pot' },
+  { id: 'r16', cat: 'Sec', nom: 'Mocca beans',            unite: 'boîte' },
+  { id: 'r17', cat: 'Sec', nom: 'Lait',                   unite: 'brique' },
+  { id: 'r18', cat: 'Sec', nom: 'Crème pour chantilly',   unite: 'brique' },
+  { id: 'r19', cat: 'Sec', nom: 'Boissons',               detail: 'coca, Evian 50 cl et 1 L…', unite: 'pack' },
+  { id: 'r20', cat: 'Sec', nom: 'Pailles',                unite: 'paquet' },
+  { id: 'r21', cat: 'Sec', nom: 'Papier TPE',             unite: 'rouleau' },
+  { id: 'r22', cat: 'Sec', nom: 'Sopalin',                detail: '1 rouleau', unite: 'rouleau' },
+  { id: 'r23', cat: 'Sec', nom: 'Lavettes',               detail: 'rose, jaune, bleue, verte', unite: 'paquet' },
 
   /* --- SURGELÉ : ce qui remonte de la chambre froide --- */
-  { id: 'r20', cat: 'Surgelé', nom: 'Glaces pour la journée',      unite: 'bac' },
-  { id: 'r21', cat: 'Surgelé', nom: 'Macarons',                    detail: 'classico et grandioso', unite: 'boîte' },
-  { id: 'r22', cat: 'Surgelé', nom: 'Gianduiotto',                 unite: 'boîte' },
-  { id: 'r23', cat: 'Surgelé', nom: 'Crêpes',                      unite: 'paquet' },
-  { id: 'r24', cat: 'Surgelé', nom: 'Gaufres',                     unite: 'paquet' },
-  { id: 'r25', cat: 'Surgelé', nom: 'Cookies',                     unite: 'paquet' }
+  { id: 'r30', cat: 'Surgelé', nom: 'Glaces pour la journée', unite: 'bac' },
+  { id: 'r31', cat: 'Surgelé', nom: 'Macarons',               detail: 'classico et grandioso', unite: 'boîte' },
+  { id: 'r32', cat: 'Surgelé', nom: 'Gianduiotto',            unite: 'boîte' },
+  { id: 'r33', cat: 'Surgelé', nom: 'Crêpes',                 unite: 'paquet' },
+  { id: 'r34', cat: 'Surgelé', nom: 'Gaufres',                unite: 'paquet' },
+  { id: 'r35', cat: 'Surgelé', nom: 'Cookies',                unite: 'paquet' }
 ];
 
 const REASSORT_CATS = [
@@ -843,7 +851,7 @@ const PAGES = {
   controle: { titre: 'Tour de contrôle',  sous: 'Ce qui se passe en boutique, en direct' },
   temp:     { titre: 'Frigos',            sous: 'Relevé matin et soir' },
   clean:    { titre: 'Nettoyage',         sous: 'Tâches du jour par zone' },
-  reas:     { titre: 'Réassort',          sous: '34 points à vérifier' },
+  reas:     { titre: 'Réassort',          sous: 'À vérifier avant le service' },
   pertes:   { titre: 'Pertes',            sous: 'Ce qui a été jeté et pourquoi' },
   lots:     { titre: 'Numéros de lot',    sous: 'Saisie à l’ouverture du produit' },
   inv:      { titre: 'Inventaires',       sous: 'Glace et sec' },
