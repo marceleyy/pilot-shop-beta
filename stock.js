@@ -154,6 +154,35 @@ async function lireMois(cle) {
 async function stockInsuffisant(cle) {
   try {
     const s = await stockReel();
+    const a = litArticle(cle);
+    const fam = FAMILLES_PRODUIT.filter(f => f.id === a.famille)[0];
+
+    /* Les familles comptées au SEC n'ont pas de stock en chambre froide : on
+       n'alerte pas sur une chantilly ou un coulis ici, leur référence est
+       l'inventaire du sec. */
+    if (fam && (fam.lieu === 'sec' || fam.stock === 'sec')) return null;
+
+    /* Un article JAMAIS compté n'est pas un article à zéro. L'inventaire de
+       chambre froide compte les macarons en bloc ; leurs saveurs sont arrivées
+       après. Une ouverture de « Grandioso Pistacchio » cherchait donc une
+       clé absente, et l'absence était lue comme une rupture. On ne connaît
+       pas la quantité : on laisse passer sans alarmer, l'inventaire suivant
+       fixera la référence saveur par saveur. */
+    const inv = s.inventaire && s.inventaire.lignes ? s.inventaire.lignes : {};
+    const connu = inv[cle] !== undefined ||
+      (s.articles[cle] !== undefined && num(s.articles[cle]) !== 0);
+    if (!connu) {
+      /* Si la famille est comptée en bloc, on regarde ce bloc. */
+      const bloc = cleArticle(a.famille, '', '');
+      if (inv[bloc] !== undefined || s.articles[bloc] !== undefined) {
+        const q = num(s.articles[bloc] || 0);
+        if (q > 0) return null;
+        return { reste: q, article: fam ? fam.libelle : a.famille,
+                 depuis: s.inventaire ? s.inventaire.jour : null };
+      }
+      return null;
+    }
+
     const q = num(s.articles[cle] || 0);
     if (q > 0) return null;
     return { reste: q, article: libelleArticle(cle),
@@ -1527,10 +1556,13 @@ function confirmerOuverture(r) {
       /* Le lot n'identifie pas un bac — deux bacs de vanille peuvent porter le
          même numéro. Le vrai signal est le stock : ouvrir un bac qu'on n'a plus
          veut dire qu'une ouverture précédente n'a pas été scannée, ou qu'une
-         livraison n'a pas été saisie. */
-      const manque = await stockInsuffisant(
-        cleArticle(fam.id, fam.parfums ? parfum : '', fam.parfums ? taille : '')
-      ).catch(() => null);
+         livraison n'a pas été saisie.
+         Seules les GLACES ont une taille de bac. Un macaron ou un coulis a une
+         saveur, pas un litrage : la condition « fam.parfums ? taille » leur
+         collait un « 5 L » dès qu'ils ont eu des saveurs, et l'alerte cherchait
+         un article qui n'existe pas. */
+      const cleOuv = cleArticle(fam.id, fam.parfums ? parfum : '', fam.id === 'glace' ? taille : '');
+      const manque = await stockInsuffisant(cleOuv).catch(() => null);
       if (manque) {
         return confirmer('Ce bac n’est plus au stock',
           'L’application n’a plus de ' + manque.article + ' en réserve' +

@@ -408,6 +408,7 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
           souvent le même numéro, et c'est l'inventaire qui donne la quantité.
           Le vrai signal est donc le stock, pas le lot. */
        if (typeof stockInsuffisant === 'function') {
+         /* Cet écran n'ouvre que des glaces, la taille est donc légitime ici. */
          const cle = cleArticle('glace', $('#og-prod').value, FOURNISSEUR.tailleParDefaut);
          const manque = await stockInsuffisant(cle).catch(() => null);
          if (manque) {
