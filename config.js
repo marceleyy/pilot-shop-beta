@@ -560,94 +560,103 @@ const FOURNISSEUR = {
 
 const TAILLES_BAC = FOURNISSEUR.taillesBac;
 
-/* Le sec, relevé sur la fiche stock opérationnel Amorino de la boutique.
-   « min » est le seuil de réassort annoté à la main sur la fiche, quand il
-   est lisible ; on le garde comme repère, pas comme règle. */
+/* Le sec, par section. « unite » est ce qu'on compte ; « decimal » autorise
+   les demi-cartons. Une référence avec « variantes » se déplie au clic. */
 const INVENTAIRE_SEC = [
-  /* --- Pots et cornets --- */
-  { id:'pot',       nom:'Pots',                     unite:'box',
-    variantes:['Petit','Classique','Grand','Géant'] },
-  { id:'cornet',    nom:'Cornets',                  unite:'box',
+  /* ==================== CORNETS ET POTS ==================== */
+  { id:'cornet',    sec:'Cornets et pots', nom:'Cornets',            unite:'carton', decimal:true,
     variantes:['Petit','Classique','Grand'] },
-  { id:'cornetsg',  nom:'Cornets sans gluten',      unite:'cornet' },
-  { id:'chococone', nom:'Choco-cônes',              unite:'box',
+  { id:'chococone', sec:'Cornets et pots', nom:'Choco-cônes',        unite:'carton', decimal:true,
     variantes:['Petit','Classique','Grand'] },
-  { id:'conepapier',nom:'Cônes papier',             unite:'box',
+  { id:'cornetsg',  sec:'Cornets et pots', nom:'Cornets sans gluten',unite:'carton', decimal:true },
+  { id:'protege',   sec:'Cornets et pots', nom:'Papier protège-cornet',unite:'carton', decimal:true,
+    variantes:['Moyen','Grand'] },
+  { id:'conepapier',sec:'Cornets et pots', nom:'Cônes papier',       unite:'carton', decimal:true,
+    variantes:['Petit','Grand'] },
+  { id:'pot',       sec:'Cornets et pots', nom:'Pots',               unite:'ramette', decimal:false,
+    variantes:['Petit','Classique','Grand','Géant','À partager'] },
+  { id:'couvercle', sec:'Cornets et pots', nom:'Couvercles',         unite:'carton', decimal:true,
     variantes:['Petit','Grand'] },
 
-  /* --- Café, chocolat, thé --- */
-  { id:'capsule',   nom:'Capsules à café',          unite:'boîte',
+  /* ==================== SERVICE ==================== */
+  { id:'couvert',   sec:'Service', nom:'Couverts en bois',           unite:'carton', decimal:true,
+    variantes:['Couteau','Cuillère','Fourchette'] },
+  { id:'cuillere',  sec:'Service', nom:'Cuillères à glace',          unite:'carton', decimal:true },
+  { id:'serviette', sec:'Service', nom:'Serviettes',                 unite:'carton', decimal:true },
+  { id:'barquette', sec:'Service', nom:'Barquettes à crêpe',         unite:'carton', decimal:true },
+  { id:'gaufrecrepe',sec:'Service', nom:'Gaufres et crêpes plateau', unite:'carton', decimal:true },
+  { id:'gobelet',   sec:'Service', nom:'Gobelets',                   unite:'pack', decimal:true,
+    variantes:['Expresso','Petit','Moyen','Grand'] },
+  { id:'bague',     sec:'Service', nom:'Bagues de gobelet',          unite:'pack', decimal:true,
+    variantes:['Petit','Moyen','Grand'] },
+  { id:'gobeleteau',sec:'Service', nom:'Gobelets à eau',             unite:'pack', decimal:true },
+  { id:'paille',    sec:'Service', nom:'Pailles',                    unite:'carton', decimal:true },
+  { id:'creaspearl',sec:'Service', nom:'Creaspearls',                unite:'pack', decimal:true },
+  { id:'wafer',     sec:'Service', nom:'Wafers 5p 30 g',             unite:'pack', decimal:true },
+  { id:'sucrecristal',sec:'Service', nom:'Sucre cristal individuel', unite:'pack', decimal:true },
+
+  /* ==================== CAFÉ, CHOCOLAT, THÉ ==================== */
+  { id:'capsule',   sec:'Café, chocolat, thé', nom:'Capsules à café', unite:'boîte', decimal:true,
     variantes:['Simple','Double','Déca'] },
-  { id:'chocochaud',nom:'Chocolat chaud',           unite:'boîte',
+  { id:'chocochaud',sec:'Café, chocolat, thé', nom:'Chocolat chaud',  unite:'boîte', decimal:true,
     variantes:['Noir','Lait','Noisette','Amande','Blanc','Caramel',
                'Aztèque','Orange cannelle','Gianduja','Coco','Panettone'] },
-  { id:'tablette',  nom:'Chocolat 220 g',           unite:'box',
+  { id:'tablette',  sec:'Café, chocolat, thé', nom:'Chocolat 220 g',  unite:'carton', decimal:true,
     variantes:['Noir','Lait','Noisette'] },
-  { id:'the',       nom:'Thés',                     unite:'box',
+  { id:'the',       sec:'Café, chocolat, thé', nom:'Thés',            unite:'boîte', decimal:true,
     variantes:['Breakfast','Earl grey','Vert','Vert Yuanne','Rooibos',
                'Infusion pomme orange'] },
 
-  /* --- Service --- */
-  { id:'gaufrecrepe',nom:'Gaufres et crêpes plateau',unite:'box' },
-  { id:'cuillere',  nom:'Cuillères en bois',        unite:'pack' },
-  { id:'couteau',   nom:'Couteaux en bois',         unite:'pack' },
-  { id:'gobelet',   nom:'Gobelets',                 unite:'pack',
-    variantes:['Expresso','Petit','Moyen','Grand'] },
-  { id:'bague',     nom:'Bagues de gobelet',        unite:'pack',
-    variantes:['Petit','Moyen','Grand'] },
-  { id:'creaspearl',nom:'Creaspearls',              unite:'pack' },
-  { id:'wafer',     nom:'Wafers 5p 30 g',           unite:'pack' },
+  /* ==================== BOISSONS ET FRAIS ==================== */
+  { id:'boisson',   sec:'Boissons et frais', nom:'Boissons',          unite:'pack', decimal:true,
+    variantes:['San Pellegrino','Evian 50 cl','Evian 1 L','Coca Cola','Coca zéro','Fusitea'] },
+  { id:'lait',      sec:'Boissons et frais', nom:'Lait',              unite:'brique', decimal:false },
+  { id:'creme',     sec:'Boissons et frais', nom:'Crème pour chantilly',unite:'brique', decimal:false },
 
-  /* --- Boissons --- */
-  { id:'boisson',   nom:'Boissons',                 unite:'pack',
-    variantes:['San Pellegrino','Evian','Evian 1 L','Coca Cola','Coca zéro','Fusitea'] },
-  { id:'gobeleteau',nom:'Gobelets à eau',           unite:'pack' },
-  { id:'lait',      nom:'Lait',                     unite:'brique' },
-
-  /* --- Coulis et toppings --- */
-  { id:'coulis',    nom:'Coulis',                   unite:'flacon',
+  /* ==================== COULIS ET TOPPINGS ==================== */
+  { id:'coulis',    sec:'Coulis et toppings', nom:'Coulis',           unite:'flacon', decimal:true,
     variantes:['Chocolat','Pistache','Caramel','Gianduja'] },
-  { id:'topping',   nom:'Toppings sur glace',       unite:'sachet',
-    variantes:['Pistache','Noisette','Éclats de noisette',
-               'Éclats de caramel','Cacao cagé','Amarena'] },
-  { id:'sucrecristal',nom:'Sucre cristal individuel',unite:'pack' },
+  { id:'topping',   sec:'Coulis et toppings', nom:'Toppings sur glace',unite:'pot', decimal:true,
+    variantes:['Pistache','Noisette','Caramel','Café'] },
 
-  /* --- Emballages à emporter --- */
-  { id:'sackraft',  nom:'Sacs kraft',               unite:'box',
+  /* ==================== EMBALLAGES À EMPORTER ==================== */
+  { id:'sackraft',  sec:'Emballages', nom:'Sacs kraft',               unite:'carton', decimal:true,
     variantes:['Petit','Grand'] },
-  { id:'macaroncarton',nom:'Cartons macarons',      unite:'carton',
+  { id:'macaroncarton',sec:'Emballages', nom:'Cartons macarons',     unite:'carton', decimal:true,
     variantes:['Petit 2p','Moyen 4p'] },
-  { id:'isobox',    nom:'ISO box 12 macarons',      unite:'box' },
-  { id:'isobac',    nom:'ISO bacs',                 unite:'box',
+  { id:'isobox',    sec:'Emballages', nom:'ISO box 12 macarons',      unite:'carton', decimal:true },
+  { id:'isobac',    sec:'Emballages', nom:'ISO bacs',                 unite:'carton', decimal:true,
     variantes:['1100 ml','550 ml'] },
+  { id:'papier',    sec:'Emballages', nom:'Rouleaux',                 unite:'rouleau', decimal:false,
+    variantes:['Papier TPE','Papier caisse','Sopalin'] },
 
-  /* --- Entretien --- */
-  { id:'guillere',  nom:'Guillère à glace',         unite:'pack' },
-  { id:'bobine',    nom:'Bobine de papier',         unite:'pack' },
-  { id:'moussana',  nom:'Moussana',                 unite:'flacon' },
-  { id:'bactalim',  nom:'Bactalim',                 unite:'flacon' },
-  { id:'savon',     nom:'Savon main',               unite:'flacon' },
-  { id:'sacpoubelle',nom:'Sacs poubelle',           unite:'rouleau' },
-  { id:'produitsol',nom:'Produit sol',              unite:'flacon' },
-  { id:'lavette',   nom:'Lavettes',                 unite:'pack',
+  /* ==================== ENTRETIEN ==================== */
+  { id:'desinfectant',sec:'Entretien', nom:'Désinfectants',           unite:'flacon', decimal:true,
+    variantes:['Bactalim','Moussana','Savon main','Produit sol','Produit à vitres'] },
+  { id:'lavette',   sec:'Entretien', nom:'Lavettes',                  unite:'pack', decimal:true,
     variantes:['Rose','Jaune','Bleue'] },
-  { id:'vitres',    nom:'Produit à vitres',         unite:'flacon' },
+  { id:'guillere',  sec:'Entretien', nom:'Guillère à glace',          unite:'pack', decimal:true },
+  { id:'sacpoubelle',sec:'Entretien', nom:'Sacs poubelle',            unite:'rouleau', decimal:false },
 
-  /* --- Surgelé, compté avec le sec car même fiche --- */
-  { id:'macclassico', nom:'Macarons Classico',      unite:'boîte',
+  /* ==================== SURGELÉ ==================== */
+  { id:'crepe',     sec:'Surgelé', nom:'Crêpes',                      unite:'carton', decimal:true },
+  { id:'gaufre',    sec:'Surgelé', nom:'Gaufres',                     unite:'carton', decimal:true },
+  { id:'cookie',    sec:'Surgelé', nom:'Cookies',                     unite:'carton', decimal:true },
+  { id:'macclassico', sec:'Surgelé', nom:'Macarons Classico',         unite:'boîte', decimal:false,
     variantes:['Cioccolato Amorino','Pistacchio','Vaniglia','Caramello',
                'Lampone','Tiramisù','Fior di latte & coulis exotique',
                'Litchi framboise rose','Cacahuète','Mangue'] },
-  { id:'macgrandioso',nom:'Macarons Grandioso',     unite:'boîte',
+  { id:'macgrandioso',sec:'Surgelé', nom:'Macarons Grandioso',        unite:'boîte', decimal:false,
     variantes:['Cioccolato','Pistacchio','Vaniglia','Lampone'] },
-  { id:'gianduiotto', nom:'Gianduiotto',            unite:'boîte',
+  { id:'gianduiotto', sec:'Surgelé', nom:'Gianduiotto',               unite:'boîte', decimal:true,
     variantes:['Chocolat noir & gelato chocolat',
                'Chocolat au lait & gelato noisette',
-               'Chocolat blanc & gelato pistache'] },
-  { id:'gaufre',    nom:'Gaufres',                  unite:'paquet' },
-  { id:'crepe',     nom:'Crêpes',                   unite:'paquet' },
-  { id:'cookie',    nom:'Cookies',                  unite:'paquet' }
+               'Chocolat blanc & gelato pistache'] }
 ];
+
+/* Sections dans l'ordre d'affichage. */
+const SEC_SECTIONS = ['Cornets et pots','Service','Café, chocolat, thé',
+  'Boissons et frais','Coulis et toppings','Emballages','Entretien','Surgelé'];
 
 /* Nombre de lignes réellement à compter, déclinaisons comprises. */
 const SEC_LIGNES = INVENTAIRE_SEC.reduce(
