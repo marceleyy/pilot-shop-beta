@@ -12,6 +12,7 @@
    PAGES.reception  = { titre:'Réception',   sous:'Livraison, DLC et stock fermé' };
 PAGES.stock      = { titre:'Stock réel', sous:'Ce qui reste en chambre froide' };
 PAGES.inventaire = { titre:'Faire l’inventaire', sous:'Compter ce qui est physiquement là' };
+PAGES.catalogue  = { titre:'Catalogue du sec', sous:'Ce que l’inventaire propose' };
 PAGES.parametres = { titre:'Back-office', sous:'Tâches, horaires et unités froides' };
 PAGES.hebdo      = { titre:'Tâches du jour', sous:'Plan hebdomadaire de la boutique' };
 PAGES.lots.titre = 'Traçabilité';
@@ -31,6 +32,12 @@ if (MENU_PLUS.manager.indexOf('reception') < 0) MENU_PLUS.manager.splice(2, 0, '
    son menu. Les signalements de l'équipe étaient donc enregistrés sans que
    personne ne puisse les consulter ni les marquer traités. */
 if (MENU_PLUS.manager.indexOf('anomalie') < 0) MENU_PLUS.manager.unshift('anomalie');
+/* Le catalogue du sec est modifiable par le manager depuis l'application :
+   retirer une référence, en ajouter, changer une unité. Sans passer par le code. */
+if (MENU_PLUS.manager.indexOf('catalogue') < 0) {
+  const i = MENU_PLUS.manager.indexOf('inventaire');
+  MENU_PLUS.manager.splice(i >= 0 ? i + 1 : MENU_PLUS.manager.length, 0, 'catalogue');
+}
 if (MENU_PLUS.manager.indexOf('parametres') < 0) MENU_PLUS.manager.push('parametres');
 /* Les tâches hebdomadaires méritent leur onglet : c'est le tableau que l'équipe
    consultait au mur, consulté plusieurs fois par jour. */

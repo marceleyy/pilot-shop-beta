@@ -113,6 +113,7 @@
      ['hebdo:responsables', 'reglages'],
      ['hebdo:',       'checklists'],
      ['hebdo',        'reglages'],
+     ['catalogue:',   'reglages'],
      ['async:',       'reglages']
    ].filter(function (r) {
      /* Une route dont la table est introuvable est retirée dès le chargement :

@@ -1245,6 +1245,22 @@ input[type="time"]:focus, input[type="date"]:focus{
   font-weight:600;white-space:nowrap;border-left:1px solid var(--line);
   min-height:46px;display:flex;align-items:center}
 
+/* Sections du sec, avec leur couleur. C'est le code couleur de la fiche papier
+   Amorino, que l'équipe connaît déjà : on retrouve la section d'un coup d'œil
+   sans lire l'entête. La teinte vient de la configuration, par variable CSS. */
+.sec-bloc{--sec-teinte:var(--fond-2);margin-top:18px;padding:12px 12px 4px;
+  border-radius:var(--r-carte);background:var(--sec-teinte)}
+.sec-bloc:first-of-type{margin-top:8px}
+.sec-entete{display:flex;align-items:center;gap:9px;padding:2px 4px 10px}
+.sec-entete h3{flex:1;margin:0}
+.sec-pastille{width:10px;height:10px;border-radius:50%;flex:0 0 auto;
+  background:var(--encre);opacity:.55}
+.sec-bloc .invl,.sec-bloc .invp{background:var(--blanc)}
+
+@media (prefers-color-scheme:dark){
+  .sec-bloc{--sec-teinte:color-mix(in srgb,var(--sec-teinte) 14%,var(--fond))}
+}
+
 /* --- 21. Impression : registre sanitaire -------------------------------- */
 #printview{display:none}
 @media print{

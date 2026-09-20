@@ -144,9 +144,18 @@ const INVENTAIRE_SEC = [
                'Chocolat blanc & gelato pistache'] }
 ];
 
-/* Sections dans l'ordre d'affichage. */
-const SEC_SECTIONS = ['Cornets et pots','Service','Café, chocolat, thé',
-  'Boissons et frais','Coulis et toppings','Emballages','Entretien','Surgelé'];
+/* Sections dans l'ordre d'affichage, avec leur couleur. Le code couleur est
+   celui de la fiche papier Amorino : les filles le connaissent déjà. */
+const SEC_SECTIONS = [
+  { id:'Cornets et pots',     couleur:'sable',   teinte:'#FDF3E3' },
+  { id:'Service',             couleur:'rose',    teinte:'#FCE7F3' },
+  { id:'Café, chocolat, thé', couleur:'corail',  teinte:'#FEE2E2' },
+  { id:'Boissons et frais',   couleur:'ciel',    teinte:'#DBEAFE' },
+  { id:'Coulis et toppings',  couleur:'lavande', teinte:'#EDE9FE' },
+  { id:'Emballages',          couleur:'menthe',  teinte:'#D1FAE5' },
+  { id:'Entretien',           couleur:'gris',    teinte:'#F1F5F9' },
+  { id:'Surgelé',             couleur:'glace',   teinte:'#E0F2FE' }
+];
 
 /* Nombre de lignes réellement à compter, déclinaisons comprises. */
 const SEC_LIGNES = INVENTAIRE_SEC.reduce(

@@ -56,16 +56,24 @@ const NOUVEAU = `/* --- Sec : par section, unité visible, décimales où ça a 
 
   const blocSec = () => {
     const anc = secPrec && secPrec.lignes ? secPrec.lignes : {};
-    const sections = (typeof SEC_SECTIONS !== 'undefined') ? SEC_SECTIONS
-      : [...new Set(INVENTAIRE_SEC.map(r => r.sec || 'Autres'))];
+    /* Le catalogue effectif : celui du manager s'il l'a modifié, sinon celui
+       d'usine. Le manager peut retirer une référence, en ajouter, changer une
+       unité ou une déclinaison depuis le Back-office, sans passer par le code. */
+    const catalogue = catalogueSec();
+    const sections = (typeof SEC_SECTIONS !== 'undefined')
+      ? SEC_SECTIONS.map(s => typeof s === 'string' ? { id:s } : s)
+      : [...new Set(catalogue.map(r => r.sec || 'Autres'))].map(s => ({ id:s }));
 
     return sections.map(section => {
-      const refs = INVENTAIRE_SEC.filter(r =>
-        typeof r === 'object' && (r.sec || 'Autres') === section);
+      const refs = catalogue.filter(r =>
+        typeof r === 'object' && (r.sec || 'Autres') === section.id && !r.masque);
       if (!refs.length) return '';
       const nb = refs.reduce((n, r) => n + (r.variantes ? r.variantes.length : 1), 0);
+      const teinte = section.teinte ? ' style="--sec-teinte:' + section.teinte + '"' : '';
 
-      return '<div class="entete"><h3>' + esc(section) + '</h3>' +
+      return '<div class="sec-bloc"' + teinte + '>' +
+        '<div class="entete sec-entete"><span class="sec-pastille"></span>' +
+        '<h3>' + esc(section.id) + '</h3>' +
         '<span class="pousse mini num">' + nb + '</span></div>' +
         '<div class="stack">' + refs.map(r => {
 
@@ -98,7 +106,7 @@ const NOUVEAU = `/* --- Sec : par section, unité visible, décimales où ça a 
                 }).join('') + '</div>'
               : '') +
             '</div>';
-        }).join('') + '</div>';
+        }).join('') + '</div></div>';
     }).join('');
   };
 
