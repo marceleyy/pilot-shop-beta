@@ -646,137 +646,148 @@ async function tacheRecomptage() {
    -------------------------------------------------------------------------- */
 V.stock = async function () {
   const { articles, inventaire } = await stockReel();
-  const cles = Object.keys(articles).filter(c => num(articles[c]) !== 0)
-    .sort((a, b) => libelleArticle(a).localeCompare(libelleArticle(b)));
-  const t = totauxStock(articles);
-  const alertes = anomaliesStock(articles);
-
-  /* Le dernier comptage du sec, par section et par référence. */
   if (typeof chargerCatalogueSec === 'function') await chargerCatalogueSec();
   const sec = await DB.get('stock:sec', null);
-  const secBloc = (function () {
+
+  /* Deux onglets, comme l'inventaire. On mémorise le dernier ouvert. */
+  let partie = STATE.stockPartie === 'sec' ? 'sec' : 'froid';
+
+  const estSec = c => {
+    const fam = FAMILLES_PRODUIT.filter(x => x.id === litArticle(c).famille)[0];
+    return !!(fam && (fam.lieu === 'sec' || fam.stock === 'sec'));
+  };
+  /* Chambre froide : tout ce qui n'est pas marqué « sec ». */
+  const clesFroid = Object.keys(articles)
+    .filter(c => num(articles[c]) !== 0 && !estSec(c))
+    .sort((a, b) => libelleArticle(a).localeCompare(libelleArticle(b)));
+  const articlesFroid = {};
+  clesFroid.forEach(c => articlesFroid[c] = articles[c]);
+  const t = totauxStock(articlesFroid);
+  const alertes = anomaliesStock(articles);
+
+  /* ---------- Chambre froide ---------- */
+  const blocFroid = () => {
+    const parFamille = {};
+    clesFroid.forEach(c => {
+      const f = litArticle(c).famille;
+      (parFamille[f] = parFamille[f] || []).push(c);
+    });
+    return carte('<div class="grid g3">' +
+      kpi('Bacs de glace', t.bacs, '', n1(t.litres) + ' L') +
+      kpi('Autres produits', t.unites, '', 'comptés à l’unité') +
+      kpi('Poids', n1(t.kg) + ' kg', '', 'glace seule') + '</div>' +
+      (inventaire
+        ? '<p class="rappel" style="margin-top:14px">Dernier inventaire le ' +
+          fmtD(inventaire.jour) + (inventaire.par ? ' par ' + esc(inventaire.par) : '') + '.</p>'
+        : '<p class="rappel" style="margin-top:14px">Aucun inventaire : le stock part de zéro.</p>'),
+      'solide') +
+
+    (alertes.length
+      ? alertes.map(a => '<div class="alerte ' + (a.niveau === 'bad' ? 'bad' : 'warn') + '" style="margin-top:12px">' +
+          '<span class="ai">•</span><div><b>' + esc(a.titre) + '</b><p>' + esc(a.detail) + '</p></div></div>').join('')
+      : '') +
+
+    '<button class="btn menthe bloc xl" id="st-inv" style="margin-top:16px">Faire l’inventaire</button>' +
+
+    (clesFroid.length
+      ? Object.keys(parFamille).map(fid => {
+          const fam = FAMILLES_PRODUIT.filter(x => x.id === fid)[0];
+          const sous = parFamille[fid].reduce((s, c) => s + num(articles[c]), 0);
+          const u = fam ? (Math.abs(sous) > 1 ? fam.unites : fam.unite) : 'unité(s)';
+          const lignes = (fid === 'glace')
+            ? (function () {
+                const parParfum = {};
+                parFamille[fid].forEach(c => { const a = litArticle(c);
+                  (parParfum[a.parfum] = parParfum[a.parfum] || []).push(c); });
+                return Object.keys(parParfum).sort((x, y) => x.localeCompare(y)).map(p => {
+                  const tailles = parParfum[p].sort((x, y) => num(litArticle(x).taille) - num(litArticle(y).taille));
+                  const n = tailles.reduce((s, c) => s + num(articles[c]), 0);
+                  const negatif = tailles.some(c => num(articles[c]) < 0);
+                  return carte('<div class="rang"><div style="flex:1;min-width:0"><b>' + esc(p) + '</b>' +
+                    '<div class="mini tailles">' + tailles.map(c => { const q = num(articles[c]);
+                      return '<span class="tq' + (q < 0 ? ' neg' : '') + '"><b>' + q + '</b>×' + litArticle(c).taille + ' L</span>';
+                    }).join('') + '</div></div>' +
+                    '<b class="num" style="font-size:20px">' + n + '</b></div>', negatif ? 'corail' : '');
+                }).join('');
+              })()
+            : parFamille[fid].map(c => { const a = litArticle(c), q = num(articles[c]);
+                return carte('<div class="rang"><div style="flex:1;min-width:0"><b>' +
+                  esc(a.parfum || (fam ? fam.libelle : fid)) + '</b>' +
+                  (fam ? '<div class="mini">En ' + esc(fam.unites) + '</div>' : '') + '</div>' +
+                  '<b class="num" style="font-size:20px">' + q + '</b></div>', q < 0 ? 'corail' : '');
+              }).join('');
+          return '<div class="entete"><h3>' + esc(fam ? fam.libelle : fid) + '</h3>' +
+            '<span class="pousse mini num">' + sous + ' ' + u + '</span></div>' +
+            '<div class="stack">' + lignes + '</div>';
+        }).join('')
+      : vide('', 'Chambre froide vide. Commencez par un inventaire.'));
+  };
+
+  /* ---------- Sec ---------- */
+  const blocSec = () => {
     if (!sec || !sec.lignes || !Object.keys(sec.lignes).length) {
-      return '<div class="entete" style="margin-top:22px"><h3>Sec</h3></div>' +
-        carte('<p class="cs">Le sec n’a jamais été compté.</p>' +
-          '<button class="btn clair bloc" id="st-inv-sec" style="margin-top:10px">Compter le sec</button>', 'plat');
+      return carte('<p class="cs">Le sec n’a jamais été compté.</p>' +
+        '<button class="btn menthe bloc xl" id="st-inv-sec" style="margin-top:12px">Compter le sec</button>', 'solide');
     }
     const cat = (typeof catalogueSec === 'function') ? catalogueSec() : INVENTAIRE_SEC;
     const sections = (typeof SEC_SECTIONS !== 'undefined')
       ? SEC_SECTIONS.map(s => typeof s === 'string' ? { id:s } : s) : [];
     const l = sec.lignes;
-    const nomRef = (id) => { const r = cat.filter(x => x.id === id)[0]; return r || null; };
-
-    /* On regroupe les lignes comptées par référence : sec|cornet|Petit → cornet */
     const parRef = {};
-    Object.keys(l).forEach(k => {
-      const p = k.split('|'); if (p[0] !== 'sec') return;
-      (parRef[p[1]] = parRef[p[1]] || []).push({ v: p[2] || '', q: num(l[k]) });
-    });
+    Object.keys(l).forEach(k => { const p = k.split('|'); if (p[0] !== 'sec') return;
+      (parRef[p[1]] = parRef[p[1]] || []).push({ v: p[2] || '', q: num(l[k]) }); });
+    const totalLignes = Object.keys(l).length;
+    const totalUnites = Object.keys(l).reduce((s, k) => s + num(l[k]), 0);
 
-    return '<div class="entete" style="margin-top:22px"><h3>Sec</h3>' +
-      '<span class="pousse mini">compté le ' + fmtD(sec.jour) + (sec.par ? ' par ' + esc(sec.par) : '') + '</span></div>' +
+    return carte('<div class="grid g2">' +
+      kpi('Références', totalLignes, '', 'comptées') +
+      kpi('Unités', n1(totalUnites), '', 'toutes confondues') + '</div>' +
+      '<p class="rappel" style="margin-top:14px">Compté le ' + fmtD(sec.jour) +
+      (sec.par ? ' par ' + esc(sec.par) : '') + '.</p>', 'solide') +
+      '<button class="btn menthe bloc xl" id="st-inv-sec" style="margin-top:16px">Recompter le sec</button>' +
+
       sections.map(s => {
-        const refs = cat.filter(r => (r.sec || 'Autres') === s.id && parRef[r.id]);
+        const refs = cat.filter(r => (r.sec || 'Autres') === s.id && !r.masque && parRef[r.id]);
         if (!refs.length) return '';
         return '<div class="sec-bloc"' + (s.teinte ? ' style="--sec-teinte:' + s.teinte + '"' : '') + '>' +
           '<div class="entete sec-entete"><span class="sec-pastille"></span><h3>' + esc(s.id) + '</h3></div>' +
           '<div class="stack">' + refs.map(r => {
             const lignes = parRef[r.id];
-            const tot = lignes.reduce((a, x) => a + x.q, 0);
-            const detail = lignes.filter(x => x.v).map(x => esc(x.v) + ' ' + n1(x.q)).join(' · ');
+            const total = lignes.reduce((a, x) => a + x.q, 0);
+            const connues = new Set(r.variantes || []);
             return carte('<div class="rang"><div style="flex:1;min-width:0"><b>' + esc(r.nom) + '</b>' +
-              (detail ? '<div class="mini">' + detail + '</div>' : '') + '</div>' +
-              '<b class="num" style="font-size:18px">' + n1(tot) + ' <small style="font-size:11px;color:var(--brume)">' +
-              esc(r.unite) + (tot > 1 ? 's' : '') + '</small></b></div>', tot === 0 ? 'corail' : '');
+              (r.variantes && r.variantes.length
+                ? '<div class="mini tailles">' + lignes
+                    .sort((a, b) => (r.variantes.indexOf(a.v) + 99) - (r.variantes.indexOf(b.v) + 99))
+                    .map(x => '<span class="tq' + (x.q < 0 ? ' neg' : '') + (connues.has(x.v) ? '' : ' ancienne') + '">' +
+                      esc(x.v || '—') + ' <b>' + n1(x.q) + '</b></span>').join('') + '</div>'
+                : '') + '</div>' +
+              '<b class="num" style="font-size:20px">' + n1(total) + '</b>' +
+              '<span class="mini" style="margin-left:6px">' + esc(r.unite) + (total > 1 ? 's' : '') + '</span></div>',
+              total < 0 ? 'corail' : '');
           }).join('') + '</div></div>';
-      }).join('') +
-      '<button class="btn clair bloc" id="st-inv-sec" style="margin-top:12px">Recompter le sec</button>';
-  })();
+      }).join('');
+  };
 
-  /* Regroupement par famille, pour ne pas dérouler quarante lignes à plat. */
-  const parFamille = {};
-  cles.forEach(c => {
-    const f = litArticle(c).famille;
-    (parFamille[f] = parFamille[f] || []).push(c);
-  });
+  const dessiner = () => {
+    $('#vue-actions').innerHTML = '';
+    $('#page').innerHTML =
+      '<div class="tseg">' +
+      [['froid', 'Chambre froide', t.bacs + ' bacs'], ['sec', 'Sec', sec ? Object.keys(sec.lignes || {}).length + ' réf.' : 'jamais compté']]
+        .map(x => '<button class="' + (x[0] === partie ? 'on' : '') + '" data-partie="' + x[0] + '">' +
+          '<span class="tsl">' + x[1] + '</span><small>' + x[2] + '</small></button>').join('') +
+      '</div>' +
+      (partie === 'froid' ? blocFroid() : blocSec());
 
-  $('#vue-actions').innerHTML = '';
-  $('#page').innerHTML =
-    carte('<div class="grid g3">' +
-      kpi('Bacs de glace', t.bacs, '', n1(t.litres) + ' L') +
-      kpi('Autres produits', t.unites, '', 'comptés à l’unité') +
-      kpi('Poids', n1(t.kg) + ' kg', '', 'glace seule') + '</div>' +
-      '<p class="mini" style="margin-top:12px">' +
-      (inventaire
-        ? 'Dernier inventaire le ' + fmtD(inventaire.jour) +
-          (inventaire.par ? ' par ' + esc(inventaire.par) : '') + '.'
-        : 'Aucun inventaire enregistré. Le stock ne compte que les réceptions ' +
-          'et les ouvertures depuis la mise en service.') + '</p>', 'solide') +
-
-    alertes.map(a =>
-      '<div class="alerte ' + a.niveau + '" style="margin-top:12px"><span class="ai">•</span>' +
-      '<div><b>' + esc(a.titre) + '</b><p>' + esc(a.detail) + '</p></div></div>').join('') +
-
-    '<button class="btn menthe bloc xl" id="st-inv" style="margin-top:14px">Faire un inventaire</button>' +
-
-    (cles.length
-      ? Object.keys(parFamille).map(f => {
-          const fam = FAMILLES_PRODUIT.filter(x => x.id === f)[0];
-          const sous = parFamille[f].reduce((s, c) => s + num(articles[c]), 0);
-          const u = fam ? (Math.abs(sous) > 1 ? fam.unites : fam.unite) : 'unité(s)';
-
-          /* Les glaces se regroupent par PARFUM, avec le détail des tailles sur
-             la même ligne. En listant une ligne par taille, « 6 Amarena » ne
-             disait pas s'il s'agissait de six bacs de 3 L ou d'un mélange — et
-             c'est précisément ce qu'on a besoin de savoir devant la chambre
-             froide pour vérifier ce qui est réellement là. */
-          const lignes = (f === 'glace')
-            ? (function () {
-                const parParfum = {};
-                parFamille[f].forEach(c => {
-                  const a = litArticle(c);
-                  (parParfum[a.parfum] = parParfum[a.parfum] || []).push(c);
-                });
-                return Object.keys(parParfum).sort((x, y) => x.localeCompare(y)).map(p => {
-                  const tailles = parParfum[p]
-                    .sort((x, y) => num(litArticle(x).taille) - num(litArticle(y).taille));
-                  const n = tailles.reduce((s, c) => s + num(articles[c]), 0);
-                  const negatif = tailles.some(c => num(articles[c]) < 0);
-                  return carte('<div class="rang">' +
-                    '<div style="flex:1;min-width:0"><b>' + esc(p) + '</b>' +
-                    '<div class="mini tailles">' + tailles.map(c => {
-                      const q = num(articles[c]);
-                      return '<span class="tq' + (q < 0 ? ' neg' : '') + '">' +
-                             '<b>' + q + '</b>×' + litArticle(c).taille + ' L</span>';
-                    }).join('') + '</div></div>' +
-                    '<b class="num" style="font-size:20px">' + n + '</b></div>',
-                    negatif ? 'corail' : '');
-                }).join('');
-              })()
-            : parFamille[f].map(c => {
-                const a = litArticle(c), q = num(articles[c]);
-                return carte('<div class="rang">' +
-                  '<div style="flex:1;min-width:0"><b>' + esc(a.parfum || (fam ? fam.libelle : f)) + '</b>' +
-                  (fam ? '<div class="mini">En ' + esc(fam.unites) + '</div>' : '') + '</div>' +
-                  '<b class="num" style="font-size:20px">' + q + '</b></div>',
-                  q < 0 ? 'corail' : '');
-              }).join('');
-
-          return '<div class="entete"><h3>' + esc(fam ? fam.libelle : f) + '</h3>' +
-            '<span class="pousse mini num">' + sous + ' ' + u + '</span></div>' +
-            '<div class="stack">' + lignes + '</div>';
-        }).join('')
-      : vide('', 'Stock vide. Commencez par un inventaire.')) +
-
-    /* Le sec, tel que compté au dernier inventaire. Il ne bouge pas avec la
-       traçabilité — on ne scanne pas un carton de serviettes —, donc on affiche
-       le dernier comptage avec sa date. L'écran s'appelait « ce qui reste en
-       chambre froide » et n'en montrait que la moitié. */
-    secBloc;
-
-  $('#st-inv').onclick = () => rendre('inventaire');
-  const bs = $('#st-inv-sec');
-  if (bs) bs.onclick = () => { STATE.inventairePartie = 'sec'; rendre('inventaire'); };
+    $$('[data-partie]').forEach(b => b.onclick = () => {
+      partie = b.dataset.partie; STATE.stockPartie = partie; dessiner();
+    });
+    const bi = $('#st-inv');
+    if (bi) bi.onclick = () => { STATE.inventairePartie = 'froid'; rendre('inventaire'); };
+    const bs = $('#st-inv-sec');
+    if (bs) bs.onclick = () => { STATE.inventairePartie = 'sec'; rendre('inventaire'); };
+  };
+  dessiner();
 };
 
 /* -----------------------------------------------------------------------------

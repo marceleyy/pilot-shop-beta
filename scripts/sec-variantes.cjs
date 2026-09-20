@@ -156,14 +156,24 @@ const avant = src.lastIndexOf('/*', d);
 if (avant > 0 && src.slice(avant, d).indexOf('*/') === src.slice(avant, d).lastIndexOf('*/')
     && d - avant < 600) deb = avant;
 
-/* Fin : on englobe SEC_SECTIONS et SEC_LIGNES s'ils existent déjà. */
+/* Fin : on englobe SEC_SECTIONS et SEC_LIGNES s'ils existent déjà.
+   Sans fenêtre fixe — une fenêtre de 900 caractères manquait SEC_LIGNES dès que
+   SEC_SECTIONS s'est allongé avec les couleurs, et le script réinsérait la
+   déclaration : « already declared » à chaque passage. On cherche chaque
+   déclaration jusqu'à la prochaine constante du fichier, quelle que soit la
+   distance. */
 let f = src.indexOf('];', d);
 if (f < 0) { console.error('Fin du tableau introuvable.'); process.exit(1); }
 f += 2;
 for (const nom of ['const SEC_SECTIONS', 'const SEC_LIGNES']) {
-  const suite = src.slice(f, f + 900);
-  const i = suite.indexOf(nom);
-  if (i >= 0) { const fin = suite.indexOf(';', i); if (fin >= 0) f += fin + 1; }
+  const i = src.indexOf(nom, f);
+  if (i < 0) continue;
+  /* La déclaration doit suivre sans autre « const » entre les deux : sinon
+     c'est une autre partie du fichier, on ne la touche pas. */
+  const entre = src.slice(f, i);
+  if (/\bconst\s+(?!SEC_)/.test(entre)) continue;
+  const fin = src.indexOf(';', i);
+  if (fin >= 0) f = fin + 1;
 }
 
 const resultat = src.slice(0, deb) + NOUVEAU + src.slice(f);
