@@ -548,12 +548,22 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
      (PREUVE.hebdoObligatoire && (t.jours || t.joursSauf || t.async)));
      /* Une étape liée n'est cochée que si l'action a vraiment eu lieu. */
      const faite = lie ? lie.fait : !!v.ok;
-     return '<div class="tache' + (faite ? ' on' : '') + (lie ? ' liee' : '') + '">' +
-     '<span class="tnum">' + n + '</span>' +
-     (lie
-       ? '<span class="box" aria-hidden="true">✓</span>'
+     /* Une tâche urgente porte son explication : un appui sur son libellé
+        l'affiche en clair — pourquoi elle est là, quel inventaire faire — au
+        lieu de renvoyer vers un écran muet. Le bouton « Y aller » ouvre
+        ensuite l'inventaire sur le bon onglet. */
+     const urgente = !!t.urgent;
+     return '<div class="tache' + (faite ? ' on' : '') + (lie ? ' liee' : '') +
+       (urgente ? ' urgente' : '') + '">' +
+     '<span class="tnum">' + (urgente ? '!' : n) + '</span>' +
+     (lie || urgente
+       ? '<span class="box" aria-hidden="true">' + (urgente ? '' : '✓') + '</span>'
        : '<button class="box" data-t="' + t.id + '">✓</button>') +
-     '<span class="tx"><span class="tn">' + esc(t.t) + '</span>' +
+     '<span class="tx">' +
+     (urgente
+       ? '<button type="button" class="tn tn-btn" data-explique="' + esc(t.id) + '">' + esc(t.t) + '</button>'
+       : '<span class="tn">' + esc(t.t) + '</span>') +
+     (urgente ? '<span class="tm">Touchez pour comprendre · puis « Y aller »</span>' : '') +
      (lie
        ? '<span class="tm">' + (lie.fait
            ? (lie.par ? esc(lie.par) + ' · ' + heure(lie.at) : 'fait')
@@ -567,7 +577,8 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
      (besoinPhoto && !lie ? '<button class="btn ' + (preuve ? 'menthe' : 'clair') + ' sm" data-photo="' + t.id +
        '" data-lib="' + esc(t.t) + '">' +
        (clichés.length ? '✓ ' + clichés.length : 'Photo') + '</button>' : '') +
-     (t.lien ? '<button class="btn ' + (lie && !lie.fait ? 'menthe' : 'clair') + ' sm" data-go="' + t.lien + '">' +
+     (t.lien ? '<button class="btn ' + (lie && !lie.fait ? 'menthe' : urgente ? 'corail' : 'clair') + ' sm" data-go="' + t.lien + '"' +
+       (t.partie ? ' data-partie="' + esc(t.partie) + '"' : '') + '>' +
        (lie && !lie.fait ? 'Y aller' : '→') + '</button>' : '') +
          '</div>' +
          /* Vignettes sous la tâche : plusieurs clichés possibles, avant et après.
@@ -705,6 +716,24 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
   });
    
      brancherVignettes(() => rendre('accueil'));
+
+     /* Tâche urgente : un appui sur son libellé ouvre l'explication. On
+        retrouve la tâche par son identifiant dans les blocs dessinés. */
+     $$('[data-explique]').forEach(b => b.onclick = () => {
+       const t = blocs.flatMap(x => x.taches).filter(x => x.id === b.dataset.explique)[0];
+       if (!t) return;
+       showSheet('<h2 id="sheet-titre">' + esc(t.t) + '</h2>' +
+         '<p style="margin-top:12px;font-size:15px;line-height:1.55">' + esc(t.detail || '') + '</p>' +
+         '<div class="actions"><button class="btn clair" data-fermer>Plus tard</button>' +
+         (t.lien ? '<button class="btn menthe" id="exp-go">Y aller maintenant</button>' : '') + '</div>');
+       const g = $('#exp-go');
+       if (g) g.onclick = () => { closeSheet(); if (t.partie) STATE.inventairePartie = t.partie; rendre(t.lien); };
+     });
+     /* Le bouton « Y aller » d'une tâche de recomptage ouvre l'inventaire
+        directement sur le bon onglet — sec ou chambre froide. */
+     $$('[data-go][data-partie]').forEach(b => b.onclick = () => {
+       STATE.inventairePartie = b.dataset.partie; rendre(b.dataset.go);
+     });
      $$('[data-photo]').forEach(b => b.onclick = async () => {
        const p = await attacherPreuve(j, b.dataset.photo, b.dataset.lib);
        if (p) { toast('Photo enregistrée (' + p.poids + ' Ko)'); rendre('accueil'); }
@@ -1031,7 +1060,7 @@ V.caisse = async function () {
       const dC = +(num(tpe) - num(cb)).toFixed(2);
       lignes.push(Math.abs(dC) < 0.01
         ? { ok:true,  t:'Carte : caisse et TPE au même montant.' }
-        : { ok:false, t:'Carte : ' + eur(dC) + ' d’écart. ' + eur(num(cb)) +
+        : { ok:false, montant:dC, t:'Carte : ' + eur(dC) + ' d’écart. ' + eur(num(cb)) +
                         ' sur la caisse, ' + eur(num(tpe)) + ' sur le TPE.' });
     }
 
@@ -1043,7 +1072,7 @@ V.caisse = async function () {
       const dE = +(num(fond) - attendu).toFixed(2);
       lignes.push(Math.abs(dE) < 0.01
         ? { ok:true,  t:'Espèces : le tiroir tombe juste.' }
-        : { ok:false, t:'Espèces : ' + eur(dE) + ' d’écart. ' + eur(fondOuv) + ' au départ + ' +
+        : { ok:false, montant:dE, t:'Espèces : ' + eur(dE) + ' d’écart. ' + eur(fondOuv) + ' au départ + ' +
                         eur(num(esp)) + ' encaissés − ' + eur(num(ret)) + ' retirés = ' +
                         eur(attendu) + ' attendus, ' + eur(num(fond)) + ' laissés.' });
     }
@@ -1052,11 +1081,24 @@ V.caisse = async function () {
       box.innerHTML = '<p class="verdict n">Renseignez les recettes pour le contrôle.</p>';
       return;
     }
+    /* Le rouge est réservé aux écarts qui dépassent le seuil de 5 €. En
+       dessous, un écart de quelques centimes se dit sans dramatiser — la
+       même règle que le matin. Avant, le soir passait au rouge dès un
+       centime, et l'équipe voyait une alerte tous les jours : quand tout est
+       rouge, plus rien ne l'est. */
+    const seuil = (typeof SEUILS !== 'undefined' && SEUILS.ecartFondEur) ? SEUILS.ecartFondEur : 5;
     const soucis = lignes.filter(l => !l.ok);
-    box.innerHTML = soucis.length
-      ? '<div class="verdict bad"><b>' + soucis.length + ' écart(s)</b><span>' +
-        soucis.map(l => esc(l.t)).join('<br>') + '<br>Expliquez-le dans le commentaire.</span></div>'
-      : '<p class="verdict ok">' + lignes.map(l => esc(l.t)).join(' ') + '</p>';
+    const graves = soucis.filter(l => Math.abs(l.montant || 0) >= seuil);
+    if (!soucis.length) {
+      box.innerHTML = '<p class="verdict ok">' + lignes.map(l => esc(l.t)).join(' ') + '</p>';
+    } else if (!graves.length) {
+      box.innerHTML = '<p class="verdict n">' + soucis.map(l => esc(l.t)).join('<br>') +
+        '<br>Sous le seuil de ' + eur(seuil) + ' : pas de justification demandée.</p>';
+    } else {
+      box.innerHTML = '<div class="verdict bad"><b>' + graves.length + ' écart(s) au-delà de ' +
+        eur(seuil) + '</b><span>' + soucis.map(l => esc(l.t)).join('<br>') +
+        '<br>Expliquez-le dans le commentaire.</span></div>';
+    }
   }
 
   /* Champs de saisie UNIQUEMENT. Le sélecteur large [data-k] ramassait aussi

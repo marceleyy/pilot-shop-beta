@@ -1261,6 +1261,18 @@ input[type="time"]:focus, input[type="date"]:focus{
   .sec-bloc{--sec-teinte:color-mix(in srgb,var(--sec-teinte) 14%,var(--fond))}
 }
 
+/* Tâche urgente : celle qui apparaît quand le stock détecte un écart. Le
+   libellé est un bouton qui ouvre l'explication — pourquoi elle est là, quel
+   inventaire faire —, parce qu'une tâche qu'on ne comprend pas ne se fait pas. */
+.tache.urgente{background:var(--rouge-c);border-color:color-mix(in srgb,var(--rouge) 25%,transparent)}
+.tache.urgente .tnum{background:var(--rouge);color:#fff}
+.tache.urgente .box{visibility:hidden;width:0;min-width:0;margin:0;padding:0}
+.tn-btn{background:none;border:0;padding:0;text-align:left;font:inherit;
+  font-weight:600;color:var(--encre);cursor:pointer;text-decoration:underline;
+  text-decoration-color:color-mix(in srgb,var(--rouge) 45%,transparent);
+  text-underline-offset:3px;min-height:auto}
+.tache.urgente .tm{color:var(--rouge)}
+
 /* --- 21. Impression : registre sanitaire -------------------------------- */
 #printview{display:none}
 @media print{

@@ -529,16 +529,29 @@ async function recomptageDemande() {
 async function tacheRecomptage() {
   const d = await recomptageDemande();
   if (!d) return null;
+
+  /* Le titre NOMME le produit et dit QUEL inventaire faire. « Recompter le
+     stock — 1 manquant » ne disait ni quoi ni où : l'équipière ouvrait
+     l'inventaire sans savoir si c'était la chambre froide ou le sec.
+     La chantilly est au sec ; un bac de vanille est en chambre froide. */
+  const noms = d.articles.map(c => libelleArticle(c).split(' · ')[0]);
+  const liste = noms.length <= 3 ? noms.join(', ')
+    : noms.slice(0, 2).join(', ') + ' et ' + (noms.length - 2) + ' autre(s)';
+  const ou = d.froid ? 'Chambre froide' : 'Sec';
+
   return {
     id: 'recomptage',
-    t: d.froid
-      ? 'Recompter la chambre froide — ' + d.combien + ' manquant(s)'
-      : 'Recompter le stock — ' + d.combien + ' manquant(s)',
+    t: 'Recompter ' + liste + ' — inventaire ' + ou.toLowerCase(),
     lien: 'inventaire',
+    partie: d.froid ? 'froid' : 'sec',
     urgent: true,
-    detail: d.exemple + (d.articles.length > 1
-      ? ' et ' + (d.articles.length - 1) + ' autre(s)' : '') +
-      '. Un produit a été ouvert sans être scanné, ou une livraison n’a pas été saisie.'
+    /* Le détail explique POURQUOI la tâche est là et QUOI faire, pour qu'un
+       appui l'affiche en clair au lieu de renvoyer vers un écran muet. */
+    detail: 'Le stock annonce ' + (d.articles.length > 1 ? 'des quantités négatives' : 'une quantité négative') +
+      ' : on a sorti plus que ce qui était compté. Soit un produit a été ouvert ' +
+      'sans être saisi, soit une livraison n’a pas été enregistrée. ' +
+      'Ouvrez « Faire l’inventaire », onglet ' + ou + ', comptez ' + liste +
+      ' et validez : le compte repart sur ce qui est physiquement là.'
   };
 }
 
@@ -889,6 +902,13 @@ V.inventaire = async function () {
      vingt — et en retirant l'ancien écran « Glace et sec », j'avais purement
      et simplement supprimé le seul endroit où l'on comptait le sec. */
   let partie = 'froid';
+  /* Une tâche de recomptage peut demander l'onglet directement : on l'ouvre
+     sur le sec ou la chambre froide selon le produit concerné, puis on oublie
+     la demande pour ne pas y revenir au prochain passage. */
+  if (STATE.inventairePartie === 'sec' || STATE.inventairePartie === 'froid') {
+    partie = STATE.inventairePartie;
+    STATE.inventairePartie = null;
+  }
 
   const saisie = {};        // chambre froide : cleArticle -> quantité
   const saisieSec = {};     // sec : libellé -> quantité
@@ -1283,6 +1303,12 @@ V.lots = async function () {
       '<div class="cs">À l’ouverture de tout nouveau produit, pas à la livraison. ' +
       'Le bac sort de la chambre froide, on l’ouvre, il monte en vitrine : ' +
       'un seul geste.</div>' +
+      /* Le scanner ne lit que les étiquettes de glace et de macarons : ce sont
+         les seules avec un numéro de lot imprimé en clair. La chantilly, les
+         coulis, les cakes n'en ont pas de lisible — on les saisit à la main.
+         Sans ce rappel, on scannait pour rien et on croyait le scanner cassé. */
+      '<div class="rappel" style="margin-top:12px"><b>Scanner</b> : glaces et macarons. ' +
+      '<b>À la main</b> : chantilly, coulis, toppings, cakes, gaufres, crêpes.</div>' +
       '<button class="btn menthe bloc xl" id="lo-scan" style="margin-top:14px">' +
       'Scanner une étiquette</button>' +
       '<button class="btn clair bloc" id="lo-main" style="margin-top:8px">' +
