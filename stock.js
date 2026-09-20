@@ -878,55 +878,71 @@ V.inventaire = async function () {
           'value="' + (saisie[c] !== undefined ? saisie[c] : '') + '" placeholder="0"></div>';
     }).join('') + '</div>';
 
-  /* --- Sec : une ligne par référence, dépliable quand elle a des déclinaisons
-     Une référence sans variante se compte d'un seul champ. Une référence qui
-     en a se déplie : « Cornets : 4 » ne disait pas lequel manquait, alors que
-     c'est précisément ce qu'on a besoin de savoir pour commander. */
+  /* --- Sec : par section, unité visible, décimales où ça a du sens ---------
+     Le manager l'a dit : « comme ça, les personnes voient avant de taper ».
+     L'unité est dans le champ lui-même. Et le pas est 0,5 quand la référence
+     l'autorise : deux cartons pleins et un à moitié, ça se tape 2,5. Zéro
+     veut dire « à commander », 0,5 veut dire « je réfléchis ». */
   let deplies = {};
   const cleSec = (r, v) => 'sec|' + r.id + '|' + (v || '');
 
-  const blocSec = () =>
-    '<div class="entete"><h3>Consommables et produits non congelés</h3>' +
-    '<span class="pousse mini num">' + (typeof SEC_LIGNES !== 'undefined'
-      ? SEC_LIGNES : INVENTAIRE_SEC.length) + '</span></div>' +
-    '<div class="stack">' + INVENTAIRE_SEC.map(r => {
-      /* Compatibilité : l'ancien catalogue était une simple liste de textes. */
-      if (typeof r === 'string') r = { id:r, nom:r, unite:'unité' };
-      const anc = secPrec && secPrec.lignes ? secPrec.lignes : {};
+  const champSec = (r, c) => {
+    const pas = r.decimal === false ? '1' : '0.5';
+    const mode = r.decimal === false ? 'numeric' : 'decimal';
+    return '<div class="saisie-u">' +
+      '<input type="number" inputmode="' + mode + '" min="0" step="' + pas + '" ' +
+      'data-sec="' + c + '" value="' + (saisieSec[c] !== undefined ? saisieSec[c] : '') + '" ' +
+      'placeholder="0">' +
+      '<span class="su">' + esc(r.unite) + '</span></div>';
+  };
 
-      if (!r.variantes || !r.variantes.length) {
-        const c = cleSec(r, '');
-        return '<div class="invl">' +
-          '<span class="invn">' + esc(r.nom) +
-          '<small>en ' + esc(r.unite) + '</small></span>' +
-          (anc[c] !== undefined ? '<span class="invc faible">préc. ' + anc[c] + '</span>' : '') +
-          '<input type="number" inputmode="numeric" min="0" step="1" data-sec="' + c + '" ' +
-          'value="' + (saisieSec[c] !== undefined ? saisieSec[c] : '') + '" placeholder="0"></div>';
-      }
+  const blocSec = () => {
+    const anc = secPrec && secPrec.lignes ? secPrec.lignes : {};
+    const sections = (typeof SEC_SECTIONS !== 'undefined') ? SEC_SECTIONS
+      : [...new Set(INVENTAIRE_SEC.map(r => r.sec || 'Autres'))];
 
-      const ouvert = deplies[r.id];
-      const saisis = r.variantes.filter(v => saisieSec[cleSec(r, v)] !== undefined).length;
-      const total  = r.variantes.reduce((s, v) => s + num(saisieSec[cleSec(r, v)] || 0), 0);
+    return sections.map(section => {
+      const refs = INVENTAIRE_SEC.filter(r =>
+        typeof r === 'object' && (r.sec || 'Autres') === section);
+      if (!refs.length) return '';
+      const nb = refs.reduce((n, r) => n + (r.variantes ? r.variantes.length : 1), 0);
 
-      return '<div class="invp">' +
-        '<button type="button" class="invp-h depliable" data-deplier="' + r.id + '">' +
-        '<b>' + esc(r.nom) + '</b>' +
-        '<span class="invc">' + (saisis
-          ? total + ' ' + esc(r.unite) + (total > 1 ? 's' : '') + ' · ' + saisis + '/' + r.variantes.length
-          : r.variantes.length + ' déclinaisons') + '</span>' +
-        '<span class="chev">' + (ouvert ? '−' : '+') + '</span></button>' +
-        (ouvert
-          ? '<div class="stack" style="margin-top:8px">' + r.variantes.map(v => {
-              const c = cleSec(r, v);
-              return '<div class="invl">' +
-                '<span class="invn">' + esc(v) + '</span>' +
-                (anc[c] !== undefined ? '<span class="invc faible">préc. ' + anc[c] + '</span>' : '') +
-                '<input type="number" inputmode="numeric" min="0" step="1" data-sec="' + c + '" ' +
-                'value="' + (saisieSec[c] !== undefined ? saisieSec[c] : '') + '" placeholder="0"></div>';
-            }).join('') + '</div>'
-          : '') +
-        '</div>';
-    }).join('') + '</div>';
+      return '<div class="entete"><h3>' + esc(section) + '</h3>' +
+        '<span class="pousse mini num">' + nb + '</span></div>' +
+        '<div class="stack">' + refs.map(r => {
+
+          if (!r.variantes || !r.variantes.length) {
+            const c = cleSec(r, '');
+            return '<div class="invl">' +
+              '<span class="invn">' + esc(r.nom) + '</span>' +
+              (anc[c] !== undefined ? '<span class="invc faible">préc. ' + anc[c] + '</span>' : '') +
+              champSec(r, c) + '</div>';
+          }
+
+          const ouvert = deplies[r.id];
+          const saisis = r.variantes.filter(v => saisieSec[cleSec(r, v)] !== undefined).length;
+          const total  = r.variantes.reduce((s, v) => s + num(saisieSec[cleSec(r, v)] || 0), 0);
+
+          return '<div class="invp">' +
+            '<button type="button" class="invp-h depliable" data-deplier="' + r.id + '">' +
+            '<b>' + esc(r.nom) + '</b>' +
+            '<span class="invc">' + (saisis
+              ? n1(total) + ' ' + esc(r.unite) + (total > 1 ? 's' : '') + ' · ' + saisis + '/' + r.variantes.length
+              : r.variantes.length + ' déclinaisons · en ' + esc(r.unite)) + '</span>' +
+            '<span class="chev">' + (ouvert ? '−' : '+') + '</span></button>' +
+            (ouvert
+              ? '<div class="stack" style="margin-top:8px">' + r.variantes.map(v => {
+                  const c = cleSec(r, v);
+                  return '<div class="invl">' +
+                    '<span class="invn">' + esc(v) + '</span>' +
+                    (anc[c] !== undefined ? '<span class="invc faible">préc. ' + anc[c] + '</span>' : '') +
+                    champSec(r, c) + '</div>';
+                }).join('') + '</div>'
+              : '') +
+            '</div>';
+        }).join('') + '</div>';
+    }).join('');
+  };
 
   const dessiner = () => {
     $('#vue-actions').innerHTML = '';

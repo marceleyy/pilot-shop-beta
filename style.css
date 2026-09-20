@@ -1230,6 +1230,21 @@ input[type="time"]:focus, input[type="date"]:focus{
 .rang.decl .invn small{display:block;font-size:11.5px;color:var(--brume);
   font-weight:400;margin-top:1px}
 
+/* Champ de saisie avec son unité en suffixe : « 2,5 | carton ». L'unité est
+   visible AVANT de taper — c'est ce que le manager a demandé, pour qu'on ne
+   confonde pas un carton de pots et une ramette. */
+.saisie-u{display:flex;align-items:center;flex:0 0 auto;
+  border:1px solid var(--line-fort);border-radius:11px;background:var(--blanc);
+  overflow:hidden}
+.saisie-u input{width:64px;min-height:46px;border:0;background:none;
+  text-align:right;padding:0 6px 0 10px;font-size:17px;font-weight:600;
+  font-variant-numeric:tabular-nums}
+.saisie-u input:focus{outline:none}
+.saisie-u:focus-within{border-color:var(--encre)}
+.saisie-u .su{padding:0 10px 0 4px;font-size:11.5px;color:var(--brume);
+  font-weight:600;white-space:nowrap;border-left:1px solid var(--line);
+  min-height:46px;display:flex;align-items:center}
+
 /* --- 21. Impression : registre sanitaire -------------------------------- */
 #printview{display:none}
 @media print{
