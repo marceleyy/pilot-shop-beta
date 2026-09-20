@@ -36,10 +36,22 @@ if (enPlace.indexOf('catalogueSec()') >= 0 && enPlace.indexOf('section.id') >= 0
   process.exit(0);
 }
 
-/* On remonte au commentaire qui précède blocSec, s'il y en a un */
+/* On remonte au commentaire qui précède blocSec, s'il y en a un.
+   Et si un passage précédent a déjà posé le préambule — deplies, cleSec,
+   champSec — avant un blocSec resté ancien, on remonte jusqu'à ce préambule
+   pour tout remplacer d'un bloc. Sinon le script réinsérait un second
+   « let deplies » et échouait sur « already declared », sans rien écrire. */
 let deb = d;
-const cmt = src.lastIndexOf('/*', d);
-if (cmt > 0 && d - cmt < 700 && src.slice(cmt, d).indexOf('*/') > 0) deb = cmt;
+const avantBloc = src.slice(Math.max(0, d - 1600), d);
+const iPre = avantBloc.lastIndexOf('let deplies = {};');
+if (iPre >= 0) {
+  deb = Math.max(0, d - 1600) + iPre;
+  const cmtPre = src.lastIndexOf('/*', deb);
+  if (cmtPre > 0 && deb - cmtPre < 700 && src.slice(cmtPre, deb).indexOf('*/') > 0) deb = cmtPre;
+} else {
+  const cmt = src.lastIndexOf('/*', d);
+  if (cmt > 0 && d - cmt < 700 && src.slice(cmt, d).indexOf('*/') > 0) deb = cmt;
+}
 /* et on s'arrête juste avant le commentaire qui précède dessiner, s'il existe */
 let fin = f;
 const cmt2 = src.lastIndexOf('/*', f);
