@@ -27,6 +27,15 @@ const d = src.indexOf(A1);
 const f = src.indexOf(A2, d);
 if (d < 0 || f < 0) { console.error('Ancres introuvables.'); process.exit(1); }
 
+/* REJOUABLE : si la version en place lit déjà catalogueSec() et les sections
+   en objets, il n'y a rien à faire. Sinon on remplace — y compris la version
+   intermédiaire qui comparait une chaîne à un objet et rendait tout vide. */
+const enPlace = src.slice(d, f);
+if (enPlace.indexOf('catalogueSec()') >= 0 && enPlace.indexOf('section.id') >= 0) {
+  console.log('Inventaire du sec déjà à jour — rien à faire.');
+  process.exit(0);
+}
+
 /* On remonte au commentaire qui précède blocSec, s'il y en a un */
 let deb = d;
 const cmt = src.lastIndexOf('/*', d);

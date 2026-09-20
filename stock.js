@@ -453,7 +453,18 @@ const STOCK_PLAFOND_PLAUSIBLE = 400;      // bacs : au-delà, la chambre froide 
 
 function anomaliesStock(articles) {
   const out = [];
-  const negatifs = Object.keys(articles).filter(c => num(articles[c]) < 0);
+  const negatifs = Object.keys(articles).filter(c => {
+    if (num(articles[c]) >= 0) return false;
+    /* Les familles comptées au SEC ne déclenchent pas de recomptage ici :
+       chantilly, coulis, toppings. Leur stock de référence est l'inventaire du
+       sec, pas celui de la chambre froide. Une ouverture de chantilly passait
+       la clé « chantilly|| » en négatif, et l'inventaire du sec — qui compte
+       « sec|creme| » — ne pouvait jamais la remettre à zéro. La tâche
+       « Recompter Chantilly » restait donc affichée après un comptage complet. */
+    const fam = FAMILLES_PRODUIT.filter(f => f.id === litArticle(c).famille)[0];
+    if (fam && (fam.lieu === 'sec' || fam.stock === 'sec')) return false;
+    return true;
+  });
   if (negatifs.length) {
     const pire = negatifs.reduce((a, c) => num(articles[c]) < num(articles[a]) ? c : a, negatifs[0]);
     out.push({
@@ -503,7 +514,13 @@ async function recomptageDemande() {
 
      La chambre froide reste prioritaire dans le libellé de la tâche, parce que
      c'est là que le recomptage va vite. */
-  const negatifs = Object.keys(articles).filter(c => num(articles[c]) < 0);
+  const negatifs = Object.keys(articles).filter(c => {
+    if (num(articles[c]) >= 0) return false;
+    /* Même règle que anomaliesStock : les familles comptées au sec n'ont pas
+       leur référence en chambre froide, on ne demande pas de les y recompter. */
+    const fam = FAMILLES_PRODUIT.filter(f => f.id === litArticle(c).famille)[0];
+    return !(fam && (fam.lieu === 'sec' || fam.stock === 'sec'));
+  });
   if (!negatifs.length) return null;
   const froid = negatifs.filter(c => litArticle(c).famille === 'glace');
 
