@@ -23,36 +23,38 @@ const src = fs.readFileSync(cible, 'utf8');
 
 const NOUVEAU = `const REASSORT = [
   /* --- SEC : ce qui se recharge depuis la réserve ---
-     Les intitulés reprennent ceux de l'inventaire : même vocabulaire des deux
-     côtés, sinon on ne retrouve pas le produit qu'on vient de signaler. */
-  { id: 'r01', cat: 'Sec', nom: 'Cornets',                detail: 'bambino, piccolo, classico, grande', unite: 'sachet' },
-  { id: 'r02', cat: 'Sec', nom: 'Choco-cônes',            detail: 'toutes tailles', unite: 'sachet' },
-  { id: 'r03', cat: 'Sec', nom: 'Cornets sans gluten',    unite: 'sachet' },
-  { id: 'r04', cat: 'Sec', nom: 'Papier protège-cornet',  detail: 'moyen et grand', unite: 'paquet' },
-  { id: 'r05', cat: 'Sec', nom: 'Pots',                   detail: 'piccolo à grandissimo', unite: 'pile' },
-  { id: 'r06', cat: 'Sec', nom: 'Couvercles',             detail: 'couteau, cuillère, fourchette', unite: 'pile' },
-  { id: 'r07', cat: 'Sec', nom: 'Cuillères à glace',      detail: '2 sachets', unite: 'sachet' },
-  { id: 'r08', cat: 'Sec', nom: 'Serviettes',             detail: '4 paquets', unite: 'paquet' },
-  { id: 'r09', cat: 'Sec', nom: 'Barquettes à crêpe',     unite: 'paquet' },
-  { id: 'r10', cat: 'Sec', nom: 'Gobelets',               detail: '4 tailles', unite: 'pile' },
-  { id: 'r11', cat: 'Sec', nom: 'Capsules à café',        detail: 'simple, double, décaféiné', unite: 'boîte' },
-  { id: 'r12', cat: 'Sec', nom: 'Chocolat chaud',         detail: '10 parfums', unite: 'boîte' },
-  { id: 'r13', cat: 'Sec', nom: 'Toppings',               detail: 'pistache, noisette, caramel, café', unite: 'pot' },
-  { id: 'r14', cat: 'Sec', nom: 'Coulis',                 detail: 'gianduja, chocolat noir, caramel, pistache', unite: 'flacon' },
-  { id: 'r15', cat: 'Sec', nom: 'Éclats de caramel',      unite: 'pot' },
-  { id: 'r16', cat: 'Sec', nom: 'Mocca beans',            unite: 'boîte' },
+     Intitulés repris de la fiche stock opérationnel Amorino, les mêmes que
+     l'inventaire : sinon on ne retrouve pas le produit qu'on vient de signaler. */
+  { id: 'r01', cat: 'Sec', nom: 'Pots',                   detail: 'petit, classique, grand, géant', unite: 'box' },
+  { id: 'r02', cat: 'Sec', nom: 'Cornets',                detail: 'petit, classique, grand', unite: 'box' },
+  { id: 'r03', cat: 'Sec', nom: 'Cornets sans gluten',    unite: 'cornet' },
+  { id: 'r04', cat: 'Sec', nom: 'Choco-cônes',            detail: 'petit, classique, grand', unite: 'box' },
+  { id: 'r05', cat: 'Sec', nom: 'Cônes papier',           detail: 'petit et grand', unite: 'box' },
+  { id: 'r06', cat: 'Sec', nom: 'Capsules à café',        detail: 'simple, double, déca', unite: 'boîte' },
+  { id: 'r07', cat: 'Sec', nom: 'Chocolat chaud',         detail: '11 parfums', unite: 'boîte' },
+  { id: 'r08', cat: 'Sec', nom: 'Thés',                   detail: '6 variétés', unite: 'box' },
+  { id: 'r09', cat: 'Sec', nom: 'Gaufres et crêpes plateau', unite: 'box' },
+  { id: 'r10', cat: 'Sec', nom: 'Cuillères en bois',      unite: 'pack' },
+  { id: 'r11', cat: 'Sec', nom: 'Couteaux en bois',       unite: 'pack' },
+  { id: 'r12', cat: 'Sec', nom: 'Gobelets',               detail: 'expresso, petit, moyen, grand', unite: 'pack' },
+  { id: 'r13', cat: 'Sec', nom: 'Bagues de gobelet',      detail: 'petit, moyen, grand', unite: 'pack' },
+  { id: 'r14', cat: 'Sec', nom: 'Creaspearls',            unite: 'pack' },
+  { id: 'r15', cat: 'Sec', nom: 'Boissons',               detail: 'San Pellegrino, Evian 50 cl et 1 L, Coca, Fusitea', unite: 'pack' },
+  { id: 'r16', cat: 'Sec', nom: 'Gobelets à eau',         unite: 'pack' },
   { id: 'r17', cat: 'Sec', nom: 'Lait',                   unite: 'brique' },
-  { id: 'r18', cat: 'Sec', nom: 'Crème pour chantilly',   unite: 'brique' },
-  { id: 'r19', cat: 'Sec', nom: 'Boissons',               detail: 'coca, Evian 50 cl et 1 L…', unite: 'pack' },
-  { id: 'r20', cat: 'Sec', nom: 'Pailles',                unite: 'paquet' },
-  { id: 'r21', cat: 'Sec', nom: 'Papier TPE',             unite: 'rouleau' },
-  { id: 'r22', cat: 'Sec', nom: 'Sopalin',                detail: '1 rouleau', unite: 'rouleau' },
-  { id: 'r23', cat: 'Sec', nom: 'Lavettes',               detail: 'rose, jaune, bleue, verte', unite: 'paquet' },
+  { id: 'r18', cat: 'Sec', nom: 'Coulis',                 detail: 'chocolat, pistache, caramel, gianduja', unite: 'flacon' },
+  { id: 'r19', cat: 'Sec', nom: 'Toppings sur glace',     detail: '6 références', unite: 'sachet' },
+  { id: 'r20', cat: 'Sec', nom: 'Sucre cristal individuel', unite: 'pack' },
+  { id: 'r21', cat: 'Sec', nom: 'Sacs kraft',             detail: 'petit et grand', unite: 'box' },
+  { id: 'r22', cat: 'Sec', nom: 'Cartons macarons',       detail: '2p et 4p', unite: 'carton' },
+  { id: 'r23', cat: 'Sec', nom: 'ISO box 12 macarons',    unite: 'box' },
+  { id: 'r24', cat: 'Sec', nom: 'ISO bacs',               detail: '1100 et 550 ml', unite: 'box' },
+  { id: 'r25', cat: 'Sec', nom: 'Bobine de papier',       unite: 'pack' },
+  { id: 'r26', cat: 'Sec', nom: 'Bactalim',               unite: 'flacon' },
+  { id: 'r27', cat: 'Sec', nom: 'Lavettes',               detail: 'rose, jaune, bleue', unite: 'pack' },
+  { id: 'r28', cat: 'Sec', nom: 'Produit à vitres',       unite: 'flacon' },
 
-  /* --- SURGELÉ : ce qui remonte de la chambre froide ---
-     Macarons et gianduiotti relevés sur amorino.com. Le bon de livraison
-     Jetfreeze distingue deux gammes de macarons : Classico (8×10 pièces) et
-     Grandioso (4×6), avec des parfums différents pour chacune. */
+  /* --- SURGELÉ : ce qui remonte de la chambre froide --- */
   { id: 'r30', cat: 'Surgelé', nom: 'Glaces pour la journée', unite: 'bac' },
   { id: 'r31', cat: 'Surgelé', nom: 'Macarons Classico',      detail: '10 parfums', unite: 'boîte' },
   { id: 'r32', cat: 'Surgelé', nom: 'Macarons Grandioso',     detail: '4 parfums', unite: 'boîte' },

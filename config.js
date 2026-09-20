@@ -313,36 +313,38 @@ const NETTOYAGE = {
    -------------------------------------------------------------------------- */
 const REASSORT = [
   /* --- SEC : ce qui se recharge depuis la réserve ---
-     Les intitulés reprennent ceux de l'inventaire : même vocabulaire des deux
-     côtés, sinon on ne retrouve pas le produit qu'on vient de signaler. */
-  { id: 'r01', cat: 'Sec', nom: 'Cornets',                detail: 'bambino, piccolo, classico, grande', unite: 'sachet' },
-  { id: 'r02', cat: 'Sec', nom: 'Choco-cônes',            detail: 'toutes tailles', unite: 'sachet' },
-  { id: 'r03', cat: 'Sec', nom: 'Cornets sans gluten',    unite: 'sachet' },
-  { id: 'r04', cat: 'Sec', nom: 'Papier protège-cornet',  detail: 'moyen et grand', unite: 'paquet' },
-  { id: 'r05', cat: 'Sec', nom: 'Pots',                   detail: 'piccolo à grandissimo', unite: 'pile' },
-  { id: 'r06', cat: 'Sec', nom: 'Couvercles',             detail: 'couteau, cuillère, fourchette', unite: 'pile' },
-  { id: 'r07', cat: 'Sec', nom: 'Cuillères à glace',      detail: '2 sachets', unite: 'sachet' },
-  { id: 'r08', cat: 'Sec', nom: 'Serviettes',             detail: '4 paquets', unite: 'paquet' },
-  { id: 'r09', cat: 'Sec', nom: 'Barquettes à crêpe',     unite: 'paquet' },
-  { id: 'r10', cat: 'Sec', nom: 'Gobelets',               detail: '4 tailles', unite: 'pile' },
-  { id: 'r11', cat: 'Sec', nom: 'Capsules à café',        detail: 'simple, double, décaféiné', unite: 'boîte' },
-  { id: 'r12', cat: 'Sec', nom: 'Chocolat chaud',         detail: '10 parfums', unite: 'boîte' },
-  { id: 'r13', cat: 'Sec', nom: 'Toppings',               detail: 'pistache, noisette, caramel, café', unite: 'pot' },
-  { id: 'r14', cat: 'Sec', nom: 'Coulis',                 detail: 'gianduja, chocolat noir, caramel, pistache', unite: 'flacon' },
-  { id: 'r15', cat: 'Sec', nom: 'Éclats de caramel',      unite: 'pot' },
-  { id: 'r16', cat: 'Sec', nom: 'Mocca beans',            unite: 'boîte' },
+     Intitulés repris de la fiche stock opérationnel Amorino, les mêmes que
+     l'inventaire : sinon on ne retrouve pas le produit qu'on vient de signaler. */
+  { id: 'r01', cat: 'Sec', nom: 'Pots',                   detail: 'petit, classique, grand, géant', unite: 'box' },
+  { id: 'r02', cat: 'Sec', nom: 'Cornets',                detail: 'petit, classique, grand', unite: 'box' },
+  { id: 'r03', cat: 'Sec', nom: 'Cornets sans gluten',    unite: 'cornet' },
+  { id: 'r04', cat: 'Sec', nom: 'Choco-cônes',            detail: 'petit, classique, grand', unite: 'box' },
+  { id: 'r05', cat: 'Sec', nom: 'Cônes papier',           detail: 'petit et grand', unite: 'box' },
+  { id: 'r06', cat: 'Sec', nom: 'Capsules à café',        detail: 'simple, double, déca', unite: 'boîte' },
+  { id: 'r07', cat: 'Sec', nom: 'Chocolat chaud',         detail: '11 parfums', unite: 'boîte' },
+  { id: 'r08', cat: 'Sec', nom: 'Thés',                   detail: '6 variétés', unite: 'box' },
+  { id: 'r09', cat: 'Sec', nom: 'Gaufres et crêpes plateau', unite: 'box' },
+  { id: 'r10', cat: 'Sec', nom: 'Cuillères en bois',      unite: 'pack' },
+  { id: 'r11', cat: 'Sec', nom: 'Couteaux en bois',       unite: 'pack' },
+  { id: 'r12', cat: 'Sec', nom: 'Gobelets',               detail: 'expresso, petit, moyen, grand', unite: 'pack' },
+  { id: 'r13', cat: 'Sec', nom: 'Bagues de gobelet',      detail: 'petit, moyen, grand', unite: 'pack' },
+  { id: 'r14', cat: 'Sec', nom: 'Creaspearls',            unite: 'pack' },
+  { id: 'r15', cat: 'Sec', nom: 'Boissons',               detail: 'San Pellegrino, Evian 50 cl et 1 L, Coca, Fusitea', unite: 'pack' },
+  { id: 'r16', cat: 'Sec', nom: 'Gobelets à eau',         unite: 'pack' },
   { id: 'r17', cat: 'Sec', nom: 'Lait',                   unite: 'brique' },
-  { id: 'r18', cat: 'Sec', nom: 'Crème pour chantilly',   unite: 'brique' },
-  { id: 'r19', cat: 'Sec', nom: 'Boissons',               detail: 'coca, Evian 50 cl et 1 L…', unite: 'pack' },
-  { id: 'r20', cat: 'Sec', nom: 'Pailles',                unite: 'paquet' },
-  { id: 'r21', cat: 'Sec', nom: 'Papier TPE',             unite: 'rouleau' },
-  { id: 'r22', cat: 'Sec', nom: 'Sopalin',                detail: '1 rouleau', unite: 'rouleau' },
-  { id: 'r23', cat: 'Sec', nom: 'Lavettes',               detail: 'rose, jaune, bleue, verte', unite: 'paquet' },
+  { id: 'r18', cat: 'Sec', nom: 'Coulis',                 detail: 'chocolat, pistache, caramel, gianduja', unite: 'flacon' },
+  { id: 'r19', cat: 'Sec', nom: 'Toppings sur glace',     detail: '6 références', unite: 'sachet' },
+  { id: 'r20', cat: 'Sec', nom: 'Sucre cristal individuel', unite: 'pack' },
+  { id: 'r21', cat: 'Sec', nom: 'Sacs kraft',             detail: 'petit et grand', unite: 'box' },
+  { id: 'r22', cat: 'Sec', nom: 'Cartons macarons',       detail: '2p et 4p', unite: 'carton' },
+  { id: 'r23', cat: 'Sec', nom: 'ISO box 12 macarons',    unite: 'box' },
+  { id: 'r24', cat: 'Sec', nom: 'ISO bacs',               detail: '1100 et 550 ml', unite: 'box' },
+  { id: 'r25', cat: 'Sec', nom: 'Bobine de papier',       unite: 'pack' },
+  { id: 'r26', cat: 'Sec', nom: 'Bactalim',               unite: 'flacon' },
+  { id: 'r27', cat: 'Sec', nom: 'Lavettes',               detail: 'rose, jaune, bleue', unite: 'pack' },
+  { id: 'r28', cat: 'Sec', nom: 'Produit à vitres',       unite: 'flacon' },
 
-  /* --- SURGELÉ : ce qui remonte de la chambre froide ---
-     Macarons et gianduiotti relevés sur amorino.com. Le bon de livraison
-     Jetfreeze distingue deux gammes de macarons : Classico (8×10 pièces) et
-     Grandioso (4×6), avec des parfums différents pour chacune. */
+  /* --- SURGELÉ : ce qui remonte de la chambre froide --- */
   { id: 'r30', cat: 'Surgelé', nom: 'Glaces pour la journée', unite: 'bac' },
   { id: 'r31', cat: 'Surgelé', nom: 'Macarons Classico',      detail: '10 parfums', unite: 'boîte' },
   { id: 'r32', cat: 'Surgelé', nom: 'Macarons Grandioso',     detail: '4 parfums', unite: 'boîte' },
@@ -558,51 +560,80 @@ const FOURNISSEUR = {
 
 const TAILLES_BAC = FOURNISSEUR.taillesBac;
 
-/* Le sec, avec ses déclinaisons. Chaque entrée porte un identifiant stable :
-   c'est lui qui sert de clé de comptage, pas le libellé, pour qu'un
-   changement de nom ne perde pas l'historique.
-
-   « variantes » vide ou absent = une seule ligne à compter.
-   Sinon, la référence se déplie et chaque variante se compte à part. */
+/* Le sec, relevé sur la fiche stock opérationnel Amorino de la boutique.
+   « min » est le seuil de réassort annoté à la main sur la fiche, quand il
+   est lisible ; on le garde comme repère, pas comme règle. */
 const INVENTAIRE_SEC = [
-  { id:'cornet',    nom:'Cornets',                  unite:'sachet',
-    variantes:['Bambino','Piccolo','Classico','Grande'] },
-  { id:'chococone', nom:'Choco-cônes',              unite:'sachet',
-    variantes:['Bambino','Piccolo','Classico','Grande'] },
-  { id:'cornetsg',  nom:'Cornets sans gluten',      unite:'sachet' },
-  { id:'protege',   nom:'Papier protège-cornet',    unite:'paquet',
-    variantes:['Moyen','Grand'] },
-  { id:'pot',       nom:'Pots',                     unite:'pile',
-    variantes:['Piccolo','Classico','Grande','Grandissimo'] },
-  { id:'couvercle', nom:'Couvercles',               unite:'pile',
-    variantes:['Couteau','Cuillère','Fourchette'] },
-  { id:'cuillere',  nom:'Cuillères à glace',        unite:'sachet' },
-  { id:'serviette', nom:'Serviettes',               unite:'paquet' },
-  { id:'barquette', nom:'Barquettes à crêpe',       unite:'paquet' },
-  { id:'gobelet',   nom:'Gobelets',                 unite:'pile',
-    variantes:['Taille 1','Taille 2','Taille 3','Taille 4'] },
+  /* --- Pots et cornets --- */
+  { id:'pot',       nom:'Pots',                     unite:'box',
+    variantes:['Petit','Classique','Grand','Géant'] },
+  { id:'cornet',    nom:'Cornets',                  unite:'box',
+    variantes:['Petit','Classique','Grand'] },
+  { id:'cornetsg',  nom:'Cornets sans gluten',      unite:'cornet' },
+  { id:'chococone', nom:'Choco-cônes',              unite:'box',
+    variantes:['Petit','Classique','Grand'] },
+  { id:'conepapier',nom:'Cônes papier',             unite:'box',
+    variantes:['Petit','Grand'] },
+
+  /* --- Café, chocolat, thé --- */
   { id:'capsule',   nom:'Capsules à café',          unite:'boîte',
-    variantes:['Simple','Double','Décaféiné'] },
+    variantes:['Simple','Double','Déca'] },
   { id:'chocochaud',nom:'Chocolat chaud',           unite:'boîte',
-    variantes:['Noir','Lait','Blanc','Gianduja','Noisette',
-               'Aztèque','Orange cannelle','Caramel','Amande','Coco'] },
-  { id:'cafegrain', nom:'Café en grains',           unite:'paquet' },
+    variantes:['Noir','Lait','Noisette','Amande','Blanc','Caramel',
+               'Aztèque','Orange cannelle','Gianduja','Coco','Panettone'] },
+  { id:'tablette',  nom:'Chocolat 220 g',           unite:'box',
+    variantes:['Noir','Lait','Noisette'] },
+  { id:'the',       nom:'Thés',                     unite:'box',
+    variantes:['Breakfast','Earl grey','Vert','Vert Yuanne','Rooibos',
+               'Infusion pomme orange'] },
+
+  /* --- Service --- */
+  { id:'gaufrecrepe',nom:'Gaufres et crêpes plateau',unite:'box' },
+  { id:'cuillere',  nom:'Cuillères en bois',        unite:'pack' },
+  { id:'couteau',   nom:'Couteaux en bois',         unite:'pack' },
+  { id:'gobelet',   nom:'Gobelets',                 unite:'pack',
+    variantes:['Expresso','Petit','Moyen','Grand'] },
+  { id:'bague',     nom:'Bagues de gobelet',        unite:'pack',
+    variantes:['Petit','Moyen','Grand'] },
+  { id:'creaspearl',nom:'Creaspearls',              unite:'pack' },
+  { id:'wafer',     nom:'Wafers 5p 30 g',           unite:'pack' },
+
+  /* --- Boissons --- */
+  { id:'boisson',   nom:'Boissons',                 unite:'pack',
+    variantes:['San Pellegrino','Evian','Evian 1 L','Coca Cola','Coca zéro','Fusitea'] },
+  { id:'gobeleteau',nom:'Gobelets à eau',           unite:'pack' },
   { id:'lait',      nom:'Lait',                     unite:'brique' },
-  { id:'creme',     nom:'Crème pour chantilly',     unite:'brique' },
-  /* La carte de la boutique liste quatre coulis : gianduja, chocolat noir,
-     caramel, pistache. Le dulce de leche n'y figure pas. */
+
+  /* --- Coulis et toppings --- */
   { id:'coulis',    nom:'Coulis',                   unite:'flacon',
-    variantes:['Gianduja','Chocolat noir','Caramel','Pistache'] },
-  { id:'topping',   nom:'Toppings',                 unite:'pot',
-    variantes:['Pistache','Noisette','Caramel','Café'] },
-  /* Relévés sur étiquette : éclats de caramel 500 g, mocca beans 1,1 kg. */
-  { id:'eclats',    nom:'Éclats de caramel',         unite:'pot' },
-  { id:'mocca',     nom:'Mocca beans',              unite:'boîte' },
-  { id:'gaufre',    nom:'Gaufres',                  unite:'paquet' },
-  { id:'crepe',     nom:'Crêpes',                   unite:'paquet' },
-  /* Macarons et gianduiotti : parfums relévés sur amorino.com en septembre 2026.
-     Les deux gammes de macarons sont distinctes — le bon Jetfreeze livre les
-     Classico en 8×10 pièces et les Grandioso en 4×6, avec des parfums propres. */
+    variantes:['Chocolat','Pistache','Caramel','Gianduja'] },
+  { id:'topping',   nom:'Toppings sur glace',       unite:'sachet',
+    variantes:['Pistache','Noisette','Éclats de noisette',
+               'Éclats de caramel','Cacao cagé','Amarena'] },
+  { id:'sucrecristal',nom:'Sucre cristal individuel',unite:'pack' },
+
+  /* --- Emballages à emporter --- */
+  { id:'sackraft',  nom:'Sacs kraft',               unite:'box',
+    variantes:['Petit','Grand'] },
+  { id:'macaroncarton',nom:'Cartons macarons',      unite:'carton',
+    variantes:['Petit 2p','Moyen 4p'] },
+  { id:'isobox',    nom:'ISO box 12 macarons',      unite:'box' },
+  { id:'isobac',    nom:'ISO bacs',                 unite:'box',
+    variantes:['1100 ml','550 ml'] },
+
+  /* --- Entretien --- */
+  { id:'guillere',  nom:'Guillère à glace',         unite:'pack' },
+  { id:'bobine',    nom:'Bobine de papier',         unite:'pack' },
+  { id:'moussana',  nom:'Moussana',                 unite:'flacon' },
+  { id:'bactalim',  nom:'Bactalim',                 unite:'flacon' },
+  { id:'savon',     nom:'Savon main',               unite:'flacon' },
+  { id:'sacpoubelle',nom:'Sacs poubelle',           unite:'rouleau' },
+  { id:'produitsol',nom:'Produit sol',              unite:'flacon' },
+  { id:'lavette',   nom:'Lavettes',                 unite:'pack',
+    variantes:['Rose','Jaune','Bleue'] },
+  { id:'vitres',    nom:'Produit à vitres',         unite:'flacon' },
+
+  /* --- Surgelé, compté avec le sec car même fiche --- */
   { id:'macclassico', nom:'Macarons Classico',      unite:'boîte',
     variantes:['Cioccolato Amorino','Pistacchio','Vaniglia','Caramello',
                'Lampone','Tiramisù','Fior di latte & coulis exotique',
@@ -613,19 +644,9 @@ const INVENTAIRE_SEC = [
     variantes:['Chocolat noir & gelato chocolat',
                'Chocolat au lait & gelato noisette',
                'Chocolat blanc & gelato pistache'] },
-  { id:'cookie',    nom:'Cookies',                  unite:'paquet' },
-  { id:'boisson',   nom:'Boissons',                 unite:'pack',
-    variantes:['Coca','Coca zéro','Evian 50 cl','Evian 1 L','San Pellegrino','Ice tea'] },
-  { id:'paille',    nom:'Pailles',                  unite:'paquet' },
-  { id:'papiertpe', nom:'Papier TPE',               unite:'rouleau' },
-  { id:'sopalin',   nom:'Sopalin',                  unite:'rouleau' },
-  { id:'bactalim',  nom:'Bactalim',                 unite:'flacon' },
-  { id:'degraissant',nom:'Dégraissant',             unite:'flacon' },
-  { id:'vitres',    nom:'Produit à vitres',         unite:'flacon' },
-  { id:'savon',     nom:'Savon',                    unite:'flacon' },
-  { id:'lavette',   nom:'Lavettes',                 unite:'paquet',
-    variantes:['Rose','Jaune','Bleue','Verte'] },
-  { id:'gants',     nom:'Gants jetables',           unite:'boîte' }
+  { id:'gaufre',    nom:'Gaufres',                  unite:'paquet' },
+  { id:'crepe',     nom:'Crêpes',                   unite:'paquet' },
+  { id:'cookie',    nom:'Cookies',                  unite:'paquet' }
 ];
 
 /* Nombre de lignes réellement à compter, déclinaisons comprises. */
