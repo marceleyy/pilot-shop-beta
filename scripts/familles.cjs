@@ -50,7 +50,7 @@ const NOUVEAU = `const FAMILLES_PRODUIT = [
   { id:'crepe',        libelle:'Crêpe',              parfums:false, dlc:'crepe_negatif',
     unite:'paquet', unites:'paquets' },
   { id:'chantilly',    libelle:'Chantilly',          parfums:false, dlc:'chantilly',
-    unite:'brique', unites:'briques', lieu:'sec' },
+    unite:'brique', unites:'briques', lieu:'sec', refSec:'creme' },
   /* Coulis et toppings sont au SEC : ils se comptent dans l'inventaire du sec,
      pas en chambre froide. Ils restent ici pour la traçabilité — une ouverture
      démarre une DLC — mais « lieu:'sec' » les écarte du comptage froid.

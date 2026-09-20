@@ -397,9 +397,10 @@ async function stockReel() {
   }
   /* L'inventaire et l'index des mois sont lus ensemble : en séquence, chacun
      coûtait sa propre latence avant même de commencer à lire les mois. */
-  const [inv, connus] = await Promise.all([
+  const [inv, connus, invSec] = await Promise.all([
     DB.get('stock:inventaire', null).catch(() => null),
-    moisConnus().catch(() => null)
+    moisConnus().catch(() => null),
+    DB.get('stock:sec', null).catch(() => null)
   ]);
   const mouv = await tousMouvements(inv ? inv.jour : null, connus);
 
@@ -410,6 +411,40 @@ async function stockReel() {
     Object.keys(inv.lignes).forEach(c => { out[c] = num(inv.lignes[c]); });
   }
 
+  /* Les familles comptées au SEC — chantilly, coulis, toppings — prennent leur
+     référence dans l'inventaire du sec, pas dans celui de la chambre froide.
+     Sans ce pont, la traçabilité écrivait une ouverture sur « chantilly|| »
+     pendant que l'inventaire comptait « sec|creme| » : deux compteurs pour un
+     même produit, et le premier passait à −1 quoi qu'on compte. La chantilly a
+     un lot, elle se trace et elle se compte — il faut donc que le comptage la
+     retrouve. « refSec » dit quelle référence du sec porte sa quantité. */
+  const dateSec = invSec ? invSec.at : null;
+  const famillesSec = FAMILLES_PRODUIT.filter(f => f.lieu === 'sec' || f.stock === 'sec');
+  if (invSec && invSec.lignes) {
+    famillesSec.forEach(f => {
+      const ref = f.refSec || f.id;
+      if (f.saveurs && f.saveurs.length) {
+        /* Une saveur = une déclinaison du sec. On cherche par nom, sans accent. */
+        const norm = s => String(s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+        f.saveurs.forEach(sv => {
+          const k = Object.keys(invSec.lignes).filter(x => {
+            const p = x.split('|');
+            return p[0] === 'sec' && p[1] === ref && norm(p[2]) === norm(sv);
+          })[0];
+          if (k !== undefined) out[cleArticle(f.id, sv, '')] = num(invSec.lignes[k]);
+        });
+      } else {
+        /* Sans saveur : la somme de toutes les lignes de la référence. */
+        let total = 0, trouve = false;
+        Object.keys(invSec.lignes).forEach(x => {
+          const p = x.split('|');
+          if (p[0] === 'sec' && p[1] === ref) { total += num(invSec.lignes[x]); trouve = true; }
+        });
+        if (trouve) out[cleArticle(f.id, '', '')] = total;
+      }
+    });
+  }
+
   mouv.forEach(m => {
     /* Format court depuis la réduction du journal, format long avant : on lit
        les deux pour ne pas invalider l'historique déjà écrit. */
@@ -418,7 +453,12 @@ async function stockReel() {
     const q    = num(m.q !== undefined ? m.q : m.qte);
     const at   = m.a || m.at;
     if (!c) return;
-    if (dateInv && at <= dateInv) return;   // déjà compris dans l'inventaire
+    /* Un mouvement sur une famille du sec est borné par l'inventaire du SEC ;
+       les autres par celui de la chambre froide. */
+    const famC = FAMILLES_PRODUIT.filter(f => f.id === litArticle(c).famille)[0];
+    const secC = !!(famC && (famC.lieu === 'sec' || famC.stock === 'sec'));
+    const borne = secC ? dateSec : dateInv;
+    if (borne && at <= borne) return;   // déjà compris dans l'inventaire
     if (out[c] === undefined) out[c] = 0;
     /* Les trois types sont nommés explicitement, et rien d'autre n'agit sur le
        stock. La version précédente décrémentait pour TOUT ce qui n'était pas une
