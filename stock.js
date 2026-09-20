@@ -565,6 +565,48 @@ V.stock = async function () {
   const t = totauxStock(articles);
   const alertes = anomaliesStock(articles);
 
+  /* Le dernier comptage du sec, par section et par référence. */
+  if (typeof chargerCatalogueSec === 'function') await chargerCatalogueSec();
+  const sec = await DB.get('stock:sec', null);
+  const secBloc = (function () {
+    if (!sec || !sec.lignes || !Object.keys(sec.lignes).length) {
+      return '<div class="entete" style="margin-top:22px"><h3>Sec</h3></div>' +
+        carte('<p class="cs">Le sec n’a jamais été compté.</p>' +
+          '<button class="btn clair bloc" id="st-inv-sec" style="margin-top:10px">Compter le sec</button>', 'plat');
+    }
+    const cat = (typeof catalogueSec === 'function') ? catalogueSec() : INVENTAIRE_SEC;
+    const sections = (typeof SEC_SECTIONS !== 'undefined')
+      ? SEC_SECTIONS.map(s => typeof s === 'string' ? { id:s } : s) : [];
+    const l = sec.lignes;
+    const nomRef = (id) => { const r = cat.filter(x => x.id === id)[0]; return r || null; };
+
+    /* On regroupe les lignes comptées par référence : sec|cornet|Petit → cornet */
+    const parRef = {};
+    Object.keys(l).forEach(k => {
+      const p = k.split('|'); if (p[0] !== 'sec') return;
+      (parRef[p[1]] = parRef[p[1]] || []).push({ v: p[2] || '', q: num(l[k]) });
+    });
+
+    return '<div class="entete" style="margin-top:22px"><h3>Sec</h3>' +
+      '<span class="pousse mini">compté le ' + fmtD(sec.jour) + (sec.par ? ' par ' + esc(sec.par) : '') + '</span></div>' +
+      sections.map(s => {
+        const refs = cat.filter(r => (r.sec || 'Autres') === s.id && parRef[r.id]);
+        if (!refs.length) return '';
+        return '<div class="sec-bloc"' + (s.teinte ? ' style="--sec-teinte:' + s.teinte + '"' : '') + '>' +
+          '<div class="entete sec-entete"><span class="sec-pastille"></span><h3>' + esc(s.id) + '</h3></div>' +
+          '<div class="stack">' + refs.map(r => {
+            const lignes = parRef[r.id];
+            const tot = lignes.reduce((a, x) => a + x.q, 0);
+            const detail = lignes.filter(x => x.v).map(x => esc(x.v) + ' ' + n1(x.q)).join(' · ');
+            return carte('<div class="rang"><div style="flex:1;min-width:0"><b>' + esc(r.nom) + '</b>' +
+              (detail ? '<div class="mini">' + detail + '</div>' : '') + '</div>' +
+              '<b class="num" style="font-size:18px">' + n1(tot) + ' <small style="font-size:11px;color:var(--brume)">' +
+              esc(r.unite) + (tot > 1 ? 's' : '') + '</small></b></div>', tot === 0 ? 'corail' : '');
+          }).join('') + '</div></div>';
+      }).join('') +
+      '<button class="btn clair bloc" id="st-inv-sec" style="margin-top:12px">Recompter le sec</button>';
+  })();
+
   /* Regroupement par famille, pour ne pas dérouler quarante lignes à plat. */
   const parFamille = {};
   cles.forEach(c => {
@@ -638,9 +680,17 @@ V.stock = async function () {
             '<span class="pousse mini num">' + sous + ' ' + u + '</span></div>' +
             '<div class="stack">' + lignes + '</div>';
         }).join('')
-      : vide('', 'Stock vide. Commencez par un inventaire.'));
+      : vide('', 'Stock vide. Commencez par un inventaire.')) +
+
+    /* Le sec, tel que compté au dernier inventaire. Il ne bouge pas avec la
+       traçabilité — on ne scanne pas un carton de serviettes —, donc on affiche
+       le dernier comptage avec sa date. L'écran s'appelait « ce qui reste en
+       chambre froide » et n'en montrait que la moitié. */
+    secBloc;
 
   $('#st-inv').onclick = () => rendre('inventaire');
+  const bs = $('#st-inv-sec');
+  if (bs) bs.onclick = () => { STATE.inventairePartie = 'sec'; rendre('inventaire'); };
 };
 
 /* -----------------------------------------------------------------------------
@@ -895,6 +945,9 @@ V.inventaire = async function () {
   const precedent = await DB.get('stock:inventaire', null);
   const secPrec   = await DB.get('stock:sec', null);
   const historique = await DB.get('stock:inventaires', []);
+  /* L'historique du sec, séparé : les deux comptages ne se font pas le même
+     jour ni par la même personne, et on doit pouvoir voir l'un sans l'autre. */
+  const historiqueSec = await DB.get('stock:secs', []);
 
   /* Deux comptages distincts. La chambre froide se compte vite et alimente le
      calcul d'écart ; le sec se compte rarement et porte des unités variées.
@@ -961,7 +1014,10 @@ V.inventaire = async function () {
     PARFUMS.some(p => num(articles[cleArticle('glace', p, t)]) !== 0 ||
                       saisie[cleArticle('glace', p, t)] !== undefined));
 
-  const autres = FAMILLES_PRODUIT.filter(f => f.id !== 'glace');
+  /* Les familles comptées en chambre froide : tout sauf les glaces (qui ont
+     leur bloc) et ce qui vit au sec — coulis, toppings, chantilly. Ceux-là
+     apparaissaient ici en double, avec l'inventaire du sec. */
+  const autres = FAMILLES_PRODUIT.filter(f => f.id !== 'glace' && f.lieu !== 'sec');
 
   const totalBacs   = () => Object.keys(saisie).reduce((s, c) => s + num(saisie[c]), 0);
   const totalLitres = () => Object.keys(saisie).reduce((s, c) => {
@@ -1170,17 +1226,34 @@ V.inventaire = async function () {
 
       /* Historique, comme sur la traçabilité : savoir qui a compté quoi et
          quand, sans avoir à fouiller le journal d'activité. */
-      (historique.length
-        ? '<div class="entete" style="margin-top:22px"><h3>Inventaires précédents</h3></div>' +
-          '<div class="stack">' + historique.slice().reverse().slice(0, 12).map(h => {
-            const t = totauxStock(h.lignes || {});
-            return '<div class="invl">' +
-              '<span class="invn">' + fmtD(h.jour) +
-              '<small>' + esc(h.par || '—') + ' · ' + heure(h.at) +
-              (h.manquants ? ' · ' + h.manquants + ' manquant(s)' : '') + '</small></span>' +
-              '<span class="invc">' + t.bacs + ' bacs · ' + n1(t.kg) + ' kg</span></div>';
-          }).join('') + '</div>'
-        : '');
+      /* L'historique suit l'onglet : celui du sec sur l'onglet sec, celui de la
+         chambre froide sur l'onglet chambre froide. Avant, seul le froid
+         s'affichait, et un comptage du sec validé le matin n'apparaissait
+         nulle part. */
+      (partie === 'froid'
+        ? (historique.length
+          ? '<div class="entete" style="margin-top:22px"><h3>Inventaires précédents — chambre froide</h3></div>' +
+            '<div class="stack">' + historique.slice().reverse().slice(0, 12).map(h => {
+              const t = totauxStock(h.lignes || {});
+              return '<div class="invl">' +
+                '<span class="invn">' + fmtD(h.jour) +
+                '<small>' + esc(h.par || '—') + ' · ' + heure(h.at) +
+                (h.manquants ? ' · ' + h.manquants + ' manquant(s)' : '') + '</small></span>' +
+                '<span class="invc">' + t.bacs + ' bacs · ' + n1(t.kg) + ' kg</span></div>';
+            }).join('') + '</div>'
+          : '')
+        : (historiqueSec.length
+          ? '<div class="entete" style="margin-top:22px"><h3>Inventaires précédents — sec</h3></div>' +
+            '<div class="stack">' + historiqueSec.slice().reverse().slice(0, 12).map(h => {
+              const l = h.lignes || {};
+              const refs = Object.keys(l).length;
+              const tot = Object.keys(l).reduce((s, k) => s + num(l[k]), 0);
+              return '<div class="invl">' +
+                '<span class="invn">' + fmtD(h.jour) +
+                '<small>' + esc(h.par || '—') + ' · ' + heure(h.at) + '</small></span>' +
+                '<span class="invc">' + refs + ' réf. · ' + n1(tot) + ' unités</span></div>';
+            }).join('') + '</div>'
+          : ''));
 
     $$('[data-deplier]').forEach(b => b.onclick = () => {
       deplies[b.dataset.deplier] = !deplies[b.dataset.deplier];
@@ -1275,13 +1348,19 @@ V.inventaire = async function () {
     confirmer('Valider le sec ?',
       cptes.length + ' référence(s) comptée(s). Ce relevé remplace le précédent.',
       'Valider', async () => {
-        await DB.set('stock:sec', {
+        const inv = {
           jour: today(), at: nowISO(),
           par: STATE.user ? STATE.user.prenom : null,
           employe: STATE.user ? STATE.user.id : null,
           note: $('#inv-note') ? $('#inv-note').value : '',
           lignes: lignes
-        });
+        };
+        await DB.set('stock:sec', inv);
+        /* Historique du sec : une correction du même jour remplace son entrée. */
+        const hist = await DB.get('stock:secs', []);
+        const i = hist.findIndex(h => h.jour === inv.jour);
+        if (i >= 0) hist[i] = inv; else hist.push(inv);
+        await DB.set('stock:secs', hist.slice(-36));
         try { localStorage.removeItem(CLE_BROUILLON); } catch (e) {}
         await feed('ok', STATE.user.prenom + ' a compté le sec — ' + cptes.length + ' références');
         toast('Inventaire du sec enregistré');
@@ -1342,8 +1421,11 @@ V.lots = async function () {
     const ok = await confirmerOuverture(r);
     if (ok) rendre('lots');
   };
+  /* Saisie manuelle : on demande d'abord la famille. Un coulis ou un topping
+     n'a pas d'étiquette lisible — l'équipe le saisit à la main, et on ne veut
+     pas qu'elle passe par la caméra pour rien. */
   $('#lo-main').onclick = async () => {
-    const ok = await confirmerOuverture({ lot:'', parfum:'', volume:null });
+    const ok = await confirmerOuverture({ lot:'', parfum:'', volume:null, manuel:true });
     if (ok) rendre('lots');
   };
 };

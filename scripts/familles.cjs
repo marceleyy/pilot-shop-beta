@@ -34,25 +34,32 @@ if (f < 0) { console.error('Fin du tableau introuvable.'); process.exit(1); }
 const NOUVEAU = `const FAMILLES_PRODUIT = [
   { id:'glace',        libelle:'Glace',              parfums:true,  dlc:'gelato',
     unite:'bac',    unites:'bacs' },
-  { id:'mac_classico', libelle:'Macarons Classico',  parfums:false, dlc:'macaron_gelato',
-    unite:'boîte',  unites:'boîtes' },
-  { id:'mac_grandioso',libelle:'Macarons Grandioso', parfums:false, dlc:'macaron_gelato',
-    unite:'boîte',  unites:'boîtes' },
-  { id:'gianduiotto',  libelle:'Gianduiotto',        parfums:false, dlc:'gianduiotto',
-    unite:'boîte',  unites:'boîtes' },
+  { id:'mac_classico', libelle:'Macarons Classico',  parfums:true,  dlc:'macaron_gelato',
+    unite:'boîte',  unites:'boîtes',
+    saveurs:['Cioccolato Amorino','Pistacchio','Vaniglia','Caramello','Lampone',
+             'Tiramisù','Fior di latte & coulis exotique','Litchi framboise rose',
+             'Cacahuète','Mangue'] },
+  { id:'mac_grandioso',libelle:'Macarons Grandioso', parfums:true,  dlc:'macaron_gelato',
+    unite:'boîte',  unites:'boîtes',
+    saveurs:['Cioccolato','Pistacchio','Vaniglia','Lampone'] },
+  { id:'gianduiotto',  libelle:'Gianduiotto',        parfums:true,  dlc:'gianduiotto',
+    unite:'boîte',  unites:'boîtes',
+    saveurs:['Noir & chocolat','Lait & noisette','Blanc & pistache'] },
   { id:'gaufre',       libelle:'Gaufre',             parfums:false, dlc:'gaufre',
     unite:'paquet', unites:'paquets' },
   { id:'crepe',        libelle:'Crêpe',              parfums:false, dlc:'crepe_negatif',
     unite:'paquet', unites:'paquets' },
   { id:'chantilly',    libelle:'Chantilly',          parfums:false, dlc:'chantilly',
-    unite:'brique', unites:'briques' },
-  /* Coulis et toppings ont des saveurs, comme les glaces ont des parfums.
-     Le gianduja est ce que l'équipe appelle la crème fondue. */
+    unite:'brique', unites:'briques', lieu:'sec' },
+  /* Coulis et toppings sont au SEC : ils se comptent dans l'inventaire du sec,
+     pas en chambre froide. Ils restent ici pour la traçabilité — une ouverture
+     démarre une DLC — mais « lieu:'sec' » les écarte du comptage froid.
+     Les saveurs sont celles de la fiche : plus de dulce de leche. */
   { id:'coulis',       libelle:'Coulis',             parfums:true,  dlc:'coulis',
-    unite:'flacon', unites:'flacons',
-    saveurs:['Gianduja','Chocolat','Caramel','Pistache','Dulce de leche'] },
+    unite:'flacon', unites:'flacons', lieu:'sec',
+    saveurs:['Chocolat','Pistache','Caramel','Gianduja'] },
   { id:'topping',      libelle:'Topping',            parfums:true,  dlc:'topping',
-    unite:'pot',    unites:'pots',
+    unite:'pot',    unites:'pots', lieu:'sec',
     saveurs:['Pistache','Noisette','Caramel','Café'] }
 ];`;
 

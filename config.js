@@ -312,53 +312,50 @@ const NETTOYAGE = {
    8. RÉASSORT — sec et surgelé, groupés par section
    -------------------------------------------------------------------------- */
 const REASSORT = [
-  /* --- SEC : ce qui se recharge depuis la réserve ---
-     Intitulés et unités repris de l'inventaire, tels que corrigés par le manager
-     le 20 septembre. On compte des cartons pour presque tout ; les pots se
-     comptent en ramettes. Même vocabulaire des deux côtés, sinon on ne
-     retrouve pas le produit qu'on vient de signaler. */
-  { id: 'r01', cat: 'Sec', nom: 'Cornets',                detail: 'petit, classique, grand', unite: 'carton' },
-  { id: 'r02', cat: 'Sec', nom: 'Choco-cônes',            detail: 'petit, classique, grand', unite: 'carton' },
-  { id: 'r03', cat: 'Sec', nom: 'Cornets sans gluten',    unite: 'carton' },
-  { id: 'r04', cat: 'Sec', nom: 'Papier protège-cornet',  detail: 'moyen et grand', unite: 'carton' },
-  { id: 'r05', cat: 'Sec', nom: 'Cônes papier',           detail: 'petit et grand', unite: 'carton' },
-  { id: 'r06', cat: 'Sec', nom: 'Pots',                   detail: 'petit à géant, à partager', unite: 'ramette' },
-  { id: 'r07', cat: 'Sec', nom: 'Couvercles',             detail: 'petit et grand', unite: 'carton' },
-  { id: 'r08', cat: 'Sec', nom: 'Couverts en bois',       detail: 'couteau, cuillère, fourchette', unite: 'carton' },
-  { id: 'r09', cat: 'Sec', nom: 'Cuillères à glace',      unite: 'carton' },
-  { id: 'r10', cat: 'Sec', nom: 'Serviettes',             unite: 'carton' },
-  { id: 'r11', cat: 'Sec', nom: 'Barquettes à crêpe',     unite: 'carton' },
-  { id: 'r12', cat: 'Sec', nom: 'Gaufres et crêpes plateau', unite: 'carton' },
-  { id: 'r13', cat: 'Sec', nom: 'Gobelets',               detail: 'expresso, petit, moyen, grand', unite: 'pack' },
-  { id: 'r14', cat: 'Sec', nom: 'Bagues de gobelet',      detail: 'petit, moyen, grand', unite: 'pack' },
-  { id: 'r15', cat: 'Sec', nom: 'Gobelets à eau',         unite: 'pack' },
-  { id: 'r16', cat: 'Sec', nom: 'Pailles',                unite: 'carton' },
-  { id: 'r17', cat: 'Sec', nom: 'Creaspearls',            unite: 'pack' },
-  { id: 'r18', cat: 'Sec', nom: 'Wafers 5p 30 g',         unite: 'pack' },
-  { id: 'r19', cat: 'Sec', nom: 'Sucre cristal individuel', unite: 'pack' },
-  { id: 'r20', cat: 'Sec', nom: 'Capsules à café',        detail: 'simple, double, déca', unite: 'boîte' },
-  { id: 'r21', cat: 'Sec', nom: 'Chocolat chaud',         detail: '11 parfums', unite: 'boîte' },
-  { id: 'r22', cat: 'Sec', nom: 'Chocolat 220 g',         detail: 'noir, lait, noisette', unite: 'carton' },
-  { id: 'r23', cat: 'Sec', nom: 'Thés',                   detail: '6 variétés', unite: 'boîte' },
-  { id: 'r24', cat: 'Sec', nom: 'Boissons',               detail: 'San Pellegrino, Evian 50 cl et 1 L, Coca, Fusitea', unite: 'pack' },
-  { id: 'r25', cat: 'Sec', nom: 'Lait',                   unite: 'brique' },
-  { id: 'r26', cat: 'Sec', nom: 'Crème pour chantilly',   unite: 'brique' },
-  { id: 'r27', cat: 'Sec', nom: 'Coulis',                 detail: 'chocolat, pistache, caramel, gianduja', unite: 'flacon' },
-  { id: 'r28', cat: 'Sec', nom: 'Toppings sur glace',     detail: 'pistache, noisette, caramel, café', unite: 'pot' },
-  { id: 'r29', cat: 'Sec', nom: 'Sacs kraft',             detail: 'petit et grand', unite: 'carton' },
-  { id: 'r30', cat: 'Sec', nom: 'Cartons macarons',       detail: '2p et 4p', unite: 'carton' },
-  { id: 'r31', cat: 'Sec', nom: 'ISO box 12 macarons',    unite: 'carton' },
-  { id: 'r32', cat: 'Sec', nom: 'ISO bacs',               detail: '1100 et 550 ml', unite: 'carton' },
-  { id: 'r33', cat: 'Sec', nom: 'Rouleaux',               detail: 'TPE, caisse, sopalin', unite: 'rouleau' },
-  { id: 'r34', cat: 'Sec', nom: 'Désinfectants',          detail: 'Bactalim, Moussana, savon, sol, vitres', unite: 'flacon' },
-  { id: 'r35', cat: 'Sec', nom: 'Lavettes',               detail: 'rose, jaune, bleue', unite: 'pack' },
-  { id: 'r36', cat: 'Sec', nom: 'Guillère à glace',       unite: 'pack' },
+  /* --- SEC : ce qui se recharge depuis la réserve.
+     « ref » pointe vers INVENTAIRE_SEC : mêmes déclinaisons, même vocabulaire. */
+  { id: 'r01', ref:'cornet',      cat: 'Sec', nom: 'Cornets',                unite: 'carton' },
+  { id: 'r02', ref:'chococone',   cat: 'Sec', nom: 'Choco-cônes',            unite: 'carton' },
+  { id: 'r03', ref:'cornetsg',    cat: 'Sec', nom: 'Cornets sans gluten',    unite: 'carton' },
+  { id: 'r05', ref:'conepapier',  cat: 'Sec', nom: 'Cônes papier',           unite: 'carton' },
+  { id: 'r06', ref:'pot',         cat: 'Sec', nom: 'Pots',                   unite: 'ramette' },
+  { id: 'r07', ref:'couvercle',   cat: 'Sec', nom: 'Couvercles gobelet',     unite: 'carton' },
+  { id: 'r08', ref:'couvert',     cat: 'Sec', nom: 'Couverts en bois',       unite: 'carton' },
+  { id: 'r09', ref:'cuillere',    cat: 'Sec', nom: 'Cuillères à glace',      unite: 'carton' },
+  { id: 'r10', ref:'serviette',   cat: 'Sec', nom: 'Serviettes',             unite: 'carton' },
+  { id: 'r11', ref:'barquette',   cat: 'Sec', nom: 'Barquettes crêpes et gaufres', unite: 'carton' },
+  { id: 'r13', ref:'gobelet',     cat: 'Sec', nom: 'Gobelets',               unite: 'pack' },
+  { id: 'r14', ref:'bague',       cat: 'Sec', nom: 'Bagues de gobelet',      unite: 'pack' },
+  { id: 'r15', ref:'gobeleteau',  cat: 'Sec', nom: 'Gobelets à eau',         unite: 'pack' },
+  { id: 'r16', ref:'paille',      cat: 'Sec', nom: 'Pailles',                unite: 'carton' },
+  { id: 'r17', ref:'creaspearl',  cat: 'Sec', nom: 'Creaspearls',            unite: 'pack' },
+  { id: 'r18', ref:'wafer',       cat: 'Sec', nom: 'Wafers 5p 30 g',         unite: 'pack' },
+  { id: 'r19', ref:'sucrecristal',cat: 'Sec', nom: 'Sucre cristal individuel', unite: 'pack' },
+  { id: 'r20', ref:'capsule',     cat: 'Sec', nom: 'Capsules à café',        unite: 'boîte' },
+  { id: 'r21', ref:'chocochaud',  cat: 'Sec', nom: 'Chocolat chaud',         unite: 'boîte' },
+  { id: 'r22', ref:'tablette',    cat: 'Sec', nom: 'Chocolat 220 g',         unite: 'carton' },
+  { id: 'r23', ref:'the',         cat: 'Sec', nom: 'Thés',                   unite: 'boîte' },
+  { id: 'r24', ref:'boisson',     cat: 'Sec', nom: 'Boissons',               unite: 'pack' },
+  { id: 'r25', ref:'lait',        cat: 'Sec', nom: 'Lait',                   unite: 'brique' },
+  { id: 'r26', ref:'creme',       cat: 'Sec', nom: 'Crème pour chantilly',   unite: 'brique' },
+  { id: 'r27', ref:'coulis',      cat: 'Sec', nom: 'Coulis',                 unite: 'flacon' },
+  { id: 'r28', ref:'topping',     cat: 'Sec', nom: 'Toppings sur glace',     unite: 'pot' },
+  { id: 'r29', ref:'sackraft',    cat: 'Sec', nom: 'Sacs kraft',             unite: 'carton' },
+  { id: 'r30', ref:'macaroncarton',cat: 'Sec', nom: 'Cartons macarons',      unite: 'carton' },
+  { id: 'r31', ref:'isobox',      cat: 'Sec', nom: 'ISO box 12 macarons',    unite: 'carton' },
+  { id: 'r32', ref:'isobac',      cat: 'Sec', nom: 'ISO bacs',               unite: 'carton' },
+  { id: 'r33', ref:'papier',      cat: 'Sec', nom: 'Rouleaux',               unite: 'rouleau' },
+  { id: 'r34', ref:'desinfectant',cat: 'Sec', nom: 'Désinfectants',          unite: 'flacon' },
+  { id: 'r35', ref:'lavette',     cat: 'Sec', nom: 'Lavettes',               unite: 'pack' },
+  { id: 'r36', ref:'guillere',    cat: 'Sec', nom: 'Guillère à glace',       unite: 'pack' },
 
-  /* --- SURGELÉ : ce qui remonte de la chambre froide --- */
+  /* --- SURGELÉ : ce qui remonte de la chambre froide.
+     Sans déclinaison ici : on remonte « des macarons », le détail des parfums
+     est l'affaire de l'inventaire chambre froide. */
   { id: 'r40', cat: 'Surgelé', nom: 'Glaces pour la journée', unite: 'bac' },
-  { id: 'r41', cat: 'Surgelé', nom: 'Macarons Classico',      detail: '10 parfums', unite: 'boîte' },
-  { id: 'r42', cat: 'Surgelé', nom: 'Macarons Grandioso',     detail: '4 parfums', unite: 'boîte' },
-  { id: 'r43', cat: 'Surgelé', nom: 'Gianduiotto',            detail: '3 enrobages', unite: 'boîte' },
+  { id: 'r41', cat: 'Surgelé', nom: 'Macarons Classico',      unite: 'boîte' },
+  { id: 'r42', cat: 'Surgelé', nom: 'Macarons Grandioso',     unite: 'boîte' },
+  { id: 'r43', cat: 'Surgelé', nom: 'Gianduiotto',            unite: 'boîte' },
   { id: 'r44', cat: 'Surgelé', nom: 'Crêpes',                 unite: 'carton' },
   { id: 'r45', cat: 'Surgelé', nom: 'Gaufres',                unite: 'carton' },
   { id: 'r46', cat: 'Surgelé', nom: 'Cookies',                unite: 'carton' }
@@ -579,13 +576,12 @@ const INVENTAIRE_SEC = [
   { id:'chococone', sec:'Cornets et pots', nom:'Choco-cônes',        unite:'carton', decimal:true,
     variantes:['Petit','Classique','Grand'] },
   { id:'cornetsg',  sec:'Cornets et pots', nom:'Cornets sans gluten',unite:'carton', decimal:true },
-  { id:'protege',   sec:'Cornets et pots', nom:'Papier protège-cornet',unite:'carton', decimal:true,
-    variantes:['Moyen','Grand'] },
+  /* Papier protège-cornet et cônes papier sont le même produit. */
   { id:'conepapier',sec:'Cornets et pots', nom:'Cônes papier',       unite:'carton', decimal:true,
     variantes:['Petit','Grand'] },
   { id:'pot',       sec:'Cornets et pots', nom:'Pots',               unite:'ramette', decimal:false,
     variantes:['Petit','Classique','Grand','Géant','À partager'] },
-  { id:'couvercle', sec:'Cornets et pots', nom:'Couvercles',         unite:'carton', decimal:true,
+  { id:'couvercle', sec:'Cornets et pots', nom:'Couvercles gobelet', unite:'carton', decimal:true,
     variantes:['Petit','Grand'] },
 
   /* ==================== SERVICE ==================== */
@@ -593,8 +589,8 @@ const INVENTAIRE_SEC = [
     variantes:['Couteau','Cuillère','Fourchette'] },
   { id:'cuillere',  sec:'Service', nom:'Cuillères à glace',          unite:'carton', decimal:true },
   { id:'serviette', sec:'Service', nom:'Serviettes',                 unite:'carton', decimal:true },
-  { id:'barquette', sec:'Service', nom:'Barquettes à crêpe',         unite:'carton', decimal:true },
-  { id:'gaufrecrepe',sec:'Service', nom:'Gaufres et crêpes plateau', unite:'carton', decimal:true },
+  /* Barquettes à crêpe et plateaux gaufres-crêpes sont le même produit. */
+  { id:'barquette', sec:'Service', nom:'Barquettes crêpes et gaufres',unite:'carton', decimal:true },
   { id:'gobelet',   sec:'Service', nom:'Gobelets',                   unite:'pack', decimal:true,
     variantes:['Expresso','Petit','Moyen','Grand'] },
   { id:'bague',     sec:'Service', nom:'Bagues de gobelet',          unite:'pack', decimal:true,
@@ -646,23 +642,13 @@ const INVENTAIRE_SEC = [
   { id:'lavette',   sec:'Entretien', nom:'Lavettes',                  unite:'pack', decimal:true,
     variantes:['Rose','Jaune','Bleue'] },
   { id:'guillere',  sec:'Entretien', nom:'Guillère à glace',          unite:'pack', decimal:true },
-  { id:'sacpoubelle',sec:'Entretien', nom:'Sacs poubelle',            unite:'rouleau', decimal:false },
-
-  /* ==================== SURGELÉ ==================== */
-  { id:'crepe',     sec:'Surgelé', nom:'Crêpes',                      unite:'carton', decimal:true },
-  { id:'gaufre',    sec:'Surgelé', nom:'Gaufres',                     unite:'carton', decimal:true },
-  { id:'cookie',    sec:'Surgelé', nom:'Cookies',                     unite:'carton', decimal:true },
-  { id:'macclassico', sec:'Surgelé', nom:'Macarons Classico',         unite:'boîte', decimal:false,
-    variantes:['Cioccolato Amorino','Pistacchio','Vaniglia','Caramello',
-               'Lampone','Tiramisù','Fior di latte & coulis exotique',
-               'Litchi framboise rose','Cacahuète','Mangue'] },
-  { id:'macgrandioso',sec:'Surgelé', nom:'Macarons Grandioso',        unite:'boîte', decimal:false,
-    variantes:['Cioccolato','Pistacchio','Vaniglia','Lampone'] },
-  { id:'gianduiotto', sec:'Surgelé', nom:'Gianduiotto',               unite:'boîte', decimal:true,
-    variantes:['Chocolat noir & gelato chocolat',
-               'Chocolat au lait & gelato noisette',
-               'Chocolat blanc & gelato pistache'] }
+  { id:'sacpoubelle',sec:'Entretien', nom:'Sacs poubelle',            unite:'rouleau', decimal:false }
 ];
+
+/* Les produits surgelés — macarons, gianduiotti, crêpes, gaufres, cookies —
+   sont en CHAMBRE FROIDE et se comptent dans l'onglet chambre froide, avec les
+   glaces. Ils ne sont pas dans le catalogue du sec : les y mettre les faisait
+   compter deux fois. Leurs déclinaisons vivent dans FAMILLES_PRODUIT. */
 
 /* Sections dans l'ordre d'affichage, avec leur couleur. Le code couleur est
    celui de la fiche papier Amorino : les filles le connaissent déjà. */
@@ -673,8 +659,7 @@ const SEC_SECTIONS = [
   { id:'Boissons et frais',   couleur:'ciel',    teinte:'#DBEAFE' },
   { id:'Coulis et toppings',  couleur:'lavande', teinte:'#EDE9FE' },
   { id:'Emballages',          couleur:'menthe',  teinte:'#D1FAE5' },
-  { id:'Entretien',           couleur:'gris',    teinte:'#F1F5F9' },
-  { id:'Surgelé',             couleur:'glace',   teinte:'#E0F2FE' }
+  { id:'Entretien',           couleur:'gris',    teinte:'#F1F5F9' }
 ];
 
 /* Nombre de lignes réellement à compter, déclinaisons comprises. */
@@ -852,25 +837,32 @@ const METEO = {
 const FAMILLES_PRODUIT = [
   { id:'glace',        libelle:'Glace',              parfums:true,  dlc:'gelato',
     unite:'bac',    unites:'bacs' },
-  { id:'mac_classico', libelle:'Macarons Classico',  parfums:false, dlc:'macaron_gelato',
-    unite:'boîte',  unites:'boîtes' },
-  { id:'mac_grandioso',libelle:'Macarons Grandioso', parfums:false, dlc:'macaron_gelato',
-    unite:'boîte',  unites:'boîtes' },
-  { id:'gianduiotto',  libelle:'Gianduiotto',        parfums:false, dlc:'gianduiotto',
-    unite:'boîte',  unites:'boîtes' },
+  { id:'mac_classico', libelle:'Macarons Classico',  parfums:true,  dlc:'macaron_gelato',
+    unite:'boîte',  unites:'boîtes',
+    saveurs:['Cioccolato Amorino','Pistacchio','Vaniglia','Caramello','Lampone',
+             'Tiramisù','Fior di latte & coulis exotique','Litchi framboise rose',
+             'Cacahuète','Mangue'] },
+  { id:'mac_grandioso',libelle:'Macarons Grandioso', parfums:true,  dlc:'macaron_gelato',
+    unite:'boîte',  unites:'boîtes',
+    saveurs:['Cioccolato','Pistacchio','Vaniglia','Lampone'] },
+  { id:'gianduiotto',  libelle:'Gianduiotto',        parfums:true,  dlc:'gianduiotto',
+    unite:'boîte',  unites:'boîtes',
+    saveurs:['Noir & chocolat','Lait & noisette','Blanc & pistache'] },
   { id:'gaufre',       libelle:'Gaufre',             parfums:false, dlc:'gaufre',
     unite:'paquet', unites:'paquets' },
   { id:'crepe',        libelle:'Crêpe',              parfums:false, dlc:'crepe_negatif',
     unite:'paquet', unites:'paquets' },
   { id:'chantilly',    libelle:'Chantilly',          parfums:false, dlc:'chantilly',
-    unite:'brique', unites:'briques' },
-  /* Coulis et toppings ont des saveurs, comme les glaces ont des parfums.
-     Le gianduja est ce que l'équipe appelle la crème fondue. */
+    unite:'brique', unites:'briques', lieu:'sec' },
+  /* Coulis et toppings sont au SEC : ils se comptent dans l'inventaire du sec,
+     pas en chambre froide. Ils restent ici pour la traçabilité — une ouverture
+     démarre une DLC — mais « lieu:'sec' » les écarte du comptage froid.
+     Les saveurs sont celles de la fiche : plus de dulce de leche. */
   { id:'coulis',       libelle:'Coulis',             parfums:true,  dlc:'coulis',
-    unite:'flacon', unites:'flacons',
-    saveurs:['Gianduja','Chocolat','Caramel','Pistache','Dulce de leche'] },
+    unite:'flacon', unites:'flacons', lieu:'sec',
+    saveurs:['Chocolat','Pistache','Caramel','Gianduja'] },
   { id:'topping',      libelle:'Topping',            parfums:true,  dlc:'topping',
-    unite:'pot',    unites:'pots',
+    unite:'pot',    unites:'pots', lieu:'sec',
     saveurs:['Pistache','Noisette','Caramel','Café'] }
 ];
 

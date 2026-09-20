@@ -59,13 +59,12 @@ const INVENTAIRE_SEC = [
   { id:'chococone', sec:'Cornets et pots', nom:'Choco-cônes',        unite:'carton', decimal:true,
     variantes:['Petit','Classique','Grand'] },
   { id:'cornetsg',  sec:'Cornets et pots', nom:'Cornets sans gluten',unite:'carton', decimal:true },
-  { id:'protege',   sec:'Cornets et pots', nom:'Papier protège-cornet',unite:'carton', decimal:true,
-    variantes:['Moyen','Grand'] },
+  /* Papier protège-cornet et cônes papier sont le même produit. */
   { id:'conepapier',sec:'Cornets et pots', nom:'Cônes papier',       unite:'carton', decimal:true,
     variantes:['Petit','Grand'] },
   { id:'pot',       sec:'Cornets et pots', nom:'Pots',               unite:'ramette', decimal:false,
     variantes:['Petit','Classique','Grand','Géant','À partager'] },
-  { id:'couvercle', sec:'Cornets et pots', nom:'Couvercles',         unite:'carton', decimal:true,
+  { id:'couvercle', sec:'Cornets et pots', nom:'Couvercles gobelet', unite:'carton', decimal:true,
     variantes:['Petit','Grand'] },
 
   /* ==================== SERVICE ==================== */
@@ -73,8 +72,8 @@ const INVENTAIRE_SEC = [
     variantes:['Couteau','Cuillère','Fourchette'] },
   { id:'cuillere',  sec:'Service', nom:'Cuillères à glace',          unite:'carton', decimal:true },
   { id:'serviette', sec:'Service', nom:'Serviettes',                 unite:'carton', decimal:true },
-  { id:'barquette', sec:'Service', nom:'Barquettes à crêpe',         unite:'carton', decimal:true },
-  { id:'gaufrecrepe',sec:'Service', nom:'Gaufres et crêpes plateau', unite:'carton', decimal:true },
+  /* Barquettes à crêpe et plateaux gaufres-crêpes sont le même produit. */
+  { id:'barquette', sec:'Service', nom:'Barquettes crêpes et gaufres',unite:'carton', decimal:true },
   { id:'gobelet',   sec:'Service', nom:'Gobelets',                   unite:'pack', decimal:true,
     variantes:['Expresso','Petit','Moyen','Grand'] },
   { id:'bague',     sec:'Service', nom:'Bagues de gobelet',          unite:'pack', decimal:true,
@@ -126,23 +125,13 @@ const INVENTAIRE_SEC = [
   { id:'lavette',   sec:'Entretien', nom:'Lavettes',                  unite:'pack', decimal:true,
     variantes:['Rose','Jaune','Bleue'] },
   { id:'guillere',  sec:'Entretien', nom:'Guillère à glace',          unite:'pack', decimal:true },
-  { id:'sacpoubelle',sec:'Entretien', nom:'Sacs poubelle',            unite:'rouleau', decimal:false },
-
-  /* ==================== SURGELÉ ==================== */
-  { id:'crepe',     sec:'Surgelé', nom:'Crêpes',                      unite:'carton', decimal:true },
-  { id:'gaufre',    sec:'Surgelé', nom:'Gaufres',                     unite:'carton', decimal:true },
-  { id:'cookie',    sec:'Surgelé', nom:'Cookies',                     unite:'carton', decimal:true },
-  { id:'macclassico', sec:'Surgelé', nom:'Macarons Classico',         unite:'boîte', decimal:false,
-    variantes:['Cioccolato Amorino','Pistacchio','Vaniglia','Caramello',
-               'Lampone','Tiramisù','Fior di latte & coulis exotique',
-               'Litchi framboise rose','Cacahuète','Mangue'] },
-  { id:'macgrandioso',sec:'Surgelé', nom:'Macarons Grandioso',        unite:'boîte', decimal:false,
-    variantes:['Cioccolato','Pistacchio','Vaniglia','Lampone'] },
-  { id:'gianduiotto', sec:'Surgelé', nom:'Gianduiotto',               unite:'boîte', decimal:true,
-    variantes:['Chocolat noir & gelato chocolat',
-               'Chocolat au lait & gelato noisette',
-               'Chocolat blanc & gelato pistache'] }
+  { id:'sacpoubelle',sec:'Entretien', nom:'Sacs poubelle',            unite:'rouleau', decimal:false }
 ];
+
+/* Les produits surgelés — macarons, gianduiotti, crêpes, gaufres, cookies —
+   sont en CHAMBRE FROIDE et se comptent dans l'onglet chambre froide, avec les
+   glaces. Ils ne sont pas dans le catalogue du sec : les y mettre les faisait
+   compter deux fois. Leurs déclinaisons vivent dans FAMILLES_PRODUIT. */
 
 /* Sections dans l'ordre d'affichage, avec leur couleur. Le code couleur est
    celui de la fiche papier Amorino : les filles le connaissent déjà. */
@@ -153,8 +142,7 @@ const SEC_SECTIONS = [
   { id:'Boissons et frais',   couleur:'ciel',    teinte:'#DBEAFE' },
   { id:'Coulis et toppings',  couleur:'lavande', teinte:'#EDE9FE' },
   { id:'Emballages',          couleur:'menthe',  teinte:'#D1FAE5' },
-  { id:'Entretien',           couleur:'gris',    teinte:'#F1F5F9' },
-  { id:'Surgelé',             couleur:'glace',   teinte:'#E0F2FE' }
+  { id:'Entretien',           couleur:'gris',    teinte:'#F1F5F9' }
 ];
 
 /* Nombre de lignes réellement à compter, déclinaisons comprises. */

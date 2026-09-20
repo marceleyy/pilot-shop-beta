@@ -1439,23 +1439,13 @@ async function purgerPreuves() {
    const deplies = {};
    function declinaisonsReassort(r) {
      if (typeof INVENTAIRE_SEC === 'undefined') return [];
-     const norm = s => String(s || '').toLowerCase()
-       .normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z]/g, '');
-     const cible = norm(r.nom);
-     /* Correspondance EXACTE d'abord. La correspondance par préfixe rattachait
-        « Cornets sans gluten » aux tailles de « Cornets », alors qu'il n'en a
-        pas, et « Chocolat chaud » ne trouvait pas « Sachets de chocolat chaud ».
-        On tente l'égalité, puis l'inclusion dans les deux sens, du plus long
-        nom au plus court pour que le libellé le plus spécifique gagne. */
-     const refs = INVENTAIRE_SEC.filter(x =>
-       typeof x === 'object' && x.variantes && x.variantes.length);
-     const exact = refs.filter(x => norm(x.nom) === cible)[0];
-     if (exact) return exact.variantes;
-     const proches = refs.filter(x => {
-       const n = norm(x.nom);
-       return n.indexOf(cible) >= 0 || cible.indexOf(n) >= 0;
-     }).sort((a, b) => norm(b.nom).length - norm(a.nom).length);
-     return proches.length ? proches[0].variantes : [];
+     const cat = (typeof catalogueSec === 'function') ? catalogueSec() : INVENTAIRE_SEC;
+     /* Par IDENTIFIANT, jamais par ressemblance de nom : c'est la ressemblance
+        qui faisait hériter à « Gobelets à eau » les quatre tailles de
+        « Gobelets », et à « Cornets sans gluten » celles des cornets. */
+     if (!r.ref) return [];
+     const ref = cat.filter(x => typeof x === 'object' && x.id === r.ref)[0];
+     return ref && ref.variantes && ref.variantes.length ? ref.variantes : [];
    }
 
    V.reas = async function () {
