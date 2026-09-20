@@ -1527,9 +1527,21 @@ V.lots = async function () {
 /* Feuille de confirmation après un scan : famille, parfum, taille, lot. */
 function confirmerOuverture(r) {
   return new Promise(resolve => {
-    let famille = r.parfum ? 'glace' : '';
+    /* Après un scan, on ne présume PLUS que c'est une glace. Le moteur lit
+       « Pistacchio » sur un macaron aussi bien que sur un bac, et la famille
+       était forcée à « glace » dès qu'un parfum était reconnu : impossible
+       d'atteindre les saveurs de macarons par le scanner. Le parfum lu reste
+       proposé ; la famille, c'est à la personne de la choisir — et si elle
+       choisit Macarons, le même mot sera cherché dans leurs saveurs. */
+    let famille = r.familleDetectee || '';
     let parfum  = r.parfum || '';
     let taille  = r.volume || FOURNISSEUR.tailleParDefaut;
+    /* Si le lot a la forme des macarons — L + 4 chiffres + lettre — on
+       présélectionne les macarons ; si c'est la forme Amorino, une glace. */
+    if (!famille && r.lot) {
+      if (/^L\d{4}[A-Z]$/i.test(r.lot)) famille = 'mac_classico';
+      else if (/^1[34]\d{3}[A-Z]$/i.test(r.lot)) famille = 'glace';
+    }
 
     const garder = () => {
       const l = $('#co-lot'); if (l) r.lot = l.value.trim().toUpperCase();
@@ -1552,8 +1564,15 @@ function confirmerOuverture(r) {
             /* Les coulis et toppings ont leurs propres saveurs : proposer les
                vingt-trois parfums de glace pour un flacon de coulis n'avait
                aucun sens et rendait le choix impraticable. */
-            '<select id="co-parfum">' + (fam.saveurs || PARFUMS).map(p =>
-              '<option' + (p === parfum ? ' selected' : '') + '>' + esc(p) + '</option>').join('') +
+            '<select id="co-parfum">' + (fam.saveurs || PARFUMS).map(p => {
+              /* Le mot lu sur l'étiquette est comparé sans accent ni casse, et
+                 sur ses cinq premières lettres : « Pistache » lu sur un bac et
+                 « Pistacchio » de la liste des macarons se retrouvent. */
+              const nrm = s => String(s||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z]/g,'');
+              const a = nrm(p), b = nrm(parfum);
+              const proche = b && (a === b || (a.length >= 5 && b.length >= 5 && a.slice(0,5) === b.slice(0,5)));
+              return '<option' + (proche ? ' selected' : '') + '>' + esc(p) + '</option>';
+            }).join('') +
             '</select></div>' +
             (fam.id === 'glace'
               ? '<div class="champ" style="margin-top:14px"><label class="f">Taille du bac</label>' +
