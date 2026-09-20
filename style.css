@@ -1273,6 +1273,11 @@ input[type="time"]:focus, input[type="date"]:focus{
   text-underline-offset:3px;min-height:auto}
 .tache.urgente .tm{color:var(--rouge)}
 
+/* Déclinaison comptée sous un ancien nom — « Piccolo », « Taille 1 », « Verte »
+   d'un catalogue antérieur. On l'affiche quand même, en italique : c'est ce
+   qui a été compté, on ne le cache pas. Elle disparaîtra au prochain inventaire. */
+.tq.ancienne{font-style:italic;opacity:.62}
+
 /* --- 21. Impression : registre sanitaire -------------------------------- */
 #printview{display:none}
 @media print{

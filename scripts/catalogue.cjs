@@ -22,6 +22,7 @@ const etapes = [
   ['sec-variantes.cjs',           'catalogue du sec (déclinaisons, sections, couleurs)'],
   ['inventaire-sec-sections.cjs', 'écran d’inventaire du sec'],
   ['catalogue-manager.cjs',       'catalogue modifiable par le manager'],
+  ['stock-onglets.cjs',           'écran Stock réel en deux onglets'],
   ['reassort-style.cjs',          'écran de réassort'],
 ];
 
@@ -38,6 +39,9 @@ for (const [script, quoi] of etapes) {
     console.log('  ✗ ' + quoi);
     console.log('    ' + String(e.stdout || e.message).trim().split('\n').slice(-2).join('\n    '));
     echecs++;
+    /* On s'arrête au premier échec : un script qui échoue laisse le fichier
+       dans un état que les suivants ne connaissent pas. */
+    break;
   }
 }
 
