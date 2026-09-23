@@ -2307,6 +2307,18 @@ window.addEventListener('error', function (ev) {
                   ouverte:false, nonInitialisee:true };
        }
      }
+
+     /* Une période échue reste « courante » tant que personne ne la clôture :
+        c'est voulu, la clôture est un acte du manager. Mais elle doit le
+        DIRE. Le 23 septembre, la semaine du 14 au 20 était encore la période
+        courante, et trois jours de saisies s'y rattachaient sans que personne
+        ne le sache. On marque l'échéance pour que la tour de contrôle et
+        l'accueil du manager la signalent. */
+     if (p && p.fin && today() > p.fin) {
+       p.echue = true;
+       p.joursDepuisFin = Math.round((new Date(today()) - new Date(p.fin)) / 86400000);
+     }
+
      _periode = p;
      _periodeAt = Date.now();
      return p;
@@ -2499,6 +2511,14 @@ function ouvrirPremierePeriode() {
      const enService = equipeJour.filter(s => !s.fin);
    
      const A = [];
+     /* Une période échue passe en tête : tant qu'elle n'est pas clôturée, les
+        saisies s'y rattachent et l'écart de la semaine suivante ne peut pas
+        se calculer. Trois jours sans que personne ne le voie, c'est arrivé. */
+     if (per && per.echue) {
+       A.push(['bad', 'Période terminée depuis ' + per.joursDepuisFin + ' jour(s)',
+         'La semaine du ' + fmtD(per.debut) + ' au ' + fmtD(per.fin) + ' attend sa clôture. ' +
+         'Les saisies d’aujourd’hui s’y rattachent encore.', 'periodes']);
+     }
      /* Une alerte doit nommer le produit. « 2 ruptures non traitées » oblige le
         manager à ouvrir un autre écran pour savoir s'il s'agit de cornets ou
         de lait — et donc s'il doit appeler le fournisseur maintenant. */
