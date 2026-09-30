@@ -51,11 +51,19 @@ function enregistrerSession(s) {
 
 /* --- Appels d'authentification -------------------------------------------- */
 async function appelAuth(chemin, corps) {
-  const r = await fetch(SUPABASE.url + '/auth/v1' + chemin, {
-    method: 'POST',
-    headers: { 'apikey': SUPABASE.anonKey, 'Content-Type': 'application/json' },
-    body: JSON.stringify(corps)
-  });
+  /* Délai borné : un renouvellement bloque tous les appels à la base, et le
+     Wi-Fi de la boutique peut traîner sans être coupé. */
+  const ctrl = new AbortController();
+  const to = setTimeout(() => ctrl.abort(), OFFLINE.timeoutReseauMs);
+  let r;
+  try {
+    r = await fetch(SUPABASE.url + '/auth/v1' + chemin, {
+      method: 'POST',
+      headers: { 'apikey': SUPABASE.anonKey, 'Content-Type': 'application/json' },
+      body: JSON.stringify(corps),
+      signal: ctrl.signal
+    });
+  } finally { clearTimeout(to); }
   const d = await r.json().catch(() => ({}));
   if (!r.ok) {
     const e = new Error(d.error_description || d.msg || d.message || ('HTTP ' + r.status));
@@ -124,6 +132,12 @@ let _dernierEssaiSite = 0;   // hors de _session : chaque renouvellement la remp
 async function jetonValide() {
   if (!_session) chargerSession();
   if (!_session) return null;
+  /* Un renouvellement déjà parti : on l'attend. Sinon les appels lancés en
+     même temps au démarrage repartaient avec l'ancien jeton sans boutique. */
+  if (_renouvellementEnCours) {
+    const s = await _renouvellementEnCours;
+    if (s) return s.access_token;
+  }
   const reste = _session.expires_at - Date.now();
   const encoreValide = reste > AUTH.margeRenouvellementSec * 1000;
   const sansSite = !jetonPorteSite(_session.access_token) &&
