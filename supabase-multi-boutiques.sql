@@ -12,9 +12,13 @@
 -- l'administrateur peut modifier (le compte lui-même ne peut pas la changer).
 --
 -- Cinq blocs. Lancez-les UN PAR UN, dans l'ordre, dans le SQL Editor, en
--- lisant le résultat de chacun. De préférence après la fermeture : les iPads
--- doivent renouveler leur jeton pour voir la boutique (c'est automatique au
--- prochain démarrage de l'application, ou au plus tard sous une heure).
+-- lisant le résultat de chacun.
+--
+-- ATTENDEZ AU MOINS UNE HEURE ENTRE LE BLOC 2 ET LE BLOC 5 (le plus simple :
+-- blocs 1 à 4 le soir, bloc 5 le lendemain matin avant l'ouverture). Un iPad
+-- garde son jeton jusqu'à une heure ; tant que ce jeton ne porte pas la
+-- boutique, le bloc 5 lui ferait lire des tables vides, et il pourrait
+-- réécrire par-dessus les vraies données (équipe, relevés partagés, période).
 --
 -- AVANT TOUT : faites une sauvegarde (Database → Backups), et dans
 -- Authentication → Sign In / Providers, désactivez « Allow new users to
@@ -57,6 +61,23 @@ where n.nspname = 'public' and c.relkind = 'r'
                 and col.column_name = 'site')
 order by c.relname;
 
+-- Les politiques en place. Toutes seront remplacées par p_site au bloc 5 :
+-- une politique oubliée (« Enable read access for all users »…) s'ajouterait
+-- à p_site et rouvrirait l'accès à toutes les boutiques.
+select tablename, policyname, cmd, roles::text, qual
+from pg_policies where schemaname = 'public' order by tablename, policyname;
+
+-- Ce que p_site NE protège PAS : vues, tables partitionnées, fonctions
+-- SECURITY DEFINER exposées par l'API. Attendu : aucune ligne. S'il y en a,
+-- signalez-les avant d'aller plus loin.
+select 'vue ou table partitionnée' as nature, c.relname as nom
+from pg_class c join pg_namespace n on n.oid = c.relnamespace
+where n.nspname = 'public' and c.relkind in ('v', 'm', 'p')
+union all
+select 'fonction security definer', p.proname
+from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+where n.nspname = 'public' and p.prosecdef;
+
 -- Et les comptes existants, avec la boutique qui leur est (ou non) attribuée :
 select email, raw_app_meta_data ->> 'site' as site_app, raw_user_meta_data ->> 'site' as site_user
 from auth.users order by email;
@@ -69,13 +90,22 @@ from auth.users order by email;
 -- ║ Remplacez l'adresse par celle du compte Paccard vue au bloc 1.           ║
 -- ╚══════════════════════════════════════════════════════════════════════════╝
 
-update auth.users
-   set raw_app_meta_data = coalesce(raw_app_meta_data, '{}'::jsonb)
-                           || jsonb_build_object('site', 'Paccard')
- where email = 'paccard@pilot-shop.local';
+do $$
+declare
+  compte constant text := 'paccard@pilot-shop.local';
+  site   constant text := 'Paccard';
+begin
+  update auth.users
+     set raw_app_meta_data = coalesce(raw_app_meta_data, '{}'::jsonb)
+                             || jsonb_build_object('site', site)
+   where email = compte;
+  if not found then
+    raise exception 'Aucun compte « % » : corrigez l''adresse avant de continuer.', compte;
+  end if;
+end $$;
 
--- Attendu : « UPDATE 1 ». Si c'est « UPDATE 0 », l'adresse est fausse :
--- corrigez-la avant de continuer.
+-- Attendu : « Success. No rows returned ». Une erreur « Aucun compte » veut
+-- dire que l'adresse est fausse : rien n'a été modifié.
 -- Pour une nouvelle boutique : créez son compte (Authentication → Users →
 -- Add user), puis relancez ce bloc avec son adresse et son nom de site.
 
@@ -148,9 +178,18 @@ begin
   end loop;
 end $$;
 
+/* L'API doit relire les clés primaires, sinon ses écritures visent encore (id). */
+notify pgrst, 'reload schema';
+
 -- Attendu : « Success. No rows returned ».
 -- Si une erreur apparaît (par exemple une clé étrangère qui dépend de « id »),
 -- copiez-la et arrêtez-vous là : le bloc entier est annulé, rien n'est cassé.
+--
+-- Si le bloc 1 a montré un autre nom que « Paccard » dans sites_presents
+-- (ancienne version de l'application), ces lignes deviendraient invisibles
+-- au bloc 5. Pour les rattacher à Paccard, décommentez et lancez, table par
+-- table (remplacez NOM_DE_TABLE et ANCIEN_NOM) :
+-- update public.NOM_DE_TABLE set site = 'Paccard' where site = 'ANCIEN_NOM';
 
 
 
@@ -161,7 +200,7 @@ end $$;
 -- ╚══════════════════════════════════════════════════════════════════════════╝
 
 do $$
-declare t record;
+declare t record; p record;
 begin
   for t in
     select c.relname as nom
@@ -170,8 +209,14 @@ begin
     where n.nspname = 'public' and c.relkind = 'r'
   loop
     execute format('alter table public.%I enable row level security', t.nom);
-    execute format('drop policy if exists p_appli on public.%I', t.nom);
-    execute format('drop policy if exists p_site on public.%I', t.nom);
+    /* TOUTES les politiques existantes partent, pas seulement p_appli :
+       les politiques se cumulent, une seule trop large suffirait. */
+    for p in
+      select policyname from pg_policies
+      where schemaname = 'public' and tablename = t.nom
+    loop
+      execute format('drop policy %I on public.%I', p.policyname, t.nom);
+    end loop;
     execute format(
       'create policy p_site on public.%I for all to authenticated '
       'using (site = public.site_courant()) with check (site = public.site_courant())',

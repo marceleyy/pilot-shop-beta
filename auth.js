@@ -66,13 +66,13 @@ async function appelAuth(chemin, corps) {
 }
 
 function memoriser(d) {
-  /* app_metadata d'abord : c'est lui que la base lit pour filtrer, et seul
+  /* app_metadata seulement : c'est lui que la base lit pour filtrer, et seul
      l'administrateur peut le modifier. user_metadata, modifiable par le
      compte lui-même, était lu en premier — et comme il vaut toujours au
-     moins {}, app_metadata n'était jamais consulté. */
+     moins {}, app_metadata n'était jamais consulté. Sans boutique dans le
+     compte (avant la migration), on garde celle de config.js. */
   const u = d.user || {};
-  const site = (u.app_metadata && u.app_metadata.site) ||
-               (u.user_metadata && u.user_metadata.site) || APP.site;
+  const site = (u.app_metadata && u.app_metadata.site) || APP.site;
   enregistrerSession({
     access_token: d.access_token,
     refresh_token: d.refresh_token,
@@ -107,17 +107,38 @@ async function renouveler() {
 /* Jeton valide, renouvelé si besoin. Renvoie null si l'appareil n'est pas
    rattaché : les appels réseau sont alors simplement mis en file d'attente. */
 let _renouvellementEnCours = null;
+/* Le jeton porte-t-il la boutique ? Un jeton émis avant que l'administrateur
+   l'attribue au compte n'en a pas : la base renverrait alors des tables VIDES
+   (pas une erreur), et l'appareil pourrait réécrire par-dessus les vraies
+   données. On renouvelle sans attendre l'expiration — au plus toutes les
+   dix minutes, pour ne pas marteler un compte qui n'a vraiment pas de site. */
+function jetonPorteSite(jeton) {
+  try {
+    const b64 = jeton.split('.')[1].replace(/-/g, '+').replace(/_/g, '/');
+    const p = JSON.parse(atob(b64 + '==='.slice((b64.length + 3) % 4)));
+    return !!(p.app_metadata && p.app_metadata.site);
+  } catch (e) { return true; }   // illisible : on ne bloque rien
+}
+
+let _dernierEssaiSite = 0;   // hors de _session : chaque renouvellement la remplace
 async function jetonValide() {
   if (!_session) chargerSession();
   if (!_session) return null;
   const reste = _session.expires_at - Date.now();
-  if (reste > AUTH.margeRenouvellementSec * 1000) return _session.access_token;
+  const encoreValide = reste > AUTH.margeRenouvellementSec * 1000;
+  const sansSite = !jetonPorteSite(_session.access_token) &&
+                   Date.now() - _dernierEssaiSite > 600000;
+  if (encoreValide && !sansSite) return _session.access_token;
+  if (sansSite) _dernierEssaiSite = Date.now();
   /* Un seul renouvellement à la fois, même si dix appels partent ensemble. */
   if (!_renouvellementEnCours) {
     _renouvellementEnCours = renouveler().finally(() => { _renouvellementEnCours = null; });
   }
   const s = await _renouvellementEnCours;
-  return s ? s.access_token : null;
+  if (s) return s.access_token;
+  /* Renouvellement raté (réseau) alors que le jeton courait encore : on le
+     garde plutôt que de faire passer l'appareil pour non rattaché. */
+  return (encoreValide && _session) ? _session.access_token : null;
 }
 
 function appareilRattache() { return !!(_session || chargerSession()); }
