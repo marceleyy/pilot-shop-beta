@@ -8,12 +8,15 @@
    elle qui déclenche le re-téléchargement. Un appareil déjà installé garderait
    sinon l'ancien cache, et n'irait jamais chercher les fichiers ajoutés — le
    scan hors ligne ne marcherait que sur les appareils neufs. */
-const CACHE   = 'pilotshop-cache-v6';
-const RUNTIME = 'pilotshop-runtime-v6';
+const CACHE   = 'pilotshop-cache-v7';
+const RUNTIME = 'pilotshop-runtime-v7';
 
 const PRECACHE = [
   '/',
   '/index.html',
+  /* Sans env.js hors ligne, l'application démarre sans l'adresse de la base :
+     les saisies restent locales et ne partent jamais en file d'attente. */
+  '/env.js',
   '/style.css',
   '/config.js',
   '/auth.js',
@@ -50,8 +53,15 @@ self.addEventListener('install', event => {
     await Promise.all(PRECACHE.map(async url => {
       try {
         const r = await fetch(new Request(url, { cache: 'reload' }));
-        if (r && r.ok) await cache.put(url, r);
-      } catch (e) { /* ressource optionnelle absente : on continue */ }
+        if (!r || !r.ok) throw new Error('precache ' + url);
+        await cache.put(url, r);
+      } catch (e) {
+        /* Téléchargement raté (Wi-Fi faible) : on reprend la copie de l'ancienne
+           version, sinon l'activation la purgerait et le scan hors ligne
+           (plusieurs Mo de Tesseract) disparaîtrait. */
+        const ancienne = await caches.match(url);
+        if (ancienne) await cache.put(url, ancienne);
+      }
     }));
     await self.skipWaiting();
   })());
@@ -106,7 +116,14 @@ self.addEventListener('fetch', event => {
       try {
         const preload = await event.preloadResponse;
         const r = preload || await avecDelai(fetch(req), 4000);
-        if (r && r.ok) await cache.put('/index.html', r.clone());
+        /* Une panne serveur (5xx) passe au secours du cache ; un 4xx (page
+           absente, protection Vercel) est montré tel quel. Seule la page
+           d'accueil peut remplacer la coquille hors ligne — pas un PDF ou une
+           image ouverts dans l'application. */
+        if (!r || r.status >= 500) throw new Error('navigation ' + (r && r.status));
+        if (r.ok && (url.pathname === '/' || url.pathname === '/index.html')) {
+          event.waitUntil(cache.put('/index.html', r.clone()).catch(() => {}));
+        }
         return r;
       } catch (e) {
         const cachee = await cache.match('/index.html');
@@ -127,7 +144,11 @@ self.addEventListener('fetch', event => {
       const cache = await caches.open(CACHE);
       try {
         const r = await avecDelai(fetch(req), 4000);
-        if (r && r.ok && r.type === 'basic') await cache.put(req, r.clone());
+        /* 200 seulement : une réponse partielle (206) ou un quota plein ferait
+           échouer cache.put, et la bonne réponse réseau serait jetée. */
+        if (r && r.status === 200 && r.type === 'basic') {
+          event.waitUntil(cache.put(req, r.clone()).catch(() => {}));
+        }
         return r;
       } catch (e) {
         const cachee = await cache.match(req);
@@ -145,7 +166,9 @@ self.addEventListener('fetch', event => {
       if (cachee) return cachee;
       try {
         const r = await fetch(req);
-        if (r && (r.ok || r.type === 'opaque')) await cache.put(req, r.clone());
+        /* Jamais de réponse opaque : son statut est illisible, une erreur du
+           CDN resterait en cache jusqu'à la prochaine version. */
+        if (r && r.ok) event.waitUntil(cache.put(req, r.clone()).catch(() => {}));
         return r;
       } catch (e) {
         return cachee || new Response('', { status: 504, statusText: 'Hors ligne' });

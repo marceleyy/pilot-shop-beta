@@ -117,7 +117,7 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
          '<h2 id="sheet-titre">' + esc(p.libelle || 'Photo') + '</h2>' +
          '<p class="cs">' + esc(p.par || '—') + ' · ' + fmtD(jour) +
          (p.at ? ' à ' + heure(p.at) : '') + '</p>' +
-         '<img src="' + p.img + '" alt="" class="preuve-plein">' +
+         '<img src="' + esc(p.img) + '" alt="" class="preuve-plein">' +
          '<div class="actions">' +
          '<button class="btn clair" data-fermer>Fermer</button>' +
          '<button class="btn corail" id="pv-suppr">Supprimer</button></div>');
@@ -147,7 +147,7 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
      return '<div class="rang vignettes">' + liste.map(p =>
        '<button type="button" class="vign" data-vign="' + esc(p.id) + '" ' +
        'data-vjour="' + esc(jour) + '" aria-label="Voir la photo">' +
-       '<img src="' + p.img + '" alt=""></button>').join('') + '</div>';
+       '<img src="' + esc(p.img) + '" alt=""></button>').join('') + '</div>';
    }
 
    /* À appeler après chaque rendu qui contient des vignettes. */
@@ -1124,7 +1124,9 @@ V.caisse = async function () {
     });
     champsSaisie().forEach(i => i.oninput = () => {
       r[i.dataset.k] = i.value;
-      if (r[mom + '_valide']) delete r[mom + '_valide'];
+      /* null et non delete : la fusion avec la copie du serveur ferait revenir
+         une clé supprimée, et l'ancienne signature avec elle. */
+      if (r[mom + '_valide']) r[mom + '_valide'] = null;
       /* Écriture locale IMMÉDIATE, avant l'enregistrement différé : si l'onglet
          est déchargé entre deux frappes, rien n'est perdu. */
       try { localStorage.setItem('pilotshop.v3:brouillon:caisse:' + j, JSON.stringify(r)); } catch (e) {}
@@ -1251,7 +1253,7 @@ V.hebdo = async function () {
 
             (ph.length
               ? '<div class="rang" style="margin-top:12px;gap:8px">' + ph.map(p =>
-                  '<img src="' + p.img + '" alt="Preuve" style="width:74px;height:74px;' +
+                  '<img src="' + esc(p.img) + '" alt="Preuve" style="width:74px;height:74px;' +
                   'object-fit:cover;border-radius:10px;border:1px solid var(--line)">').join('') + '</div>'
               : '') +
 
@@ -1316,7 +1318,12 @@ function defautEnceinte(e) {
 }
 
 V.temp = async function () {
-  if (!V.temp._d) V.temp._d = today();
+  /* L'iPad reste ouvert plusieurs jours : au changement de date, on revient au
+     jour en cours au lieu de rester bloqué sur la veille, verrouillée. */
+  if (!V.temp._d || V.temp._auj !== today()) {
+    if (V.temp._auj) STATE.jour = today();   // sinon la saisie resterait verrouillée
+    V.temp._d = today(); V.temp._auj = today();
+  }
   const j = V.temp._d;
   const rec = await DB.get('temp:' + j, {});
   if (!rec.valide) rec.valide = {};
@@ -1415,7 +1422,7 @@ V.temp = async function () {
 
   /* Modifier une valeur après validation annule celle-ci : le registre doit
      porter la signature de la personne qui a vu la dernière valeur. */
-  const invalider = () => { if (rec.valide[mom.id]) delete rec.valide[mom.id]; };
+  const invalider = () => { if (rec.valide[mom.id]) rec.valide[mom.id] = null; };   // null : voir caisse
 
   function brancher() {
     brancherNavJour('temp');
@@ -1783,7 +1790,7 @@ V.clean = async function () {
             (ph.length ? '✓ Photo' : 'Photo') + '</button></div>' +
             (ph.length
               ? '<div class="rang" style="margin-top:10px;gap:8px">' + ph.map(p =>
-                '<img src="' + p.img + '" alt="" style="width:62px;height:62px;object-fit:cover;' +
+                '<img src="' + esc(p.img) + '" alt="" style="width:62px;height:62px;object-fit:cover;' +
                 'border-radius:9px;border:1px solid var(--line)">').join('') + '</div>'
               : ''),
             v.ok ? 'menthe' : '');
@@ -1855,7 +1862,7 @@ V.anomalie = async function () {
     if (!a || !a.photo) return;
     const plein = document.createElement('div');
     plein.className = 'photo-plein';
-    plein.innerHTML = '<img src="' + a.photo + '" alt="">' +
+    plein.innerHTML = '<img src="' + esc(a.photo) + '" alt="">' +
       '<div class="pp-barre">' +
       '<button type="button" class="btn clair sm" data-pp-fermer>Fermer</button>' +
       (a.resolue ? '' : '<button type="button" class="btn corail sm" data-pp-suppr>Retirer la photo</button>') +
@@ -1902,10 +1909,10 @@ function carteAnomalie(a) {
     /* Cliquable : l'aperçu est rogné en hauteur, et c'est justement le détail
        qu'on a photographié — une fuite, un joint, une pièce cassée — qu'on a
        besoin de voir en entier. */
-    (a.photo ? '<img src="' + a.photo + '" alt="" data-anoph="' + esc(a.id) + '" ' +
+    (a.photo ? '<img src="' + esc(a.photo) + '" alt="" data-anoph="' + esc(a.id) + '" ' +
       'style="width:100%;max-height:190px;object-fit:cover;border-radius:10px;' +
       'margin-top:10px;cursor:pointer">' : '') +
-    (a.resolue ? '' : '<button class="btn clair bloc sm" data-res="' + a.id +
+    (a.resolue ? '' : '<button class="btn clair bloc sm" data-res="' + esc(a.id) +
       '" style="margin-top:10px">Marquer comme traitée</button>'),
     a.resolue ? 'plat' : (g.couleur === 'bad' ? 'corail' : g.couleur === 'warn' ? 'ambre' : ''));
 }

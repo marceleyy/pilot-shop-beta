@@ -647,7 +647,7 @@
    const vide = (icone, texte) => '<div class="vide">' + esc(texte) + '</div>';
    const pastille = (cls, txt) => '<span class="pill ' + cls + '">' + esc(txt) + '</span>';
    const avatar = (e, cls) =>
-     '<span class="' + (cls || 'av') + '" style="background:' + e.couleur + '">' + esc(e.initiales) + '</span>';
+     '<span class="' + (cls || 'av') + '" style="background:' + esc(e.couleur) + '">' + esc(e.initiales) + '</span>';
    
    /* =============================================================================
       4. CONNEXION TACTILE
@@ -656,7 +656,7 @@
      $('#login-site').textContent = APP.site + ' · ' + APP.version;
    
      $('#qui-liste').innerHTML = EQUIPE.map(e =>
-       '<button type="button" data-qui="' + e.id + '">' +
+       '<button type="button" data-qui="' + esc(e.id) + '">' +
          avatar(e) +
          '<span class="nm">' + esc(e.prenom) + '</span>' +
          '<span class="rl">' + ROLES[e.role].label + '</span>' +
@@ -672,12 +672,17 @@
      const rz = $('#lg-reset');
      if (rz) rz.onclick = function () { ecranRemiseAZero(false); };
    
-     document.addEventListener('keydown', e => {
-       if ($('#login').hidden || $('#login-pin').hidden) return;
-       if (/^[0-9]$/.test(e.key)) toucheP(e.key);
-       else if (e.key === 'Backspace') toucheP('effacer');
-       else if (e.key === 'Escape') retourQui();
-     });
+     /* Une seule fois : initLogin est rappelée à chaque démarrage et après le
+        rattachement, et chaque écouteur en plus doublait la touche tapée. */
+     if (!initLogin._clavier) {
+       initLogin._clavier = true;
+       document.addEventListener('keydown', e => {
+         if ($('#login').hidden || $('#login-pin').hidden) return;
+         if (/^[0-9]$/.test(e.key)) toucheP(e.key);
+         else if (e.key === 'Backspace') toucheP('effacer');
+         else if (e.key === 'Escape') retourQui();
+       });
+     }
    }
    
    function ouvrirPin(id) {
@@ -1183,7 +1188,7 @@ async function purgerPreuves() {
         ? '<div class="rang vignettes">' + clichés.map(p =>
             '<button type="button" class="vign" data-vign="' + esc(p.id) + '" ' +
             'data-vjour="' + esc(j) + '" aria-label="Voir la photo">' +
-            '<img src="' + p.img + '" alt=""></button>').join('') + '</div>'
+            '<img src="' + esc(p.img) + '" alt=""></button>').join('') + '</div>'
         : '');
   };
    
@@ -1222,7 +1227,7 @@ async function purgerPreuves() {
                ? '<div class="rang vignettes">' + clichesA.map(p =>
                    '<button type="button" class="vign" data-vign="' + esc(p.id) + '" ' +
                    'data-vjour="' + esc(j) + '" aria-label="Voir la photo">' +
-                   '<img src="' + p.img + '" alt=""></button>').join('') + '</div>'
+                   '<img src="' + esc(p.img) + '" alt=""></button>').join('') + '</div>'
                : '') +
              '<p class="mini" style="margin-top:8px">' + esc(a.consigne) + '</p>',
              a.retard ? 'corail' : 'ambre');
@@ -2686,7 +2691,7 @@ function ouvrirPremierePeriode() {
              ' par ' + esc(f.par || '—') + ' · ' + Math.round(f.heures / 24 * 10) / 10 + ' j de vie</div></div>' +
              '<div class="fr"><b>' + resteLisible(f.resteH) + '</b>' +
              '<span>limite ' + fmtDC(f.limite) + '</span></div>' +
-             (f.c === 'rouge' ? '<button class="btn corail sm" data-jeter="' + f.cle + '">Jeter</button>' : '') +
+             (f.c === 'rouge' ? '<button class="btn corail sm" data-jeter="' + esc(f.cle) + '">Jeter</button>' : '') +
              '</div>').join('') + '</div>').join('')
          : vide('🧊', 'Aucun lot ouvert ce mois. Les saisies de l’équipe apparaissent ici.'));
    
@@ -3409,7 +3414,7 @@ function modifierPeriode(per) {
        }
        else if (onglet === 'feedback') {
          (Array.isArray(v) ? v : []).slice().reverse().forEach(f =>
-           lignes.push([fmtD(f.at.slice(0, 10)), f.type, f.texte, f.par, 'warn']));
+           lignes.push([fmtD(f.at ? isoOf(new Date(f.at)) : today()), f.type, f.texte, f.par, 'warn']));
        }
      }
    
@@ -3525,10 +3530,10 @@ function modifierPeriode(per) {
                const m = L.t['m_' + e.id], s = L.t['s_' + e.id];
                const bad = etatTemp(e, m) === 'crit' || etatTemp(e, s) === 'crit';
                return '<td' + (bad ? ' style="font-weight:700"' : '') + '>' +
-                 (m === undefined || m === '' ? '—' : m) + ' / ' + (s === undefined || s === '' ? '—' : s) + '</td>';
+                 (m === undefined || m === '' ? '—' : esc(m)) + ' / ' + (s === undefined || s === '' ? '—' : esc(s)) + '</td>';
              }).join('') + '<td>' + esc(L.t.obs || '') + '</td></tr>').join('') + '</tbody></table>' +
            '<div style="font-size:9.5px">Valeurs en °C, matin / soir. Les dépassements de limite critique sont en gras. ' +
-           'Cibles : ' + ENCEINTES.map(e => e.nom + ' ' + e.cible).join(' · ') + '.</div>'
+           'Cibles : ' + ENCEINTES.map(e => esc(e.nom) + ' ' + esc(e.cible)).join(' · ') + '.</div>'
          : '<div>Aucun relevé enregistré sur la période.</div>') +
    
        '<div class="pv-s">2. Nettoyage et désinfection</div>' +

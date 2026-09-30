@@ -152,8 +152,9 @@ async function chargerImage(file, cote) {
   } else {
     const url = URL.createObjectURL(propre);
     const img = new Image();
-    await new Promise((ok, ko) => { img.onload = ok; img.onerror = () => ko(new Error('Image illisible')); img.src = url; });
-    URL.revokeObjectURL(url);
+    try {
+      await new Promise((ok, ko) => { img.onload = ok; img.onerror = () => ko(new Error('Image illisible')); img.src = url; });
+    } finally { URL.revokeObjectURL(url); }
     source = img; lSrc = img.naturalWidth; hSrc = img.naturalHeight;
   }
 
@@ -336,6 +337,8 @@ async function lireMeilleur(canvasNB, canvasGris, profil) {
 }
 
 async function lire(canvas, profil) {
+  /* Le minuteur d'inactivité pourrait arrêter le worker en pleine lecture. */
+  clearTimeout(OCR._minuteur);
   const w = await obtenirWorker();
   const params = profil === 'code'
     ? { tessedit_char_whitelist: '0123456789' + MAJUSCULES,
@@ -348,9 +351,11 @@ async function lire(canvas, profil) {
         tessedit_ocr_engine_mode: '1',
         preserve_interword_spaces: '1' };
 
-  await w.setParameters(params);
-  const r = await w.recognize(canvas);
-  reporterArret();
+  let r;
+  try {
+    await w.setParameters(params);
+    r = await w.recognize(canvas);
+  } finally { reporterArret(); }
   return { texte: (r.data.text || '').trim(), confiance: (r.data.confidence || 0) / 100 };
 }
 
@@ -650,11 +655,14 @@ function ouvrirViseur(aide, type) {
     }
     const video = document.getElementById('vs-video');
     try {
-      fluxCamera = await navigator.mediaDevices.getUserMedia({
+      const flux = await navigator.mediaDevices.getUserMedia({
         video: { facingMode: { ideal: 'environment' },
                  width: { ideal: 1920 }, height: { ideal: 1080 } },
         audio: false
       });
+      /* Double appui : l'ancien flux resterait allumé (voyant, batterie). */
+      if (fluxCamera && fluxCamera !== flux) fluxCamera.getTracks().forEach(t => t.stop());
+      fluxCamera = flux;
     } catch (e) { return reject(e); }
 
     video.srcObject = fluxCamera;
@@ -744,7 +752,7 @@ function rappelCadrage(type) {
      'bl'        → { fournisseur, numero, date, lignes, confiance, texte }
    ========================================================================== */
 async function analyserCanvas(type, canvas, nom, resolve) {
-  let apercu = '';
+  let apercu = '', gris = null;
   const etape = (t, s) => showSheet(
     '<h2 id="sheet-titre">' + t + '</h2><p class="sub">' + esc(nom) + '</p>' +
     '<div class="vide"><span class="vi">🔍</span>' + s + '</div>');
@@ -753,14 +761,14 @@ async function analyserCanvas(type, canvas, nom, resolve) {
     await new Promise(r => setTimeout(r, 30));
     /* On garde une copie en niveaux de gris AVANT de binariser : elle servira
        de seconde lecture si le noir et blanc rend un résultat incertain. */
-    const gris = copierCanvas(canvas);
+    gris = copierCanvas(canvas);
     pretraiter(canvas);
     try { apercu = canvas.toDataURL('image/jpeg', 0.6); } catch (e) {}
 
     etape('Lecture de l’étiquette', 'Reconnaissance du texte…');
     const code   = await lireMeilleur(canvas, gris, 'code');
     const parfum = await lireMeilleur(canvas, gris, 'parfum');
-    libererCanvas(gris);
+    libererCanvas(gris); gris = null;
 
     const batch = extraireBatch(code.texte + '\n' + parfum.texte);
     const trouve = extraireParfum(parfum.texte + '\n' + code.texte);
@@ -783,6 +791,7 @@ async function analyserCanvas(type, canvas, nom, resolve) {
     confirmerLecture(type, r, apercu, resolve);
   } catch (err) {
     libererCanvas(canvas);
+    if (gris) libererCanvas(gris);
     saisieManuelle(type, err && err.message ? err.message : 'Lecture impossible', resolve);
   }
 }
