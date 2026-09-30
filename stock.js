@@ -1418,8 +1418,16 @@ V.inventaire = async function () {
     cptes.forEach(c => { lignes[c] = num(saisie[c]); });
     const t = totauxStock(lignes);
 
-    /* État AVANT le comptage : c'est lui qui révèle les bacs disparus. */
-    const avant = (await stockReel()).articles;
+    /* État AVANT le comptage : c'est lui qui révèle les bacs disparus. Sans
+       les familles du sec (chantilly, coulis…) : la chambre froide ne les
+       compte pas, elles passaient toutes pour manquantes à chaque inventaire. */
+    const tout = (await stockReel()).articles;
+    const avant = {};
+    Object.keys(tout).forEach(c => {
+      const fam = FAMILLES_PRODUIT.filter(f => f.id === litArticle(c).famille)[0];
+      if (litArticle(c).famille === 'sec' || (fam && (fam.lieu === 'sec' || fam.stock === 'sec'))) return;
+      avant[c] = tout[c];
+    });
     const ecart = Object.keys(lignes).reduce((s, c) =>
       s + (num(lignes[c]) - num(avant[c] || 0)), 0);
 

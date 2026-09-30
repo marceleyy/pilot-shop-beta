@@ -300,6 +300,9 @@
          if (defaut === undefined) defaut = null;
          const cache = () => { try { const v = lire(cle); return v === null ? defaut : JSON.parse(v); } catch (e) { return defaut; } };
          if (!distant(cle) || !STATE.enLigne) return cache();
+         /* Une saisie encore en file d'attente est plus récente que la copie du
+            serveur : on garde la locale, sinon elle disparaît de l'écran. */
+         if (fileLire().some(x => x.cle === cle)) return cache();
          try {
            const l = await appel(table(cle) + '?id=eq.' + encodeURIComponent(cle) + '&select=data&limit=1');
            if (!l || !l.length) return cache();
@@ -332,6 +335,7 @@
          /* Les clés partagées passent par une file : relire puis écrire doit
             être insensible aux écritures concurrentes. */
          const envoyer = async () => {
+           const t0 = nowISO();
            try {
              let aEcrire = valeur;
              if (aFusionner(cle)) {
@@ -349,6 +353,11 @@
                headers: { 'Prefer': 'resolution=merge-duplicates,return=minimal' },
                body: JSON.stringify({ id:cle, site:APP.site, data:aEcrire })
              });
+             /* La valeur envoyée remplace toute écriture plus ancienne encore en
+                file : la rejouer ensuite écraserait cette saisie plus récente. */
+             const f = fileLire();
+             const perimee = x => x.cle === cle && x.at <= t0;   // pas une saisie empilée depuis
+             if (f.some(perimee)) fileEcrire(f.filter(x => !perimee(x)));
              return true;
            } catch (e) { await empiler('set', cle, valeur); return true; }
          };
@@ -456,8 +465,13 @@
      if (!f.length) return;
    
      syncEnCours = true;
+     const id = x => x.op + '|' + x.cle + '|' + x.at;
      const restants = [];
+     let envoyes = 0;
      for (const item of f) {
+       /* Remplacée ou déjà envoyée pendant la synchro : on ne rejoue pas une
+          valeur périmée par-dessus une plus récente. */
+       if (!fileLire().some(x => id(x) === id(item))) continue;
        /* Une clé sans table ne peut pas partir : on l'abandonne au lieu
           d'appeler /rest/v1/undefined en boucle. La donnée reste en local. */
        if (!DB._table(item.cle)) {
@@ -474,6 +488,7 @@
              body: JSON.stringify({ id:item.cle, site:APP.site, data:item.valeur })
            });
          }
+         envoyes++;
        } catch (e) {
          /* Échec définitif — table absente : on n'insiste pas, la donnée reste
             en local et le bandeau nomme la clé. Cinq tentatives inutiles ne
@@ -482,15 +497,28 @@
            console.warn('Écriture abandonnée (table absente) :', item.cle);
            continue;
          }
-         item.essais = (item.essais || 0) + 1;
-         if (item.essais < OFFLINE.tentatives) restants.push(item);
-         else console.warn('Écriture abandonnée après ' + item.essais + ' essais :', item.cle);
+         /* Seul un refus du serveur sur la donnée elle-même (400, 409, 413…)
+            compte comme un essai. Réseau coupé, délai, 5xx ou session expirée
+            sont passagers : abandonner après cinq essais, soit deux minutes de
+            Wi-Fi muet, perdait la saisie pour de bon. */
+         const refus = e && e.http >= 400 && e.http < 500 &&
+                       [401, 403, 408, 429].indexOf(e.http) < 0;
+         if (refus) item.essais = (item.essais || 0) + 1;
+         if (!refus || item.essais < OFFLINE.tentatives) restants.push(item);
+         else console.warn('Écriture abandonnée après ' + item.essais + ' refus :', item.cle);
        }
      }
-     fileEcrire(restants);
+     /* Relecture de la file : une saisie empilée PENDANT la synchro ne doit pas
+        être effacée par la réécriture, et une entrée remplacée entre-temps ne
+        doit pas revenir. */
+     const actuelle = fileLire();
+     const presents = new Set(actuelle.map(id));
+     const vus = new Set(f.map(id));
+     fileEcrire(restants.filter(r => presents.has(id(r)))
+                .concat(actuelle.filter(x => !vus.has(id(x)))));
      syncEnCours = false;
    
-     const partis = f.length - restants.length;
+     const partis = envoyes;
      if (partis > 0) {
        derniereSync = nowISO();
        if (STATE.user) toast(partis + ' saisie(s) synchronisée(s)');
@@ -1379,16 +1407,24 @@ async function purgerPreuves() {
      });
    };
    
-   /* Reporte le litrage détruit du mois dans la période d'écart en cours */
+   /* Reporte le litrage détruit dans la période d'écart en cours. L'écart est
+      rangé sous l'identifiant de la période (ecart:<id>), pas sous le mois :
+      écrit sous « ecart:2026-09 », le jeté n'était jamais lu par calculEcart. */
    async function cumulerPertesMois(jour) {
-     const m = monthKey(jour);
+     /* Lecture directe : periodeCourante() ouvrirait la fenêtre de première
+        période en plein enregistrement d'une perte. */
+     const per = await DB.get('periode:courante', null);
+     if (!per || !per.id || !per.debut) return;
      let total = 0;
      const cles = await DB.list('pertes:');
      for (const c of cles) {
-       if (monthKey(c.replace('pertes:', '')) !== m) continue;
+       const d = c.replace('pertes:', '');
+       /* Pas de borne de fin : une période échue reste la période en cours
+          jusqu'à sa clôture, et la suivante part de son propre début. */
+       if (d < per.debut) continue;
        (await DB.get(c, [])).forEach(w => total += num(w.litrage));
      }
-     await DB.patch('ecart:' + m, { jeteL:total, jeteKg:+(total * FOURNISSEUR.poidsMoyenLitre).toFixed(2) });
+     await DB.patch('ecart:' + per.id, { jeteL:total, jeteKg:+(total * FOURNISSEUR.poidsMoyenLitre).toFixed(2) });
    }
    
    function analyserDictee(txt) {
@@ -2228,7 +2264,9 @@ window.addEventListener('error', function (ev) {
         le rattachement qu'il faut proposer, pas la création d'une équipe qui
         existe déjà — soit la boutique démarre vraiment de zéro. */
      if (!EQUIPE.length) {
-       if (typeof appareilRattache === 'function' && !appareilRattache() &&
+       /* Sans base configurée (aperçu Vercel, poste local), rattacher n'a pas
+          de sens : l'écran bloquait l'application sur « HTTP 404 ». */
+       if (SUPABASE.url && SUPABASE.anonKey && typeof appareilRattache === 'function' && !appareilRattache() &&
            typeof ecranRattachement === 'function') {
          await ecranRattachement();
        } else if (typeof ecranAmorcage === 'function') {
@@ -2362,7 +2400,9 @@ function ouvrirPremierePeriode() {
       '<div class="actions"><button class="btn menthe bloc" id="pp-ok">Ouvrir la période</button></div>');
 
     /* Ni croix, ni voile cliquable, ni Échap : la décision est obligatoire. */
-    $$('[data-fermer]').forEach(b => b.style.display = 'none');
+    /* Les boutons de la feuille seulement : masquer aussi le voile (qui porte
+       data-fermer) le laissait invisible pour toutes les feuilles suivantes. */
+    $$('#sheet-corps [data-fermer]').forEach(b => b.style.display = 'none');
     const voile = $('#sheet .voile');
     if (voile) voile.onclick = () => toast('Choisissez une période pour commencer', 'erreur');
 
