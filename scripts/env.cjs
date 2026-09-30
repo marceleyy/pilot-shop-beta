@@ -28,6 +28,13 @@ const enLigne = !!process.env.VERCEL;
 
 /* --- Garde-fou : ne jamais écraser un env.js local par du vide --- */
 if (!url || !key) {
+  /* Les aperçus (Preview) n'ont pas les variables, volontairement : ils ne
+     doivent pas écrire dans la base en ligne. Ils démarrent en mode local
+     (index.html tolère l'absence d'env.js). Seule la production échoue. */
+  if (enLigne && /^(preview|development)$/.test(process.env.VERCEL_ENV || '')) {
+    console.warn('env.cjs : aperçu sans variables Supabase, déployé en mode local.');
+    process.exit(0);
+  }
   if (enLigne) {
     console.error('\n  ERREUR — variables d\u2019environnement manquantes.');
     console.error('  SUPABASE_URL      : ' + (url ? 'présente' : 'ABSENTE'));
