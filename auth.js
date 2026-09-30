@@ -26,15 +26,23 @@ const AUTH = {
 let _session = null;      // { access_token, refresh_token, expires_at, site }
 
 /* --- Mémoire locale ------------------------------------------------------- */
+/* La boutique vient du COMPTE, plus de config.js : un même déploiement sert
+   toutes les boutiques, et la base n'accepte que les lignes du site inscrit
+   dans le jeton. Écrire sous un autre nom serait refusé. */
+function appliquerSite(s) {
+  if (s && s.site) APP.site = s.site;
+}
 function chargerSession() {
   try {
     const brut = localStorage.getItem(AUTH.cle);
     _session = brut ? JSON.parse(brut) : null;
   } catch (e) { _session = null; }
+  appliquerSite(_session);
   return _session;
 }
 function enregistrerSession(s) {
   _session = s;
+  appliquerSite(s);
   try {
     if (s) localStorage.setItem(AUTH.cle, JSON.stringify(s));
     else localStorage.removeItem(AUTH.cle);
@@ -58,12 +66,18 @@ async function appelAuth(chemin, corps) {
 }
 
 function memoriser(d) {
-  const meta = (d.user && (d.user.user_metadata || d.user.app_metadata)) || {};
+  /* app_metadata d'abord : c'est lui que la base lit pour filtrer, et seul
+     l'administrateur peut le modifier. user_metadata, modifiable par le
+     compte lui-même, était lu en premier — et comme il vaut toujours au
+     moins {}, app_metadata n'était jamais consulté. */
+  const u = d.user || {};
+  const site = (u.app_metadata && u.app_metadata.site) ||
+               (u.user_metadata && u.user_metadata.site) || APP.site;
   enregistrerSession({
     access_token: d.access_token,
     refresh_token: d.refresh_token,
     expires_at: Date.now() + ((d.expires_in || 3600) * 1000),
-    site: meta.site || APP.site,
+    site: site,
     compte: d.user ? d.user.email : null
   });
   return _session;
