@@ -8,7 +8,7 @@
    elle qui déclenche le re-téléchargement. Un appareil déjà installé garderait
    sinon l'ancien cache, et n'irait jamais chercher les fichiers ajoutés — le
    scan hors ligne ne marcherait que sur les appareils neufs. */
-const CACHE   = 'pilotshop-cache-v8';
+const CACHE   = 'pilotshop-cache-v9';
 /* Nom FIXE, sans numéro de version : polices et bibliothèques du CDN ne
    changent pas avec l'application. Le renommer à chaque version les faisait
    purger à l'activation, donc re-télécharger — impossible en chambre froide. */
@@ -93,7 +93,8 @@ self.addEventListener('activate', event => {
 /* -----------------------------------------------------------------------------
    RÉCUPÉRATION
    Navigation      → cache d'abord, réseau en arrière-plan (ouverture instantanée)
-   Fichiers du app → stale-while-revalidate
+   Fichiers du app → réseau d'abord, repli sur le cache
+   Modèle Tesseract → cache-first (mis en cache à la première réponse)
    Polices, CDN    → cache-first, mise en cache runtime
    Écritures / API → réseau seul, jamais de cache
    -------------------------------------------------------------------------- */
@@ -142,6 +143,30 @@ self.addEventListener('fetch', event => {
           status: 200,
           headers: { 'Content-Type': 'text/html; charset=utf-8' }
         });
+      }
+    })());
+    return;
+  }
+
+  /* --- Modèle de lecture (vendor/*.traineddata*) : cache d'abord ---
+     ocr.js passe cacheMethod:'none' : Tesseract ne garde plus le modèle dans
+     IndexedDB, c'est donc ce cache qui l'évite à chaque scan. Plusieurs Mo,
+     qui ne changent pas d'une version à l'autre : pas de réseau d'abord. */
+  if (url.origin === self.location.origin &&
+      /^\/vendor\/[^/]*\.traineddata/.test(url.pathname)) {
+    event.respondWith((async () => {
+      const cache = await caches.open(CACHE);
+      const cachee = await cache.match(url.pathname) || await cache.match(req);
+      if (cachee) return cachee;
+      try {
+        const r = await fetch(req);
+        /* Première réponse réseau complète (200) : mise en cache. */
+        if (r && r.status === 200 && r.type === 'basic') {
+          event.waitUntil(cache.put(url.pathname, r.clone()).catch(() => {}));
+        }
+        return r;
+      } catch (e) {
+        return new Response('', { status: 504, statusText: 'Hors ligne' });
       }
     })());
     return;

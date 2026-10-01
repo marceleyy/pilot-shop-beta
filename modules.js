@@ -89,7 +89,7 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
          Math.round(poidsActuel / 1024) + ' Ko. Supprimez-en une pour en reprendre.');
        return null;
      }
-     if (l.length >= PREUVE.maxParJour) {
+     if (l.filter(x => !x.supprime).length >= PREUVE.maxParJour) {
        toast('Maximum de ' + PREUVE.maxParJour + ' photos par jour atteint', 'erreur');
        return null;
      }
@@ -110,7 +110,7 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
      (async function () {
        const cle = 'preuves:' + jour;
        const l = await DB.get(cle, []);
-       const p = l.filter(x => x.id === idPreuve)[0];
+       const p = l.filter(x => x.id === idPreuve && !x.supprime)[0];
        if (!p) return toast('Photo introuvable', 'erreur');
 
        showSheet(
@@ -129,7 +129,11 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
            'en reprendre une.',
            'Supprimer', async () => {
              const l2 = await DB.get(cle, []);
-             await DB.set(cle, l2.filter(x => x.id !== idPreuve));
+             /* Marquée, pas retirée : la liste est réunie avec celle du
+                serveur, une ligne retirée reviendrait. La photo elle-même est
+                effacée pour libérer la place. */
+             await DB.set(cle, l2.map(x => x.id === idPreuve
+               ? Object.assign({}, x, { supprime:{ par:STATE.user.prenom, at:nowISO() }, img:'' }) : x));
              await feed('warn', STATE.user.prenom + ' a supprimé une photo : ' +
                (p.libelle || 'sans libellé'));
              closeSheet();
@@ -496,7 +500,7 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
    STATE.phase = STATE.phase || phaseCourante();
    const e = await etatJour(j);
    const rec = await DB.get('checklist:' + j, {});
-   const preuves = await DB.get('preuves:' + j, []);
+   const preuves = (await DB.get('preuves:' + j, [])).filter(p => !p.supprime);
    const alertes = await alertesDLC();
    const releve = await DB.get('releve', []);
    const msgs = releve.filter(m => !m.lu || m.epingle).slice(-3).reverse();
@@ -828,10 +832,16 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
        Math.floor(reste / 60) + ':' + String(reste % 60).padStart(2, '0') + '</div>' +
        '<div class="actions"><button class="btn clair" data-fermer>Fermer</button></div>';
      showSheet(html());
+     /* Marqueur du minuteur : le voile ferme la feuille sans passer par le
+        bouton qui arrêtait l'intervalle. Si une autre feuille s'ouvre ensuite,
+        showSheet efface le marqueur et le tick s'arrête au lieu d'écraser
+        son contenu. */
+     const idMin = uid();
+     $('#sheet').dataset.minuteur = idMin;
      const t = setInterval(() => {
        reste--;
        const box = document.getElementById('sheet-corps');
-       if (!box || $('#sheet').hidden) return clearInterval(t);
+       if (!box || $('#sheet').hidden || $('#sheet').dataset.minuteur !== idMin) return clearInterval(t);
        if (reste <= 0) {
          clearInterval(t);
          vibrer([200, 100, 200]);
@@ -1249,7 +1259,7 @@ V.hebdo = async function () {
   const j = STATE.jour;
   const taches = await tachesHebdoDuJour(j);
   const rec = await DB.get('hebdo:' + j, {});
-  const preuves = await DB.get('preuves:' + j, []);
+  const preuves = (await DB.get('preuves:' + j, [])).filter(p => !p.supprime);
   const resp = await DB.get('hebdo:responsables', {});
   const faits = taches.filter(t => rec[t.id] && rec[t.id].ok).length;
 
@@ -1792,7 +1802,7 @@ V.clean = async function () {
   const j = STATE.jour;
   const taches = await tachesHebdoDuJour(j);
   const rec = await DB.get('hebdo:' + j, {});
-  const preuves = await DB.get('preuves:' + j, []);
+  const preuves = (await DB.get('preuves:' + j, [])).filter(p => !p.supprime);
   const photosDe = id => preuves.filter(p => p.tache === id);
   const faits = taches.filter(t => rec[t.id] && rec[t.id].ok).length;
 

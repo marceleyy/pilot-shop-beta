@@ -144,10 +144,15 @@
       réassort. Les tableaux sont remplacés, jamais mélangés. */
    /* Listes où l'on ne fait qu'ajouter (ou cocher) des lignes : deux iPads qui
       ajoutent chacun la leur ne doivent pas s'écraser. Les autres listes
-      (preuves, pertes) suppriment des lignes : une union les ferait revenir. */
+      (pertes) suppriment des lignes : une union les ferait revenir. */
+   /* « preuves: » : la copie locale est purgée au bout de 7 jours ; une photo
+      ajoutée ensuite sur ce jour, sans union, envoyait [nouvelle] et écrasait
+      la liste du serveur. Chaque preuve a un id ; une suppression ne retire
+      plus la ligne mais la marque « supprime » (filtrée à l'affichage), sinon
+      l'union la ferait revenir. */
    /* « pointage: » : deux équipiers qui pointent sur deux iPads le même jour
       ajoutent chacun leur session ; sans union, la seconde effaçait la première. */
-   const UNIR = ['ruptures', 'releve', 'anomalies', 'reception:', 'stock:mv:', 'pointage:'];
+   const UNIR = ['ruptures', 'releve', 'anomalies', 'reception:', 'stock:mv:', 'pointage:', 'preuves:'];
    const ts = x => (x && (x.a || x.at)) || '';
    const idLigne = x => x && (x.id || [ts(x), x.c || x.cle, x.t || x.type, x.e || x.employe || '',
                                        x.q !== undefined ? x.q : x.qte, x.l || x.lot || ''].join('|'));
@@ -171,6 +176,8 @@
          if (d[f] && !m[f]) { m[f] = d[f]; m[f + 'Par'] = d[f + 'Par']; m[f + 'At'] = d[f + 'At']; }
        });
        if (d.lu) m.lu = true;   // luPar, lui, est réuni juste après
+       /* Preuve supprimée sur un autre iPad : elle le reste ici aussi. */
+       if (d.supprime && !m.supprime) { m.supprime = d.supprime; m.img = ''; }
        /* Pointage : une fin de service saisie sur un autre iPad n'est pas perdue. */
        if (d.fin && !m.fin) { m.fin = d.fin; if (d.minutes !== undefined) m.minutes = d.minutes; }
        if (Array.isArray(d.luPar)) {
@@ -672,6 +679,8 @@
      sheet.hidden = false;
      /* Contenu neuf : ni modifié, ni obligatoire tant que l'appelant ne le dit pas. */
      delete sheet.dataset.obligatoire;
+     /* Toute nouvelle feuille retire le marqueur d'un minuteur en cours. */
+     delete sheet.dataset.minuteur;
      _feuilleModifiee = false;
      document.body.style.overflow = 'hidden';
      /* Une entrée d'historique pour la feuille : le bouton retour du téléphone
@@ -693,6 +702,7 @@
    function closeSheet() {
      $('#sheet').hidden = true;
      delete $('#sheet').dataset.obligatoire;
+     delete $('#sheet').dataset.minuteur;
      document.body.style.overflow = '';
      if (_feuilleHisto) {
        _feuilleHisto = false;
@@ -957,15 +967,26 @@
       ANTI-ESSAIS DU CODE PIN
       Quatre chiffres, c'est 10 000 combinaisons : sans frein, un après-midi
       suffit. Après 5 échecs de suite, la saisie est bloquée 30 s, puis 60 s,
-      120 s… à chaque nouvelle série. Le compteur survit au rechargement
+      120 s… à chaque nouvelle série, sans dépasser 15 min. Le compteur survit au rechargement
       (clé locale « pinEchecs », jamais envoyée au serveur).
       -------------------------------------------------------------------------- */
    const PIN_ESSAIS = 5, PIN_BLOCAGE_MS = 30000;
+   /* Plafond du blocage : 15 min. Sans lui, le doublement à chaque série
+      finissait par bloquer la tablette des heures, voire des jours, pour
+      toute l'équipe (le compteur est commun). */
+   const PIN_BLOCAGE_MAX_MS = 900000;
    const PIN_CLE = 'pinEchecs';      // stockée sous « pilotshop.v3:pinEchecs »
    let pinEchecs = (function () {
      try {
        const v = JSON.parse(DB._lire(PIN_CLE) || 'null');
-       if (v && typeof v === 'object') return { n:+v.n || 0, series:+v.series || 0, jusqua:+v.jusqua || 0 };
+       if (v && typeof v === 'object') {
+         const o = { n:+v.n || 0, series:+v.series || 0, jusqua:+v.jusqua || 0 };
+         /* Horloge reculée (ou ancien blocage non plafonné) : la fin du blocage
+            ne peut pas être plus loin que maintenant + plafond. */
+         const borne = Date.now() + PIN_BLOCAGE_MAX_MS;
+         if (o.jusqua > borne) o.jusqua = borne;
+         return o;
+       }
      } catch (e) {}
      return { n:0, series:0, jusqua:0 };
    })();
@@ -1001,8 +1022,9 @@
        STATE._pin = '';
        pinEchecs.n++;
        if (pinEchecs.n >= PIN_ESSAIS) {
-         /* 30 s, puis le double à chaque nouvelle série de 5 échecs. */
-         pinEchecs.jusqua = Date.now() + PIN_BLOCAGE_MS * Math.pow(2, pinEchecs.series);
+         /* 30 s, puis le double à chaque nouvelle série de 5 échecs, plafonné à 15 min. */
+         pinEchecs.jusqua = Date.now() + Math.min(PIN_BLOCAGE_MAX_MS,
+           PIN_BLOCAGE_MS * Math.pow(2, Math.min(pinEchecs.series, 10)));
          pinEchecs.series++;
          pinEchecs.n = 0;
        }
@@ -1038,10 +1060,20 @@
    
    async function chargerService() {
      const l = await DB.get('pointage:' + today(), []);
-     const ouverte = l.filter(s => s.employe === STATE.user.id && !s.fin)[0];
+     let ouverte = l.filter(s => s.employe === STATE.user.id && !s.fin)[0];
      /* Le jour de début est gardé avec la session : c'est sous lui qu'elle
         sera clôturée, même si la fin tombe après minuit. */
      if (ouverte && !ouverte.jour) ouverte.jour = today();
+     /* Service de nuit : commencé hier soir, pas encore clos après minuit.
+        Il est rangé sous la veille ; on l'y retrouve avec son jour de début. */
+     if (!ouverte) {
+       const veille = addD(today(), -1);
+       const lv = await DB.get('pointage:' + veille, []);
+       /* Au-delà de 14 h, c'est un oubli de pointage de sortie, pas un service en cours. */
+       ouverte = (Array.isArray(lv) ? lv : []).filter(s => s.employe === STATE.user.id && !s.fin &&
+         Date.now() - new Date(s.debut).getTime() < 14 * 3600000)[0];
+       if (ouverte && !ouverte.jour) ouverte.jour = veille;
+     }
      STATE.service = ouverte || null;
    }
    
@@ -1244,7 +1276,9 @@ function renderNav() {
      /* Chaque vue laisse une trace dans l'historique du navigateur : sans cela,
         le bouton « retour » du téléphone quittait purement et simplement
         l'application au lieu de revenir à l'écran précédent. */
-     if (!viaHistorique) pousserHistorique({ vue:id });
+     /* Pas pour un simple redessin de la même vue : chaque case cochée
+        empilait une entrée, et « retour » restait sur place autant de fois. */
+     if (!viaHistorique && !memeVue) pousserHistorique({ vue:id });
 
      if (memeVue) {
     /* Deux passages : après peinture, puis après les images éventuelles. */
@@ -1352,7 +1386,16 @@ function renderNav() {
      const nouveau = ['m_fond', 's_cb', 's_esp', 's_tpe', 's_retrait', 's_fond'].some(c => rempli(k[c]));
      if (!nouveau) {
        const cb = num(k.cb), esp = num(k.esp);
-       return { ca:cb + esp, cb:cb, esp:esp, ecart:num(k.ecart), par:k.par || '' };
+       /* Anciennes feuilles sans « ecart » enregistré : on le recalcule avec
+          l'équilibre de modules.js plutôt que d'afficher 0 €. */
+       let ecart = num(k.ecart);
+       /* Seulement sur une soirée complète : une feuille partielle (matin seul,
+          TPE absent) donnerait un faux écart. */
+       if (!rempli(k.ecart) && typeof equilibreCaisse === 'function' &&
+           ['fi', 'ff', 'cb', 'esp', 'tpe'].every(c => rempli(k[c]))) {
+         ecart = equilibreCaisse(k).ecart;
+       }
+       return { ca:cb + esp, cb:cb, esp:esp, ecart:ecart, par:k.par || '' };
      }
      const cb = num(k.s_cb), esp = num(k.s_esp);
      let ecart = 0;
@@ -1386,7 +1429,9 @@ function renderNav() {
        jour:jour,
        tempM:complet('m'), tempS:complet('s'), tempCrit:crit,
        net:net.faits, netTotal:net.total,
-       caisse:!!k, caisseEcart: k ? caisseResume(k).ecart : 0,
+       caisse:!!k,
+       /* La veille fournit le fond initial quand le matin n'a pas été saisi. */
+       caisseEcart: k ? caisseResume(k, await DB.get('caisse:' + addD(jour, -1), null)).ecart : 0,
        reassort:Object.keys(r).filter(k2 => r[k2] && r[k2].ok).length,
        reassortTotal:REASSORT.length, ruptures:rupt
      };
@@ -1581,7 +1626,11 @@ async function purgerPreuves() {
      $('#pa').onclick = async () => {
        const p = $('#pp').value.trim();
        if (!p) { toast('Indiquez le produit', 'erreur'); return $('#pp').focus(); }
+       /* parUnite : le litrage est saisi par unité (saisie manuelle comme
+          dictée, qui remplit ce même formulaire). Les anciennes lignes, sans
+          ce marqueur, gardent leur calcul d'origine. */
        liste.push({ id:uid(), produit:p, nombre:num($('#pn').value) || 1, litrage:num($('#pl').value),
+                    parUnite:true,
                     motif:motif, par:STATE.user.prenom, employe:STATE.user.id, at:nowISO() });
        await DB.set('pertes:' + j, liste);
        await cumulerPertesMois(j);
@@ -1603,7 +1652,12 @@ async function purgerPreuves() {
    /* Litres réellement jetés sur une ligne de perte : le litrage est saisi PAR
       UNITÉ (« 2 bacs de 5 L » → nombre 2, litrage 5, comme la dictée). Les
       totaux ignoraient le nombre : deux bacs jetés comptaient pour un. */
-   const litresPerte = w => num((w && w.nombre) || 1) * num(w && w.litrage);
+   /* Seules les lignes marquées « parUnite » sont multipliées : les anciennes
+      saisies étaient peut-être en litres totaux, on ne les recalcule pas
+      rétroactivement. */
+   const litresPerte = w => (w && w.parUnite)
+     ? num(w.nombre || 1) * num(w.litrage)
+     : num(w && w.litrage);
 
    /* Reporte le litrage détruit dans la période d'écart en cours. L'écart est
       rangé sous l'identifiant de la période (ecart:<id>), pas sous le mois :
@@ -2266,9 +2320,13 @@ async function lireEquipeBase() {
   try {
     const l = await DB._appel(DB._table('equipe') + '?id=eq.' + encodeURIComponent('equipe') +
                               '&select=data&limit=1');
+    lireEquipeBase.refus = false;
     return { etat:'base', data:(l && l.length) ? l[0].data : null };
   } catch (e) {
-    return { etat:'reseau' };
+    /* 401/403 : la base répond mais refuse cet appareil. Ce n'est pas le
+       Wi-Fi ; l'écran d'attente le dira (e.http est posé par DB._appel). */
+    lireEquipeBase.refus = !!(e && (e.http === 401 || e.http === 403));
+    return { etat:'reseau', http:e && e.http };
   }
 }
 
@@ -2283,30 +2341,46 @@ function ecranEquipeInjoignable() {
   const d = document.createElement('div');
   d.id = 'amorcage';
   document.body.appendChild(d);
+  /* Refus du serveur (401/403) : le Wi-Fi n'y est pour rien. */
+  const motifRefus = 'L’appareil doit être rattaché à nouveau.';
+  const refus = !!lireEquipeBase.refus;
   d.innerHTML =
     '<div class="in">' +
     '<div class="lg"><h1>Pilot-Shop</h1><p>' + esc(APP.site) + '</p></div>' +
     '<div class="card solide">' +
     '<h2>Connexion nécessaire pour charger l’équipe</h2>' +
-    '<div class="cs">La liste de l’équipe n’est pas encore sur cet appareil et la base ' +
-    'ne répond pas. Vérifiez le Wi-Fi, puis réessayez.</div>' +
+    '<div class="cs" id="eq-motif">La liste de l’équipe n’est pas encore sur cet appareil et la base ' +
+    (refus ? 'refuse l’accès. ' + motifRefus : 'ne répond pas. Vérifiez le Wi-Fi, puis réessayez.') + '</div>' +
     '<button class="btn menthe bloc xl" id="eq-retry" style="margin-top:14px">Réessayer</button>' +
     '<p class="mini" id="eq-etat" style="text-align:center;margin-top:12px"></p>' +
     '</div></div>';
-  d.querySelector('#eq-retry').onclick = async () => {
+  const essayer = async () => {
+    if (!d.isConnected) return;
     const bouton = d.querySelector('#eq-retry');
+    if (bouton.disabled) return;
     bouton.disabled = true;
     d.querySelector('#eq-etat').textContent = 'Connexion…';
     const etat = await chargerEquipe();
     bouton.disabled = false;
     if (etat === 'reseau') {
-      d.querySelector('#eq-etat').textContent = 'Toujours pas de connexion. Réessayez dans un instant.';
+      d.querySelector('#eq-etat').textContent = lireEquipeBase.refus
+        ? motifRefus
+        : 'Toujours pas de connexion. Réessayez dans un instant.';
       return;
     }
+    window.removeEventListener('online', auRetourReseau);
     d.remove();
     if (typeof initLogin === 'function') initLogin();
     if (etat === 'vide') ecranAmorcage();
   };
+  /* Nouvel essai automatique au retour du réseau ; l'écouteur est retiré
+     après usage (un seul essai par retour, le bouton reste disponible). */
+  function auRetourReseau() {
+    window.removeEventListener('online', auRetourReseau);
+    essayer().then(() => { if (d.isConnected) window.addEventListener('online', auRetourReseau); });
+  }
+  window.addEventListener('online', auRetourReseau);
+  d.querySelector('#eq-retry').onclick = essayer;
 }
 
 /* L'équipe change rarement, mais quand elle change il faut que ça suive :
@@ -3095,7 +3169,7 @@ function ouvrirPremierePeriode() {
            const glace = f.type === 'g' || f.famille === 'glace';
            const litrage = glace ? (num(f.taille) || FOURNISSEUR.tailleParDefaut) : 0;
            await DB.push('pertes:' + today(), { id:uid(), produit:f.nom + ' (lot ' + f.lot + ')', nombre:1,
-             litrage:litrage, motif:'perime', par:STATE.user.prenom, employe:STATE.user.id, at:nowISO() });
+             litrage:litrage, parUnite:true, motif:'perime', par:STATE.user.prenom, employe:STATE.user.id, at:nowISO() });
            await cumulerPertesMois(today());
            /* Marqué jeté plutôt que supprimé : « lots: » est fusionné avec la
               copie du serveur, qui faisait revenir une clé supprimée. */
@@ -3719,7 +3793,8 @@ function modifierPeriode(per) {
        const j = c.replace(defs[onglet].p, ''), v = await DB.get(c);
        if (!v) continue;
        if (onglet === 'caisse') {
-         const rk = caisseResume(v);
+         /* Même calcul qu'ailleurs : la veille donne le fond initial manquant. */
+         const rk = caisseResume(v, await DB.get('caisse:' + addD(j, -1), null));
          lignes.push([fmtD(j), eur(rk.ca), eur(rk.ecart), rk.par || '—',
                       Math.abs(rk.ecart) > SEUILS.caisseJourEur ? 'bad' : 'ok']);
        }
