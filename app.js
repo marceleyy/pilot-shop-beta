@@ -133,13 +133,55 @@
       temps, une seule survit.
       Pour ces clés, on relit la base juste avant d'écrire et on fusionne. */
    const FUSIONNER = ['checklist:', 'hebdo:', 'temp:', 'caisse:', 'reassort:',
-                      'preuves:', 'ruptures', 'releve', 'lots:', 'clean:'];
+                      'preuves:', 'ruptures', 'releve', 'lots:', 'clean:',
+                      'anomalies', 'reception:', 'stock:mv:'];
    const aFusionner = cle => FUSIONNER.some(p => cle.indexOf(p) === 0);
 
    /* Fusion superficielle, champ par champ. Suffisante : chaque personne
       touche des champs distincts — sa tâche, son enceinte, son point de
       réassort. Les tableaux sont remplacés, jamais mélangés. */
-   function fusionner(distant, local) {
+   /* Listes où l'on ne fait qu'ajouter (ou cocher) des lignes : deux iPads qui
+      ajoutent chacun la leur ne doivent pas s'écraser. Les autres listes
+      (preuves, pertes) suppriment des lignes : une union les ferait revenir. */
+   const UNIR = ['ruptures', 'releve', 'anomalies', 'reception:', 'stock:mv:'];
+   const ts = x => (x && (x.a || x.at)) || '';
+   const idLigne = x => x && (x.id || [ts(x), x.c || x.cle, x.t || x.type, x.e || x.employe || '',
+                                       x.q !== undefined ? x.q : x.qte, x.l || x.lot || ''].join('|'));
+   function unirListes(distant, local, cle) {
+     /* Journal du stock : les lignes antérieures au dernier inventaire ne
+        comptent plus et sont rognées exprès (purgerJournal) — on ne les fait
+        pas revenir. Aucune autre liste n'est rognée. */
+     let borne = '';
+     if (cle.indexOf('stock:mv:') === 0) {
+       try { const inv = JSON.parse(DB._lire('stock:inventaire') || 'null'); borne = (inv && inv.at) || ''; } catch (e) {}
+     }
+     const parId = {};
+     distant.forEach(x => { if (x && x.id) parId[x.id] = x; });
+     /* Même ligne des deux côtés : la locale fait foi (une photo retirée ne
+        revient pas), mais une case cochée sur un autre iPad reste cochée. */
+     const fusion = local.map(l => {
+       const d = l && l.id && parId[l.id];
+       if (!d) return l;
+       const m = Object.assign({}, l);
+       ['traite', 'resolue'].forEach(f => {
+         if (d[f] && !m[f]) { m[f] = d[f]; m[f + 'Par'] = d[f + 'Par']; m[f + 'At'] = d[f + 'At']; }
+       });
+       if (d.lu) m.lu = true;   // luPar, lui, est réuni juste après
+       if (Array.isArray(d.luPar)) {
+         m.luPar = (m.luPar || []).concat(d.luPar.filter(p => (m.luPar || []).indexOf(p) < 0));
+       }
+       return m;
+     });
+     const vus = new Set(local.map(idLigne));
+     const ajout = distant.filter(x => x && !vus.has(idLigne(x)) && !(borne && ts(x) && ts(x) <= borne));
+     if (!ajout.length) return fusion;
+     const out = fusion.concat(ajout);
+     return out.every(x => ts(x)) ? out.sort((p, q) => ts(p) < ts(q) ? -1 : ts(p) > ts(q) ? 1 : 0) : out;
+   }
+
+   function fusionner(distant, local, cle) {
+     if (Array.isArray(distant) && Array.isArray(local) && cle &&
+         UNIR.some(p => cle.indexOf(p) === 0)) return unirListes(distant, local, cle);
      if (!distant || typeof distant !== 'object' || Array.isArray(distant)) return local;
      if (!local   || typeof local   !== 'object' || Array.isArray(local))   return local;
      const out = Object.assign({}, distant);
@@ -343,7 +385,7 @@
                  const l = await appel(table(cle) + '?id=eq.' + encodeURIComponent(cle) +
                                        '&select=data&limit=1');
                  if (l && l.length && l[0].data) {
-                   aEcrire = fusionner(l[0].data, valeur);
+                   aEcrire = fusionner(l[0].data, valeur, cle);
                    try { ecrire(cle, JSON.stringify(aEcrire)); } catch (x) {}
                  }
                } catch (x) { /* relecture impossible : on écrit ce qu'on a */ }
@@ -481,12 +523,33 @@
        try {
          if (item.op === 'del') {
            await DB._appel(DB._table(item.cle) + '?id=eq.' + encodeURIComponent(item.cle), { method:'DELETE' });
-         } else {
+         } else if (!aFusionner(item.cle)) {
            await DB._appel(DB._table(item.cle), {
              method: 'POST',
              headers: { 'Prefer': 'resolution=merge-duplicates,return=minimal' },
              body: JSON.stringify({ id:item.cle, site:APP.site, data:item.valeur })
            });
+         } else {
+           /* Comme DB.set, et sous le même verrou : une clé partagée est
+              fusionnée avec la copie du serveur, sinon la saisie hors ligne
+              écrase celles des autres iPads — ou une saisie faite pendant la
+              synchro sur ce même appareil. */
+           const parti = await enFile(item.cle, async () => {
+             if (!fileLire().some(x => id(x) === id(item))) return false;
+             let data = item.valeur;
+             try {
+               const l = await DB._appel(DB._table(item.cle) + '?id=eq.' + encodeURIComponent(item.cle) +
+                                         '&select=data&limit=1');
+               if (l && l.length && l[0].data) data = fusionner(l[0].data, item.valeur, item.cle);
+             } catch (x) { /* relecture impossible : l'envoi dira si le réseau est là */ }
+             await DB._appel(DB._table(item.cle), {
+               method: 'POST',
+               headers: { 'Prefer': 'resolution=merge-duplicates,return=minimal' },
+               body: JSON.stringify({ id:item.cle, site:APP.site, data:data })
+             });
+             return true;
+           });
+           if (!parti) continue;
          }
          envoyes++;
        } catch (e) {

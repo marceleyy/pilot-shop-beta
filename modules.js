@@ -351,8 +351,14 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
            ouvertures ne décrémentaient pas — elle dérivait en silence. */
         for (const l of valides) {
           const fam = devinerFamille(l.produit);
-          const cle = cleArticle(fam.id, fam.parfums ? l.produit.trim() : '',
-                                 fam.parfums ? (num(l.taille) || FOURNISSEUR.tailleParDefaut) : '');
+          /* Même clé que l'ouverture : « Gelato pistache 3 litres » doit
+             alimenter glace|Pistache|3, pas un article fantôme en 5 L que
+             l'inventaire ne compte jamais. Seules les glaces ont une taille. */
+          const glace = fam.id === 'glace';
+          const parfum = glace ? (parfumDepuisDesignation(l.produit) || l.produit.trim()) : l.produit.trim();
+          const cle = cleArticle(fam.id, fam.parfums ? parfum : '',
+                                 glace ? (num(l.taille) || tailleDepuisDesignation(l.produit) ||
+                                          FOURNISSEUR.tailleParDefaut) : '');
           await ajouterMouvement('reception', cle, num(l.qte) || 1,
             { lot:l.lot, bl:bl.numero, dlc:l.dlc, famille:fam.id });
         }

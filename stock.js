@@ -213,6 +213,7 @@ async function ajouterMouvement(type, cle, qte, extra) {
      et ils fausseraient le stock de façon invisible. */
   const dernier = l[l.length - 1];
   if (dernier && dernier.t === type && dernier.c === cle &&
+      dernier.e === (STATE.user ? STATE.user.id : null) &&   // pas le scan d'un autre iPad
       num(dernier.q) === num(qte) &&
       ((extra && extra.lot) ? dernier.l === extra.lot : true) &&
       (Date.now() - new Date(dernier.a)) < 15000) {
