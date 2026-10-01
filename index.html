@@ -117,7 +117,7 @@
 
 <!-- ===================== OUTILS ===================== -->
 <button type="button" id="fb" class="noprint" hidden>
-  <span class="pt" aria-hidden="true"></span>Signaler
+  <span class="pt" aria-hidden="true"></span>Retour bêta
 </button>
 
 <div id="sheet" hidden role="dialog" aria-modal="true" aria-labelledby="sheet-titre">
@@ -158,7 +158,9 @@
 
 
 <!-- ===================== SCRIPTS ===================== -->
-<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js" crossorigin="anonymous" defer></script>
+<!-- async et non defer : en premier dans la file des scripts différés, un CDN
+     muet bloquait app.js. XLSX ne sert qu'à l'import de caisse, au clic. -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js" crossorigin="anonymous" async></script>
 <script src="env.js" defer onerror="console.info(&quot;env.js absent : mode local&quot;)"></script>
 <script src="config.js" defer></script>
 <script src="auth.js" defer></script>

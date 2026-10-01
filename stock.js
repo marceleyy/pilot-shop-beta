@@ -403,7 +403,14 @@ async function stockReel() {
     moisConnus().catch(() => null),
     DB.get('stock:sec', null).catch(() => null)
   ]);
-  const mouv = await tousMouvements(inv ? inv.jour : null, connus);
+  /* Les familles du sec sont bornées par l'inventaire du SEC, qui peut être
+     plus ancien que celui de la chambre froide : on lit donc les mouvements
+     depuis le plus ancien des deux (les bornes par famille, plus bas, écartent
+     ce qui est déjà compté). Sans l'un des deux, on lit toute la fenêtre. */
+  const depuis = (inv && inv.jour && invSec && invSec.jour)
+    ? (String(inv.jour) < String(invSec.jour) ? inv.jour : invSec.jour)
+    : null;
+  const mouv = await tousMouvements(depuis, connus);
 
   const out = {};
   const dateInv = inv ? inv.at : null;
@@ -1170,8 +1177,8 @@ V.inventaire = async function () {
         '<div class="invp-t">' + tailles.map(t => {
           const c = cleArticle('glace', p, t);
           return '<label><span>' + t + ' L</span>' +
-            '<input type="number" inputmode="numeric" min="0" step="1" data-inv="' + c + '" ' +
-            'value="' + (saisie[c] !== undefined ? saisie[c] : '') + '" placeholder="0"></label>';
+            '<input type="number" inputmode="numeric" min="0" step="1" data-inv="' + esc(c) + '" ' +
+            'value="' + (saisie[c] !== undefined ? esc(saisie[c]) : '') + '" placeholder="0"></label>';
         }).join('') + '</div></div>';
     }).join('') + '</div>' +
 
@@ -1191,8 +1198,8 @@ V.inventaire = async function () {
               return '<div class="invl">' +
                 '<span class="invn">' + esc(sv) + '</span>' +
                 (q ? '<span class="invc">' + q + '</span>' : '') +
-                '<input type="number" inputmode="numeric" min="0" step="1" data-inv="' + c + '" ' +
-                'value="' + (saisie[c] !== undefined ? saisie[c] : '') + '" placeholder="0"></div>';
+                '<input type="number" inputmode="numeric" min="0" step="1" data-inv="' + esc(c) + '" ' +
+                'value="' + (saisie[c] !== undefined ? esc(saisie[c]) : '') + '" placeholder="0"></div>';
             }).join('') + '</div></div>';
         }
         const c = cleArticle(f.id, '', '');
@@ -1201,8 +1208,8 @@ V.inventaire = async function () {
           '<span class="invn">' + esc(f.libelle) +
           '<small>en ' + esc(f.unites) + '</small></span>' +
           (q ? '<span class="invc">' + q + ' en stock</span>' : '') +
-          '<input type="number" inputmode="numeric" min="0" step="1" data-inv="' + c + '" ' +
-          'value="' + (saisie[c] !== undefined ? saisie[c] : '') + '" placeholder="0"></div>';
+          '<input type="number" inputmode="numeric" min="0" step="1" data-inv="' + esc(c) + '" ' +
+          'value="' + (saisie[c] !== undefined ? esc(saisie[c]) : '') + '" placeholder="0"></div>';
     }).join('') + '</div>';
 
   /* --- Sec : par section, unité visible, décimales où ça a du sens ---------
@@ -1429,15 +1436,23 @@ V.inventaire = async function () {
       if (litArticle(c).famille === 'sec' || (fam && (fam.lieu === 'sec' || fam.stock === 'sec'))) return;
       avant[c] = tout[c];
     });
-    const ecart = Object.keys(lignes).reduce((s, c) =>
-      s + (num(lignes[c]) - num(avant[c] || 0)), 0);
+    /* Manquants et surplus sont comptés séparément, sur l'union des articles
+       attendus et saisis, comme enregistrerInventaire : une somme d'écarts
+       signés laissait 2 bacs manquants et 2 en trop s'annuler en
+       « correspond exactement ». */
+    let manq = 0, trop = 0;
+    new Set(Object.keys(avant).concat(Object.keys(lignes))).forEach(c => {
+      const d = num(lignes[c] || 0) - num(avant[c] || 0);
+      if (d < 0) manq += -d; else trop += d;
+    });
 
     confirmer('Valider la chambre froide ?',
       t.bacs + ' bacs comptés sur ' + cptes.length + ' référence(s), soit ' +
       n1(t.kg) + ' kg. ' +
-      (ecart === 0 ? 'Cela correspond exactement au stock attendu.'
-       : ecart < 0 ? Math.abs(ecart) + ' bac(s) de moins qu’attendu — des ouvertures non tracées.'
-       : ecart + ' bac(s) de plus qu’attendu — une réception non saisie.'),
+      (manq === 0 && trop === 0 ? 'Cela correspond exactement au stock attendu.'
+       : manq + ' manquant(s), ' + trop + ' en trop par rapport au stock attendu' +
+         (manq ? ' — des ouvertures non tracées ?' : '') +
+         (trop ? (manq ? ' Et' : ' —') + ' une réception non saisie ?' : '')),
       'Valider', async () => {
         const inv = await enregistrerInventaire(lignes,
           $('#inv-note') ? $('#inv-note').value : '', avant);

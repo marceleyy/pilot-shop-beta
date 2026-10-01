@@ -1,6 +1,6 @@
 {
   "id": "/",
-  "name": "Pilot-Shop — Chamonix",
+  "name": "Pilot-Shop — Paccard",
   "short_name": "Pilot-Shop",
   "description": "Registres et pilotage du point de vente",
   "lang": "fr-FR",
@@ -44,32 +44,6 @@
       "sizes": "180x180",
       "type": "image/png",
       "purpose": "any"
-    }
-  ],
-  "shortcuts": [
-    {
-      "name": "Relever les frigos",
-      "short_name": "Frigos",
-      "url": "/?vue=temp",
-      "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png" }]
-    },
-    {
-      "name": "Nettoyage du jour",
-      "short_name": "Nettoyage",
-      "url": "/?vue=clean",
-      "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png" }]
-    },
-    {
-      "name": "Déclarer une perte",
-      "short_name": "Perte",
-      "url": "/?vue=pertes",
-      "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png" }]
-    },
-    {
-      "name": "Tour de contrôle",
-      "short_name": "Contrôle",
-      "url": "/?vue=controle",
-      "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png" }]
     }
   ]
 }

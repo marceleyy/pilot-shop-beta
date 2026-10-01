@@ -285,7 +285,11 @@ async function obtenirWorker() {
   const chemins = {
     workerPath: 'vendor/tesseract-worker.min.js',
     corePath:   'vendor/tesseract-core-simd.wasm.js',
-    langPath:   'vendor/'
+    langPath:   'vendor/',
+    /* Pas de copie dans IndexedDB : le modèle est déjà précaché par le
+       service worker. Le dupliquer coûtait plusieurs Mo et une écriture lente
+       au premier scan. Option reconnue par la version embarquée (v5). */
+    cacheMethod: 'none'
   };
 
   let w;
