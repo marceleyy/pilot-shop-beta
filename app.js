@@ -20,7 +20,11 @@
       Infinity, qui contaminerait tout total où il entrerait. */
    const num = v => {
      if (v === null || v === undefined) return 0;
-     const x = parseFloat(String(v).replace(/[\s\u00a0\u202f€]/g, '').replace(',', '.'));
+     let s = String(v).replace(/[\s\u00a0\u202f€]/g, '');
+     if (/^\(.*\)$/.test(s)) s = '-' + s.slice(1, -1);          // (12,50) : avoir comptable
+     /* Avec une virgule, on lit à la française : « 1.234,50 » = 1234,50. */
+     if (s.indexOf(',') >= 0) s = s.replace(/\./g, '').replace(',', '.');
+     const x = parseFloat(s);
      return isFinite(x) ? x : 0;
    };
    /* Une décimale, à la française. La version précédente rendait « 1234.6 » :
@@ -133,13 +137,55 @@
       temps, une seule survit.
       Pour ces clés, on relit la base juste avant d'écrire et on fusionne. */
    const FUSIONNER = ['checklist:', 'hebdo:', 'temp:', 'caisse:', 'reassort:',
-                      'preuves:', 'ruptures', 'releve', 'lots:', 'clean:'];
+                      'preuves:', 'ruptures', 'releve', 'lots:', 'clean:',
+                      'anomalies', 'reception:', 'stock:mv:'];
    const aFusionner = cle => FUSIONNER.some(p => cle.indexOf(p) === 0);
 
    /* Fusion superficielle, champ par champ. Suffisante : chaque personne
       touche des champs distincts — sa tâche, son enceinte, son point de
       réassort. Les tableaux sont remplacés, jamais mélangés. */
-   function fusionner(distant, local) {
+   /* Listes où l'on ne fait qu'ajouter (ou cocher) des lignes : deux iPads qui
+      ajoutent chacun la leur ne doivent pas s'écraser. Les autres listes
+      (preuves, pertes) suppriment des lignes : une union les ferait revenir. */
+   const UNIR = ['ruptures', 'releve', 'anomalies', 'reception:', 'stock:mv:'];
+   const ts = x => (x && (x.a || x.at)) || '';
+   const idLigne = x => x && (x.id || [ts(x), x.c || x.cle, x.t || x.type, x.e || x.employe || '',
+                                       x.q !== undefined ? x.q : x.qte, x.l || x.lot || ''].join('|'));
+   function unirListes(distant, local, cle) {
+     /* Journal du stock : les lignes antérieures au dernier inventaire ne
+        comptent plus et sont rognées exprès (purgerJournal) — on ne les fait
+        pas revenir. Aucune autre liste n'est rognée. */
+     let borne = '';
+     if (cle.indexOf('stock:mv:') === 0) {
+       try { const inv = JSON.parse(DB._lire('stock:inventaire') || 'null'); borne = (inv && inv.at) || ''; } catch (e) {}
+     }
+     const parId = {};
+     distant.forEach(x => { if (x && x.id) parId[x.id] = x; });
+     /* Même ligne des deux côtés : la locale fait foi (une photo retirée ne
+        revient pas), mais une case cochée sur un autre iPad reste cochée. */
+     const fusion = local.map(l => {
+       const d = l && l.id && parId[l.id];
+       if (!d) return l;
+       const m = Object.assign({}, l);
+       ['traite', 'resolue'].forEach(f => {
+         if (d[f] && !m[f]) { m[f] = d[f]; m[f + 'Par'] = d[f + 'Par']; m[f + 'At'] = d[f + 'At']; }
+       });
+       if (d.lu) m.lu = true;   // luPar, lui, est réuni juste après
+       if (Array.isArray(d.luPar)) {
+         m.luPar = (m.luPar || []).concat(d.luPar.filter(p => (m.luPar || []).indexOf(p) < 0));
+       }
+       return m;
+     });
+     const vus = new Set(local.map(idLigne));
+     const ajout = distant.filter(x => x && !vus.has(idLigne(x)) && !(borne && ts(x) && ts(x) <= borne));
+     if (!ajout.length) return fusion;
+     const out = fusion.concat(ajout);
+     return out.every(x => ts(x)) ? out.sort((p, q) => ts(p) < ts(q) ? -1 : ts(p) > ts(q) ? 1 : 0) : out;
+   }
+
+   function fusionner(distant, local, cle) {
+     if (Array.isArray(distant) && Array.isArray(local) && cle &&
+         UNIR.some(p => cle.indexOf(p) === 0)) return unirListes(distant, local, cle);
      if (!distant || typeof distant !== 'object' || Array.isArray(distant)) return local;
      if (!local   || typeof local   !== 'object' || Array.isArray(local))   return local;
      const out = Object.assign({}, distant);
@@ -300,6 +346,9 @@
          if (defaut === undefined) defaut = null;
          const cache = () => { try { const v = lire(cle); return v === null ? defaut : JSON.parse(v); } catch (e) { return defaut; } };
          if (!distant(cle) || !STATE.enLigne) return cache();
+         /* Une saisie encore en file d'attente est plus récente que la copie du
+            serveur : on garde la locale, sinon elle disparaît de l'écran. */
+         if (fileLire().some(x => x.cle === cle)) return cache();
          try {
            const l = await appel(table(cle) + '?id=eq.' + encodeURIComponent(cle) + '&select=data&limit=1');
            if (!l || !l.length) return cache();
@@ -332,6 +381,7 @@
          /* Les clés partagées passent par une file : relire puis écrire doit
             être insensible aux écritures concurrentes. */
          const envoyer = async () => {
+           const t0 = nowISO();
            try {
              let aEcrire = valeur;
              if (aFusionner(cle)) {
@@ -339,7 +389,7 @@
                  const l = await appel(table(cle) + '?id=eq.' + encodeURIComponent(cle) +
                                        '&select=data&limit=1');
                  if (l && l.length && l[0].data) {
-                   aEcrire = fusionner(l[0].data, valeur);
+                   aEcrire = fusionner(l[0].data, valeur, cle);
                    try { ecrire(cle, JSON.stringify(aEcrire)); } catch (x) {}
                  }
                } catch (x) { /* relecture impossible : on écrit ce qu'on a */ }
@@ -349,6 +399,11 @@
                headers: { 'Prefer': 'resolution=merge-duplicates,return=minimal' },
                body: JSON.stringify({ id:cle, site:APP.site, data:aEcrire })
              });
+             /* La valeur envoyée remplace toute écriture plus ancienne encore en
+                file : la rejouer ensuite écraserait cette saisie plus récente. */
+             const f = fileLire();
+             const perimee = x => x.cle === cle && x.at <= t0;   // pas une saisie empilée depuis
+             if (f.some(perimee)) fileEcrire(f.filter(x => !perimee(x)));
              return true;
            } catch (e) { await empiler('set', cle, valeur); return true; }
          };
@@ -456,8 +511,13 @@
      if (!f.length) return;
    
      syncEnCours = true;
+     const id = x => x.op + '|' + x.cle + '|' + x.at;
      const restants = [];
+     let envoyes = 0;
      for (const item of f) {
+       /* Remplacée ou déjà envoyée pendant la synchro : on ne rejoue pas une
+          valeur périmée par-dessus une plus récente. */
+       if (!fileLire().some(x => id(x) === id(item))) continue;
        /* Une clé sans table ne peut pas partir : on l'abandonne au lieu
           d'appeler /rest/v1/undefined en boucle. La donnée reste en local. */
        if (!DB._table(item.cle)) {
@@ -467,13 +527,35 @@
        try {
          if (item.op === 'del') {
            await DB._appel(DB._table(item.cle) + '?id=eq.' + encodeURIComponent(item.cle), { method:'DELETE' });
-         } else {
+         } else if (!aFusionner(item.cle)) {
            await DB._appel(DB._table(item.cle), {
              method: 'POST',
              headers: { 'Prefer': 'resolution=merge-duplicates,return=minimal' },
              body: JSON.stringify({ id:item.cle, site:APP.site, data:item.valeur })
            });
+         } else {
+           /* Comme DB.set, et sous le même verrou : une clé partagée est
+              fusionnée avec la copie du serveur, sinon la saisie hors ligne
+              écrase celles des autres iPads — ou une saisie faite pendant la
+              synchro sur ce même appareil. */
+           const parti = await enFile(item.cle, async () => {
+             if (!fileLire().some(x => id(x) === id(item))) return false;
+             let data = item.valeur;
+             try {
+               const l = await DB._appel(DB._table(item.cle) + '?id=eq.' + encodeURIComponent(item.cle) +
+                                         '&select=data&limit=1');
+               if (l && l.length && l[0].data) data = fusionner(l[0].data, item.valeur, item.cle);
+             } catch (x) { /* relecture impossible : l'envoi dira si le réseau est là */ }
+             await DB._appel(DB._table(item.cle), {
+               method: 'POST',
+               headers: { 'Prefer': 'resolution=merge-duplicates,return=minimal' },
+               body: JSON.stringify({ id:item.cle, site:APP.site, data:data })
+             });
+             return true;
+           });
+           if (!parti) continue;
          }
+         envoyes++;
        } catch (e) {
          /* Échec définitif — table absente : on n'insiste pas, la donnée reste
             en local et le bandeau nomme la clé. Cinq tentatives inutiles ne
@@ -482,15 +564,28 @@
            console.warn('Écriture abandonnée (table absente) :', item.cle);
            continue;
          }
-         item.essais = (item.essais || 0) + 1;
-         if (item.essais < OFFLINE.tentatives) restants.push(item);
-         else console.warn('Écriture abandonnée après ' + item.essais + ' essais :', item.cle);
+         /* Seul un refus du serveur sur la donnée elle-même (400, 409, 413…)
+            compte comme un essai. Réseau coupé, délai, 5xx ou session expirée
+            sont passagers : abandonner après cinq essais, soit deux minutes de
+            Wi-Fi muet, perdait la saisie pour de bon. */
+         const refus = e && e.http >= 400 && e.http < 500 &&
+                       [401, 403, 408, 429].indexOf(e.http) < 0;
+         if (refus) item.essais = (item.essais || 0) + 1;
+         if (!refus || item.essais < OFFLINE.tentatives) restants.push(item);
+         else console.warn('Écriture abandonnée après ' + item.essais + ' refus :', item.cle);
        }
      }
-     fileEcrire(restants);
+     /* Relecture de la file : une saisie empilée PENDANT la synchro ne doit pas
+        être effacée par la réécriture, et une entrée remplacée entre-temps ne
+        doit pas revenir. */
+     const actuelle = fileLire();
+     const presents = new Set(actuelle.map(id));
+     const vus = new Set(f.map(id));
+     fileEcrire(restants.filter(r => presents.has(id(r)))
+                .concat(actuelle.filter(x => !vus.has(id(x)))));
      syncEnCours = false;
    
-     const partis = f.length - restants.length;
+     const partis = envoyes;
      if (partis > 0) {
        derniereSync = nowISO();
        if (STATE.user) toast(partis + ' saisie(s) synchronisée(s)');
@@ -647,7 +742,7 @@
    const vide = (icone, texte) => '<div class="vide">' + esc(texte) + '</div>';
    const pastille = (cls, txt) => '<span class="pill ' + cls + '">' + esc(txt) + '</span>';
    const avatar = (e, cls) =>
-     '<span class="' + (cls || 'av') + '" style="background:' + e.couleur + '">' + esc(e.initiales) + '</span>';
+     '<span class="' + (cls || 'av') + '" style="background:' + esc(e.couleur) + '">' + esc(e.initiales) + '</span>';
    
    /* =============================================================================
       4. CONNEXION TACTILE
@@ -656,7 +751,7 @@
      $('#login-site').textContent = APP.site + ' · ' + APP.version;
    
      $('#qui-liste').innerHTML = EQUIPE.map(e =>
-       '<button type="button" data-qui="' + e.id + '">' +
+       '<button type="button" data-qui="' + esc(e.id) + '">' +
          avatar(e) +
          '<span class="nm">' + esc(e.prenom) + '</span>' +
          '<span class="rl">' + ROLES[e.role].label + '</span>' +
@@ -672,12 +767,17 @@
      const rz = $('#lg-reset');
      if (rz) rz.onclick = function () { ecranRemiseAZero(false); };
    
-     document.addEventListener('keydown', e => {
-       if ($('#login').hidden || $('#login-pin').hidden) return;
-       if (/^[0-9]$/.test(e.key)) toucheP(e.key);
-       else if (e.key === 'Backspace') toucheP('effacer');
-       else if (e.key === 'Escape') retourQui();
-     });
+     /* Une seule fois : initLogin est rappelée à chaque démarrage et après le
+        rattachement, et chaque écouteur en plus doublait la touche tapée. */
+     if (!initLogin._clavier) {
+       initLogin._clavier = true;
+       document.addEventListener('keydown', e => {
+         if ($('#login').hidden || $('#login-pin').hidden) return;
+         if (/^[0-9]$/.test(e.key)) toucheP(e.key);
+         else if (e.key === 'Backspace') toucheP('effacer');
+         else if (e.key === 'Escape') retourQui();
+       });
+     }
    }
    
    function ouvrirPin(id) {
@@ -750,8 +850,17 @@
    }
    
    async function chargerService() {
-     const l = await DB.get('pointage:' + today(), []);
-     const ouverte = l.filter(s => s.employe === STATE.user.id && !s.fin)[0];
+     /* La veille aussi : un service commencé avant minuit est rangé sous le
+        jour de l'arrivée, et serait sinon oublié au rechargement. */
+     let ouverte = null;
+     for (const d of [today(), addD(today(), -1)]) {
+       const l = await DB.get('pointage:' + d, []);
+       /* Hier : seulement un service récent. Un oubli de la veille rouvert le
+          lendemain enregistrerait 24 heures de travail. */
+       ouverte = l.filter(s => s.employe === STATE.user.id && !s.fin &&
+         (d === today() || Date.now() - new Date(s.debut) < 16 * 3600e3))[0];
+       if (ouverte) break;
+     }
      STATE.service = ouverte || null;
    }
    
@@ -766,10 +875,15 @@
        await feed('ok', STATE.user.prenom + ' a pris son service');
        toast('Bon service, ' + STATE.user.prenom);
      } else {
-       const s = l.filter(x => x.id === (STATE.service && STATE.service.id))[0];
+       /* Le service est rangé sous le jour de l'ARRIVÉE : partir après minuit
+          le cherchait sous le lendemain, et il restait ouvert à jamais. */
+       const cleS = STATE.service && STATE.service.debut
+         ? 'pointage:' + isoOf(new Date(STATE.service.debut)) : cle;
+       const lS = cleS === cle ? l : await DB.get(cleS, []);
+       const s = lS.filter(x => x.id === (STATE.service && STATE.service.id))[0];
        if (s) { s.fin = nowISO(); s.minutes = Math.round((new Date(s.fin) - new Date(s.debut)) / 60000); }
        STATE.service = null;
-       await DB.set(cle, l);
+       await DB.set(cleS, lS);
        await feed('ok', STATE.user.prenom + ' a terminé son service');
        toast('Service terminé');
      }
@@ -1049,7 +1163,8 @@ function renderNav() {
        jour:jour,
        tempM:complet('m'), tempS:complet('s'), tempCrit:crit,
        net:net.faits, netTotal:net.total,
-       caisse:!!k, caisseEcart: k ? num(k.ecart) : 0,
+       /* Une fiche ouverte n'est pas une caisse faite : il faut la fermeture validée. */
+       caisse:!!(k && (k.s_valide || (k.s_valide === undefined && k.ecart !== undefined))), caisseEcart: k ? num(k.ecart) : 0,
        reassort:Object.keys(r).filter(k2 => r[k2] && r[k2].ok).length,
        reassortTotal:REASSORT.length, ruptures:rupt
      };
@@ -1183,7 +1298,7 @@ async function purgerPreuves() {
         ? '<div class="rang vignettes">' + clichés.map(p =>
             '<button type="button" class="vign" data-vign="' + esc(p.id) + '" ' +
             'data-vjour="' + esc(j) + '" aria-label="Voir la photo">' +
-            '<img src="' + p.img + '" alt=""></button>').join('') + '</div>'
+            '<img src="' + esc(p.img) + '" alt=""></button>').join('') + '</div>'
         : '');
   };
    
@@ -1222,7 +1337,7 @@ async function purgerPreuves() {
                ? '<div class="rang vignettes">' + clichesA.map(p =>
                    '<button type="button" class="vign" data-vign="' + esc(p.id) + '" ' +
                    'data-vjour="' + esc(j) + '" aria-label="Voir la photo">' +
-                   '<img src="' + p.img + '" alt=""></button>').join('') + '</div>'
+                   '<img src="' + esc(p.img) + '" alt=""></button>').join('') + '</div>'
                : '') +
              '<p class="mini" style="margin-top:8px">' + esc(a.consigne) + '</p>',
              a.retard ? 'corail' : 'ambre');
@@ -1374,16 +1489,24 @@ async function purgerPreuves() {
      });
    };
    
-   /* Reporte le litrage détruit du mois dans la période d'écart en cours */
+   /* Reporte le litrage détruit dans la période d'écart en cours. L'écart est
+      rangé sous l'identifiant de la période (ecart:<id>), pas sous le mois :
+      écrit sous « ecart:2026-09 », le jeté n'était jamais lu par calculEcart. */
    async function cumulerPertesMois(jour) {
-     const m = monthKey(jour);
+     /* Lecture directe : periodeCourante() ouvrirait la fenêtre de première
+        période en plein enregistrement d'une perte. */
+     const per = await DB.get('periode:courante', null);
+     if (!per || !per.id || !per.debut) return;
      let total = 0;
      const cles = await DB.list('pertes:');
      for (const c of cles) {
-       if (monthKey(c.replace('pertes:', '')) !== m) continue;
+       const d = c.replace('pertes:', '');
+       /* Pas de borne de fin : une période échue reste la période en cours
+          jusqu'à sa clôture, et la suivante part de son propre début. */
+       if (d < per.debut) continue;
        (await DB.get(c, [])).forEach(w => total += num(w.litrage));
      }
-     await DB.patch('ecart:' + m, { jeteL:total, jeteKg:+(total * FOURNISSEUR.poidsMoyenLitre).toFixed(2) });
+     await DB.patch('ecart:' + per.id, { jeteL:total, jeteKg:+(total * FOURNISSEUR.poidsMoyenLitre).toFixed(2) });
    }
    
    function analyserDictee(txt) {
@@ -2223,7 +2346,9 @@ window.addEventListener('error', function (ev) {
         le rattachement qu'il faut proposer, pas la création d'une équipe qui
         existe déjà — soit la boutique démarre vraiment de zéro. */
      if (!EQUIPE.length) {
-       if (typeof appareilRattache === 'function' && !appareilRattache() &&
+       /* Sans base configurée (aperçu Vercel, poste local), rattacher n'a pas
+          de sens : l'écran bloquait l'application sur « HTTP 404 ». */
+       if (SUPABASE.url && SUPABASE.anonKey && typeof appareilRattache === 'function' && !appareilRattache() &&
            typeof ecranRattachement === 'function') {
          await ecranRattachement();
        } else if (typeof ecranAmorcage === 'function') {
@@ -2357,7 +2482,9 @@ function ouvrirPremierePeriode() {
       '<div class="actions"><button class="btn menthe bloc" id="pp-ok">Ouvrir la période</button></div>');
 
     /* Ni croix, ni voile cliquable, ni Échap : la décision est obligatoire. */
-    $$('[data-fermer]').forEach(b => b.style.display = 'none');
+    /* Les boutons de la feuille seulement : masquer aussi le voile (qui porte
+       data-fermer) le laissait invisible pour toutes les feuilles suivantes. */
+    $$('#sheet-corps [data-fermer]').forEach(b => b.style.display = 'none');
     const voile = $('#sheet .voile');
     if (voile) voile.onclick = () => toast('Choisissez une période pour commencer', 'erreur');
 
@@ -2686,7 +2813,7 @@ function ouvrirPremierePeriode() {
              ' par ' + esc(f.par || '—') + ' · ' + Math.round(f.heures / 24 * 10) / 10 + ' j de vie</div></div>' +
              '<div class="fr"><b>' + resteLisible(f.resteH) + '</b>' +
              '<span>limite ' + fmtDC(f.limite) + '</span></div>' +
-             (f.c === 'rouge' ? '<button class="btn corail sm" data-jeter="' + f.cle + '">Jeter</button>' : '') +
+             (f.c === 'rouge' ? '<button class="btn corail sm" data-jeter="' + esc(f.cle) + '">Jeter</button>' : '') +
              '</div>').join('') + '</div>').join('')
          : vide('🧊', 'Aucun lot ouvert ce mois. Les saisies de l’équipe apparaissent ici.'));
    
@@ -3145,7 +3272,7 @@ function ouvrirPremierePeriode() {
        const st = await etatJour(d);
        if (!st.tempM || !st.tempS) B.push({ id:'temp', txt:'Températures incomplètes le ' + fmtDC(d), go:'temp' });
        if (st.netTotal && st.net === 0) B.push({ id:'nettoyage', txt:'Aucun nettoyage validé le ' + fmtDC(d), go:'clean' });
-       if (!st.caisse) B.push({ id:'caisse', txt:'Feuille de caisse absente le ' + fmtDC(d), go:'caisse' });
+       if (!st.caisse) B.push({ id:'caisse', txt:'Fermeture de caisse non validée le ' + fmtDC(d), go:'caisse' });
      }
      return B.map(b => Object.assign(b, {
        forcable: (PERIODES.blocages.filter(x => x.id === b.id)[0] || { forcable:false }).forcable
@@ -3381,7 +3508,8 @@ function modifierPeriode(per) {
        const j = c.replace(defs[onglet].p, ''), v = await DB.get(c);
        if (!v) continue;
        if (onglet === 'caisse')
-         lignes.push([fmtD(j), eur(num(v.cb) + num(v.esp)), eur(num(v.ecart)), v.par || '—',
+         lignes.push([fmtD(j), eur(num(v.s_cb !== undefined ? v.s_cb : v.cb) + num(v.s_esp !== undefined ? v.s_esp : v.esp)),
+                      eur(num(v.ecart)), v.par || (v.s_valide && v.s_valide.par) || '—',
                       Math.abs(num(v.ecart)) > SEUILS.caisseJourEur ? 'bad' : 'ok']);
        else if (onglet === 'temp') {
          const n = ENCEINTES.reduce((s, e) => s + (v['m_' + e.id] ? 1 : 0) + (v['s_' + e.id] ? 1 : 0), 0);
@@ -3409,7 +3537,7 @@ function modifierPeriode(per) {
        }
        else if (onglet === 'feedback') {
          (Array.isArray(v) ? v : []).slice().reverse().forEach(f =>
-           lignes.push([fmtD(f.at.slice(0, 10)), f.type, f.texte, f.par, 'warn']));
+           lignes.push([fmtD(f.at ? isoOf(new Date(f.at)) : today()), f.type, f.texte, f.par, 'warn']));
        }
      }
    
@@ -3439,7 +3567,12 @@ function modifierPeriode(per) {
      $('#pdf').onclick = ouvrirBouclier;
      $('#pdf2').onclick = ouvrirBouclier;
      $('#csv').onclick = () => {
-       const csv = ['Date;Volume;Resultat;Par'].concat(lignes.map(l => l.slice(0, 4).join(';'))).join('\n');
+       /* Guillemets : un « ; » ou un retour à la ligne dans un texte décalait les
+          colonnes. Apostrophe devant = + - @ : Excel l'exécuterait en formule. */
+       const q = x => { x = String(x == null ? '' : x);
+                        if (/^[=+\-@\t\r]/.test(x) && !/^-[\d\s\u00a0\u202f.,]+\s*€?$/.test(x)) x = "'" + x;
+                        return '"' + x.replace(/"/g, '""') + '"'; };
+       const csv = ['Date;Volume;Resultat;Par'].concat(lignes.map(l => l.slice(0, 4).map(q).join(';'))).join('\n');
        const a = document.createElement('a');
        a.href = URL.createObjectURL(new Blob(['\ufeff' + csv], { type:'text/csv;charset=utf-8' }));
        a.download = 'pilot-shop-' + onglet + '-' + today() + '.csv';
@@ -3507,7 +3640,12 @@ function modifierPeriode(per) {
                                   at: c[k].at || '' })) });
        }
      }
-     const fifo = await calculFIFO(monthKey(fin));
+     /* Tous les mois couverts : un registre imprimé le 2 oubliait les lots
+        ouverts fin du mois précédent, encore en vitrine. */
+     const moisReg = joursEntre(debut, fin).map(monthKey).filter((m, i, a) => a.indexOf(m) === i);
+     const fifo = [].concat(...(await Promise.all(moisReg.map(calculFIFO))))
+       .filter(f => f.ouv >= debut || f.limite >= debut)   // encore en vitrine sur la période
+       .sort((a, b) => a.resteH - b.resteH);
      const per = await periodeCourante();
    
      $('#printview').innerHTML =
@@ -3525,10 +3663,10 @@ function modifierPeriode(per) {
                const m = L.t['m_' + e.id], s = L.t['s_' + e.id];
                const bad = etatTemp(e, m) === 'crit' || etatTemp(e, s) === 'crit';
                return '<td' + (bad ? ' style="font-weight:700"' : '') + '>' +
-                 (m === undefined || m === '' ? '—' : m) + ' / ' + (s === undefined || s === '' ? '—' : s) + '</td>';
+                 (m === undefined || m === '' ? '—' : esc(m)) + ' / ' + (s === undefined || s === '' ? '—' : esc(s)) + '</td>';
              }).join('') + '<td>' + esc(L.t.obs || '') + '</td></tr>').join('') + '</tbody></table>' +
            '<div style="font-size:9.5px">Valeurs en °C, matin / soir. Les dépassements de limite critique sont en gras. ' +
-           'Cibles : ' + ENCEINTES.map(e => e.nom + ' ' + e.cible).join(' · ') + '.</div>'
+           'Cibles : ' + ENCEINTES.map(e => esc(e.nom) + ' ' + esc(e.cible)).join(' · ') + '.</div>'
          : '<div>Aucun relevé enregistré sur la période.</div>') +
    
        '<div class="pv-s">2. Nettoyage et désinfection</div>' +
@@ -3563,7 +3701,7 @@ function modifierPeriode(per) {
              '<td>' + f.limite.split('-').reverse().join('/') + '</td>' +
              '<td>' + (f.c === 'rouge' ? 'DÉPASSÉE' : f.c === 'orange' ? 'À consommer' : 'Conforme') + '</td>' +
              '<td>' + esc(f.par || '—') + '</td></tr>').join('') + '</tbody></table>'
-         : '<div>Aucun lot ouvert enregistré ce mois.</div>') +
+         : '<div>Aucun lot ouvert enregistré sur la période.</div>') +
    
        '<div class="sign">Document généré à partir de saisies horodatées et nominatives du système ' + esc(APP.nom) +
        '. Chaque validation est associée au compte de la personne connectée.<br><br>' +
