@@ -1148,6 +1148,19 @@ V.caisse = async function () {
         : 'Renseignez tous les montants du soir', 'erreur');
       r[mom + '_valide'] = { par:STATE.user.prenom, id:STATE.user.id, at:nowISO() };
       champsSaisie().forEach(i => { r[i.dataset.k] = i.value; });
+      /* Le tableau de bord, l'historique et les tendances lisent encore
+         ecart / par : sans eux, chaque soir s'affichait à 0 €, sans écart. */
+      if (mom === 's') {
+        const fondOuv = (r.m_fond !== undefined && r.m_fond !== '') ? num(r.m_fond)
+                      : (fondVeille !== null ? fondVeille : null);
+        /* ecart garde son ancien sens : carte + espèces, comme les fiches
+           d'avant, pour que les tendances comparent des choses comparables. */
+        r.ecartCB = +(num(r.s_tpe) - num(r.s_cb)).toFixed(2);
+        r.ecartEsp = fondOuv === null ? null
+          : +(num(r.s_fond) - (fondOuv + num(r.s_esp) - num(r.s_retrait))).toFixed(2);
+        r.ecart = +(r.ecartCB + (r.ecartEsp || 0)).toFixed(2);
+        r.par = STATE.user.prenom;
+      }
       await DB.set('caisse:' + j, r);
       await feed('ok', STATE.user.prenom + ' a validé le comptage ' +
         (mom === 'm' ? 'd’ouverture' : 'de fermeture'));

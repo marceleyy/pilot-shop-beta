@@ -20,7 +20,11 @@
       Infinity, qui contaminerait tout total où il entrerait. */
    const num = v => {
      if (v === null || v === undefined) return 0;
-     const x = parseFloat(String(v).replace(/[\s\u00a0\u202f€]/g, '').replace(',', '.'));
+     let s = String(v).replace(/[\s\u00a0\u202f€]/g, '');
+     if (/^\(.*\)$/.test(s)) s = '-' + s.slice(1, -1);          // (12,50) : avoir comptable
+     /* Avec une virgule, on lit à la française : « 1.234,50 » = 1234,50. */
+     if (s.indexOf(',') >= 0) s = s.replace(/\./g, '').replace(',', '.');
+     const x = parseFloat(s);
      return isFinite(x) ? x : 0;
    };
    /* Une décimale, à la française. La version précédente rendait « 1234.6 » :
@@ -846,8 +850,17 @@
    }
    
    async function chargerService() {
-     const l = await DB.get('pointage:' + today(), []);
-     const ouverte = l.filter(s => s.employe === STATE.user.id && !s.fin)[0];
+     /* La veille aussi : un service commencé avant minuit est rangé sous le
+        jour de l'arrivée, et serait sinon oublié au rechargement. */
+     let ouverte = null;
+     for (const d of [today(), addD(today(), -1)]) {
+       const l = await DB.get('pointage:' + d, []);
+       /* Hier : seulement un service récent. Un oubli de la veille rouvert le
+          lendemain enregistrerait 24 heures de travail. */
+       ouverte = l.filter(s => s.employe === STATE.user.id && !s.fin &&
+         (d === today() || Date.now() - new Date(s.debut) < 16 * 3600e3))[0];
+       if (ouverte) break;
+     }
      STATE.service = ouverte || null;
    }
    
@@ -862,10 +875,15 @@
        await feed('ok', STATE.user.prenom + ' a pris son service');
        toast('Bon service, ' + STATE.user.prenom);
      } else {
-       const s = l.filter(x => x.id === (STATE.service && STATE.service.id))[0];
+       /* Le service est rangé sous le jour de l'ARRIVÉE : partir après minuit
+          le cherchait sous le lendemain, et il restait ouvert à jamais. */
+       const cleS = STATE.service && STATE.service.debut
+         ? 'pointage:' + isoOf(new Date(STATE.service.debut)) : cle;
+       const lS = cleS === cle ? l : await DB.get(cleS, []);
+       const s = lS.filter(x => x.id === (STATE.service && STATE.service.id))[0];
        if (s) { s.fin = nowISO(); s.minutes = Math.round((new Date(s.fin) - new Date(s.debut)) / 60000); }
        STATE.service = null;
-       await DB.set(cle, l);
+       await DB.set(cleS, lS);
        await feed('ok', STATE.user.prenom + ' a terminé son service');
        toast('Service terminé');
      }
@@ -1145,7 +1163,8 @@ function renderNav() {
        jour:jour,
        tempM:complet('m'), tempS:complet('s'), tempCrit:crit,
        net:net.faits, netTotal:net.total,
-       caisse:!!k, caisseEcart: k ? num(k.ecart) : 0,
+       /* Une fiche ouverte n'est pas une caisse faite : il faut la fermeture validée. */
+       caisse:!!(k && (k.s_valide || (k.s_valide === undefined && k.ecart !== undefined))), caisseEcart: k ? num(k.ecart) : 0,
        reassort:Object.keys(r).filter(k2 => r[k2] && r[k2].ok).length,
        reassortTotal:REASSORT.length, ruptures:rupt
      };
@@ -3253,7 +3272,7 @@ function ouvrirPremierePeriode() {
        const st = await etatJour(d);
        if (!st.tempM || !st.tempS) B.push({ id:'temp', txt:'Températures incomplètes le ' + fmtDC(d), go:'temp' });
        if (st.netTotal && st.net === 0) B.push({ id:'nettoyage', txt:'Aucun nettoyage validé le ' + fmtDC(d), go:'clean' });
-       if (!st.caisse) B.push({ id:'caisse', txt:'Feuille de caisse absente le ' + fmtDC(d), go:'caisse' });
+       if (!st.caisse) B.push({ id:'caisse', txt:'Fermeture de caisse non validée le ' + fmtDC(d), go:'caisse' });
      }
      return B.map(b => Object.assign(b, {
        forcable: (PERIODES.blocages.filter(x => x.id === b.id)[0] || { forcable:false }).forcable
@@ -3489,7 +3508,8 @@ function modifierPeriode(per) {
        const j = c.replace(defs[onglet].p, ''), v = await DB.get(c);
        if (!v) continue;
        if (onglet === 'caisse')
-         lignes.push([fmtD(j), eur(num(v.cb) + num(v.esp)), eur(num(v.ecart)), v.par || '—',
+         lignes.push([fmtD(j), eur(num(v.s_cb !== undefined ? v.s_cb : v.cb) + num(v.s_esp !== undefined ? v.s_esp : v.esp)),
+                      eur(num(v.ecart)), v.par || (v.s_valide && v.s_valide.par) || '—',
                       Math.abs(num(v.ecart)) > SEUILS.caisseJourEur ? 'bad' : 'ok']);
        else if (onglet === 'temp') {
          const n = ENCEINTES.reduce((s, e) => s + (v['m_' + e.id] ? 1 : 0) + (v['s_' + e.id] ? 1 : 0), 0);
@@ -3547,7 +3567,12 @@ function modifierPeriode(per) {
      $('#pdf').onclick = ouvrirBouclier;
      $('#pdf2').onclick = ouvrirBouclier;
      $('#csv').onclick = () => {
-       const csv = ['Date;Volume;Resultat;Par'].concat(lignes.map(l => l.slice(0, 4).join(';'))).join('\n');
+       /* Guillemets : un « ; » ou un retour à la ligne dans un texte décalait les
+          colonnes. Apostrophe devant = + - @ : Excel l'exécuterait en formule. */
+       const q = x => { x = String(x == null ? '' : x);
+                        if (/^[=+\-@\t\r]/.test(x) && !/^-[\d\s\u00a0\u202f.,]+\s*€?$/.test(x)) x = "'" + x;
+                        return '"' + x.replace(/"/g, '""') + '"'; };
+       const csv = ['Date;Volume;Resultat;Par'].concat(lignes.map(l => l.slice(0, 4).map(q).join(';'))).join('\n');
        const a = document.createElement('a');
        a.href = URL.createObjectURL(new Blob(['\ufeff' + csv], { type:'text/csv;charset=utf-8' }));
        a.download = 'pilot-shop-' + onglet + '-' + today() + '.csv';
@@ -3615,7 +3640,12 @@ function modifierPeriode(per) {
                                   at: c[k].at || '' })) });
        }
      }
-     const fifo = await calculFIFO(monthKey(fin));
+     /* Tous les mois couverts : un registre imprimé le 2 oubliait les lots
+        ouverts fin du mois précédent, encore en vitrine. */
+     const moisReg = joursEntre(debut, fin).map(monthKey).filter((m, i, a) => a.indexOf(m) === i);
+     const fifo = [].concat(...(await Promise.all(moisReg.map(calculFIFO))))
+       .filter(f => f.ouv >= debut || f.limite >= debut)   // encore en vitrine sur la période
+       .sort((a, b) => a.resteH - b.resteH);
      const per = await periodeCourante();
    
      $('#printview').innerHTML =
@@ -3671,7 +3701,7 @@ function modifierPeriode(per) {
              '<td>' + f.limite.split('-').reverse().join('/') + '</td>' +
              '<td>' + (f.c === 'rouge' ? 'DÉPASSÉE' : f.c === 'orange' ? 'À consommer' : 'Conforme') + '</td>' +
              '<td>' + esc(f.par || '—') + '</td></tr>').join('') + '</tbody></table>'
-         : '<div>Aucun lot ouvert enregistré ce mois.</div>') +
+         : '<div>Aucun lot ouvert enregistré sur la période.</div>') +
    
        '<div class="sign">Document généré à partir de saisies horodatées et nominatives du système ' + esc(APP.nom) +
        '. Chaque validation est associée au compte de la personne connectée.<br><br>' +
