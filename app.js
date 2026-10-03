@@ -20,7 +20,11 @@
       Infinity, qui contaminerait tout total où il entrerait. */
    const num = v => {
      if (v === null || v === undefined) return 0;
-     const x = parseFloat(String(v).replace(/[\s\u00a0\u202f€]/g, '').replace(',', '.'));
+     let s = String(v).replace(/[\s\u00a0\u202f€]/g, '');
+     if (/^\(.*\)$/.test(s)) s = '-' + s.slice(1, -1);          // (12,50) : avoir comptable
+     /* Avec une virgule, on lit à la française : « 1.234,50 » = 1234,50. */
+     if (s.indexOf(',') >= 0) s = s.replace(/\./g, '').replace(',', '.');
+     const x = parseFloat(s);
      return isFinite(x) ? x : 0;
    };
    /* Une décimale, à la française. La version précédente rendait « 1234.6 » :
@@ -1429,7 +1433,10 @@ function renderNav() {
        jour:jour,
        tempM:complet('m'), tempS:complet('s'), tempCrit:crit,
        net:net.faits, netTotal:net.total,
-       caisse:!!k,
+       /* Une fiche ouverte n'est pas une caisse faite : il faut la fermeture validée. */
+       caisse:!!(k && (k.s_valide || (k.s_valide === undefined && (k.ecart !== undefined ||
+         /* Ancienne feuille complète sans écart enregistré : caisseResume le recalcule. */
+         ['fi', 'ff', 'cb', 'esp', 'tpe'].every(c => k[c] !== undefined && k[c] !== null && k[c] !== ''))))),
        /* La veille fournit le fond initial quand le matin n'a pas été saisi. */
        caisseEcart: k ? caisseResume(k, await DB.get('caisse:' + addD(jour, -1), null)).ecart : 0,
        reassort:Object.keys(r).filter(k2 => r[k2] && r[k2].ok).length,
@@ -3557,7 +3564,7 @@ function ouvrirPremierePeriode() {
        const st = await etatJour(d);
        if (!st.tempM || !st.tempS) B.push({ id:'temp', txt:'Températures incomplètes le ' + fmtDC(d), go:'temp' });
        if (st.netTotal && st.net === 0) B.push({ id:'nettoyage', txt:'Aucun nettoyage validé le ' + fmtDC(d), go:'clean' });
-       if (!st.caisse) B.push({ id:'caisse', txt:'Feuille de caisse absente le ' + fmtDC(d), go:'caisse' });
+       if (!st.caisse) B.push({ id:'caisse', txt:'Fermeture de caisse non validée le ' + fmtDC(d), go:'caisse' });
      }
      return B.map(b => Object.assign(b, {
        forcable: (PERIODES.blocages.filter(x => x.id === b.id)[0] || { forcable:false }).forcable
@@ -3854,7 +3861,12 @@ function modifierPeriode(per) {
      $('#pdf').onclick = ouvrirBouclier;
      $('#pdf2').onclick = ouvrirBouclier;
      $('#csv').onclick = () => {
-       const csv = ['Date;Volume;Resultat;Par'].concat(lignes.map(l => l.slice(0, 4).join(';'))).join('\n');
+       /* Guillemets : un « ; » ou un retour à la ligne dans un texte décalait les
+          colonnes. Apostrophe devant = + - @ : Excel l'exécuterait en formule. */
+       const q = x => { x = String(x == null ? '' : x);
+                        if (/^[=+\-@\t\r]/.test(x) && !/^-[\d\s\u00a0\u202f.,]+\s*€?$/.test(x)) x = "'" + x;
+                        return '"' + x.replace(/"/g, '""') + '"'; };
+       const csv = ['Date;Volume;Resultat;Par'].concat(lignes.map(l => l.slice(0, 4).map(q).join(';'))).join('\n');
        const a = document.createElement('a');
        a.href = URL.createObjectURL(new Blob(['\ufeff' + csv], { type:'text/csv;charset=utf-8' }));
        a.download = 'pilot-shop-' + onglet + '-' + today() + '.csv';
@@ -3922,7 +3934,12 @@ function modifierPeriode(per) {
                                   at: c[k].at || '' })) });
        }
      }
-     const fifo = await calculFIFO(monthKey(fin));
+     /* Tous les mois couverts : un registre imprimé le 2 oubliait les lots
+        ouverts fin du mois précédent, encore en vitrine. */
+     const moisReg = joursEntre(debut, fin).map(monthKey).filter((m, i, a) => a.indexOf(m) === i);
+     const fifo = [].concat(...(await Promise.all(moisReg.map(calculFIFO))))
+       .filter(f => f.ouv >= debut || f.limite >= debut)   // encore en vitrine sur la période
+       .sort((a, b) => a.resteH - b.resteH);
      const per = await periodeCourante();
    
      $('#printview').innerHTML =
@@ -3978,7 +3995,7 @@ function modifierPeriode(per) {
              '<td>' + f.limite.split('-').reverse().join('/') + '</td>' +
              '<td>' + (f.c === 'rouge' ? 'DÉPASSÉE' : f.c === 'orange' ? 'À consommer' : 'Conforme') + '</td>' +
              '<td>' + esc(f.par || '—') + '</td></tr>').join('') + '</tbody></table>'
-         : '<div>Aucun lot ouvert enregistré ce mois.</div>') +
+         : '<div>Aucun lot ouvert enregistré sur la période.</div>') +
    
        '<div class="sign">Document généré à partir de saisies horodatées et nominatives du système ' + esc(APP.nom) +
        '. Chaque validation est associée au compte de la personne connectée.<br><br>' +

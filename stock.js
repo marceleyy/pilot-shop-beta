@@ -62,10 +62,14 @@ function parfumDepuisDesignation(nom) {
   return null;
 }
 
-/* Taille du bac lue dans la désignation : « Glace Café 3 litres ». */
+/* Taille du bac lue dans la désignation : « Glace Café 3 litres », « 3L »,
+   « 3 lt ». Seules les tailles de bac connues sont retenues : un « 12 L »
+   lu ailleurs dans le texte ne doit pas créer un bac qui n'existe pas. */
 function tailleDepuisDesignation(nom) {
-  const m = String(nom || '').match(/(\d+)\s*litres?/i);
-  return m ? +m[1] : null;
+  const m = String(nom || '').match(/(\d+(?:[.,]\d+)?)\s*(?:litres?|lt|l)\b/i);
+  if (!m) return null;
+  const t = parseFloat(m[1].replace(',', '.'));
+  return (FOURNISSEUR.taillesBac || []).indexOf(t) >= 0 ? t : null;
 }
 
 function devinerFamille(nom) {
