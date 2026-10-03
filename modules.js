@@ -89,7 +89,7 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
          Math.round(poidsActuel / 1024) + ' Ko. Supprimez-en une pour en reprendre.');
        return null;
      }
-     if (l.length >= PREUVE.maxParJour) {
+     if (l.filter(x => !x.supprime).length >= PREUVE.maxParJour) {
        toast('Maximum de ' + PREUVE.maxParJour + ' photos par jour atteint', 'erreur');
        return null;
      }
@@ -110,7 +110,7 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
      (async function () {
        const cle = 'preuves:' + jour;
        const l = await DB.get(cle, []);
-       const p = l.filter(x => x.id === idPreuve)[0];
+       const p = l.filter(x => x.id === idPreuve && !x.supprime)[0];
        if (!p) return toast('Photo introuvable', 'erreur');
 
        showSheet(
@@ -129,7 +129,11 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
            'en reprendre une.',
            'Supprimer', async () => {
              const l2 = await DB.get(cle, []);
-             await DB.set(cle, l2.filter(x => x.id !== idPreuve));
+             /* Marquée, pas retirée : la liste est réunie avec celle du
+                serveur, une ligne retirée reviendrait. La photo elle-même est
+                effacée pour libérer la place. */
+             await DB.set(cle, l2.map(x => x.id === idPreuve
+               ? Object.assign({}, x, { supprime:{ par:STATE.user.prenom, at:nowISO() }, img:'' }) : x));
              await feed('warn', STATE.user.prenom + ' a supprimé une photo : ' +
                (p.libelle || 'sans libellé'));
              closeSheet();
@@ -284,6 +288,23 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
        };
      }
    
+     /* Saveur de fam.saveurs reconnue dans un libellé de bon de livraison.
+        D'abord la saveur entière contenue dans le libellé, sinon un mot du
+        libellé qui partage ses cinq premières lettres avec la saveur. */
+     function saveurDepuisLibelle(saveurs, libelle) {
+       const nrm = s => String(s||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z]/g,'');
+       const tout = nrm(libelle);
+       if (!tout) return null;
+       const exact = saveurs.filter(sv => nrm(sv) && tout.indexOf(nrm(sv)) >= 0)
+         .sort((a, b) => nrm(b).length - nrm(a).length)[0];
+       if (exact) return exact;
+       const mots = String(libelle).split(/[\s,;:\/\-]+/).map(nrm).filter(m => m.length >= 5);
+       return saveurs.filter(sv => {
+         const a = nrm(sv);
+         return a.length >= 5 && mots.some(m => m.slice(0,5) === a.slice(0,5));
+       })[0] || null;
+     }
+
      function lignesReception(bl) {
        const lignes = (bl.lignes || []).map(l => ({
          produit:l.parfum || l.ref || '', qte:l.bacs || 1, unite:'bac', lot:'', dlc:''
@@ -311,7 +332,7 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
            '<div class="actions"><button class="btn clair" data-fermer>Annuler</button>' +
            '<button class="btn menthe" id="rl-ok">Enregistrer la réception</button></div>';
    
-         $$('[data-fermer]').forEach(b => b.onclick = closeSheet);
+         $$('#sheet-corps [data-fermer]').forEach(b => b.onclick = closeSheet);
          $$('[data-r]').forEach(inp => inp.oninput = () => {
            const [i, k] = inp.dataset.r.split('.');
            lignes[+i][k] = inp.value;
@@ -355,7 +376,16 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
              alimenter glace|Pistache|3, pas un article fantôme en 5 L que
              l'inventaire ne compte jamais. Seules les glaces ont une taille. */
           const glace = fam.id === 'glace';
-          const parfum = glace ? (parfumDepuisDesignation(l.produit) || l.produit.trim()) : l.produit.trim();
+          let parfum = glace ? (parfumDepuisDesignation(l.produit) || l.produit.trim()) : l.produit.trim();
+          /* Macarons, gianduiotti, coulis, toppings : la saveur est retrouvée
+             dans fam.saveurs avec la même normalisation que confirmerOuverture
+             (sans accent ni casse, cinq premières lettres), pour tomber sur la
+             même clé « famille|Saveur| » que l'ouverture. Sans correspondance,
+             on garde le libellé tel quel, comme avant. */
+          if (!glace && fam.saveurs && fam.saveurs.length) {
+            const sv = saveurDepuisLibelle(fam.saveurs, l.produit);
+            if (sv) parfum = sv;
+          }
           const cle = cleArticle(fam.id, fam.parfums ? parfum : '',
                                  glace ? (num(l.taille) || tailleDepuisDesignation(l.produit) ||
                                           FOURNISSEUR.tailleParDefaut) : '');
@@ -470,7 +500,7 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
    STATE.phase = STATE.phase || phaseCourante();
    const e = await etatJour(j);
    const rec = await DB.get('checklist:' + j, {});
-   const preuves = await DB.get('preuves:' + j, []);
+   const preuves = (await DB.get('preuves:' + j, [])).filter(p => !p.supprime);
    const alertes = await alertesDLC();
    const releve = await DB.get('releve', []);
    const msgs = releve.filter(m => !m.lu || m.epingle).slice(-3).reverse();
@@ -487,7 +517,7 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
       const mom = (phase === 'fermeture') ? 's' : 'm';
       const v = tempJour.valide && tempJour.valide[mom];
       return { fait: !!v, ou: 'temp',
-               quoi: 'le relévé des températures du ' + (mom === 'm' ? 'matin' : 'soir'),
+               quoi: 'le relevé des températures du ' + (mom === 'm' ? 'matin' : 'soir'),
                par: v ? v.par : null, at: v ? v.at : null };
     }
     if (t.lien === 'caisse') {
@@ -517,7 +547,7 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
    
      const R = [];
      if (!e.tempM) R.push(['bad', 'Frigos du matin non relevés', 'À faire dès l’ouverture, avant la mise en vitrine.', 'temp']);
-     if (e.tempCrit) R.push(['bad', e.tempCrit + ' frigo(s) en limite critique', 'Transférez les produits et prévenez Eve.', 'temp']);
+     if (e.tempCrit) R.push(['bad', e.tempCrit + ' frigo(s) en limite critique', 'Transférez les produits et prévenez ' + (typeof nomManager === 'function' ? nomManager() : 'le manager') + '.', 'temp']);
      alertes.filter(a => a.niveau !== 'jaune').forEach(a => R.push(['bad',
        'DLC ' + (a.reste < 0 ? 'dépassée' : 'dans ' + a.reste + ' j') + ' : ' + a.produit,
        'Produit non ouvert reçu le ' + fmtDC(a.recuLe) + '. À écouler ou à jeter.', 'stock']));
@@ -619,7 +649,7 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
              '<b>' + esc(r[1]) + '</b><p>' + esc(r[2]) + '</p></div>' +
              '<button class="btn clair sm" data-go="' + r[3] + '">Ouvrir</button></div>').join('') + '</div>'
          : '<div class="alerte ok"><div style="flex:1"><b>Tout est à jour</b>' +
-           '<p>Aucun relévé ni contrôle en retard.</p></div></div>') +
+           '<p>Aucun relevé ni contrôle en retard.</p></div></div>') +
    
        (msgs.length ? '<div class="entete"><h3>Carnet de relève</h3>' +
          '<button class="btn fantome sm pousse" data-go="releve">Tout voir</button></div>' +
@@ -802,22 +832,28 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
        Math.floor(reste / 60) + ':' + String(reste % 60).padStart(2, '0') + '</div>' +
        '<div class="actions"><button class="btn clair" data-fermer>Fermer</button></div>';
      showSheet(html());
+     /* Marqueur du minuteur : le voile ferme la feuille sans passer par le
+        bouton qui arrêtait l'intervalle. Si une autre feuille s'ouvre ensuite,
+        showSheet efface le marqueur et le tick s'arrête au lieu d'écraser
+        son contenu. */
+     const idMin = uid();
+     $('#sheet').dataset.minuteur = idMin;
      const t = setInterval(() => {
        reste--;
        const box = document.getElementById('sheet-corps');
-       if (!box || $('#sheet').hidden) return clearInterval(t);
+       if (!box || $('#sheet').hidden || $('#sheet').dataset.minuteur !== idMin) return clearInterval(t);
        if (reste <= 0) {
          clearInterval(t);
          vibrer([200, 100, 200]);
          box.innerHTML = '<h2>Temps écoulé</h2><p class="sub">Vous pouvez rincer.</p>' +
            '<div class="actions"><button class="btn menthe" data-fermer>Terminé</button></div>';
-         $$('[data-fermer]').forEach(b => b.onclick = closeSheet);
+         $$('#sheet-corps [data-fermer]').forEach(b => b.onclick = closeSheet);
          return;
        }
        box.innerHTML = html();
-       $$('[data-fermer]').forEach(b => b.onclick = () => { clearInterval(t); closeSheet(); });
+       $$('#sheet-corps [data-fermer]').forEach(b => b.onclick = () => { clearInterval(t); closeSheet(); });
      }, 1000);
-     $$('[data-fermer]').forEach(b => b.onclick = () => { clearInterval(t); closeSheet(); });
+     $$('#sheet-corps [data-fermer]').forEach(b => b.onclick = () => { clearInterval(t); closeSheet(); });
    }
    
    /* =============================================================================
@@ -1197,7 +1233,7 @@ function confirmerHorsStock(produit, lot) {
       '<div class="alerte info" style="margin-top:10px"><span class="ai">ℹ️</span><div>' +
       '<b>Si vous continuez</b><p>L’ouverture sera traçée normalement — c’est ce qui ' +
       'compte pour un contrôle — mais le stock ne sera pas décrémenté et l’écart de ' +
-      'période s’en ressentira. Eve verra le signalement dans le fil.</p></div></div>' +
+      'période s’en ressentira. ' + esc((m => m.charAt(0).toUpperCase() + m.slice(1))(typeof nomManager === 'function' ? nomManager() : 'le manager')) + ' verra le signalement dans le fil.</p></div></div>' +
       '<div class="actions"><button class="btn clair" id="hs-x">Vérifier le lot</button>' +
       '<button class="btn ambre" id="hs-ok">Tracer quand même</button></div>' +
       '<button class="btn clair bloc" id="hs-rec" style="margin-top:10px">' +
@@ -1236,7 +1272,7 @@ V.hebdo = async function () {
   const j = STATE.jour;
   const taches = await tachesHebdoDuJour(j);
   const rec = await DB.get('hebdo:' + j, {});
-  const preuves = await DB.get('preuves:' + j, []);
+  const preuves = (await DB.get('preuves:' + j, [])).filter(p => !p.supprime);
   const resp = await DB.get('hebdo:responsables', {});
   const faits = taches.filter(t => rec[t.id] && rec[t.id].ok).length;
 
@@ -1379,7 +1415,9 @@ V.temp = async function () {
 
   const ligne = e => {
     const v = val(e), hs = v === 'HS', ok = saisi(e);
-    const etat = hs ? '' : etatTemp(e, v);
+    /* Pas encore relevée : on n'affiche pas la valeur cible en vert, ce qui
+       laissait croire à un relevé conforme. « — » et aucune classe d'état. */
+    const etat = (hs || !ok) ? '' : etatTemp(e, v);
     /* Trois états lisibles d'un coup d'œil : à relever, relevé, validé. */
     const cls = valideMoment() && ok ? 'tligne valide' : ok ? 'tligne saisi' : 'tligne';
     return '<div class="' + cls + '">' +
@@ -1389,10 +1427,11 @@ V.temp = async function () {
       '<div class="tl-bas">' +
       (hs
         ? '<span class="tm-hs">Hors service</span>'
-        : '<button class="tm-pas" data-pas="-1" data-e="' + e.id + '">−</button>' +
-          '<button class="tm-val ' + etat + '" data-libre="' + e.id + '">' + v + '<small>°C</small></button>' +
-          '<button class="tm-pas" data-pas="1" data-e="' + e.id + '">+</button>') +
-      '<button class="tm-off' + (hs ? ' on' : '') + '" data-hs="' + e.id + '">HS</button>' +
+        : '<button class="tm-pas" data-pas="-1" data-e="' + esc(e.id) + '">−</button>' +
+          '<button class="tm-val ' + etat + '" data-libre="' + esc(e.id) + '">' +
+          (ok ? esc(v) + '<small>°C</small>' : '—') + '</button>' +
+          '<button class="tm-pas" data-pas="1" data-e="' + esc(e.id) + '">+</button>') +
+      '<button class="tm-off' + (hs ? ' on' : '') + '" data-hs="' + esc(e.id) + '">HS</button>' +
       '</div></div>';
   };
 
@@ -1413,7 +1452,7 @@ V.temp = async function () {
 
       (vm
         ? '<div class="alerte ok" style="margin-bottom:12px"><span class="ai">•</span><div>' +
-          '<b>Relévé du ' + mom.label.toLowerCase() + ' validé</b>' +
+          '<b>Relevé du ' + mom.label.toLowerCase() + ' validé</b>' +
           '<p>Par ' + esc(vm.par) + ' à ' + heure(vm.at) + '. Toute modification demandera ' +
           'une nouvelle validation.</p></div></div>'
         : '') +
@@ -1422,13 +1461,14 @@ V.temp = async function () {
 
       carte(entete('📝', 'Action corrective',
         'Obligatoire dès qu’une enceinte dépasse sa limite critique.') +
-        '<textarea id="obs" placeholder="Ex. vitrine à −9 °C : bacs transférés en chambre froide, Eve prévenue.">' +
+        '<textarea id="obs" aria-label="Action corrective" placeholder="Ex. vitrine à −9 °C : bacs transférés en chambre froide, ' +
+        esc((typeof nomManager === 'function' ? nomManager() : 'le manager')) + ' prévenu.">' +
         esc(rec.obs || '') + '</textarea>') +
 
       '<button class="btn ' + (vm ? 'clair' : 'menthe') + ' bloc xl" id="tvalider" style="margin-top:16px">' +
       (vm ? '✓ Déjà validé — revalider'
           : reste.length ? 'Valider le ' + mom.label.toLowerCase() + ' (' + reste.length + ' manquante' + (reste.length > 1 ? 's' : '') + ')'
-                         : 'Valider le relévé du ' + mom.label.toLowerCase()) +
+                         : 'Valider le relevé du ' + mom.label.toLowerCase()) +
       '</button>';
 
     brancher();
@@ -1456,7 +1496,10 @@ V.temp = async function () {
     $$('[data-pas]').forEach(b => b.onclick = async () => {
       const e = ENCEINTES.filter(x => x.id === b.dataset.e)[0];
       const actuel = val(e);
-      const nv = (actuel === 'HS' ? defautEnceinte(e) : actuel) + (+b.dataset.pas);
+      /* Premier appui sur une enceinte non relevée : il pose la cible telle
+         quelle (affichée « — » jusque-là) ; les appuis suivants font ±1. */
+      const nv = !saisi(e) ? defautEnceinte(e)
+               : (actuel === 'HS' ? defautEnceinte(e) : actuel) + (+b.dataset.pas);
       if (nv < e.lo - 5 || nv > e.hi + 5) return;
       rec[cle(e)] = nv;
       invalider();
@@ -1520,7 +1563,7 @@ V.temp = async function () {
       rec.valide[mom.id] = { par:STATE.user.prenom, id:STATE.user.id, at:nowISO() };
       await sauver();
       await feed('ok', STATE.user.prenom + ' a validé les températures du ' + mom.label.toLowerCase());
-      toast('Relévé du ' + mom.label.toLowerCase() + ' validé');
+      toast('Relevé du ' + mom.label.toLowerCase() + ' validé');
       rendre('accueil');
     }
   }
@@ -1548,12 +1591,12 @@ V.parametres = async function () {
 
     carte(entete('🕐', 'Horaires', 'Bornes des phases de la journée dans « Ma journée ».') +
          '<div class="grid g2">' +
-         '<div class="champ"><label class="f">Ouverture boutique</label><input type="time" id="h1" value="' + HORAIRES.ouverture + '"></div>' +
-         '<div class="champ"><label class="f">Fermeture boutique</label><input type="time" id="h2" value="' + HORAIRES.fermeture + '"></div>' +
-         '<div class="champ"><label class="f">Début phase ouverture</label><input type="time" id="h3" value="' + HORAIRES.debutOuverture + '"></div>' +
-         '<div class="champ"><label class="f">Fin phase ouverture</label><input type="time" id="h4" value="' + HORAIRES.finOuverture + '"></div>' +
-         '<div class="champ"><label class="f">Début phase fermeture</label><input type="time" id="h5" value="' + HORAIRES.debutFermeture + '"></div>' +
-         '<div class="champ"><label class="f">Fin phase fermeture</label><input type="time" id="h6" value="' + HORAIRES.finFermeture + '"></div></div>' +
+         '<div class="champ"><label class="f">Ouverture boutique</label><input type="time" id="h1" value="' + esc(HORAIRES.ouverture) + '"></div>' +
+         '<div class="champ"><label class="f">Fermeture boutique</label><input type="time" id="h2" value="' + esc(HORAIRES.fermeture) + '"></div>' +
+         '<div class="champ"><label class="f">Début phase ouverture</label><input type="time" id="h3" value="' + esc(HORAIRES.debutOuverture) + '"></div>' +
+         '<div class="champ"><label class="f">Fin phase ouverture</label><input type="time" id="h4" value="' + esc(HORAIRES.finOuverture) + '"></div>' +
+         '<div class="champ"><label class="f">Début phase fermeture</label><input type="time" id="h5" value="' + esc(HORAIRES.debutFermeture) + '"></div>' +
+         '<div class="champ"><label class="f">Fin phase fermeture</label><input type="time" id="h6" value="' + esc(HORAIRES.finFermeture) + '"></div></div>' +
          '<button class="btn menthe bloc" id="hv" style="margin-top:14px">Enregistrer les horaires</button>', 'solide') +
    
        carte(entete('❄️', 'Unités frigorifiques', 'Nom, cible et plage de boutons du relevé de températures.') +
@@ -1562,12 +1605,12 @@ V.parametres = async function () {
            '<input type="text" data-e="' + i + '.nom" value="' + esc(e.nom) + '"></div>' +
            '<div class="grid g3" style="margin-top:10px">' +
            '<div class="champ"><label class="f">Cible affichée</label><input type="text" data-e="' + i + '.cible" value="' + esc(e.cible) + '"></div>' +
-           '<div class="champ"><label class="f">Vert de</label><input type="number" data-e="' + i + '.v0" value="' + e.vert[0] + '"></div>' +
-           '<div class="champ"><label class="f">Vert à</label><input type="number" data-e="' + i + '.v1" value="' + e.vert[1] + '"></div></div>' +
+           '<div class="champ"><label class="f">Vert de</label><input type="number" data-e="' + i + '.v0" value="' + esc(e.vert[0]) + '"></div>' +
+           '<div class="champ"><label class="f">Vert à</label><input type="number" data-e="' + i + '.v1" value="' + esc(e.vert[1]) + '"></div></div>' +
            '<div class="grid g3" style="margin-top:10px">' +
-           '<div class="champ"><label class="f">Critique au-dessus de</label><input type="number" data-e="' + i + '.crit" value="' + e.crit + '"></div>' +
-           '<div class="champ"><label class="f">Bouton min</label><input type="number" data-e="' + i + '.lo" value="' + e.lo + '"></div>' +
-           '<div class="champ"><label class="f">Bouton max</label><input type="number" data-e="' + i + '.hi" value="' + e.hi + '"></div></div>' +
+           '<div class="champ"><label class="f">Critique au-dessus de</label><input type="number" data-e="' + i + '.crit" value="' + esc(e.crit) + '"></div>' +
+           '<div class="champ"><label class="f">Bouton min</label><input type="number" data-e="' + i + '.lo" value="' + esc(e.lo) + '"></div>' +
+           '<div class="champ"><label class="f">Bouton max</label><input type="number" data-e="' + i + '.hi" value="' + esc(e.hi) + '"></div></div>' +
            '<button class="btn fantome bloc sm" data-supp="' + i + '" style="margin-top:8px">Supprimer cette unité</button></div>').join('') + '</div>' +
          '<button class="btn clair bloc" id="ea" style="margin-top:12px">+ Ajouter une unité</button>' +
          '<button class="btn menthe bloc" id="ev" style="margin-top:8px">Enregistrer les unités</button>') +
@@ -1578,7 +1621,7 @@ V.parametres = async function () {
            z.taches.filter(t => t.jours).map(t =>
              '<div class="tache"><span class="tx"><span class="tn">' + esc(t.nom) + '</span>' +
              '<span class="tm">' + t.jours.map(x => JOURS_SEMAINE[x]).join(', ') + '</span></span>' +
-             '<select data-h="' + t.id + '" style="width:auto;min-width:130px">' +
+             '<select data-h="' + esc(t.id) + '" style="width:auto;min-width:130px">' +
              JOURS_SEMAINE.slice(1).map((jn, k) =>
                '<option value="' + (k + 1) + '"' + (t.jours[0] === k + 1 ? ' selected' : '') + '>' + jn + '</option>').join('') +
              '</select></div>').join('') + '</div>').join('') + '</div>' +
@@ -1658,10 +1701,10 @@ async function organiserSemaine() {
       '<div class="jours" style="margin-top:10px">' +
       [1,2,3,4,5,6,7].map(k =>
         '<button type="button" class="jbtn' + (t.jours.indexOf(k) >= 0 ? ' on' : '') +
-        '" data-j="' + t.id + '.' + k + '">' + JOURS_COURTS[k] + '</button>').join('') + '</div>' +
+        '" data-j="' + esc(t.id) + '.' + k + '">' + JOURS_COURTS[k] + '</button>').join('') + '</div>' +
       '<div class="champ" style="margin-top:10px"><label class="f">Attribuée à</label>' +
-      '<select data-a="' + t.id + '"><option value="">— toute l’équipe —</option>' +
-      EQUIPE.map(e => '<option value="' + e.id + '"' +
+      '<select data-a="' + esc(t.id) + '"><option value="">— toute l’équipe —</option>' +
+      EQUIPE.map(e => '<option value="' + esc(e.id) + '"' +
         (t.assignee === e.id ? ' selected' : '') + '>' + esc(e.prenom) + '</option>').join('') +
       '</select></div></div>';
 
@@ -1744,8 +1787,8 @@ async function attribuerResponsables() {
     '<p class="sub">Trois rôles à désigner, comme au bas du tableau.</p>' +
     RESPONSABLES.map(r =>
       '<div class="champ" style="margin-top:14px"><label class="f">' + r.icone + ' ' + esc(r.libelle) + '</label>' +
-      '<select data-r="' + r.id + '"><option value="">— personne —</option>' +
-      EQUIPE.map(e => '<option value="' + e.id + '"' +
+      '<select data-r="' + esc(r.id) + '"><option value="">— personne —</option>' +
+      EQUIPE.map(e => '<option value="' + esc(e.id) + '"' +
         (resp[r.id] === e.id ? ' selected' : '') + '>' + esc(e.prenom) + '</option>').join('') +
       '</select></div>').join('') +
     '<div class="actions"><button class="btn clair" data-fermer>Annuler</button>' +
@@ -1772,7 +1815,7 @@ V.clean = async function () {
   const j = STATE.jour;
   const taches = await tachesHebdoDuJour(j);
   const rec = await DB.get('hebdo:' + j, {});
-  const preuves = await DB.get('preuves:' + j, []);
+  const preuves = (await DB.get('preuves:' + j, [])).filter(p => !p.supprime);
   const photosDe = id => preuves.filter(p => p.tache === id);
   const faits = taches.filter(t => rec[t.id] && rec[t.id].ok).length;
 
@@ -1799,12 +1842,12 @@ V.clean = async function () {
           return carte(
             '<div class="tache' + (v.ok ? ' on' : '') + '">' +
             '<span class="tnum">' + (i + 1) + '</span>' +
-            '<button class="box" data-hb="' + t.id + '">✓</button>' +
+            '<button class="box" data-hb="' + esc(t.id) + '">✓</button>' +
             '<span class="tx"><span class="tn">' + esc(t.libelle) + '</span>' +
             '<span class="tm">' + (v.ok ? esc(v.par) + ' · ' + heure(v.at)
               : (qui ? 'Attribuée à ' + esc(qui) : 'Photo obligatoire')) +
             (ph.length ? ' · ' + ph.length + ' photo(s)' : '') + '</span></span>' +
-            '<button class="btn ' + (ph.length ? 'menthe' : 'clair') + ' sm" data-hbp="' + t.id + '"' +
+            '<button class="btn ' + (ph.length ? 'menthe' : 'clair') + ' sm" data-hbp="' + esc(t.id) + '"' +
             (ph.length >= HEBDO.photosMax ? ' disabled' : '') + '>' +
             (ph.length ? '✓ Photo' : 'Photo') + '</button></div>' +
             (ph.length
@@ -1947,7 +1990,7 @@ function formulaireAnomalie() {
   const dessiner = () => {
     $('#sheet-corps').innerHTML =
       '<h2 id="sheet-titre">Signaler un problème</h2>' +
-      '<p class="sub">Eve le verra immédiatement dans sa tour de contrôle.</p>' +
+      '<p class="sub">' + esc((m => m.charAt(0).toUpperCase() + m.slice(1))(typeof nomManager === 'function' ? nomManager() : 'le manager')) + ' le verra immédiatement dans sa tour de contrôle.</p>' +
 
       '<div class="entete"><h3>De quoi s’agit-il ?</h3></div>' +
       '<div class="chips" id="an-cat">' + ANOMALIES.categories.map(c =>
@@ -1982,7 +2025,7 @@ function formulaireAnomalie() {
       '<div class="actions"><button class="btn clair" data-fermer>Annuler</button>' +
       '<button class="btn corail" id="an-ok">Signaler</button></div>';
 
-    $$('[data-fermer]').forEach(b => b.onclick = closeSheet);
+    $$('#sheet-corps [data-fermer]').forEach(b => b.onclick = closeSheet);
     $$('#an-cat [data-c]').forEach(b => b.onclick = () => { garder(); categorie = b.dataset.c; dessiner(); });
     $$('[data-g]').forEach(b => b.onclick = () => { garder(); gravite = b.dataset.g; dessiner(); });
     $('#an-ph').onclick = async () => {

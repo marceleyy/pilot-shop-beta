@@ -1,0 +1,20 @@
+# Fichiers exclus du déploiement Vercel.
+# vercel.json publie la racine du dépôt (outputDirectory "."), donc tout ce qui
+# n'est pas listé ici devient téléchargeable par n'importe qui.
+
+# Photos (métadonnées GPS), documents internes, audio
+*.HEIC
+*.heic
+*.pdf
+*.m4a
+am.png
+
+# Schéma et correctifs de la base : ne regardent pas le navigateur
+*.sql
+
+# Modèle de configuration : env.js est généré au build par scripts/env.cjs
+env.example.js
+
+# Scripts de maintenance — sauf env.cjs, que la commande de build exécute
+scripts/*
+!scripts/env.cjs

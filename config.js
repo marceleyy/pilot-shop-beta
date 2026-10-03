@@ -894,7 +894,7 @@ const TABS = {
     { id: 'clean',    label: 'Nettoyage' },
     { id: 'lots',     label: 'Traçabilité' },
     { id: 'reas',     label: 'Réassort' },
-    { id: 'temp',     label: 'Température' },
+    { id: 'temp',     label: 'Frigos' },     // même mot que le titre de l'écran
     { id: 'anomalie', label: 'Anomalie' }
   ],
   manager: [

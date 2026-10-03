@@ -79,7 +79,9 @@ button{cursor:pointer;border:0;background:none}
 #topbar h1{font-size:22px}
 #topbar .ts{font-size:13px;color:var(--brume);margin-top:1px}
 #topbar .ta{display:flex;gap:8px;flex:0 0 auto}
-#page{flex:1;padding:16px var(--pad-x) 28px;max-width:1100px;width:100%;margin:0 auto}
+/* Marge basse de 80 px : le bouton flottant « Retour bêta » (#fb, 48 px à
+   14 px au-dessus de la barre) ne doit pas recouvrir le dernier bouton. */
+#page{flex:1;padding:16px var(--pad-x) 80px;max-width:1100px;width:100%;margin:0 auto}
 .stack{display:flex;flex-direction:column;gap:var(--gap)}
 .grid{display:grid;gap:var(--gap)}
 .g2{grid-template-columns:repeat(2,minmax(0,1fr))}
@@ -381,12 +383,23 @@ select{background-image:linear-gradient(45deg,transparent 50%,var(--brume) 50%),
   box-shadow:var(--ombre-lev);max-width:88vw;text-align:center;
 }
 #toast.on{opacity:1;transform:translateX(-50%)}
+/* Toast d'erreur : rouge franc et liseré, pour ne pas le confondre avec une
+   confirmation (la classe est posée par toast(msg, 'erreur')). */
+#toast.erreur{background:#B91C1C;border:2px solid #FECACA}
 #offline{
   position:fixed;top:0;left:0;right:0;z-index:90;padding:calc(var(--safe-t) + 8px) 16px 8px;
-  background:var(--ambre-d);color:#fff;font-size:13.5px;font-weight:600;text-align:center;
+  /* #B45309 : contraste 5:1 avec le blanc (l'ancien ambre était à 3:1). */
+  background:#B45309;color:#fff;font-size:13.5px;font-weight:600;text-align:center;
+  line-height:18px;min-height:var(--offline-h);
   transform:translateY(-100%);transition:var(--tr);
 }
 #offline.on{transform:none}
+/* Hauteur réservée au bandeau : deux lignes de 18 px + marges. Quand il est
+   visible, il ne masque plus la barre du haut : on décale l'application et la
+   barre collante d'autant. #offline précède #app dans index.html. */
+:root{--offline-h:calc(var(--safe-t) + 52px)}
+#offline.on ~ #app{padding-top:var(--offline-h)}
+#offline.on ~ #app #topbar{top:var(--offline-h);padding-top:10px}
 #offline .sync{opacity:.82;font-weight:500}
 #fb{
   position:fixed;right:16px;bottom:calc(var(--barre-h) + 14px);z-index:110;
@@ -578,7 +591,7 @@ select{background-image:linear-gradient(45deg,transparent 50%,var(--brume) 50%),
 /* Numéro d'ordre devant chaque étape d'une procédure */
 .tnum{flex:0 0 auto;width:24px;text-align:right;
   font-size:14px;font-weight:700;font-variant-numeric:tabular-nums;
-  color:var(--brume-2);line-height:1}
+  color:var(--brume);line-height:1}   /* --brume : 4,76:1, lisible */
 .tache.on .tnum{color:var(--menthe-d)}
 
 /* =============================================================================
@@ -783,9 +796,11 @@ svg.ic{display:block;flex:0 0 auto;stroke:currentColor}
   padding-bottom:var(--safe-b)}
 #tabbar button{display:flex;flex-direction:column;align-items:center;justify-content:center;
   gap:3px;min-height:62px;padding:6px 2px 0;border-top:2px solid transparent;
-  font-size:10.5px;font-weight:600;color:var(--brume-2);letter-spacing:-.01em}
+  font-size:10.5px;font-weight:600;color:var(--brume);letter-spacing:-.01em}
+/* Deux lignes autorisées plutôt qu'une ellipse : à 375 px, « Traçabilité »
+   devenait « Traçab… ». */
 #tabbar button .tl{display:block;line-height:1.1;text-align:center;
-  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
+  white-space:normal;overflow-wrap:break-word;max-width:100%}
 #tabbar button.on{color:var(--encre);border-top-color:var(--encre)}
 #tabbar button.on svg.ic{stroke-width:2}
 
@@ -866,7 +881,7 @@ body{font-size:var(--t-corps);line-height:1.5}
 /* Bouton de compte dans la barre du haut : « tout le reste » et déconnexion.
    Sans lui, l'équipe n'avait plus aucun accès à ces écrans depuis que la barre
    du bas est passée à six onglets sans « Plus ». */
-#compte{flex:0 0 auto;width:40px;height:40px;border-radius:50%;
+#compte{flex:0 0 auto;width:48px;height:48px;   /* cible tactile 48 px */border-radius:50%;
   color:#fff;font-size:13.5px;font-weight:700;letter-spacing:.02em;
   display:flex;align-items:center;justify-content:center;margin-left:10px}
 #compte:active{transform:scale(.93)}
@@ -1068,7 +1083,8 @@ body::before{display:none!important}
 /* Bandeau cliquable : quand une action peut résoudre le problème, il doit se
    voir et s'inviter à être touché. Un bandeau qui annonce sans rien proposer
    n'est qu'un reproche permanent. */
-#offline.agir{cursor:pointer;padding-top:12px;padding-bottom:12px}
+/* L'encoche reste réservée (safe-t) : sans elle, le texte passait dessous. */
+#offline.agir{cursor:pointer;padding-top:calc(var(--safe-t) + 8px);padding-bottom:8px}
 #offline.agir .msg{text-decoration:underline;text-underline-offset:3px}
 #offline.agir:active{filter:brightness(.94)}
 
@@ -1215,7 +1231,7 @@ input[type="time"]:focus, input[type="date"]:focus{
 .invc.faible{opacity:.62}
 
 /* Chevron de dépliage, partagé par le réassort et l'inventaire du sec. */
-.chev{flex:0 0 auto;width:34px;height:34px;border-radius:9px;border:1px solid var(--line);
+.chev{flex:0 0 auto;width:44px;height:44px;   /* cible tactile 44 px minimum */border-radius:9px;border:1px solid var(--line);
   background:var(--fond-2);color:var(--ardoise);font-size:17px;font-weight:700;
   cursor:pointer;font-family:inherit;
   display:flex;align-items:center;justify-content:center}
@@ -1264,7 +1280,7 @@ input[type="time"]:focus, input[type="date"]:focus{
 /* Tâche urgente : celle qui apparaît quand le stock détecte un écart. Le
    libellé est un bouton qui ouvre l'explication — pourquoi elle est là, quel
    inventaire faire —, parce qu'une tâche qu'on ne comprend pas ne se fait pas. */
-.tache.urgente{background:var(--rouge-c);border-color:color-mix(in srgb,var(--rouge) 25%,transparent)}
+.tache.urgente{background:var(--rouge-l);   /* --rouge-c n'existait pas */border-color:color-mix(in srgb,var(--rouge) 25%,transparent)}
 .tache.urgente .tnum{background:var(--rouge);color:#fff}
 .tache.urgente .box{visibility:hidden;width:0;min-width:0;margin:0;padding:0}
 .tn-btn{background:none;border:0;padding:0;text-align:left;font:inherit;
