@@ -3,6 +3,15 @@
    Cible : iPad tactile en boutique. Doigts froids, gras, pressés.
    ============================================================================= */
 
+/* --- 0. Police ---------------------------------------------------------- */
+/* Inter servie par l'application, plus par Google Fonts : chaque ouverture
+   envoyait l'adresse IP de l'iPad à Google. Fichier variable 100-900, latin
+   (accents français compris), licence OFL dans fonts/LICENSE-Inter.txt. */
+@font-face{
+  font-family:Inter; font-style:normal; font-weight:100 900; font-display:swap;
+  src:url(fonts/inter.woff2) format("woff2");
+}
+
 /* --- 1. Jetons ---------------------------------------------------------- */
 :root{
   --encre:#0F2027; --ardoise:#41585F; --brume:#8AA0A8; --brume-2:#B6C6CC;

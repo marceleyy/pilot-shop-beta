@@ -2002,7 +2002,8 @@ function formulaireAnomalie() {
 
       '<div class="champ" style="margin-top:14px"><label class="f">Détail (facultatif)</label>' +
       '<textarea id="an-d" placeholder="Depuis quand, ce qui a été tenté, conséquence sur le service.">' +
-      esc(memo.detail) + '</textarea></div>' +
+      esc(memo.detail) + '</textarea>' +
+      '<p class="mini" style="margin-top:6px">' + esc(CONSIGNE_TEXTE_LIBRE) + '</p></div>' +
 
       '<div class="entete"><h3>Gravité</h3></div>' +
       '<div class="stack">' + ANOMALIES.gravites.map(g =>
