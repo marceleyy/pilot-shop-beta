@@ -364,7 +364,11 @@ select{background-image:linear-gradient(45deg,transparent 50%,var(--brume) 50%),
 .dense-scroll{max-height:62vh;overflow-y:auto;-webkit-overflow-scrolling:touch}
 
 /* --- 15. Feuille modale ------------------------------------------------- */
-#sheet{position:fixed;inset:0;z-index:200;display:flex;align-items:flex-end;justify-content:center}
+/* 255 : au-dessus de l'écran de connexion (#login, 250). À 200, la feuille de
+   remise à zéro s'ouvrait DESSOUS : le bouton semblait ne rien faire, puis la
+   feuille réapparaissait par-dessus l'application à la connexion. Reste sous
+   #amorcage et #rattach (260 et plus), le toast (300) et le viseur (400). */
+#sheet{position:fixed;inset:0;z-index:255;display:flex;align-items:flex-end;justify-content:center}
 #sheet[hidden]{display:none!important}
 #sheet .voile{position:absolute;inset:0;background:rgba(15,32,39,.42);backdrop-filter:blur(6px);animation:fade .2s ease}
 #sheet .box{

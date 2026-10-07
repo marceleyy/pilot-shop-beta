@@ -1051,6 +1051,9 @@
        initLogin._clavier = true;
        document.addEventListener('keydown', e => {
          if ($('#login').hidden || $('#login-pin').hidden) return;
+         /* Une feuille est ouverte par-dessus (remise à zéro) : la frappe est à
+            elle, pas au pavé caché dessous. */
+         if (!$('#sheet').hidden || /^(INPUT|TEXTAREA|SELECT)$/.test((e.target && e.target.tagName) || '')) return;
          if (/^[0-9]$/.test(e.key)) toucheP(e.key);
          else if (e.key === 'Backspace') toucheP('effacer');
          else if (e.key === 'Escape') retourQui();
@@ -2201,11 +2204,16 @@ async function purgerPreuves() {
      • le lien discret en bas de l'écran des prénoms
      • l'adresse https://…/?reset tapée directement dans le navigateur
    ========================================================================== */
-async function viderAppareil() {
+/* garderRattachement : « vider les saisies » ne détache plus l'appareil. Le
+   jeton du compte de la boutique (AUTH.cle) partait avec le reste : il
+   fallait ressortir les identifiants de la boutique pour repartir. */
+async function viderAppareil(garderRattachement) {
   let cles = 0, cachesEff = 0, sw = 0;
   try {
     const p = OFFLINE.storeLocal + ':';
+    const jeton = (typeof AUTH !== 'undefined') ? AUTH.cle : null;
     Object.keys(localStorage).filter(k => k.indexOf(p) === 0)
+      .filter(k => !(garderRattachement && k === jeton))
       .forEach(k => { localStorage.removeItem(k); cles++; });
     /* Le compteur d'échecs du PIN survit à la remise à zéro : sinon elle
        servirait à lever le blocage anti-essais. */
@@ -2230,7 +2238,11 @@ function ecranRemiseAZero(auto) {
   const p = OFFLINE.storeLocal + ':';
   let n = 0;
   try { n = Object.keys(localStorage).filter(k => k.indexOf(p) === 0).length; } catch (e) {}
+  const rattache = (typeof appareilRattache === 'function') && appareilRattache();
 
+  /* Confirmation forte : le bouton reste inactif tant que le mot n'est pas
+     tapé. Un appui (ou un lien …/?reset reçu par message) ne suffit plus à
+     tout effacer sans code. */
   showSheet(
     '<h2 id="sheet-titre">Réinitialiser cet appareil</h2>' +
     '<p class="sub">' + n + ' élément(s) enregistré(s) sur cet appareil</p>' +
@@ -2240,27 +2252,70 @@ function ecranRemiseAZero(auto) {
     'l’application. Ce qui est déjà remonté dans la base n’est pas touché et reviendra ' +
     'tout seul à la reconnexion.</p></div></div>' +
 
-    (n > 0 ? '<div class="alerte bad" style="margin-top:10px"><span class="ai">▲</span><div>' +
-      '<b>Les saisies non synchronisées seront perdues</b><p>Si cet appareil a travaillé ' +
-      'hors ligne sans jamais se reconnecter, ces données n’existent nulle part ailleurs.</p></div></div>' : '') +
+    (DB.configure ? '' : '<div class="alerte bad" style="margin-top:10px"><span class="ai">▲</span><div>' +
+      '<b>Aucune base configurée</b><p>Rien de ce qui a été saisi ici n’existe ailleurs : ' +
+      'tout sera définitivement perdu.</p></div></div>') +
+    '<div id="rz-file"></div>' +
+
+    (rattache ? '<label class="rang" style="margin-top:14px;gap:12px;align-items:flex-start;flex-wrap:nowrap">' +
+      '<input type="checkbox" id="rz-detacher" style="width:22px;height:22px;flex:0 0 auto;margin-top:1px">' +
+      '<span style="flex:1;min-width:0"><b>Détacher aussi l’appareil</b><span class="mini" style="display:block">Il faudra ' +
+      'le rattacher avec les identifiants de la boutique. Sans cette case, il reste rattaché.</span></span></label>' : '') +
+
+    '<div class="champ" style="margin-top:14px"><label class="f" for="rz-mot">Pour confirmer, tapez EFFACER</label>' +
+    '<input type="text" id="rz-mot" autocomplete="off" autocapitalize="characters" spellcheck="false"></div>' +
 
     '<div class="actions"><button class="btn clair" id="rz-x">Annuler</button>' +
-    '<button class="btn corail" id="rz-ok">Tout effacer</button></div>');
+    '<button class="btn corail" id="rz-ok" disabled>Tout effacer</button></div>');
+
+  /* Arrivée par …/?reset : le démarrage s'est arrêté avant de charger l'équipe.
+     Fermer la feuille (Échap, voile, Retour) laissait un écran des prénoms vide
+     et la session ouverte jamais reprise : seule « Annuler » sort, par un
+     redémarrage complet sur l'adresse déjà nettoyée. */
+  if (auto) $('#sheet').dataset.obligatoire = '1';
+
+  /* Saisies encore en file d'attente : leur nombre exact, et une dernière
+     tentative d'envoi avant de les effacer. */
+  const majFile = () => {
+    const zone = $('#rz-file');
+    if (!zone) return;
+    const nb = fileLire().length;
+    zone.innerHTML = nb
+      ? '<div class="alerte bad" style="margin-top:10px"><span class="ai">▲</span><div>' +
+        '<b>' + nb + ' saisie(s) jamais envoyée(s) à la base</b><p>Elles n’existent que sur cet ' +
+        'appareil et seraient perdues.' + (DB.configure ? ' Reconnectez-le au réseau puis touchez « Envoyer d’abord ».' : '') +
+        '</p></div></div>' +
+        (DB.configure ? '<button class="btn clair bloc" id="rz-sync" style="margin-top:10px">Envoyer d’abord</button>' : '')
+      : '';
+    const b = $('#rz-sync');
+    if (b) b.onclick = async () => {
+      b.disabled = true; b.textContent = 'Envoi…';
+      try { await journaliserSync(); } catch (e) {}
+      majFile();
+      if (fileLire().length) toast('Envoi impossible pour l’instant — réseau ou base injoignable', 'erreur');
+    };
+  };
+  majFile();
+  if (fileLire().length && DB.configure) journaliserSync().then(majFile, majFile);
+
+  const ok = $('#rz-ok');
+  $('#rz-mot').oninput = () => { ok.disabled = $('#rz-mot').value.trim().toUpperCase() !== 'EFFACER'; };
 
   $('#rz-x').onclick = function () {
+    if (auto) { location.replace(location.pathname); return; }
     closeSheet();
-    /* L'adresse est déjà propre : on reprend simplement la connexion normale,
-       sans rechargement, donc sans risque de rouvrir cet écran. */
-    if (auto) demarrerConnexion();
   };
-  $('#rz-ok').onclick = async function () {
+  ok.onclick = async function () {
+    if ($('#rz-mot').value.trim().toUpperCase() !== 'EFFACER') return;
+    const detacher = !!($('#rz-detacher') && $('#rz-detacher').checked);
+    $('#sheet').dataset.obligatoire = '1';      // plus de fermeture pendant le nettoyage
     $('#sheet-corps').innerHTML =
       '<h2>Nettoyage en cours…</h2><div class="vide">Un instant</div>';
-    const r = await viderAppareil();
+    const r = await viderAppareil(!detacher);
     $('#sheet-corps').innerHTML =
       '<h2>Appareil remis à zéro</h2>' +
       '<p class="sub">' + r.cles + ' saisie(s), ' + r.sw + ' service worker, ' +
-      r.caches + ' cache(s) effacés.</p>' +
+      r.caches + ' cache(s) effacés' + (rattache && !detacher ? ' · appareil toujours rattaché' : '') + '.</p>' +
       '<div class="alerte ok" style="margin-top:12px"><span class="ai">•</span><div>' +
       '<b>Redémarrage…</b><p>L’application va se recharger sur sa dernière version.</p></div></div>';
     setTimeout(function () { location.replace(location.pathname); }, 1500);
@@ -2806,6 +2861,9 @@ window.addEventListener('error', function (ev) {
   const bt = $('#bt');
   if (bt) bt.textContent = 'Boutique ' + APP.site;
 
+  /* Une feuille ouverte sur l'écran de connexion (remise à zéro) ne doit pas
+     reparaître par-dessus l'application, avec son bouton « Tout effacer ». */
+  if (!$('#sheet').hidden) closeSheet();
   $('#login').hidden = true;
   $('#app').hidden = false;
   document.title = APP.nom + ' — ' + APP.site;
@@ -2835,6 +2893,14 @@ window.addEventListener('error', function (ev) {
   rendre(STATE.user.role === 'manager' ? 'controle' : 'accueil');
 }
    
+   /* Résolue quand modules.js, stock.js et ocr.js ont été exécutés : les
+      scripts différés passent tous avant DOMContentLoaded. */
+   const documentPret = new Promise(r => {
+     if (document.readyState === 'complete') return r();
+     document.addEventListener('DOMContentLoaded', () => r(), { once:true });
+     window.addEventListener('load', () => r(), { once:true });
+   });
+
    (async function () {
      initLogin();
      majBandeau();
@@ -2879,6 +2945,12 @@ window.addEventListener('error', function (ev) {
        }
      }
 
+     /* La reprise de session attend que TOUS les scripts soient chargés. Le
+        démarrage n'enchaîne que des lectures locales, résolues aussitôt : il
+        appelait demarrer() avant l'exécution de modules.js et stock.js — page
+        vide et « Vue indisponible » pour l'équipe, Tour de contrôle sans son
+        complément de stock pour le manager, après tout rechargement hors ligne. */
+     await documentPret;
      const s = await DB.get('session', null);
      const u = utilisateurDeSession(s);
      if (u) {
