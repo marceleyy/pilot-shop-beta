@@ -1617,15 +1617,20 @@ V.temp = async function () {
     $$('[data-hs]').forEach(b => b.onclick = async () => {
       const e = ENCEINTES.filter(x => x.id === b.dataset.hs)[0];
       /* HS puis HS de nouveau effaçait la température déjà relevée : on garde
-         la valeur d'avant pour la remettre si l'on revient sur le HS. */
-      const memo = V.temp._avantHS || (V.temp._avantHS = {});
-      const k = j + '|' + cle(e);
-      if (rec[cle(e)] === 'HS') {
-        rec[cle(e)] = (memo[k] !== undefined) ? memo[k] : '';
-        delete memo[k];
+         la valeur d'avant pour la remettre si l'on revient sur le HS.
+         Gardée dans le relevé du jour (rec.avantHS), plus en mémoire vive :
+         un rechargement de l'application la perdait (B5). null plutôt que
+         delete : la fusion de « temp: » garderait sinon la valeur de la base.
+         « avantHS » ne commence ni par m_ ni par s_ : il ne compte pas comme
+         une mesure (releveMesure). */
+      const memo = rec.avantHS || (rec.avantHS = {});
+      const k = cle(e);
+      if (rec[k] === 'HS') {
+        rec[k] = (memo[k] !== undefined && memo[k] !== null) ? memo[k] : '';
+        memo[k] = null;
       } else {
-        if (saisi(e)) memo[k] = rec[cle(e)];
-        rec[cle(e)] = 'HS';
+        memo[k] = saisi(e) ? rec[k] : null;
+        rec[k] = 'HS';
       }
       invalider();
       await sauver();
