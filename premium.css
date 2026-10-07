@@ -1,0 +1,1195 @@
+/* =============================================================================
+   PILOT-SHOP — premium.css
+   Direction « Maison glacière artisanale »
+
+   Chargée APRÈS style.css : elle ne réécrit pas l'application, elle la
+   rhabille. Aucune règle ici ne change la structure (pas de JS, pas de DOM
+   nouveau) ; on joue sur les jetons, puis on reprend composant par composant
+   les règles finales de style.css (sections 24 à 26 et suivantes), qui sont
+   celles qui s'appliquent réellement.
+
+   L'identité, en quatre idées :
+     1. Une toile ivoire, des cartes porcelaine, une encre chocolat. Le chaud
+        remplace le gris ardoise : on est chez un glacier, pas dans un tableur.
+     2. Pistache, framboise et caramel portent les statuts (bon, grave,
+        attention), myrtille l'information. Jamais seuls : chaque statut a
+        aussi un SIGNE et une forme — ✓ dans un rond (bon), ! dans un
+        losange (attention), ✕ dans un octogone (grave) — et un libellé.
+     3. Un serif système (New York sur iPad) pour les seuls titres d'affiche :
+        titre de page, marque de connexion, grands chiffres, salutation.
+        Inter pour tout le reste, parce qu'un outil de travail se lit vite.
+     4. L'or est un détail, pas une couleur : un filet sous la marque, un
+        repère sur l'onglet actif, l'anneau du compte, le halo de saisie.
+     5. Un seul aplat chocolat par écran : l'action principale. Un choix
+        sélectionné (segment, onglet) est un curseur porcelaine cerclé de
+        chocolat, jamais un second bouton plein.
+
+   Version finale : direction « Maison glacière » (B), complétée des meilleures
+   idées des deux autres pistes — liste à filets des tâches, curseur de
+   segment, onglets horizontaux en paysage, verre clair du « Retour bêta »,
+   titres coupés en « … » — et corrigée des défauts relevés par le jury
+   (toast, liste déroulante, « Ma journée », marqueur d'onglet, pavé PIN).
+
+   Contraintes tenues (ratios calculés, voir la section 18) :
+     • cibles tactiles ≥ 48 px, actions principales ≥ 56 px ;
+     • texte courant ≥ 4,5:1, grands textes et contours utiles ≥ 3:1 ;
+     • prefers-reduced-motion respecté (règle globale de style.css + ici) ;
+     • pas de thème sombre : l'application force color-scheme:light et de
+       nombreux styles en ligne supposent un fond clair (voir section 18) ;
+     • :has() toujours sous @supports : sans lui (Safari < 15.4), l'écran
+       reste juste, seul le raffinement disparaît.
+   ========================================================================== */
+
+
+/* =============================================================================
+   1. JETONS
+   ========================================================================== */
+:root{
+  /* --- Toile et surfaces ------------------------------------------------- */
+  --creme:      #F8F3EA;   /* fond de page : ivoire chaud                    */
+  --creme-2:    #F0E8DA;   /* surface creusée : piste, entête de tableau     */
+  --creme-3:    #E7DCC8;   /* pressé, pastille de l'onglet actif             */
+  --porcelaine: #FFFCF7;   /* cartes, champs, boutons clairs                 */
+  --filet:      #E8DECE;   /* filet décoratif (séparateurs, bord de carte)   */
+  --filet-fort: #D9CBB5;   /* bord de bouton clair (décoratif)               */
+  --contour:    #958271;   /* bord FONCTIONNEL (champ, case) : 3,6:1         */
+
+  /* --- Encres ------------------------------------------------------------ */
+  --chocolat:   #2A1A12;   /* texte principal : 15,1:1 sur crème            */
+  --chocolat-2: #3B2619;
+  --cacao:      #5A463A;   /* texte secondaire : 8,0:1                       */
+  --noisette:   #75604F;   /* texte discret : 5,4:1 crème, 4,9:1 crème-2     */
+
+  /* --- Statuts ----------------------------------------------------------- */
+  /* -l : fond teinté · -c : bord teinté · -d : texte sur fond teinté        */
+  --pistache:   #4F7A2A; --pistache-d:  #4A6A23; --pistache-l:  #EEF3E0; --pistache-c:  #C9D8A8;
+  --framboise:  #B4284E; --framboise-d: #9E1F42; --framboise-l: #FBE9EE; --framboise-c: #EFC3D0;
+  --caramel:    #9C5A0C; --caramel-d:   #8A520C; --caramel-l:   #FBF0DB; --caramel-c:   #EBD2A3;
+  --myrtille:   #3D5480; --myrtille-l:  #EAEEF6; --myrtille-c:  #C9D2E5;
+
+  /* --- Or : le détail rare ------------------------------------------------ */
+  --or:   #B08A4A;   /* graphique seulement (3,1:1 sur porcelaine)          */
+  --or-d: #8C6A2E;   /* or lisible en texte (4,9:1 sur porcelaine)          */
+  --or-l: #EADBBC;
+
+  /* --- Voile chocolat des avatars ----------------------------------------- */
+  /* Les couleurs d'équipe sont des pastels posés en ligne par app.js : le
+     blanc dessus tombait à 2,2–2,8:1. Une ombre intérieure chocolat à 40 %
+     les « poudre de cacao » et remonte toutes les initiales au-dessus de
+     4,6:1, sans toucher au JS ni perdre la teinte de chacun. */
+  --voile-avatar: inset 0 0 0 999px rgba(42,23,14,.40);
+
+  /* --- Typographie ------------------------------------------------------- */
+  /* New York sur iPad et Mac ; Cambria sous Windows ; Caladea (métrique
+     Cambria) sous Linux. Toutes sont des polices système : rien à charger. */
+  --serif: ui-serif, "New York", "Iowan Old Style", Charter, "Palatino Linotype",
+           Palatino, Georgia, Cambria, Caladea, serif;
+  --sans:  Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  /* Échelle : 11,5 · 13 · 15 · 16 · 19 · 22 · 30 · 36 · 46 */
+  --t-sur:    11.5px;  /* surtitres en capitales                           */
+  --t-note:   13px;
+  --t-liste:  15px;
+  --t-corps:  16px;
+  --t-carte:  19px;
+  --t-titre:  22px;
+  --t-page:   30px;    /* serif                                            */
+  --t-chiffre:36px;    /* serif                                            */
+  --t-marque: 46px;    /* serif                                            */
+
+  /* --- Formes ------------------------------------------------------------ */
+  --r-carte: 20px; --r-bloc: 14px; --r-btn: 14px; --r-sheet: 28px; --r-pill: 999px;
+  --ombre:     0 1px 0 rgba(42,26,18,.03), 0 10px 24px -16px rgba(42,26,18,.22);
+  --ombre-lev: 0 2px 6px rgba(42,26,18,.06), 0 28px 56px -20px rgba(42,26,18,.38);
+  --ombre-btn: inset 0 1px 0 rgba(255,255,255,.10), 0 8px 18px -10px rgba(42,26,18,.60);
+  --halo:      0 0 0 4px rgba(176,138,74,.30);   /* halo or de la saisie   */
+
+  --tap: 48px; --tap-fort: 56px;
+  --tr: .2s cubic-bezier(.32,.72,0,1);
+  /* Hauteur de la barre du haut sur tablette : titre et sous-titre tiennent
+     chacun sur UNE ligne (coupés en « … »), la hauteur est donc fixe. Le
+     total d'inventaire collant s'accroche juste dessous. */
+  --topbar-h: 82px;
+  /* Chevron des listes déroulantes, réutilisé au repos et au focus. */
+  --chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 14 9'%3E%3Cpath d='M1.5 1.5l5.5 5.5 5.5-5.5' fill='none' stroke='%235A463A' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+
+  /* --- Correspondance avec les jetons de style.css ------------------------
+     Toute règle ancienne qui lit un jeton passe d'elle-même à la nouvelle
+     palette : c'est ce qui évite de réécrire 1 300 lignes. */
+  --encre: var(--chocolat);  --ardoise: var(--cacao);
+  --brume: var(--noisette);  --brume-2: #A8978A;
+  --fond:  var(--creme);     --fond-2:  var(--creme-2);  --blanc: var(--porcelaine);
+  --line:  var(--filet);     --line-fort: var(--filet-fort);
+  --voile: rgba(255,252,247,.86); --voile-fort: rgba(248,243,234,.88);
+  --voile-nuit: rgba(42,26,18,.90);
+  --menthe: #8FAE5A;  --menthe-l: var(--pistache-l);  --menthe-d: var(--pistache-d);
+  --corail: #D2607E;  --corail-l: var(--framboise-l); --corail-d: var(--framboise);
+  --ambre:  var(--or);--ambre-l:  var(--caramel-l);   --ambre-d:  var(--caramel);
+  --ciel:   #8DA0C4;  --ciel-l:   var(--myrtille-l);  --ciel-d:   var(--myrtille);
+  --sable:  #D9C3A5;  --sable-l:  #F6EEE2;            --nuit:     var(--chocolat-2);
+  --vert:   var(--pistache);  --vert-l:  var(--pistache-l);
+  --rouge:  var(--framboise); --rouge-l: var(--framboise-l);
+  --bleu:   var(--myrtille);  --bleu-l:  var(--myrtille-l);
+  --ombre-carte: var(--ombre);
+}
+
+
+/* =============================================================================
+   2. BASE
+   ========================================================================== */
+/* Toile ivoire unie. La lueur de fond de style.css reste coupée (sa règle
+   « display:none!important » n'est plus combattue) : la lueur de vitrine
+   est réservée à l'écran de connexion, où elle ne gêne aucune lecture. */
+html{background:var(--creme)}
+body{
+  font-family:var(--sans);
+  background:var(--creme); color:var(--chocolat);
+  font-size:var(--t-corps); line-height:1.5; letter-spacing:-.011em;
+  font-feature-settings:"calt" 1, "kern" 1;
+  text-rendering:optimizeLegibility;
+}
+::selection{background:var(--or-l);color:var(--chocolat)}
+h1,h2,h3,h4{color:var(--chocolat);font-family:var(--sans)}
+h2{font-size:var(--t-carte);font-weight:650;letter-spacing:-.018em;line-height:1.25}
+h3{font-weight:650}
+.num{font-variant-numeric:tabular-nums}
+.mini{color:var(--noisette)}
+b,strong{font-weight:650}
+
+/* Anneau de focus clavier : chocolat, décalé, qui suit l'arrondi. */
+:focus-visible{outline:2.5px solid var(--chocolat);outline-offset:2px}
+input:focus-visible,select:focus-visible,textarea:focus-visible{outline:0}
+
+
+/* =============================================================================
+   3. TYPOGRAPHIE
+   ========================================================================== */
+/* Surtitre de section : capitales espacées, cacao. Plus de losange or devant
+   chaque surtitre : répété dix fois par écran, l'ornement devenait du bruit.
+   L'or reste rare (marque, onglet actif, compte, états vides). */
+.entete{margin:var(--e5,24px) 0 10px;gap:10px}
+.entete h3{
+  font-family:var(--sans);font-size:var(--t-sur);font-weight:700;
+  letter-spacing:.12em;text-transform:uppercase;color:var(--cacao);
+}
+.entete .mini,.entete > span{color:var(--noisette)}
+
+/* Chiffres alignés en colonne partout où l'on compare des nombres. */
+.kpi .v,#page .tnum,.dl .c,.fi .fh,.fifo .fr b,.tl-cible,.entete .mini,
+.ecart .lg,.lotb,.tq,.detail-l .num,.nj-c span,.meteo-mini .mm-t,
+input[type=number],.inv-total b,.pave button{
+  font-variant-numeric:lining-nums tabular-nums;
+}
+
+/* Titre de la première carte d'un écran : Inter, pas serif — le serif est
+   réservé au titre de page juste au-dessus ; deux serifs l'un sous l'autre
+   se feraient concurrence. On efface aussi l'écart de taille entre la 1re
+   et la 2e carte (21 px / 26 px) que laissaient deux règles anciennes. */
+#page > .card:first-child h2,
+#page > *:first-child + .card h2{
+  font-family:var(--sans);font-weight:700;font-size:var(--t-titre);
+  letter-spacing:-.022em;line-height:1.2;
+}
+.card > .ch{margin-bottom:4px}
+.card .sub,.card .cs,.card > .cs{color:var(--noisette);font-size:13.5px;line-height:1.45}
+.mini,.cs,.sub,.tm{color:var(--noisette)}
+label.f,.f{
+  font-size:var(--t-sur);font-weight:650;letter-spacing:.09em;text-transform:uppercase;
+  color:var(--cacao);margin-bottom:8px;
+}
+.aide{color:var(--noisette)}
+
+
+/* =============================================================================
+   4. OSSATURE : barre du haut, page, rythme
+   ========================================================================== */
+/* La barre du haut était transparente alors qu'elle colle au défilement :
+   le contenu passait sous le titre. Verre crème et filet. */
+#topbar{
+  background:rgba(248,243,234,.86);
+  backdrop-filter:blur(20px) saturate(1.3);-webkit-backdrop-filter:blur(20px) saturate(1.3);
+  border-bottom:1px solid var(--filet);
+  padding:calc(var(--safe-t) + 12px) var(--pad-x) 12px;
+  gap:12px;min-height:76px;
+}
+#topbar{min-height:var(--topbar-h)}
+/* Titre et sous-titre sur UNE ligne chacun, coupés en « … » si besoin. Le
+   serif d'affiche (New York sur iPad) est plus large que celui des essais :
+   sans cette coupe, un titre long faisait passer la barre à 133 px en
+   portrait et 168 px au téléphone. */
+#topbar .tt{min-width:0}
+#topbar h1{
+  font-family:var(--serif);font-size:var(--t-page);font-weight:600;
+  letter-spacing:-.012em;line-height:1.12;color:var(--chocolat);
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+  padding-bottom:1px;   /* jambage du « g » et du « p » non rogné */
+}
+#topbar .ts{font-size:13px;color:var(--noisette);margin-top:3px;letter-spacing:0;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#topbar .ta{gap:8px;align-items:center}
+/* Sélecteur de mois du frigo virtuel : app.js lui pose style="min-height:42px",
+   sous la cible tactile. Seul !important passe devant un attribut style. */
+#topbar .ta input{min-height:48px!important}
+
+/* Compte : avatar poudré, liseré porcelaine et anneau or. */
+#compte{
+  width:48px;height:48px;color:#FFFCF7;font-size:14px;font-weight:650;letter-spacing:.04em;
+  box-shadow:var(--voile-avatar),0 0 0 2px var(--porcelaine),0 0 0 3.5px var(--or);
+  margin-left:8px;transition:transform var(--tr);
+}
+
+#page{padding-top:20px}
+@media(min-width:900px){#page{padding-top:24px}}
+
+/* Rythme : la marge « carte + carte » s'ajoutait à l'écart des grilles et
+   des piles. Dans une grille, la 2e carte descendait de 12 px (tuile météo
+   et « Personne en service » décalées, achats / pertes aussi). */
+.grid > .card + .card,
+.stack > .card + .card{margin-top:0}
+/* Et à l'inverse, un bloc qui suit une grille ou une pile n'avait aucune
+   marge : « Semaine · 07/10 » collait à la rangée du dessus. */
+#page > :not(.entete) + :is(.card,.grid,.stack,.dense){margin-top:16px}
+#page > :not(.entete) + .card.plat{margin-top:24px}
+/* Premier surtitre d'un écran : pas de marge haute en plus de la page. */
+#page > .entete:first-child{margin-top:4px}
+/* Deux champs côte à côte dans une grille : la marge « champ + champ »
+   (prévue pour l'empilement) décalait le second de 14 px vers le bas —
+   début / fin de période, prénom / code, nombre / litrage, 3 L / 5 L / 7 L. */
+.grid > .champ + .champ{margin-top:0}
+.stack{gap:10px}
+.grid{gap:12px}
+
+
+/* =============================================================================
+   5. BARRE D'ONGLETS
+   ========================================================================== */
+/* Barre opaque : en verre, le texte qui défilait dessous restait lisible
+   en fantôme et se mêlait aux libellés. */
+#tabbar{
+  background:var(--porcelaine);
+  backdrop-filter:none;-webkit-backdrop-filter:none;
+  border-top:1px solid var(--filet);
+  box-shadow:0 -10px 24px -22px rgba(42,26,18,.40);
+  padding:0 6px var(--safe-b);
+}
+/* La bordure haute de 2 px sur un bouton arrondi dessinait un arc noir
+   au-dessus de l'onglet actif. On la retire : le repère devient un trait or
+   au bord de la barre et une pastille crème derrière l'icône. */
+#tabbar .tab,#tabbar button{
+  border:0;border-radius:16px;min-height:63px;padding:7px 1px 6px;gap:4px;
+  color:var(--noisette);font-size:11px;font-weight:600;letter-spacing:-.01em;
+}
+/* Libellés sur une seule ligne : à 390 px, « Ma journée » passait sur deux
+   lignes et rendait la barre irrégulière. */
+#tabbar .tab .tl,#tabbar button .tl{white-space:nowrap;overflow-wrap:normal;word-break:normal;hyphens:none}
+#tabbar button svg.ic{
+  width:56px;height:32px;padding:5px 17px;border-radius:var(--r-pill);
+  transition:background-color var(--tr);
+}
+#tabbar button.on{color:var(--chocolat);font-weight:700}
+#tabbar button.on svg.ic{background:var(--creme-3);stroke-width:2}
+/* Repère or foncé (#8C6A2E, 4,9:1 sur porcelaine) collé au bord haut de la
+   barre, à l'intérieur : il ne déborde plus au-dessus. */
+#tabbar button.on::before{
+  content:'';position:absolute;top:0;left:50%;width:36px;height:4px;margin-left:-18px;
+  border-radius:0 0 4px 4px;background:var(--or-d);
+}
+#tabbar .tab:active{background:var(--creme-2)}
+#tabbar .tab .badge{
+  top:3px;right:calc(50% - 30px);min-width:20px;height:20px;
+  background:var(--framboise);color:#FFFCF7;font-size:11px;font-weight:700;
+  box-shadow:0 0 0 2px var(--porcelaine);
+}
+
+/* iPad en paysage : pictogramme et libellé côte à côte, en 13,5 px — lisible
+   à un mètre, comme la barre d'iPadOS. La pastille couvre tout l'onglet. */
+@media (min-width:900px){
+  :root{--barre-h:calc(71px + var(--safe-b))}
+  #tabbar{padding:7px 12px calc(7px + var(--safe-b));justify-content:center;gap:6px}
+  #tabbar .tab,#tabbar button{
+    flex:1 1 0;max-width:184px;flex-direction:row;gap:9px;
+    font-size:13.5px;letter-spacing:-.01em;min-height:56px;padding:0 12px;border-radius:14px;
+  }
+  #tabbar button svg.ic,#tabbar button.on svg.ic{width:22px;height:22px;padding:0;background:none}
+  #tabbar button.on{background:var(--creme-3)}
+  #tabbar .tab:active{background:var(--creme-2)}
+  #tabbar button.on::before{top:-7px}
+  #tabbar .tab .badge{top:6px;right:auto;left:calc(50% + 4px)}
+}
+
+
+/* =============================================================================
+   6. CARTES ET INDICATEURS
+   ========================================================================== */
+.card,
+.card.solide,.card.menthe,.card.corail,.card.ambre,.card.ciel,.card.sable{
+  background:var(--porcelaine);
+  border:1px solid var(--filet);
+  border-radius:var(--r-carte);
+  box-shadow:var(--ombre);
+  padding:20px 22px;
+  backdrop-filter:none;-webkit-backdrop-filter:none;
+}
+.card.plat{background:transparent;border:0;box-shadow:none;padding:0}
+/* Variantes de carte. Seules « corail » (grave) et « ambre » (attention)
+   gardent un indice : bord teinté et aube pâle sur 64 px. « menthe », « sable »
+   et « ciel » restent neutres, comme depuis la passe 26 : le réassort s'en
+   sert AUSSI comme couleur de famille (Surgelé = menthe), et une ligne
+   surgelée à faire aurait eu l'air d'une ligne faite. */
+.card.corail{background:linear-gradient(180deg,var(--framboise-l),var(--porcelaine) 64px);border-color:var(--framboise-c)}
+.card.ambre {background:linear-gradient(180deg,var(--caramel-l),var(--porcelaine) 64px);border-color:var(--caramel-c)}
+.card.nuit{background:linear-gradient(165deg,var(--chocolat-2),var(--chocolat));border-color:transparent;color:#F6EEE2}
+.card.nuit h2,.card.nuit h3{color:#FFFCF7}
+.card.nuit .cs,.card.nuit .mini{color:rgba(246,238,226,.78)}
+.card.urgence{border:1.5px solid var(--framboise)}
+@keyframes clignote{
+  0%,100%{box-shadow:var(--ombre),0 0 0 0 rgba(180,40,78,.32)}
+  50%    {box-shadow:var(--ombre),0 0 0 8px rgba(180,40,78,0)}
+}
+.card.tap:active{transform:scale(.99)}
+
+/* --- Indicateurs chiffrés : le chiffre en serif, comme un prix de carte -- */
+.kpi{
+  background:var(--porcelaine);border:1px solid var(--filet);border-radius:16px;
+  box-shadow:var(--ombre);padding:16px 18px 15px;
+  backdrop-filter:none;-webkit-backdrop-filter:none;
+}
+/* Dans une carte, la tuile se creuse plutôt que d'empiler deux ombres. */
+.card:not(.plat) .kpi{background:var(--creme);border-color:transparent;box-shadow:none}
+.kpi .k{
+  display:flex;align-items:center;gap:7px;
+  font-size:11px;font-weight:700;letter-spacing:.11em;text-transform:uppercase;color:var(--cacao);
+}
+.kpi .v{
+  font-family:var(--serif);font-size:var(--t-chiffre);font-weight:600;
+  letter-spacing:-.01em;line-height:1.05;margin-top:9px;color:var(--chocolat);
+  font-variant-numeric:lining-nums tabular-nums;
+}
+.kpi .u{font-family:var(--sans);font-size:14px;font-weight:550;color:var(--noisette);margin-left:4px;letter-spacing:0}
+.kpi .d{font-size:12.5px;color:var(--noisette);margin-top:6px}
+.kpi.ok .v  {color:var(--pistache-d)}
+.kpi.warn .v{color:var(--caramel-d)}
+.kpi.bad .v {color:var(--framboise-d)}
+/* Le statut ne repose pas sur la couleur du chiffre : un signe le précède
+   dans le libellé — ✓ (bon), ! (attention), ✕ (grave) — et les tuiles à
+   surveiller portent une bande de couleur en tête. */
+.kpi.ok .k::before,.kpi.warn .k::before,.kpi.bad .k::before{
+  flex:0 0 auto;font:800 12px/1 var(--sans);letter-spacing:0;}
+.kpi.ok .k::before  {content:'✓';color:var(--pistache)}
+.kpi.warn .k::before{content:'!';color:var(--caramel);width:8px;text-align:center}
+.kpi.bad .k::before {content:'✕';color:var(--framboise)}
+.kpi.warn,.card:not(.plat) .kpi.warn{border-color:var(--caramel-c);box-shadow:inset 0 3px 0 var(--caramel),var(--ombre)}
+.kpi.bad,.card:not(.plat) .kpi.bad  {border-color:var(--framboise-c);box-shadow:inset 0 3px 0 var(--framboise),var(--ombre)}
+.card:not(.plat) .kpi.warn{box-shadow:inset 0 3px 0 var(--caramel)}
+.card:not(.plat) .kpi.bad {box-shadow:inset 0 3px 0 var(--framboise)}
+
+/* Météo : la température est un grand chiffre, elle passe au serif. */
+.meteo .mt,.meteo-mini .mm-t{font-family:var(--serif);font-weight:600;letter-spacing:-.01em;font-variant-numeric:lining-nums tabular-nums}
+.meteo .mt{font-size:34px}
+.meteo .md{color:var(--cacao)}
+.meteo-mini .mm-d{color:var(--cacao)}
+.meteo-mini .mm-p{color:var(--noisette)}
+
+/* Bande d'accueil (équipier) : la salutation sort de sa boîte et devient un
+   titre éditorial en serif, la météo reste à droite. Une carte de moins. */
+.accueil-haut{
+  background:transparent;border:0;box-shadow:none;border-radius:0;
+  padding:2px 2px 4px;margin:0 0 14px;gap:20px;
+}
+.salut-bloc b{font-family:var(--serif);font-size:26px;font-weight:600;
+  letter-spacing:-.01em;line-height:1.15;color:var(--chocolat)}
+.salut-bloc span{color:var(--noisette);font-size:13.5px;margin-top:4px}
+.meteo-mini .mm-t{font-size:26px}
+
+
+/* =============================================================================
+   7. BOUTONS
+   ========================================================================== */
+.btn{
+  min-height:52px;padding:0 22px;border-radius:var(--r-btn);
+  background:var(--chocolat);color:var(--porcelaine);border:0;
+  font-family:var(--sans);font-size:16px;font-weight:600;letter-spacing:-.008em;
+  box-shadow:var(--ombre-btn);
+  transition:transform .16s cubic-bezier(.32,.72,0,1),background-color .16s,box-shadow .16s;
+}
+.btn:active{transform:scale(.97);background:#1B100A}
+/* Le vert d'action est resté chocolat depuis la passe 24 (« un seul plein
+   par écran ») : on garde ce principe, la pistache est réservée aux statuts. */
+.btn.menthe{background:var(--chocolat);color:var(--porcelaine)}
+.btn.menthe:active{background:#1B100A}
+.btn.corail{background:var(--framboise);color:#FFFCF7}
+.btn.corail:active{background:var(--framboise-d)}
+.btn.ambre{background:var(--caramel);color:#FFFCF7}
+.btn.clair,.btn.ciel{
+  background:var(--porcelaine);color:var(--chocolat);
+  border:1px solid var(--filet-fort);box-shadow:0 1px 0 rgba(42,26,18,.04);
+}
+.btn.clair:active,.btn.ciel:active{background:var(--creme-2)}
+.btn.fantome{background:transparent;color:var(--cacao);box-shadow:none;border:0}
+.btn.fantome:active{color:var(--framboise);background:transparent}
+/* Tailles : 48 px plancher partout (« Traité », « Ouvrir », « Y aller » étaient
+   à 44 px), 56 px pour les actions pleine largeur, 60 px pour les grandes. */
+.btn.sm,.btn.fantome.sm{min-height:48px;min-width:48px;padding:0 16px;font-size:14px;border-radius:12px}
+.btn.bloc{min-height:var(--tap-fort)}
+.btn.xl,.btn.bloc.xl{min-height:60px;font-size:17px;border-radius:16px}
+#sheet .actions .btn{min-height:var(--tap-fort)}
+.btn[disabled]{opacity:.4}
+
+/* Duo Fait / Rupture */
+.duo .ok{background:var(--pistache-l);color:var(--pistache-d);border:1.5px solid var(--pistache-c);box-shadow:none}
+.duo .ok.on{background:var(--pistache);color:#FFFCF7;border-color:var(--pistache)}
+.duo .ko{background:var(--framboise-l);color:var(--framboise-d);border:1.5px solid var(--framboise-c);box-shadow:none}
+.duo .ko.on{background:var(--framboise);color:#FFFCF7;border-color:var(--framboise)}
+.duo.compact .btn.ok{background:var(--porcelaine);border:1px solid var(--filet-fort);color:var(--pistache)}
+.duo.compact .btn.ok.on{background:var(--pistache);border-color:var(--pistache);color:#FFFCF7}
+.duo.compact .btn.ko{background:var(--porcelaine);border:1px solid var(--filet-fort);color:var(--caramel)}
+.duo.compact .btn.ko.on{background:var(--framboise);border-color:var(--framboise);color:#FFFCF7}
+
+
+/* =============================================================================
+   8. FORMULAIRES ET SÉLECTEURS
+   ========================================================================== */
+/* Bord des champs à 3,6:1 : c'est lui qui dit « ici on écrit ». Le filet
+   décoratif des cartes (1,3:1) ne suffisait pas en plein soleil. */
+input[type=text],input[type=number],input[type=date],input[type=month],
+input[type=password],input[type=search],input[type=time],input[type=datetime-local],
+select,textarea{
+  min-height:52px;background-color:var(--porcelaine);color:var(--chocolat);
+  border:1px solid var(--contour);border-radius:var(--r-bloc);
+  box-shadow:inset 0 1px 2px rgba(42,26,18,.05);
+  font-family:var(--sans);font-size:16px;
+}
+textarea{min-height:104px}
+::placeholder{color:var(--noisette);opacity:1}
+input:focus,select:focus,textarea:focus,
+input[type="time"]:focus,input[type="date"]:focus{
+  outline:0;border-color:var(--chocolat);background-color:var(--porcelaine);
+  box-shadow:var(--halo);
+}
+/* Liste déroulante : la règle de style.css (« background: » en raccourci,
+   section 26) effaçait la flèche, au repos comme au focus. Sans elle, le
+   choix du rôle ressemblait à un champ texte. On la redessine aux deux états. */
+select,select:focus{
+  background-image:var(--chevron);
+  background-position:right 18px center;background-size:14px 9px;background-repeat:no-repeat;
+  padding-right:46px;cursor:pointer;
+}
+/* Champs compacts de l'inventaire : 46 px → 48 px. */
+.invp-t input,.invl input{min-height:48px}
+.saisie-u{border:1px solid var(--contour);border-radius:12px;background:var(--porcelaine)}
+.saisie-u input{min-height:48px;box-shadow:none}
+.saisie-u:focus-within{border-color:var(--chocolat);box-shadow:var(--halo)}
+.saisie-u .su{min-height:48px;color:var(--cacao);border-left-color:var(--filet)}
+
+/* Puces de choix (historique, familles…) */
+.chip{
+  min-height:48px;padding:0 18px;border-radius:var(--r-pill);
+  background:var(--porcelaine);border:1px solid var(--filet-fort);color:var(--cacao);
+  font-size:15px;font-weight:600;box-shadow:0 1px 0 rgba(42,26,18,.04);
+}
+/* Puce choisie : même idiome que les segments — porcelaine cerclée de
+   chocolat (2 px), texte gras. L'aplat sombre reste à l'action principale :
+   « Semaine » ne se confond plus avec « Ouvrir la période » juste dessous. */
+.chip.on,.pas.on{
+  background:var(--porcelaine);border-color:var(--chocolat);color:var(--chocolat);font-weight:700;
+  box-shadow:inset 0 0 0 1px var(--chocolat),0 4px 10px -6px rgba(42,26,18,.35);
+}
+.chip.menthe.on{background:var(--pistache-l);border-color:var(--pistache);color:var(--pistache-d);box-shadow:inset 0 0 0 1px var(--pistache)}
+.chip.corail.on{background:var(--framboise-l);border-color:var(--framboise);color:var(--framboise-d);box-shadow:inset 0 0 0 1px var(--framboise)}
+.chip.ambre.on{background:var(--caramel-l);border-color:var(--caramel);color:var(--caramel-d);box-shadow:inset 0 0 0 1px var(--caramel)}
+
+.pas{min-height:48px;border-radius:var(--r-pill);padding:0 18px;
+  background:var(--porcelaine);border:1px solid var(--filet-fort);color:var(--chocolat)}
+
+.jbtn{height:48px;min-height:48px;border-radius:12px;background:var(--porcelaine);
+  border:1px solid var(--contour);color:var(--cacao)}
+.jbtn.on{background:var(--chocolat);border-color:var(--chocolat);color:var(--porcelaine)}
+
+/* Chevron de dépliage : 44 → 48 px. */
+.chev{width:48px;height:48px;border-radius:12px;background:var(--creme-2);
+  border:1px solid var(--filet-fort);color:var(--cacao)}
+.chev:active{background:var(--chocolat);border-color:var(--chocolat);color:var(--porcelaine)}
+.invp-h.depliable .chev{width:28px;height:28px;border-radius:8px;border:0}
+
+
+/* =============================================================================
+   9. STATUTS : pastilles, alertes, verdicts, jauges, frigo virtuel
+   ========================================================================== */
+/* --- Pastilles : un signe devant le mot --------------------------------
+   ✓ bon · ! attention · ✕ grave. Un signe se lit à un mètre là où une forme
+   de 7 px (rond, losange, triangle) ne se distinguait plus. Bord teinté en
+   plus du fond, pour les écrans délavés par le soleil. */
+.pill{
+  border-radius:var(--r-pill);padding:4px 11px 4px 9px;gap:5px;
+  font-size:12px;font-weight:650;letter-spacing:0;line-height:1.25;
+  border:1px solid transparent;
+}
+.pill.ok::before,.pill.warn::before,.pill.bad::before{
+  flex:0 0 auto;font:800 11.5px/1 var(--sans);letter-spacing:0;
+  width:auto;height:auto;background:none;clip-path:none;transform:none;border-radius:0}
+.pill.ok::before  {content:'✓'}
+.pill.warn::before{content:'!';padding:0 1px}
+.pill.bad::before {content:'✕'}
+.pill.ok  {background:var(--pistache-l); color:var(--pistache-d); border-color:var(--pistache-c)}
+.pill.warn{background:var(--caramel-l);  color:var(--caramel-d);  border-color:var(--caramel-c)}
+.pill.bad {background:var(--framboise-l);color:var(--framboise-d);border-color:var(--framboise-c)}
+.pill.n   {background:var(--creme-2);    color:var(--cacao);      border-color:var(--filet)}
+.pill.ciel{background:var(--myrtille-l); color:var(--myrtille);   border-color:var(--myrtille-c)}
+.pill.ambre{background:var(--caramel-l); color:var(--caramel-d);  border-color:var(--caramel-c)}
+
+/* --- Alertes : une forme ET un signe distincts par niveau ---------------
+   Le pictogramme d'origine (.ai : ▲ ●) avait été masqué. On le remplace par
+   un pseudo-élément dessiné : octogone « ✕ » (grave, comme un panneau
+   stop), losange « ! » (attention), rond « ✓ » (bon), rond « i » (info).
+   Trois silhouettes ET trois signes : rien ne repose sur la seule teinte. */
+.alerte{
+  align-items:center;gap:14px;padding:14px 16px 14px 14px;
+  border-radius:16px;border:1px solid transparent;
+}
+.alerte::before{
+  content:'';flex:0 0 auto;width:32px;height:32px;display:grid;place-items:center;
+  border-radius:50%;color:#FFFCF7;font:700 15px/1 var(--sans);
+}
+.alerte.bad {background:var(--framboise-l);border-color:var(--framboise-c);color:var(--framboise-d)}
+.alerte.warn{background:var(--caramel-l);  border-color:var(--caramel-c);  color:var(--caramel-d)}
+.alerte.ok  {background:var(--pistache-l); border-color:var(--pistache-c); color:var(--pistache-d)}
+.alerte.info{background:var(--myrtille-l); border-color:var(--myrtille-c); color:var(--myrtille)}
+.alerte.bad::before {content:'✕';background:var(--framboise);border-radius:0;font-size:15px;font-weight:800;
+  clip-path:polygon(30% 0,70% 0,100% 30%,100% 70%,70% 100%,30% 100%,0 70%,0 30%)}
+.alerte.warn::before{content:'!';background:var(--caramel);border-radius:3px;font-weight:800;
+  clip-path:polygon(50% 0,100% 50%,50% 100%,0 50%)}
+.alerte.ok::before  {content:'✓';background:var(--pistache)}
+.alerte.info::before{content:'i';background:var(--myrtille);font-family:var(--serif);font-style:italic;font-size:17px}
+.alerte b{font-size:15.5px;font-weight:700;line-height:1.25;color:inherit}
+.alerte p{opacity:1;color:var(--cacao);font-size:13.5px;line-height:1.4}
+.alerte .go{margin-left:auto}
+
+/* --- Verdicts, rappels, lectures --------------------------------------- */
+.verdict,.rappel,.lecture{border-radius:var(--r-bloc);border:1px solid transparent}
+.verdict.ok {background:var(--pistache-l);border-color:var(--pistache-c);color:var(--pistache-d)}
+.verdict.bad{background:var(--framboise-l);border-color:var(--framboise-c);color:var(--framboise-d)}
+.verdict.warn{background:var(--caramel-l);border-color:var(--caramel-c);color:var(--caramel-d)}
+.verdict.n,.rappel,.lecture{background:var(--creme-2);color:var(--cacao)}
+.verdict.bad span{opacity:1;color:var(--cacao)}
+
+/* --- Jauges ------------------------------------------------------------ */
+.jauge{height:8px;background:var(--creme-3);border-radius:var(--r-pill)}
+.jauge i{background:linear-gradient(90deg,var(--chocolat-2),var(--chocolat));border-radius:var(--r-pill)}
+.jauge i.warn{background:var(--caramel)}
+.jauge i.bad{background:var(--framboise)}
+.avanc span{color:var(--cacao)}
+
+/* --- Jauge d'écart glace ----------------------------------------------- */
+.ecart .piste{
+  height:40px;border-radius:14px;border:1px solid var(--filet-fort);
+  background:linear-gradient(90deg,var(--framboise-l),var(--porcelaine) 44%,var(--porcelaine) 56%,var(--framboise-l));
+}
+.ecart .cible{background:var(--pistache-l);border-left:1.5px dashed var(--pistache-d);border-right:1.5px dashed var(--pistache-d)}
+.ecart .aig{background:var(--chocolat);box-shadow:0 0 0 2px var(--porcelaine)}
+.ecart .lg{color:var(--noisette)}
+
+/* --- Frigo virtuel (FIFO) : bord gauche + teinte + libellé ------------- */
+.fifo{border:1px solid;border-left-width:5px;border-radius:16px}
+.fifo.vert  {background:var(--pistache-l); border-color:var(--pistache-c); border-left-color:var(--pistache)}
+.fifo.orange{background:var(--caramel-l);  border-color:var(--caramel-c);  border-left-color:var(--caramel)}
+.fifo.rouge {background:var(--framboise-l);border-color:var(--framboise-c);border-left-color:var(--framboise)}
+.fifo.vert .fr b  {color:var(--pistache-d)}
+.fifo.orange .fr b{color:var(--caramel-d)}
+.fifo.rouge .fr b {color:var(--framboise-d)}
+.fifo .fd,.fifo .fr span{color:var(--cacao)}
+
+.demo{background:var(--caramel-l);color:var(--caramel-d);border-color:var(--or)}
+.tq b{color:var(--cacao)}
+.tq.neg b{color:var(--framboise-d)}
+
+
+/* =============================================================================
+   10. LISTES : tâches, listes denses, menu, fil d'activité, lots, inventaire
+   ========================================================================== */
+/* --- Tâches ------------------------------------------------------------ */
+.tache{background:var(--porcelaine);border:1px solid var(--filet);border-radius:var(--r-bloc)}
+#page .tache{padding:10px 14px;gap:12px;min-height:64px}
+#page .tache + .tache{margin-top:8px}
+/* La case est LE bouton : 44 → 48 px, bord fonctionnel à 3,6:1. */
+#page .tache .box{
+  width:48px;height:48px;min-height:48px;border-radius:13px;
+  border:1.5px solid var(--contour);background:var(--porcelaine);
+  color:transparent;font-size:19px;
+}
+#page .tache .box:active{transform:scale(.92);background:var(--creme-2)}
+.tache .tn,#page .tache .tn{color:var(--chocolat);font-size:15.5px;font-weight:600}
+.tache .tm{color:var(--noisette)}
+.tnum,#page .tnum{color:var(--noisette);font-weight:700}
+.tache.on{background:var(--pistache-l);border-color:var(--pistache-c)}
+.tache.on .tn,#page .tache.on .tn{color:var(--pistache-d)}
+.tache.on .box,#page .tache.on .box{background:var(--pistache);border-color:var(--pistache);color:#FFFCF7}
+.tache.on .tnum{color:var(--pistache-d)}
+.tache.retard{background:var(--framboise-l);border-color:var(--framboise-c)}
+#page .tache.liee .box{background:var(--creme-2);border:1.5px dashed var(--brume-2)}
+#page .tache.liee.on .box{background:var(--pistache);border:1.5px solid var(--pistache);color:#FFFCF7}
+.tache.urgente{background:var(--framboise-l);border-color:var(--framboise-c)}
+.tache.urgente .tnum,#page .tache.urgente .tnum{
+  width:26px;height:26px;border-radius:50%;display:grid;place-items:center;
+  background:var(--framboise);color:#FFFCF7;font-size:13px;
+}
+.tache.urgente .tm{color:var(--framboise-d)}
+.tn-btn{min-height:44px;display:inline-flex;align-items:center;color:var(--chocolat)}
+
+/* Tâches réunies dans une carte (procédures de « Ma journée ») : une liste à
+   filets, pas des boîtes dans une boîte. La ligne faite garde son code :
+   case pistache pleine, libellé pistache. Préfixe #page : style.css écrit
+   « #page .tache » (1,1,0) pour ses marges. */
+#page .card .stack > .tache{
+  background:transparent;border:0;border-radius:12px;
+  padding:8px 4px;min-height:64px;margin-top:0;
+}
+#page .card .stack > * + .tache{border-top:1px solid var(--filet);border-radius:0}
+#page .card .stack > .tache.on{background:transparent}
+/* La tâche urgente reste un bloc framboise arrondi : elle doit sortir du lot. */
+#page .card .stack > .tache.urgente{
+  background:var(--framboise-l);border:1px solid var(--framboise-c);border-radius:12px;
+  padding-left:10px;padding-right:10px;margin:4px 0;
+}
+#page .card .stack > .tache.urgente + .tache{border-top:0}
+#page .card .stack > .tache .btn.sm{flex:0 0 auto}
+
+/* Une tâche seule dans une carte (nettoyage, hebdo) dessinait un cadre dans
+   le cadre. La carte devient le cadre ; l'état « fait » passe à la carte
+   quand le navigateur sait la viser (:has), sinon la case pleine le dit. */
+#page .card > .tache{background:transparent;border-color:transparent;padding-left:0;padding-right:0;min-height:52px}
+@supports selector(:has(*)){
+  .card .stack:has(> .tache){gap:0}
+  #page .card:has(> .tache.on){background:var(--pistache-l);border-color:var(--pistache-c)}
+  #page .card:has(> .tache.urgente){background:var(--framboise-l);border-color:var(--framboise-c)}
+  #page .card:has(> .tache){padding-top:12px;padding-bottom:12px}
+}
+
+/* Étapes d'une fiche technique (dans la feuille) : numéro en pastille. */
+#sheet-corps .tache{background:transparent;border:0;border-bottom:1px solid var(--filet);border-radius:0}
+#sheet-corps .tache .tn{color:var(--chocolat)}
+.stepnum{background:var(--creme-2);color:var(--cacao)}
+
+/* --- Listes denses (historique, réglages) ------------------------------ */
+.dense{
+  background:var(--porcelaine);border:1px solid var(--filet);border-radius:16px;
+  box-shadow:var(--ombre);
+}
+.dl{min-height:52px;padding:12px 16px;font-size:14.5px}
+.dl + .dl{border-top:1px solid var(--filet)}
+.dl:nth-child(even){background:rgba(240,232,218,.38)}
+.dl .c{color:var(--cacao)}
+.dense-h{background:var(--creme-2);color:var(--cacao);font-size:11px;letter-spacing:.1em;padding:10px 16px}
+
+/* --- Entrées de menu (« Tout le reste ») ------------------------------- */
+.menu-item{
+  min-height:68px;padding:14px 18px;background:var(--porcelaine);
+  border:1px solid var(--filet);border-radius:16px;box-shadow:0 1px 0 rgba(42,26,18,.03);
+}
+.menu-item:active{background:var(--creme-2);transform:scale(.99)}
+.menu-item .mi-t{color:var(--chocolat);font-weight:600}
+.menu-item .mi-s{color:var(--noisette)}
+.menu-item .mi-fl{color:var(--or-d);font-size:24px;line-height:1}
+
+/* --- Fil d'activité ---------------------------------------------------- */
+.fi{padding:12px 0;align-items:flex-start}
+.fi + .fi{border-top:1px solid var(--filet)}
+.fi .fh{color:var(--noisette);padding-top:6px}
+/* .fx et .fm sont des <span> : la date se collait au texte (« 13/1007/10 »). */
+.fi .fx,.fi .fm{display:block}
+.fi .fx{color:var(--chocolat);padding-top:5px}
+.fi .fm{color:var(--noisette)}
+.fi.warn .fx{color:var(--caramel-d);font-weight:600}
+.fi.bad .fx{color:var(--framboise-d);font-weight:650}
+/* Le fil dit aussi le niveau par un signe, pas seulement par la teinte. */
+.fi.warn .fx::before{content:'! ';font-weight:800}
+.fi.bad .fx::before{content:'✕ ';font-weight:800}
+
+/* --- Traçabilité, inventaire ------------------------------------------- */
+.lotl,.invp,.invl{background:var(--porcelaine);border:1px solid var(--filet);border-radius:var(--r-bloc)}
+.lotf,.lotd,.invn small,.invc,.invp-t label span{color:var(--noisette)}
+.inv-total{background:var(--chocolat);color:var(--porcelaine);border-radius:16px;box-shadow:var(--ombre-btn)}
+.inv-total b{font-family:var(--serif);font-weight:600;font-variant-numeric:lining-nums tabular-nums}
+.inv-total span{opacity:.82}
+.rang.decl{border-top-color:var(--filet)}
+/* Teinte de section : repli crème si la variable devient invalide (la règle
+   sombre de style.css la définit à partir d'elle-même). */
+.sec-bloc{background:var(--sec-teinte,var(--creme-2))}
+.sec-pastille{background:var(--chocolat)}
+
+/* --- États vides : un petit ornement plutôt qu'un vide sec ------------- */
+.vide{color:var(--noisette);padding:40px 20px}
+.vide::before{
+  content:'';display:block;width:56px;height:10px;margin:0 auto 14px;
+  background:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 56 10'%3E%3Cpath d='M0 5h21M35 5h21' stroke='%23B08A4A' stroke-width='1'/%3E%3Cpath d='M28 1.5l3.5 3.5-3.5 3.5-3.5-3.5z' fill='%23B08A4A'/%3E%3C/svg%3E") center/contain no-repeat;
+}
+
+/* --- Photos ------------------------------------------------------------ */
+.vign{border-color:var(--filet);border-radius:10px;background:var(--creme-2)}
+.preuve-plein,.guide-apercu{background:var(--creme-2)}
+.pp-barre .btn{min-height:48px}
+.pp-fermer{width:48px;height:48px}
+
+
+/* =============================================================================
+   11. SAISIES DE TERRAIN : températures, phases, jours
+   ========================================================================== */
+/* Bascules matin / soir, ouverture / service / fermeture, glace / sec : une
+   piste crème creusée, le choix en curseur porcelaine SURÉLEVÉ et CERCLÉ de
+   chocolat (2 px, 13:1 sur la piste). Lisible à un mètre comme l'était
+   l'aplat chocolat, mais il ne se confond plus avec le bouton principal :
+   l'aplat chocolat est réservé à l'action (« Valider… »). */
+.tseg,.phase-nav{
+  gap:6px;padding:5px;background:var(--creme-2);
+  border:1px solid var(--filet);border-radius:18px;
+}
+.tseg button,.phase-nav button{
+  border:0;background:transparent;border-radius:14px;box-shadow:none;
+  color:var(--cacao);min-height:66px;
+}
+.tseg button:active,.phase-nav button:active{background:var(--creme-3)}
+.tseg button.on,.phase-nav button.on{
+  background:var(--porcelaine);color:var(--chocolat);border:0;font-weight:700;
+  box-shadow:inset 0 0 0 2px var(--chocolat),0 1px 2px rgba(42,26,18,.10),0 8px 16px -8px rgba(42,26,18,.30);
+}
+.tseg button .tsl{font-weight:650}
+.tseg button.on .tsl,.phase-nav button.on span{font-weight:750}
+.tseg button.on svg.ic,.phase-nav button.on svg.ic{color:var(--or-d);stroke-width:2.1}
+.tseg button small{color:var(--noisette);opacity:1;font-weight:550}
+.tseg button.on small{color:var(--cacao)}
+
+/* Ligne d'enceinte : l'état se lit au fond, au bord ET à l'étiquette. */
+.tligne{
+  background:var(--porcelaine);border:1px solid var(--filet);border-radius:18px;
+  padding:14px 16px;box-shadow:var(--ombre);
+}
+.tligne + .tligne{margin-top:10px}
+/* Saisi mais pas encore validé : un liseré myrtille, sans noyer la ligne
+   dans le bleu — la valeur, elle, garde sa couleur de conformité. */
+.tligne.saisi{background:var(--porcelaine);border-color:var(--myrtille);box-shadow:inset 0 0 0 1px var(--myrtille)}
+.tligne.valide{background:var(--pistache-l);border-color:var(--pistache-c);box-shadow:none}
+.tl-haut b{font-size:16px;color:var(--chocolat)}
+.tl-cible{color:var(--noisette)}
+.tl-etat{background:var(--creme-2);color:var(--cacao);padding:3px 10px}
+.tligne.saisi .tl-etat{background:var(--myrtille-c);color:var(--myrtille)}
+.tligne.valide .tl-etat{background:var(--pistache);color:#FFFCF7}
+.tm-pas,.tm-off{
+  border-radius:14px;background:var(--porcelaine);border:1px solid var(--filet-fort);
+  color:var(--cacao);box-shadow:0 1px 0 rgba(42,26,18,.04);
+}
+.tm-pas:active{background:var(--creme-2)}
+.tm-pas,.tm-off,.tm-val{height:56px;min-height:56px}
+.tm-val{position:relative;font-variant-numeric:lining-nums proportional-nums;border-radius:14px;background:var(--porcelaine);border:1px solid var(--contour);color:var(--chocolat)}
+.tm-val.vert{background:var(--pistache-l);border-color:var(--pistache);color:var(--pistache-d)}
+.tm-val.rouge{background:var(--caramel-l);border-color:var(--caramel);color:var(--caramel-d)}
+.tm-val.crit{background:var(--framboise);border-color:var(--framboise);color:#FFFCF7}
+.tm-val small{opacity:1;font-weight:600;color:inherit}
+/* Le verdict est écrit sous la valeur — « ✓ OK », « ! HORS CIBLE »,
+   « ✕ CRITIQUE » — : la couleur n'est plus seule à le dire. */
+.tm-val.vert,.tm-val.rouge,.tm-val.crit{padding-bottom:13px;line-height:1}
+.tm-val.vert::after,.tm-val.rouge::after,.tm-val.crit::after{
+  position:absolute;left:0;right:0;bottom:6px;text-align:center;
+  font:800 10.5px/1 var(--sans);letter-spacing:.08em;white-space:nowrap;
+}
+.tm-val.vert::after{content:'✓ OK'}
+.tm-val.rouge::after{content:'! HORS CIBLE'}
+.tm-val.crit::after{content:'✕ CRITIQUE'}
+.tm-off.on{background:var(--cacao);border-color:var(--cacao);color:#FFFCF7}
+.tm-hs{background:var(--creme-2);color:var(--cacao)}
+.tm-lbl{color:var(--noisette)}
+
+/* Navigation entre les jours */
+.navjour button{
+  width:52px;height:52px;border-radius:16px;background:var(--porcelaine);
+  border:1px solid var(--filet-fort);color:var(--cacao);box-shadow:var(--ombre);
+}
+.navjour button:active{background:var(--creme-2)}
+.nj-c b{font-size:17px;font-weight:700;letter-spacing:-.015em}
+.nj-c span{color:var(--noisette)}
+
+/* Détail de caisse */
+.detail-t{color:var(--cacao)}
+.detail-l span{color:var(--cacao)}
+.detail-sep{background:var(--filet)}
+
+
+/* =============================================================================
+   12. FEUILLE MODALE
+   ========================================================================== */
+#sheet .voile{background:rgba(42,26,18,.42);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px)}
+/* « > » : la feuille est .box, mais les numéros d'étape des fiches sont AUSSI
+   des <span class="box"> à l'intérieur. La règle #sheet .box de style.css
+   leur donnait marges, ombre et animation de feuille : la pastille de 30 px
+   s'étirait à 64 px. On vise donc l'enfant direct, et on nettoie plus bas. */
+#sheet > .box{
+  background:var(--creme);border:1px solid rgba(255,255,255,.7);
+  padding:12px 22px calc(26px + var(--safe-b));box-shadow:var(--ombre-lev);
+}
+#sheet-corps .box{
+  position:static;max-width:none;max-height:none;overflow:visible;
+  padding:0;box-shadow:none;animation:none;
+}
+#sheet-corps .tache .box{border-radius:10px;font-variant-numeric:tabular-nums}
+#sheet .poignee{width:44px;height:5px;background:var(--filet-fort);margin-bottom:18px}
+/* Le titre de la feuille est son titre de page : serif, comme en haut. */
+#sheet #sheet-titre{
+  font-family:var(--serif);font-size:28px;font-weight:600;
+  letter-spacing:-.012em;line-height:1.15;margin-bottom:6px;
+}
+#sheet .sub{color:var(--noisette);font-size:14px;margin-bottom:20px}
+#sheet .actions{margin-top:24px}
+@media(min-width:720px){
+  #sheet > .box{max-width:600px;padding:14px 32px 30px;border-radius:var(--r-sheet)}
+}
+
+
+/* =============================================================================
+   13. CONNEXION, RATTACHEMENT, AMORÇAGE
+   ========================================================================== */
+/* Marge haute de 64 px : c'est la voie du toast sur cet écran (section 15).
+   Un message — équipe enregistrée, erreur réseau — s'y pose sans jamais
+   couvrir la marque, le pavé ni les liens du bas. */
+#login{
+  background:var(--creme);justify-content:flex-start;
+  padding:max(64px, calc(var(--safe-t) + 56px)) 22px calc(24px + var(--safe-b));
+}
+#login::before{
+  background:
+    radial-gradient(70vw 50vh at 10% -5%, rgba(201,216,168,.42), transparent 62%),
+    radial-gradient(60vw 46vh at 95% 105%, rgba(239,195,208,.34), transparent 62%),
+    radial-gradient(50vw 40vh at 85% 0%,  rgba(234,219,188,.45), transparent 60%);
+}
+/* margin:auto centre quand il y a la place et laisse défiler sinon. Avec
+   justify-content:center, un contenu plus haut que l'écran était rogné en
+   haut et inatteignable. */
+#login .in{margin:auto;max-width:560px}
+
+/* La marque : serif, filet or et losange, lieu en petites capitales. */
+#login .lg,#rattach .lg,#amorcage .lg{text-align:center;margin-bottom:32px}
+#login .lg h1,#rattach .lg h1,#amorcage .lg h1{
+  font-family:var(--serif);font-size:var(--t-marque);font-weight:600;
+  letter-spacing:-.015em;line-height:1.05;color:var(--chocolat);
+}
+#login .lg h1::after,#rattach .lg h1::after,#amorcage .lg h1::after{
+  content:'';display:block;width:84px;height:10px;margin:14px auto 0;
+  background:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 84 10'%3E%3Cpath d='M0 5h34M50 5h34' stroke='%23B08A4A' stroke-width='1'/%3E%3Cpath d='M42 1l4 4-4 4-4-4z' fill='%23B08A4A'/%3E%3C/svg%3E") center/contain no-repeat;
+}
+#login .lg p,#rattach .lg p,#amorcage .lg p{
+  font-size:12px;font-weight:650;letter-spacing:.16em;text-transform:uppercase;
+  color:var(--noisette);margin-top:12px;
+}
+/* Sceau de la maison : le cornet de l'icône, redessiné aux couleurs de la
+   palette (boule porcelaine, cornet or, tuile chocolat) — l'icône d'origine,
+   sarcelle sur bleu nuit, jurait avec l'ivoire. Pur CSS, rien à charger. */
+#login .lg::before,#rattach .lg::before,#amorcage .lg::before{
+  content:'';display:block;width:58px;height:58px;margin:0 auto 16px;border-radius:17px;
+  background:
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 40'%3E%3Cg fill='%23F6EEE2'%3E%3Ccircle cx='20' cy='12.5' r='7.5'/%3E%3Ccircle cx='12.8' cy='17.2' r='5.6'/%3E%3Ccircle cx='27.2' cy='17.2' r='5.6'/%3E%3Crect x='8.6' y='16.6' width='22.8' height='5.6' rx='2.8'/%3E%3C/g%3E%3Cpath d='M10.2 22.6h19.6L20 38.4z' fill='%23C9A464'/%3E%3Cpath d='M15.2 26.6h9.6M17.4 30.6h5.2' stroke='%232A1A12' stroke-width='1.7' stroke-linecap='round'/%3E%3C/svg%3E") center 52%/36px 36px no-repeat,
+    linear-gradient(155deg,#4A3022,var(--chocolat) 70%);
+  box-shadow:inset 0 0 0 1px rgba(201,164,100,.45),0 1px 2px rgba(42,26,18,.20),0 12px 24px -12px rgba(42,26,18,.55);
+}
+#login .entete{justify-content:center;margin:0 0 16px}
+#login .entete h3{flex:0 1 auto;text-align:center}
+
+/* Choix de la personne : cartes centrées (deux personnes ne restent plus
+   collées à gauche d'une grille de quatre). */
+#login .qui{display:flex;flex-wrap:wrap;justify-content:center;gap:14px}
+.qui button{
+  flex:0 1 150px;min-height:156px;padding:18px 12px 16px;gap:8px;
+  background:var(--porcelaine);border:1px solid var(--filet);border-radius:22px;
+  box-shadow:var(--ombre);backdrop-filter:none;-webkit-backdrop-filter:none;
+  transition:transform var(--tr),background-color var(--tr),box-shadow var(--tr);
+}
+.qui button:active{transform:scale(.96);background:var(--creme-2)}
+.qui .av{width:64px;height:64px;font-size:20px;font-weight:700;letter-spacing:.03em;color:#FFFCF7;
+  box-shadow:var(--voile-avatar),0 0 0 3px var(--porcelaine),0 0 0 4px var(--filet-fort)}
+.qui .nm{font-size:17px;font-weight:650;color:var(--chocolat);margin-top:4px}
+.qui .rl{font-size:11px;font-weight:650;letter-spacing:.1em;text-transform:uppercase;color:var(--noisette)}
+
+/* Code personnel */
+#login-pin .card{
+  background:var(--porcelaine);border:1px solid var(--filet);border-radius:28px;
+  box-shadow:var(--ombre-lev);padding:28px 28px 26px;
+}
+#login-pin .card > .ch{margin-bottom:0}
+/* L'avatar du pavé n'avait aucun style hors de .qui : un petit rectangle
+   surligné à la place d'un rond. */
+#pin-av,.av{
+  display:inline-grid;place-items:center;flex:0 0 auto;border-radius:50%;
+  color:#FFFCF7;font-weight:650;letter-spacing:.03em;box-shadow:var(--voile-avatar);
+}
+.av{width:44px;height:44px;font-size:14px}
+#pin-av{width:68px;height:68px;font-size:22px;
+  box-shadow:var(--voile-avatar),0 0 0 3px var(--porcelaine),0 0 0 4.5px var(--or)}
+#pin-nom{font-family:var(--serif);font-size:30px;font-weight:600;letter-spacing:-.012em;margin-top:12px}
+#pin-aide{color:var(--cacao);font-size:14px}
+.pins{gap:16px;margin:20px 0 24px}
+/* Points vides : un anneau à 3,6:1 plutôt qu'un gris à peine visible. */
+.pins i{width:14px;height:14px;background:transparent;box-shadow:inset 0 0 0 1.5px var(--contour)}
+.pins i.on{background:var(--chocolat);box-shadow:inset 0 0 0 1.5px var(--chocolat);transform:scale(1.12)}
+.pins.err i{background:var(--framboise);box-shadow:none}
+/* Code faux : le message passe en framboise pendant la secousse des points
+   (app.js ne laisse la classe « err » que 0,4 s ; le texte « Code incorrect »
+   reste ensuite, en cacao). */
+@supports selector(:has(*)){
+  #pin-aide:has(+ #pin-points.err){color:var(--framboise-d);font-weight:650}
+}
+
+/* Pavé : touches plus larges (336 px) et plus hautes (76 px). Touches
+   crème bombées sur la carte porcelaine, cerclées d'un filet plus marqué :
+   elles se détachent de la carte même sans ombre visible au soleil. */
+.pave{gap:14px;max-width:336px}
+.pave button{
+  height:76px;border-radius:22px;color:var(--chocolat);
+  background:linear-gradient(180deg,#FFFDF9,var(--creme) 100%);
+  border:1px solid var(--filet-fort);
+  box-shadow:inset 0 1px 0 #fff,0 1px 0 rgba(42,26,18,.06),0 8px 16px -12px rgba(42,26,18,.45);
+  font-family:var(--sans);font-size:30px;font-weight:550;
+  transition:transform .12s cubic-bezier(.32,.72,0,1),background-color .12s;
+}
+.pave button:active{background:var(--creme-3);transform:scale(.94)}
+.pave .fn{background:transparent;border-color:transparent;box-shadow:none;
+  font-size:16px;font-weight:650;color:var(--cacao)}
+/* Le glyphe « effacer » était à 16 px : on ne le voyait pas. */
+.pave .fn[data-k="effacer"]{font-size:26px;font-weight:500}
+.pave .fn:active{background:var(--creme-2)}
+#pin-retour{margin-top:12px}
+#login-etat{color:var(--noisette)}
+#login-etat:empty{display:none}
+#lg-reset{min-height:48px;margin-top:8px;color:var(--noisette);text-underline-offset:3px}
+
+/* Paysage iPad : le code se compose à droite, l'identité reste à gauche.
+   Le pavé tient sans défilement dans 768 px de haut. */
+@media (min-width:900px) and (orientation:landscape){
+  #login .in{max-width:760px}
+  #login .lg{margin-bottom:26px}
+  #login-pin .card{
+    display:grid;grid-template-columns:minmax(0,1fr) 336px;
+    grid-template-rows:1fr auto auto auto auto 1fr;column-gap:44px;
+    padding:30px 36px;
+  }
+  #login-pin .card > *{grid-column:1}
+  #login-pin .card > .ch{grid-row:2}
+  #login-pin .card > h2{grid-row:3}
+  #login-pin .card > .cs{grid-row:4}
+  #login-pin .card > .pins{grid-row:5}
+  #login-pin .card > .pave{grid-column:2;grid-row:1 / -1;margin:0;gap:12px}
+  #login-pin .pave button{height:72px}
+}
+
+/* Pendant la saisie du code, le sceau s'efface : le pavé doit tenir en
+   entier, sans défiler, sur 768 px de haut comme sur un téléphone. Sans
+   :has() (Safari < 15.4), le sceau reste et l'écran défile un peu. */
+@supports selector(:has(*)){
+  #login:has(#login-pin:not([hidden])) .lg::before{display:none}
+  @media (max-width:600px){
+    /* Voie du toast élargie : un message d'erreur long tient sur deux lignes. */
+    #login:has(#login-pin:not([hidden])){padding-top:max(78px, calc(var(--safe-t) + 70px))}
+    #login:has(#login-pin:not([hidden])) #login-pin .card{padding:20px 18px 16px}
+    #login:has(#login-pin:not([hidden])) .pave{gap:10px}
+    #login:has(#login-pin:not([hidden])) #pin-retour{margin-top:6px}
+    #login:has(#login-pin:not([hidden])) .lg{margin-bottom:14px}
+    #login:has(#login-pin:not([hidden])) .lg h1{font-size:31px}
+    #login:has(#login-pin:not([hidden])) .lg h1::after{margin-top:9px}
+    #login:has(#login-pin:not([hidden])) .lg p{margin-top:7px}
+    #login:has(#login-pin:not([hidden])) #pin-av{width:56px;height:56px;font-size:19px}
+    #login:has(#login-pin:not([hidden])) #pin-nom{margin-top:8px}
+    #login:has(#login-pin:not([hidden])) .pins{margin:14px 0 18px}
+  }
+}
+
+/* Rattachement et AMORÇAGE.
+   #amorcage (création de la première équipe) n'avait AUCUNE règle de
+   position : il s'ajoutait en bas de <body>, sous #login (fixe, z 250), et
+   restait invisible. Correctif assumé : même traitement que #rattach, en
+   couche fixe au-dessus de la connexion (260, sous le toast à 300). */
+#rattach,#amorcage{
+  position:fixed;inset:0;z-index:260;
+  background:
+    radial-gradient(70vw 50vh at 10% -5%, rgba(201,216,168,.42), transparent 62%),
+    radial-gradient(60vw 46vh at 95% 105%, rgba(239,195,208,.34), transparent 62%),
+    radial-gradient(50vw 40vh at 85% 0%,  rgba(234,219,188,.45), transparent 60%),
+    var(--creme);
+  overflow-y:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain;
+  padding:max(28px,var(--safe-t)) 18px calc(28px + var(--safe-b));
+}
+#rattach{z-index:900}
+#rattach .in,#amorcage .in{max-width:540px;margin:0 auto;padding-top:5vh}
+#amorcage .card.solide{border-radius:24px;padding:24px 24px 22px}
+#amorcage .card.plat{
+  background:var(--creme);border:1px solid var(--filet);border-radius:16px;padding:14px 16px 16px;
+}
+#amorcage h2,#rattach h2{font-size:var(--t-titre);font-weight:700;letter-spacing:-.02em}
+
+
+/* =============================================================================
+   14. AVATARS DU FIL ET DE L'ÉQUIPE
+   ========================================================================== */
+.fi .fp{color:#FFFCF7;box-shadow:var(--voile-avatar)}
+
+
+/* =============================================================================
+   15. TOAST, BANDEAU HORS-LIGNE, RETOUR BÊTA
+   ========================================================================== */
+/* Le toast prend la largeur de son texte (borné à l'écran) : centré par
+   « left:50% », il ne disposait que d'une demi-largeur et passait sur deux
+   ou trois lignes au téléphone. */
+#toast{
+  width:max-content;max-width:calc(100vw - 32px);
+  background:rgba(42,26,18,.94);color:var(--porcelaine);
+  border:1px solid rgba(255,255,255,.08);border-radius:24px;
+  padding:13px 22px;font-size:14.5px;font-weight:550;line-height:1.35;box-shadow:var(--ombre-lev);
+}
+/* Erreur : framboise ET un signe ✕ dans une pastille, pas la seule teinte. */
+#toast.erreur{background:var(--framboise-d);border:1.5px solid var(--framboise-c);padding-left:14px}
+#toast.erreur::before{
+  content:'✕';display:inline-grid;place-items:center;width:20px;height:20px;margin:-2px 10px 0 0;
+  vertical-align:middle;border-radius:50%;background:#FFFCF7;color:var(--framboise-d);
+  font:800 11px/1 var(--sans);
+}
+/* Sur l'écran de connexion, le toast monte EN HAUT, dans une marge réservée
+   au-dessus du sceau (voir section 13) : en bas, il couvrait « Ce n'est pas
+   moi », « Réinitialiser » et, au téléphone, la touche 0 du pavé. */
+#login:not([hidden]) ~ #toast{
+  top:calc(var(--safe-t) + 8px);bottom:auto;
+  transform:translateX(-50%) translateY(-16px);
+}
+#login:not([hidden]) ~ #toast.on{transform:translateX(-50%)}
+
+/* Caramel brûlé : 6,5:1 avec le texte porcelaine. */
+#offline{background:#8A4E0B;color:#FFFCF7}
+
+/* Retour bêta : pilule de verre ivoire, filet et point or. Elle ne fait plus
+   concurrence au bouton principal chocolat. */
+#fb{
+  background:rgba(255,252,247,.90);color:var(--chocolat);min-height:48px;
+  -webkit-backdrop-filter:blur(16px) saturate(1.4);backdrop-filter:blur(16px) saturate(1.4);
+  border:1px solid var(--filet-fort);box-shadow:var(--ombre-lev);
+  font-size:13.5px;font-weight:650;padding:0 18px 0 15px;
+  bottom:calc(var(--barre-h) + 14px);
+}
+#fb:active{background:var(--creme-2)}
+#fb .pt{background:var(--or);box-shadow:0 0 0 3px rgba(176,138,74,.22)}
+
+
+/* =============================================================================
+   16. TÉLÉPHONE (≤ 600 px)
+   ========================================================================== */
+@media (max-width:600px){
+  :root{--t-page:24px;--t-chiffre:30px;--t-marque:38px;--t-titre:20px}
+  /* Barre du haut sur deux rangs quand il y a des actions : titre et compte
+     en haut, boutons dessous. Sur une seule ligne, le titre se réduisait à
+     une colonne de 90 px (sous-titre sur quatre lignes) et « Historique »
+     passait SOUS le bouton « Registre sanitaire ». */
+  #topbar{min-height:68px;padding:calc(var(--safe-t) + 10px) var(--pad-x) 10px;
+    gap:8px 10px;flex-wrap:wrap}
+  #topbar .tt{order:1;flex:1 1 0}
+  #compte{order:2;margin-left:0}
+  #topbar .ta{order:3;flex:1 1 100%;justify-content:flex-start}
+  #topbar .ta:empty{display:none}
+  #topbar .ta > *{flex:1 1 0;min-width:0}
+  #topbar .ts{font-size:12.5px;margin-top:2px}
+  .kpi .k{letter-spacing:.07em}
+  /* Listes denses : trois colonnes chiffrées de 88 px ne laissaient plus
+     AUCUNE place au libellé (« Nombre de bacs » réduit à 0 px). Colonnes
+     resserrées, libellé autorisé sur deux lignes. */
+  .dl,.dense-h{gap:8px;padding-left:12px;padding-right:12px}
+  .dl .c.w,.dense-h .c.w{width:58px}
+  .dl .c.ww,.dense-h .c.ww{width:100px}
+  .dl .c1{white-space:normal;overflow-wrap:anywhere;line-height:1.3}
+  #page{padding-top:16px}
+  .card,.card.solide,.card.menthe,.card.corail,.card.ambre,.card.ciel,.card.sable{padding:16px;border-radius:18px}
+  .card.plat{padding:0}
+  .kpi{padding:14px 14px 13px}
+  .alerte{padding:12px 12px 12px 12px;gap:12px}
+  .alerte::before{width:28px;height:28px;font-size:14px}
+  #sheet > .box{padding:10px 18px calc(22px + var(--safe-b))}
+  #sheet #sheet-titre{font-size:25px}
+  .tseg button,.phase-nav button{min-height:62px}
+  #login{padding-left:18px;padding-right:18px}
+  #login .lg{margin-bottom:24px}
+  #login-pin .card{padding:22px 18px 20px}
+  .pave{gap:12px}
+  .pave button{height:72px}
+  #pin-nom{font-size:26px}
+  .qui button{flex-basis:146px;min-height:148px}
+  /* Salutation : serif un cran plus petit, la météo garde sa colonne. */
+  .salut-bloc b{font-size:23px}
+  .meteo-mini .mm-t{font-size:22px}
+  /* Barre d'onglets : six entrées sur 390 px, environ 63 px chacune. */
+  #tabbar{padding-left:3px;padding-right:3px}
+  #tabbar .tab,#tabbar button{padding-left:0;padding-right:0}
+  /* La barre du haut passe sur deux rangs : sa hauteur varie d'un écran à
+     l'autre, le total d'inventaire ne colle donc plus dessous. */
+  .inv-total{position:static}
+}
+/* Indicateurs deux par rangée plutôt qu'en colonne au téléphone : l'écran
+   des écarts tenait sur trois hauteurs d'écran. */
+@supports selector(:has(*)){
+  @media (max-width:600px){
+    .grid.g4:has(> .kpi),.grid.g3:has(> .kpi){grid-template-columns:repeat(2,minmax(0,1fr))}
+  }
+}
+
+
+/* =============================================================================
+   16 bis. TOTAL D'INVENTAIRE, SURVOL
+   ========================================================================== */
+/* Total d'inventaire collant : avec « top:0 », il glissait SOUS la barre du
+   haut (plus haute dans l'empilement) et disparaissait au défilement. Il
+   s'accroche maintenant juste sous elle, bandeau hors ligne compris. */
+.inv-total{top:calc(var(--topbar-h) + 8px)}
+#offline.on ~ #app .inv-total{top:calc(var(--offline-h) + var(--topbar-h) + 8px)}
+
+/* Survol : seulement avec une vraie souris ou un trackpad (poste du
+   manager). « :not(.on) » : une puce choisie garde son aplat chocolat et
+   son texte porcelaine, sinon on aurait du blanc sur blanc au survol. */
+@media (hover:hover) and (pointer:fine){
+  .btn.clair:hover,.btn.ciel:hover,.chip:not(.on):hover,.pas:not(.on):hover,
+  .menu-item:hover,.navjour button:hover,.tm-pas:hover,.jbtn:not(.on):hover{background-color:var(--creme-2)}
+  .btn:not(.clair):not(.ciel):not(.fantome):hover{filter:brightness(1.18)}
+  .qui button:hover{box-shadow:var(--ombre-lev)}
+  .card.tap:hover{border-color:var(--filet-fort)}
+  #tabbar button:not(.on):hover{color:var(--chocolat);background:var(--creme-2)}
+  .tseg button:not(.on):hover,.phase-nav button:not(.on):hover{background:var(--creme-3)}
+  #fb:hover{background:var(--porcelaine)}
+}
+
+
+/* =============================================================================
+   17. MOUVEMENT RÉDUIT
+   style.css neutralise déjà toutes les animations et transitions ; on ajoute
+   la suppression des effets d'appui (échelles) qui restent sinon perceptibles.
+   ========================================================================== */
+@media (prefers-reduced-motion:reduce){
+  .btn:active,.chip:active,.pave button:active,.qui button:active,.menu-item:active,
+  #page .tache .box:active,.card.tap:active,.pas:active,.jbtn:active,
+  #fb:active,#compte:active,.tm-pas:active,.navjour button:active,.pins i.on{transform:none}
+  .card.urgence{animation:none}
+  #login:not([hidden]) ~ #toast{transform:translateX(-50%)}
+}
+
+
+/* =============================================================================
+   18. NOTES
+   • Pas de thème sombre : index.html déclare color-scheme:light, style.css le
+     force aussi sous prefers-color-scheme:dark, et une soixantaine de styles en
+     ligne (var(--ciel-l), couleurs d'avatar, teintes de section) supposent un
+     fond clair. Un mode sombre demanderait de reprendre ces styles en JS.
+   • Un seul !important : la hauteur du sélecteur de mois (#mm), que app.js
+     fixe à 42 px dans un attribut style. La lueur de fond de style.css n'est
+     plus réactivée de force.
+   • Ratios (WCAG 2.x, calculés) — texte :
+       chocolat / crème 15,1 · chocolat / porcelaine 16,4 · cacao / crème 8,0
+       cacao / crème-2 7,3 · noisette / crème 5,4 · noisette / porcelaine 5,8
+       noisette / crème-2 4,9 · bouton porcelaine / chocolat 16,4
+       porcelaine / framboise 6,1 · pistache-d / pistache-l 5,5
+       framboise-d / framboise-l 6,6 · caramel-d / caramel-l 5,7
+       myrtille / myrtille-l 6,5 · « relevé » myrtille / myrtille-c 5,0
+       chiffre KPI pistache-d / porcelaine 6,1 (5,6 sur crème)
+       toast porcelaine / chocolat 94 % 14,0 · toast d'erreur 7,5
+       hors ligne 6,5 · onglet inactif 5,8 · onglet actif / pastille 12,3
+       « Retour bêta » chocolat / verre ivoire 16,2
+       initiales porcelaine / avatar voilé : 4,6 à 16,7 selon la couleur.
+     — éléments graphiques (≥ 3:1) :
+       bord de champ et points PIN 3,6 · anneau du segment actif 13,8
+       anneau de puce choisie 16,4 · repère or de l'onglet 4,9.
+   ========================================================================== */
