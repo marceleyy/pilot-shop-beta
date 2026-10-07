@@ -1385,11 +1385,17 @@ function renderNav() {
      cocher la 18e tâche de la check-liste faisait perdre la position à chaque fois. */
   const memeVue = (STATE.view === id);
   const scrollAvant = window.scrollY || document.documentElement.scrollTop || 0;
+  /* Changer d'écran ramène au jour en cours. La date restait sinon sur la
+     veille consultée dans Nettoyage ou Caisse, et Ma journée, Réassort,
+     Pertes — sans barre de dates ni verrou — écrivaient sous la veille
+     (« checklist:<hier> » cochée par un équipier). Le redessin d'un même
+     écran, lui, garde la date : c'est ainsi que la navigation jour par jour
+     fonctionne (le clic change la date, puis redessine la même vue). */
+  if (!memeVue && STATE.jour !== today()) {
+    STATE.jour = today();
+    if (V.temp && V.temp._d !== undefined) V.temp._d = STATE.jour;
+  }
   STATE.view = id;
-     /* La date n'est PAS remise à aujourd'hui ici : c'était la raison pour
-        laquelle la navigation entre les jours restait sans effet — le clic
-        changeait bien la date, puis le redessin l'écrasait aussitôt.
-        Elle repart à aujourd'hui à la connexion et sur demande explicite. */
      const p = PAGES[id] || { titre:id, sous:'' };
      $('#vue-titre').textContent = p.titre;
      $('#vue-sous').textContent  = p.sous;
@@ -1422,7 +1428,13 @@ function renderNav() {
          '<button class="btn clair bloc" id="rt">Réessayer</button>');
        $('#rt').onclick = () => rendre(id);
      }
-     $$('#page [data-go]').forEach(b => b.onclick = () => rendre(b.dataset.go));
+     /* data-partie suit le lien : cette liaison générique passait APRÈS celle
+        de la vue et l'écrasait — la tâche de recomptage ouvrait l'inventaire
+        sur le mauvais onglet. */
+     $$('#page [data-go]').forEach(b => b.onclick = () => {
+       if (b.dataset.partie) STATE.inventairePartie = b.dataset.partie;
+       rendre(b.dataset.go);
+     });
 
      /* Chaque vue laisse une trace dans l'historique du navigateur : sans cela,
         le bouton « retour » du téléphone quittait purement et simplement
@@ -1586,7 +1598,7 @@ function renderNav() {
          ['fi', 'ff', 'cb', 'esp', 'tpe'].every(c => k[c] !== undefined && k[c] !== null && k[c] !== ''))))),
        /* La veille fournit le fond initial quand le matin n'a pas été saisi. */
        caisseEcart: k ? caisseResume(k, await DB.get('caisse:' + addD(jour, -1), null)).ecart : 0,
-       reassort:Object.keys(r).filter(k2 => r[k2] && r[k2].ok).length,
+       reassort:REASSORT.filter(x => reassortFait(x, r)).length,
        reassortTotal:REASSORT.length, ruptures:rupt
      };
    }
@@ -1942,11 +1954,20 @@ function purgerLocalAncien() {
      const ref = cat.filter(x => typeof x === 'object' && x.id === r.ref)[0];
      return ref && ref.variantes && ref.variantes.length ? ref.variantes : [];
    }
+   /* Une référence est faite quand elle est cochée, ou quand toutes ses
+      déclinaisons le sont. Une seule règle pour l'en-tête, les catégories et
+      l'état du jour : l'en-tête ne comptait que les cases simples et restait
+      à « 17 sur 41 » une fois tout vérifié. */
+   function reassortFait(r, rec) {
+     const dc = declinaisonsReassort(r);
+     if (!dc.length) return !!(rec[r.id] && rec[r.id].ok);
+     return dc.every(x => (rec[r.id + '|' + x] || {}).ok);
+   }
 
    V.reas = async function () {
      const j = STATE.jour;
      const rec = await DB.get('reassort:' + j, {});
-     const faits = REASSORT.filter(r => rec[r.id] && rec[r.id].ok).length;
+     const faits = REASSORT.filter(r => reassortFait(r, rec)).length;
      const rupt  = REASSORT.filter(r => rec[r.id] && rec[r.id].rupture);
    
      $('#page').innerHTML =
@@ -1961,11 +1982,7 @@ function purgerLocalAncien() {
          const items = REASSORT.filter(r => r.cat === c.id);
          /* Une référence est faite quand elle est cochée, ou quand toutes ses
             déclinaisons le sont. */
-         const estFaite = r => {
-           const dc = declinaisonsReassort(r);
-           if (!dc.length) return !!(rec[r.id] && rec[r.id].ok);
-           return dc.every(x => (rec[r.id + '|' + x] || {}).ok);
-         };
+         const estFaite = r => reassortFait(r, rec);
          const ok = items.filter(estFaite).length;
 
          return '<div class="entete"><h3>' + esc(c.id) + '</h3>' +
@@ -2079,6 +2096,8 @@ function purgerLocalAncien() {
    
        $('#qv').onclick = async () => {
          if (reste === null) return toast('Indiquez ce qu’il reste', 'erreur');
+         /* « −3 » était accepté et transmis comme rupture. */
+         if (!(reste >= 0)) return toast('La quantité restante ne peut pas être négative', 'erreur');
          const niveau = RUPTURE.niveaux.filter(n => reste <= n.max)[0];
          rec[cle] = { ok:0, rupture:1, reste:reste, niveau:niveau.id, note:$('#qn').value.trim(),
                       par:STATE.user.prenom, employe:STATE.user.id, at:nowISO() };
@@ -2480,6 +2499,9 @@ window.addEventListener('popstate', function (ev) {
    -------------------------------------------------------------------------- */
 function peutModifier(jour) {
   if (jour === today()) return true;
+  /* Un jour futur n'a rien à valider : le manager pouvait signer d'avance
+     les tâches ou la caisse de demain. Le passé reste corrigible par lui. */
+  if (jour > today()) return false;
   return !!(STATE.user && STATE.user.role === 'manager');
 }
 
@@ -2495,7 +2517,8 @@ function navJour(jour) {
       '<button type="button" class="btn clair bloc sm" data-nj="' + today() + '" ' +
       'style="margin:-4px 0 12px">Revenir à aujourd’hui</button>') +
     (peutModifier(jour) ? '' :
-      '<div class="lecture">Consultation seule — seul le jour en cours est modifiable.</div>');
+      '<div class="lecture">Consultation seule — ' + (jour > today()
+        ? 'un jour à venir ne se remplit pas d’avance.' : 'seul le jour en cours est modifiable.') + '</div>');
 }
 
 /* À appeler après avoir injecté navJour dans la page. */
@@ -3239,11 +3262,17 @@ function ouvrirPremierePeriode() {
    /* =============================================================================
       21. MÉTÉO
       ========================================================================== */
+   let _meteoEchec = 0;   // dernier échec d'open-meteo (voir meteo)
    async function meteo() {
      if (!METEO.actif) return null;
      const cache = await DB.get('meteo', null);
      const frais = cache && (Date.now() - new Date(cache.at)) < METEO.cacheHeures * 3600e3;
      if (frais || !STATE.enLigne) return cache;
+     /* Échec récent : pas de nouvel essai avant 10 minutes. Sans ce frein,
+        chaque redessin de Ma journée (phase, onglet, retour après une photo
+        ou une validation) attendait de nouveau 8 s qu'open-meteo réponde. */
+     const repli = () => cache || { t:'—', code:3, max:'—', pluie:'—', at:nowISO(), source:'indisponible' };
+     if (Date.now() - _meteoEchec < 10 * 60e3) return repli();
      try {
        const u = METEO.endpoint + '?latitude=' + METEO.lat + '&longitude=' + METEO.lon +
          '&current=' + METEO.parametres.current + '&daily=' + METEO.parametres.daily +
@@ -3259,7 +3288,8 @@ function ouvrirPremierePeriode() {
        await DB.set('meteo', o);
        return o;
      } catch (e) {
-       return cache || { t:'—', code:3, max:'—', pluie:'—', at:nowISO(), source:'indisponible' };
+       _meteoEchec = Date.now();
+       return repli();
      }
    }
    function widgetMeteo(m) {
@@ -3703,7 +3733,11 @@ function ouvrirPremierePeriode() {
      $$('[data-s]').forEach(i => i.oninput = save);
    
      const ro = $('#ro');
-     if (ro) ro.onclick = async () => { rec.valide = false; await DB.set(cle, rec); rendre('inv'); };
+     /* Même confirmation que « Rouvrir » de l'onglet Glace : rouvrir rend les
+        chiffres modifiables et défait la validation signée. */
+     if (ro) ro.onclick = () => confirmer('Rouvrir l’inventaire sec ?',
+       'Les chiffres redeviennent modifiables jusqu’à une nouvelle validation.',
+       'Rouvrir', async () => { rec.valide = false; await DB.set(cle, rec); rendre('inv'); });
    
      const vs = $('#vs');
      if (vs) vs.onclick = async () => {
@@ -3816,7 +3850,11 @@ function ouvrirPremierePeriode() {
        (c.invValide ? '' : '<div class="alerte bad" style="margin-top:12px"><span class="ai">▲</span>' +
          '<div><b>Inventaire glace non validé</b><p>Sans comptage réel, le stock de fin est inconnu et l’écart n’a aucune valeur. ' +
          'La période ne pourra pas être clôturée.</p></div>' +
-         '<span class="go"><button class="btn clair sm" data-go="inv">Compter</button></span></div>') +
+         /* « Compter » ouvrait l'ancien écran « Glace et sec », retiré du menu : il
+            alimentait l'écart mais pas les blocages de clôture, qui lisent
+            « Faire l'inventaire ». On envoie vers ce dernier, partie chambre
+            froide : son comptage sert aux deux. */
+         '<span class="go"><button class="btn clair sm" data-go="inventaire" data-partie="froid">Compter</button></span></div>') +
    
        '<div class="grid g2" style="margin-top:12px">' +
        carte(entete('📥', 'Achats de la période', 'Litrage cumulé des bons de livraison.') +
@@ -3829,8 +3867,8 @@ function ouvrirPremierePeriode() {
          '<p class="mini" style="margin-top:10px">' + n1(num(e.jeteL)) + ' L déclarés</p>') + '</div>' +
    
        carte(entete('🍦', 'Glace vendue', 'Poids sorti par la caisse sur la période. C’est la donnée qui pèse le plus dans l’écart.') +
-         '<button class="btn ciel bloc xl" id="imp-btn">Importer l’export de caisse (XLSX)</button>' +
-         '<input type="file" id="import-caisse" accept=".xlsx,.xls" hidden>' +
+         '<button class="btn ciel bloc xl" id="imp-btn">Importer l’export de caisse (Excel ou CSV)</button>' +
+         '<input type="file" id="import-caisse" accept=".xlsx,.xls,.csv,text/csv" hidden>' +
          '<div class="grid g2" id="ec-vente" style="margin-top:16px">' + venduKpi(c, e) +
          '<div class="champ"><label class="f">Corriger à la main (kg)</label>' +
          '<input type="number" step="0.01" id="vd" value="' + (num(c.vendu) || '') + '" placeholder="0"></div></div>' +
@@ -4157,6 +4195,7 @@ function modifierPeriode(per) {
        '<div class="champ"><label class="f">Fin</label><input type="date" id="cl-f" value="' +
        finNaturelle(per.type, demain) + '"></div></div>' +
        '<p class="mini" id="cl-info" style="margin-top:10px"></p>' +
+       '<div id="cl-trou"></div>' +
    
        '<div class="actions"><button class="btn clair" data-fermer>Annuler</button>' +
        '<button class="btn menthe" id="cl-ok">Clôturer et ouvrir</button></div>');
@@ -4172,6 +4211,19 @@ function modifierPeriode(per) {
        $('#cl-info').textContent = 'La nouvelle fenêtre couvrira ' + n + ' jour(s). ' +
          'Tous les écarts et statistiques se recalculeront dessus.';
        $('#cl-dates').style.opacity = type === 'personnalise' ? '1' : '.85';
+       /* Un début choisi après demain laissait des jours hors de toute période,
+          sans rien dire : ni écart, ni statistiques pour eux, et l'écran
+          Périodes affichait ensuite « 0 jour(s) sur 7 ». On le signale et le
+          bouton le dit, sans l'interdire (fermeture saisonnière, congés). */
+       const debut = $('#cl-d').value;
+       const trou = debut > demain ? joursEntre(demain, addD(debut, -1)) : [];
+       $('#cl-trou').innerHTML = trou.length
+         ? '<div class="alerte warn" style="margin-top:10px"><span class="ai">●</span><div><b>' + trou.length +
+           ' jour(s) hors de toute période</b><p>Du ' + fmtD(trou[0]) + ' au ' + fmtD(trou[trou.length - 1]) +
+           ' : ces jours ne compteront dans aucun écart ni aucune statistique. ' +
+           'Pour enchaîner sans interruption, commencez le ' + fmtD(demain) + '.</p></div></div>'
+         : '';
+       $('#cl-ok').textContent = trou.length ? 'Clôturer malgré l’interruption' : 'Clôturer et ouvrir';
      };
      $$('#cl-type [data-t]').forEach(b => b.onclick = () => {
        $$('#cl-type .chip').forEach(x => x.classList.remove('on'));
@@ -4509,16 +4561,56 @@ function modifierPeriode(per) {
      '71111':50
    };
    
+   /* Ouvre l'export quel que soit son format. Avant, tout passait par XLSX.read
+      en binaire : un CSV enregistré en UTF-8 y était lu en Latin-1 (« QtÃ© »,
+      d'où « Aucune colonne de quantité »), ses décimales à virgule devenaient
+      des centaines (« 1,25 » → 125), et une photo ou un PDF choisi par erreur
+      finissait en « Aucune ligne de vente » au lieu de « fichier illisible ». */
+   const IMPORT_ILLISIBLE = 'Fichier illisible : choisissez l’export des ventes de la caisse (.xlsx, .xls ou .csv).';
+   function lireClasseur(o) {
+     const illisible = () => Object.assign(new Error(IMPORT_ILLISIBLE), { illisible:true });
+     const commencePar = (...sig) => sig.every((x, i) => o[i] === x);
+     /* Vrais classeurs : .xlsx (zip) et .xls (OLE), lecture binaire comme avant. */
+     if (commencePar(0x50, 0x4B, 0x03, 0x04) || commencePar(0xD0, 0xCF, 0x11, 0xE0))
+       return XLSX.read(o, { type:'array' });
+     if (!o.length || commencePar(0x25, 0x50, 0x44, 0x46)) throw illisible();          // vide, PDF
+     /* Sinon du texte : CSV, ou tableau HTML que certaines caisses nomment .xls.
+        UTF-8 d'abord, Windows-1252 (CSV d'Excel en français) à défaut. */
+     let texte;
+     try { texte = new TextDecoder('utf-8', { fatal:true }).decode(o); }
+     catch (e) {
+       try { texte = new TextDecoder('windows-1252').decode(o); }
+       catch (e2) { texte = Array.from(o, c => String.fromCharCode(c)).join(''); }
+     }
+     texte = texte.replace(/^\ufeff/, '');
+     const echantillon = texte.slice(0, 4000);
+     const binaires = (echantillon.match(/[\u0000-\u0008\u000e-\u001f]/g) || []).length;
+     if (binaires > echantillon.length / 100) throw illisible();                        // photo, archive…
+     if (/^\s*</.test(texte)) return XLSX.read(texte, { type:'string', raw:true });
+     /* Séparateur : la ligne « sep=; » d'Excel, sinon celui qui domine la
+        première ligne ; point-virgule par défaut, pour ne pas couper « 12,5 ». */
+     let sep = null;
+     const m = /^sep=(.)\r?\n/i.exec(texte);
+     if (m) { sep = m[1]; texte = texte.slice(m[0].length); }
+     if (!sep) {
+       const ligne = texte.split(/\r?\n/).filter(l => l.trim())[0] || '';
+       const compte = c => ligne.split(c).length - 1;
+       sep = [';', '\t', ','].reduce((a, c) => compte(c) > compte(a) ? c : a, ';');
+     }
+     /* raw : les cellules restent du texte, que num() lit à la française. */
+     return XLSX.read(texte, { type:'string', raw:true, FS:sep });
+   }
+
    function lireExportCaisse(file) {
      return new Promise((resolve, reject) => {
        const fr = new FileReader();
    
-       fr.onerror = () => reject(new Error('Fichier illisible'));
+       fr.onerror = () => reject(new Error(IMPORT_ILLISIBLE));
    
        fr.onload = ev => {
          let wb;
-         try { wb = XLSX.read(new Uint8Array(ev.target.result), { type:'array' }); }
-         catch (e) { return reject(new Error('Ce fichier n’est pas un classeur Excel valide')); }
+         try { wb = lireClasseur(new Uint8Array(ev.target.result)); }
+         catch (e) { return reject(new Error(IMPORT_ILLISIBLE)); }
    
          const feuille = wb.Sheets[wb.SheetNames[0]];
          if (!feuille) return reject(new Error('Classeur vide'));

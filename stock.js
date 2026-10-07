@@ -642,7 +642,10 @@ async function recomptageDemande() {
     return !(fam && (fam.lieu === 'sec' || fam.stock === 'sec'));
   });
   if (!negatifs.length) return null;
-  const froid = negatifs.filter(c => litArticle(c).famille === 'glace');
+  /* Tout ce qui reste ici se compte en chambre froide (l'onglet y range toutes
+     les familles hors sec) : un macaron négatif n'est pas « au sec ». Seul ce
+     qui vient de l'inventaire du sec y renvoie. */
+  const froid = negatifs.filter(c => litArticle(c).famille !== 'sec');
 
   /* Un recomptage ne solde la demande que s'il a eu lieu APRÈS le négatif.
      La version précédente vérifiait seulement que l'article figurait dans
@@ -1149,6 +1152,22 @@ V.inventaire = async function () {
       }));
     } catch (e) {}
   };
+  /* Valider une partie n'efface que SA part du brouillon commun. Valider la
+     chambre froide effaçait tout : la saisie du sec en cours, pas encore
+     validée, était perdue (et inversement). */
+  const oublierBrouillon = quoi => {
+    try {
+      const b = JSON.parse(localStorage.getItem(CLE_BROUILLON) || 'null');
+      if (b && b.jour === today()) {
+        if (quoi === 'froid') b.lignes = {}; else b.sec = {};
+        if (Object.keys(b.lignes || {}).length || Object.keys(b.sec || {}).length) {
+          localStorage.setItem(CLE_BROUILLON, JSON.stringify(b));
+          return;
+        }
+      }
+      localStorage.removeItem(CLE_BROUILLON);
+    } catch (e) {}
+  };
 
   const COURANTES = FOURNISSEUR.taillesCourantes || TAILLES_BAC;
   const RARES     = FOURNISSEUR.taillesRares || [];
@@ -1499,10 +1518,10 @@ V.inventaire = async function () {
       'Valider', async () => {
         const inv = await enregistrerInventaire(lignes,
           $('#inv-note') ? $('#inv-note').value : '', avant);
-        /* Le brouillon est effacé — il n'a plus lieu d'être puisque c'est
-           validé — mais PAS la saisie : revenir sur l'écran doit montrer les
-           quantités enregistrées, pas un formulaire vide. */
-        try { localStorage.removeItem(CLE_BROUILLON); } catch (e) {}
+        /* Le brouillon de la chambre froide est effacé — il n'a plus lieu
+           d'être puisque c'est validé — mais PAS la saisie : revenir sur
+           l'écran doit montrer les quantités enregistrées. Celui du sec reste. */
+        oublierBrouillon('froid');
         await feed(inv.manquants ? 'warn' : 'ok',
           STATE.user.prenom + ' a compté la chambre froide — ' + t.bacs + ' bacs, ' + n1(t.kg) + ' kg' +
           (inv.manquants ? ' · ' + inv.manquants + ' bac(s) manquant(s)' : ''));
@@ -1533,7 +1552,7 @@ V.inventaire = async function () {
         const i = hist.findIndex(h => h.jour === inv.jour);
         if (i >= 0) hist[i] = inv; else hist.push(inv);
         await DB.set('stock:secs', hist.slice(-36));
-        try { localStorage.removeItem(CLE_BROUILLON); } catch (e) {}
+        oublierBrouillon('sec');
         await feed('ok', STATE.user.prenom + ' a compté le sec — ' + cptes.length + ' références');
         toast('Inventaire du sec enregistré');
         rendre('stock');

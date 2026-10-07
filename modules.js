@@ -634,7 +634,8 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
        (clichés.length ? '✓ ' + clichés.length : 'Photo') + '</button>' : '') +
      (t.lien ? '<button class="btn ' + (lie && !lie.fait ? 'menthe' : urgente ? 'corail' : 'clair') + ' sm" data-go="' + t.lien + '"' +
        (t.partie ? ' data-partie="' + esc(t.partie) + '"' : '') + '>' +
-       (lie && !lie.fait ? 'Y aller' : '→') + '</button>' : '') +
+       /* Même mot que la consigne « puis « Y aller » » de la tâche urgente. */
+       ((lie && !lie.fait) || urgente ? 'Y aller' : '→') + '</button>' : '') +
          '</div>' +
          /* Vignettes sous la tâche : plusieurs clichés possibles, avant et après.
             Cliquables pour voir en grand et supprimer. */
@@ -756,15 +757,24 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
     if (tm) tm.textContent = actif ? STATE.user.prenom + ' · ' + heure(nowISO()) : '';
     vibrer(UI.vibration.ok);
 
-    /* Compteur et barre d'avancement, recalculés sans tout reconstruire */
-    const total2 = $$('#page .tache [data-t]').length;
-    const faits2 = $$('#page .tache.on [data-t]').length;
+    /* Compteur et barre d'avancement, recalculés sans tout reconstruire — avec
+       la MÊME règle que l'affichage initial. Compter les cases du DOM oubliait
+       les tâches liées et urgentes (« 0 sur 10 » devenait « 1 sur 8 »), et le
+       libellé « Valider la procédure (N restantes) » ne bougeait jamais. */
+    const toutes2 = blocs.reduce((a, bl) => a.concat(bl.taches), []);
+    const total2 = toutes2.length;
+    const faits2 = toutes2.filter(estFaite).length;
     const cs = $('#page .card .cs');
     if (cs && /sur \d+ tâches/.test(cs.textContent)) {
       cs.textContent = cs.textContent.replace(/^\d+ sur \d+/, faits2 + ' sur ' + total2);
     }
     const barre = $('#page .jauge i');
     if (barre && total2) barre.style.width = Math.round(faits2 / total2 * 100) + '%';
+    const vpb = $('#valproc');
+    if (vpb && !rec['_valide_' + phase]) {
+      const reste2 = total2 - faits2;
+      vpb.textContent = 'Valider la procédure' + (reste2 > 0 ? ' (' + reste2 + ' restante' + (reste2 > 1 ? 's' : '') + ')' : '');
+    }
 
     await DB.set('checklist:' + j, rec);
     if (actif) await feed('ok', STATE.user.prenom + ' : ' + ligne2.querySelector('.tn').textContent);
