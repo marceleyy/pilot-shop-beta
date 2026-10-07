@@ -2781,8 +2781,30 @@ function ecranEquipeInjoignable() {
    un code modifié ou une personne ajoutée sur un autre appareil ne remontait
    jamais, la liste locale étant relue indéfiniment. */
 setInterval(function () {
-  if (typeof chargerEquipe === 'function' && STATE.enLigne) chargerEquipe();
+  if (typeof chargerEquipe === 'function' && STATE.enLigne) chargerEquipe().then(revaliderSession, function () {});
 }, 300000);
+
+/* L'équipe relue, la session ouverte suit. Une personne retirée sur un autre
+   iPad gardait sa session jusqu'au prochain rechargement, et un rôle changé
+   restait l'ancien. Retirée : retour immédiat à l'écran des prénoms. Rôle
+   changé : la session prend le nouveau rôle tout de suite (les contrôles
+   lisent STATE.user.role), et l'application se recharge dès qu'aucune
+   feuille n'est ouverte, pour redessiner onglets et accueil sans couper une
+   saisie. */
+let _rechargerApresRole = false;
+function revaliderSession() {
+  if (!STATE.user) return;
+  const e = EQUIPE.filter(x => x.id === STATE.user.id)[0];
+  if (!e) {
+    DB.del('session').then(() => location.reload(), () => location.reload());
+    return;
+  }
+  if (e.role !== STATE.user.role) _rechargerApresRole = true;
+  Object.assign(STATE.user, { prenom:e.prenom, role:e.role, couleur:e.couleur, initiales:e.initiales });
+  const bc = $('#compte');
+  if (bc) bc.textContent = STATE.user.initiales || '';
+  if (_rechargerApresRole && $('#sheet').hidden) location.reload();
+}
 
 /* -----------------------------------------------------------------------------
    LA SÉCURITÉ EST-ELLE ACTIVE ?
@@ -2906,8 +2928,12 @@ function ecranAmorcage() {
         return;
       }
 
+      /* Identifiants uniques, comme pour un ajout (V.equipe) : une équipe
+         recréée ne doit pas redonner « e1 » à une autre personne, sinon une
+         session restée ouverte sur un autre iPad passe à cette personne. Le
+         suffixe garde distincts deux uid() tirés dans la même milliseconde. */
       let equipe = valides.map((l, i) => ({
-        id: 'e' + (i + 1), prenom: l.prenom, pin: l.pin, role: l.role,
+        id: 'e' + uid() + i, prenom: l.prenom, pin: l.pin, role: l.role,
         couleur: COULEURS[i % COULEURS.length],
         initiales: l.prenom.slice(0, 2).toUpperCase()
       }));
@@ -4654,8 +4680,13 @@ function modifierPeriode(per) {
            if (pin) for (const x of autres) if (await pinCorrect(x, pin)) throw new Error('Ce code est déjà utilisé : choisissez-en un autre');
            let fiche;
            if (neuf) {
-             const n = liste.reduce((m, x) => Math.max(m, +((/^e(\d+)$/.exec(x.id) || [0, 0])[1])), 0) + 1;
-             fiche = { id:'e' + n, prenom:prenom, role:role, couleur:COULEURS_EQUIPE[liste.length % COULEURS_EQUIPE.length],
+             /* Identifiant jamais réutilisé. Le numéro suivait le plus grand id
+                restant : après le retrait de Nina (e3), Paul recevait e3, et
+                l'iPad où Nina était connectée se rouvrait sous le nom de Paul,
+                manager, sans code ; Paul héritait aussi de ses actions. */
+             let id = 'e' + uid();
+             while (liste.some(x => x.id === id)) id = 'e' + uid();
+             fiche = { id:id, prenom:prenom, role:role, couleur:COULEURS_EQUIPE[liste.length % COULEURS_EQUIPE.length],
                        initiales:prenom.slice(0, 2).toUpperCase() };
            } else {
              const ancienne = liste.filter(x => x.id === e.id)[0];
