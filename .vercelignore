@@ -15,6 +15,9 @@ am.png
 # Modèle de configuration : env.js est généré au build par scripts/env.cjs
 env.example.js
 
-# Scripts de maintenance — sauf env.cjs, que la commande de build exécute
+# Scripts de maintenance — sauf env.cjs, que la commande de build exécute.
+# Il reste dans le dossier publié, mais vercel.json (« redirects », appliqués
+# avant les fichiers) renvoie toute adresse /scripts/… vers l'accueil : il
+# n'est plus téléchargeable (EXPO-09).
 scripts/*
 !scripts/env.cjs
