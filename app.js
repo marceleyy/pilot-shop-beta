@@ -138,9 +138,14 @@
       que l'autre venait de saisir — vérifié : deux tâches cochées en même
       temps, une seule survit.
       Pour ces clés, on relit la base juste avant d'écrire et on fusionne. */
+   /* « ecart: » : ventes importées, bons de livraison, jeté cumulé et
+      inventaire de fin d'une même période s'y écrivent depuis des écrans et
+      des iPads différents. Sans fusion, un iPad revenu en ligne rejouait sa
+      copie entière, périmée : les ventes importées entre-temps sur l'autre
+      iPad disparaissaient (vérifié : ventes et imports effacés). */
    const FUSIONNER = ['checklist:', 'hebdo:', 'temp:', 'caisse:', 'reassort:',
                       'preuves:', 'ruptures', 'releve', 'lots:', 'clean:',
-                      'anomalies', 'reception:', 'stock:mv:', 'pointage:'];
+                      'anomalies', 'reception:', 'stock:mv:', 'pointage:', 'ecart:'];
    const aFusionner = cle => FUSIONNER.some(p => cle.indexOf(p) === 0);
 
    /* Fusion superficielle, champ par champ. Suffisante : chaque personne
@@ -214,11 +219,32 @@
      return rognerAncien(cle, out.every(x => ts(x)) ? out.sort((p, q) => ts(p) < ts(q) ? -1 : ts(p) > ts(q) ? 1 : 0) : out);
    }
 
+   /* Listes d'un écart de période qui ne font que grandir : chaque import de
+      caisse, chaque bon de livraison y ajoute sa ligne. On les réunit par id
+      (les lignes anciennes, sans id, par leur contenu). */
+   const LISTES_ECART = ['imports', 'bl'];
+   const identite = x => (x && x.id) || JSON.stringify(x);
+   function unirParId(a, b) {
+     const vus = new Set(a.map(identite));
+     const out = a.concat(b.filter(x => !vus.has(identite(x))));
+     return out.every(x => x && x.at) ? out.sort((p, q) => p.at < q.at ? -1 : p.at > q.at ? 1 : 0) : out;
+   }
+
    function fusionner(distant, local, cle) {
      if (Array.isArray(distant) && Array.isArray(local) && cle &&
          UNIR.some(p => cle.indexOf(p) === 0)) return unirListes(distant, local, cle);
      if (!distant || typeof distant !== 'object' || Array.isArray(distant)) return local;
      if (!local   || typeof local   !== 'object' || Array.isArray(local))   return local;
+     /* Écart de période : un objet imbriqué y forme un tout (ventes = { total },
+        fin = { bacs, kg }) et se remplace d'un bloc — mélangés, une saisie
+        manuelle des ventes s'ajouterait à l'import au lieu de le corriger. */
+     if (cle && cle.indexOf('ecart:') === 0) {
+       const e = Object.assign({}, distant, local);
+       LISTES_ECART.forEach(k => {
+         if (Array.isArray(distant[k]) && Array.isArray(local[k])) e[k] = unirParId(distant[k], local[k]);
+       });
+       return e;
+     }
      const out = Object.assign({}, distant);
      Object.keys(local).forEach(k => {
        const a = distant[k], b = local[k];
@@ -228,6 +254,27 @@
          : b;
      });
      return out;
+   }
+
+   /* Écriture partielle (DB.patch) appliquée à une copie de la clé, locale ou
+      serveur : « champs » remplace des champs entiers, « ajouts » ajoute des
+      lignes à des listes sans doublon (par id), « plus » incrémente des
+      nombres — une seule fois, et seulement si une ligne nouvelle est entrée :
+      un envoi rejoué après une réponse perdue ne compte pas deux fois le même
+      bon de livraison. */
+   function appliquerPatch(doc, op) {
+     const o = (doc && typeof doc === 'object' && !Array.isArray(doc)) ? Object.assign({}, doc) : {};
+     Object.assign(o, op.champs || {});
+     let nouveau = false;
+     Object.keys(op.ajouts || {}).forEach(k => {
+       const avant = Array.isArray(o[k]) ? o[k] : [];
+       const vus = new Set(avant.map(identite));
+       const neufs = (op.ajouts[k] || []).filter(x => !vus.has(identite(x)));
+       if (neufs.length) nouveau = true;
+       o[k] = avant.concat(neufs);
+     });
+     if (nouveau) Object.keys(op.plus || {}).forEach(k => { o[k] = +(num(o[k]) + num(op.plus[k])).toFixed(3); });
+     return o;
    }
 
    /* Une clé partagée ne s'écrit qu'UNE à LA FOIS. Sans cette file par clé,
@@ -462,11 +509,49 @@
          return l;
        },
    
-       async patch(cle, modif) {
-         const o = await this.get(cle, {});
-         Object.assign(o, modif);
-         await this.set(cle, o);
-         return o;
+       /* N'envoie QUE les champs modifiés, appliqués sur la copie du serveur
+          relue juste avant (sous le verrou de la clé). Avant, l'objet entier
+          partait — copie locale comprise : un iPad resté hors ligne rejouait à
+          son retour des ventes et des imports périmés par-dessus ceux saisis
+          entre-temps sur l'autre iPad. Hors ligne, l'écriture partielle entre
+          en file telle quelle et sera rejouée de la même façon, dans l'ordre. */
+       async patch(cle, champs, ajouts, plus) {
+         const op = { champs:champs || {}, ajouts:ajouts || {}, plus:plus || {} };
+         const o = appliquerPatch(await this.get(cle, {}), op);
+         let horsMemoire = false;
+         try { ecrire(cle, JSON.stringify(o)); }
+         catch (e) { horsMemoire = true; }
+         const memoirePleine = () => { toast('Mémoire pleine — libérez de l’espace sur l’iPad', 'erreur'); return o; };
+         if (!distant(cle)) return horsMemoire ? memoirePleine() : o;
+         if (!STATE.enLigne) {
+           if (horsMemoire) return memoirePleine();
+           await empiler('patch', cle, op); return o;
+         }
+         return enFile(cle, async () => {
+           /* Des écritures plus anciennes de cette clé attendent encore : la
+              nouvelle passe derrière elles, sinon leur rejeu l'écraserait. */
+           if (fileLire().some(x => x.cle === cle)) {
+             await empiler('patch', cle, op);
+             setTimeout(journaliserSync, 0);
+             return o;
+           }
+           try {
+             /* Pas d'envoi sans relecture : la ligne entière serait remplacée
+                par les seuls champs modifiés. */
+             const l = await appel(table(cle) + '?id=eq.' + encodeURIComponent(cle) + '&select=data&limit=1');
+             const data = appliquerPatch(l && l.length ? l[0].data : null, op);
+             await appel(table(cle), {
+               method: 'POST',
+               headers: { 'Prefer': 'resolution=merge-duplicates,return=minimal' },
+               body: JSON.stringify({ id:cle, site:APP.site, data:data })
+             });
+             try { ecrire(cle, JSON.stringify(data)); } catch (x) {}
+             return data;
+           } catch (e) {
+             if (horsMemoire) return memoirePleine();
+             await empiler('patch', cle, op); return o;
+           }
+         });
        },
    
        async list(prefixe) {
@@ -548,8 +633,10 @@
    }
    
    async function empiler(op, cle, valeur) {
-     const f = fileLire().filter(x => !(x.cle === cle && x.op === op));
-     f.push({ op:op, cle:cle, valeur:valeur, at:nowISO(), essais:0 });
+     /* Une écriture partielle ne remplace pas la précédente : chacune ne porte
+        que ses propres champs, toutes sont rejouées dans l'ordre. */
+     const f = op === 'patch' ? fileLire() : fileLire().filter(x => !(x.cle === cle && x.op === op));
+     f.push({ op:op, cle:cle, valeur:valeur, at:nowISO(), n:uid(), essais:0 });
      fileEcrire(f);
    }
    
@@ -564,13 +651,19 @@
      if (!f.length) return;
    
      syncEnCours = true;
-     const id = x => x.op + '|' + x.cle + '|' + x.at;
+     /* « n » distingue deux écritures partielles de la même milliseconde. */
+     const id = x => x.op + '|' + x.cle + '|' + x.at + '|' + (x.n || '');
      const restants = [];
+     /* Clés dont une écriture vient d'échouer : les suivantes de la même clé
+        attendent leur tour. Rejouées avant elle, des écritures partielles
+        plus récentes seraient écrasées par la plus ancienne. */
+     const bloquees = new Set();
      let envoyes = 0;
      for (const item of f) {
        /* Remplacée ou déjà envoyée pendant la synchro : on ne rejoue pas une
           valeur périmée par-dessus une plus récente. */
        if (!fileLire().some(x => id(x) === id(item))) continue;
+       if (bloquees.has(item.cle)) { restants.push(item); continue; }
        /* Une clé sans table ne peut pas partir : on l'abandonne au lieu
           d'appeler /rest/v1/undefined en boucle. La donnée reste en local. */
        if (!DB._table(item.cle)) {
@@ -580,6 +673,26 @@
        try {
          if (item.op === 'del') {
            await DB._appel(DB._table(item.cle) + '?id=eq.' + encodeURIComponent(item.cle), { method:'DELETE' });
+         } else if (item.op === 'patch') {
+           /* Écriture partielle : appliquée sur la copie du serveur relue sous
+              le verrou de la clé. Relecture impossible : on n'envoie rien (les
+              seuls champs modifiés remplaceraient la ligne entière) et l'on
+              réessaiera. Retirée de la file dès qu'elle est passée, pour qu'une
+              écriture lancée juste après ne la rejoue pas une seconde fois. */
+           const parti = await enFile(item.cle, async () => {
+             if (!fileLire().some(x => id(x) === id(item))) return false;
+             const t = DB._table(item.cle);
+             const l = await DB._appel(t + '?id=eq.' + encodeURIComponent(item.cle) + '&select=data&limit=1');
+             await DB._appel(t, {
+               method: 'POST',
+               headers: { 'Prefer': 'resolution=merge-duplicates,return=minimal' },
+               body: JSON.stringify({ id:item.cle, site:APP.site,
+                                      data:appliquerPatch(l && l.length ? l[0].data : null, item.valeur || {}) })
+             });
+             fileEcrire(fileLire().filter(x => id(x) !== id(item)));
+             return true;
+           });
+           if (!parti) continue;
          } else if (!aFusionner(item.cle)) {
            await DB._appel(DB._table(item.cle), {
              method: 'POST',
@@ -624,7 +737,7 @@
          const refus = e && e.http >= 400 && e.http < 500 &&
                        [401, 403, 408, 429].indexOf(e.http) < 0;
          if (refus) item.essais = (item.essais || 0) + 1;
-         if (!refus || item.essais < OFFLINE.tentatives) restants.push(item);
+         if (!refus || item.essais < OFFLINE.tentatives) { restants.push(item); bloquees.add(item.cle); }
          else console.warn('Écriture abandonnée après ' + item.essais + ' refus :', item.cle);
        }
      }
@@ -3332,10 +3445,13 @@ function ouvrirPremierePeriode() {
    
      $('#bl-ok').onclick = async () => {
        const per = await periodeCourante();
-       const e = await DB.get('ecart:' + per.id, {});
-       e.litrageBL = num(e.litrageBL) + litres;
-       e.bl = (e.bl || []).concat([{ numero:r.numero, date:r.date, bacs:total, litres:litres, lignes:r.lignes, par:STATE.user.prenom }]);
-       await DB.set('ecart:' + per.id, e);
+       /* Écriture partielle : le bon s'ajoute à la liste (id unique) et son
+          litrage aux achats, sur la copie du serveur — pas d'objet entier qui
+          écraserait les ventes saisies entre-temps sur un autre iPad. */
+       await DB.patch('ecart:' + per.id, {},
+         { bl:[{ id:uid(), numero:r.numero, date:r.date, bacs:total, litres:litres, lignes:r.lignes,
+                 par:STATE.user.prenom, at:nowISO() }] },
+         { litrageBL:litres });
        await feed('ok', STATE.user.prenom + ' a saisi le BL ' + r.numero + ' (' + total + ' bacs)');
        closeSheet();
        toast(n1(litres) + ' L ajoutés aux achats');
@@ -3475,26 +3591,32 @@ function ouvrirPremierePeriode() {
    V.ecarts = async function () {
      const per = await periodeCourante();
      const c = await calculEcart(per);
-     const st = etatEcart(c.pct);
      const inv = await DB.get('invglace:' + per.id, null);
      const e = await DB.get('ecart:' + per.id, {});
      const tendances = await analyserTendances(per);
    
-     const pos = Math.max(-25, Math.min(25, -c.pct));
-     const gauche = 50 + (pos / 25) * 50;
+     /* Synthèse et jauge en fonctions : la saisie d'un champ les met à jour
+        en place, sans redessiner la vue (voir plus bas). */
+     const kpis = c => {
+       const st = etatEcart(c.pct);
+       return kpi('Stock réel', n1(c.reel) + '<span class="u">kg</span>', '', c.invValide ? 'Inventaire validé' : 'Inventaire manquant') +
+         kpi('Stock théorique', n1(c.theo) + '<span class="u">kg</span>', '', 'Calculé') +
+         kpi('Écart', (c.ecart > 0 ? '+' : '−') + n1(Math.abs(c.ecart)) + '<span class="u">kg</span>', st.c, st.t) +
+         kpi('Coût', eur(c.valeur), st.c, 'à ' + n2(FOURNISSEUR.prixMoyenKg) + ' €/kg');
+     };
+     const aiguille = c => 50 + (Math.max(-25, Math.min(25, -c.pct)) / 25) * 50;
+     const achatsTxt = (c, e) => n1(c.achats) + ' kg · ' + ((e.bl || []).length) + ' bon(s) scanné(s)';
+     const venduKpi = (c, e) => kpi('Poids vendu', n1(c.vendu) + '<span class="u">kg</span>',
+                                    c.vendu ? 'ok' : 'warn', e.venteSource || 'Aucun import');
    
      $('#vue-actions').innerHTML = '<button class="btn clair sm" id="sbl">Scanner BL</button>';
    
      $('#page').innerHTML =
        carte(entete('📊', libellePeriode(per), 'Stock théorique = début + achats − jeté − vendu.') +
-         '<div class="grid g4">' +
-         kpi('Stock réel', n1(c.reel) + '<span class="u">kg</span>', '', c.invValide ? 'Inventaire validé' : 'Inventaire manquant') +
-         kpi('Stock théorique', n1(c.theo) + '<span class="u">kg</span>', '', 'Calculé') +
-         kpi('Écart', (c.ecart > 0 ? '+' : '−') + n1(Math.abs(c.ecart)) + '<span class="u">kg</span>', st.c, st.t) +
-         kpi('Coût', eur(c.valeur), st.c, 'à ' + n2(FOURNISSEUR.prixMoyenKg) + ' €/kg') + '</div>' +
+         '<div class="grid g4" id="ec-kpi">' + kpis(c) + '</div>' +
          '<div class="ecart" style="margin-top:18px"><div class="piste">' +
          '<div class="cible" style="left:' + (50 - (SEUILS.ecartGlacePct / 25) * 50) + '%;width:' + ((SEUILS.ecartGlacePct * 2 / 25) * 50) + '%"></div>' +
-         '<div class="aig" style="left:' + gauche + '%"></div></div>' +
+         '<div class="aig" id="ec-aig" style="left:' + aiguille(c) + '%"></div></div>' +
          '<div class="lg"><span>−25 % manquant</span><span>objectif ±' + SEUILS.ecartGlacePct + ' %</span><span>+25 % surplus</span></div></div>', 'solide') +
    
        (c.invValide ? '' : '<div class="alerte bad" style="margin-top:12px"><span class="ai">▲</span>' +
@@ -3506,8 +3628,7 @@ function ouvrirPremierePeriode() {
        carte(entete('📥', 'Achats de la période', 'Litrage cumulé des bons de livraison.') +
          '<div class="champ"><label class="f">Litrage total (L)</label>' +
          '<input type="number" step="0.1" id="bl" value="' + (e.litrageBL || '') + '"></div>' +
-         '<p class="mini" style="margin-top:10px">' + n1(c.achats) + ' kg · ' +
-         ((e.bl || []).length) + ' bon(s) scanné(s)</p>') +
+         '<p class="mini" id="ec-achats" style="margin-top:10px">' + achatsTxt(c, e) + '</p>') +
        carte(entete('🗑️', 'Pertes de la période', 'Reprises automatiquement du registre.') +
          '<div class="champ"><label class="f">Poids jeté (kg)</label>' +
          '<input type="number" step="0.01" id="jk" value="' + (e.jeteKg || '') + '"></div>' +
@@ -3516,9 +3637,7 @@ function ouvrirPremierePeriode() {
        carte(entete('🍦', 'Glace vendue', 'Poids sorti par la caisse sur la période. C’est la donnée qui pèse le plus dans l’écart.') +
          '<button class="btn ciel bloc xl" id="imp-btn">Importer l’export de caisse (XLSX)</button>' +
          '<input type="file" id="import-caisse" accept=".xlsx,.xls" hidden>' +
-         '<div class="grid g2" style="margin-top:16px">' +
-         kpi('Poids vendu', n1(c.vendu) + '<span class="u">kg</span>',
-             c.vendu ? 'ok' : 'warn', e.venteSource || 'Aucun import') +
+         '<div class="grid g2" id="ec-vente" style="margin-top:16px">' + venduKpi(c, e) +
          '<div class="champ"><label class="f">Corriger à la main (kg)</label>' +
          '<input type="number" step="0.01" id="vd" value="' + (num(c.vendu) || '') + '" placeholder="0"></div></div>' +
          ((e.imports || []).length
@@ -3541,15 +3660,35 @@ function ouvrirPremierePeriode() {
              pastille(t.niveau, t.compte + '×') + '</div>', 'ambre')).join('') +
          '</div><p class="mini" style="margin-top:10px">' + esc(FRAUDE.avertissement) + '</p>' : '');
    
-     const sauver = debounce(async () => {
-       await DB.patch('ecart:' + per.id, {
-         litrageBL:$('#bl').value, jeteKg:$('#jk').value,
-         ventes:{ total:$('#vd').value },
-         venteSource:'Saisie manuelle · ' + STATE.user.prenom
-       });
-       rendre('ecarts');
-     }, 700);
-     ['#bl', '#jk', '#vd'].forEach(x => { const el = $(x); if (el) el.oninput = sauver; });
+     /* Chaque champ n'enregistre que SA valeur, et la vue n'est plus
+        redessinée pendant la frappe. Avant, une pause de 700 ms enregistrait
+        les trois champs puis redessinait tout l'écran : le champ perdait le
+        focus et la suite partait dans le vide (« 120 » tapé lentement était
+        enregistré « 1 ») ; et toucher au seul litrage réécrivait les ventes en
+        remplaçant la source « import de caisse » par « Saisie manuelle ». */
+     const majSynthese = async () => {
+       if (!$('#ec-kpi')) return;                       // vue quittée entre-temps
+       const c2 = await calculEcart(per);
+       const e2 = await DB.get('ecart:' + per.id, {});
+       if (!$('#ec-kpi')) return;
+       $('#ec-kpi').innerHTML = kpis(c2);
+       $('#ec-aig').style.left = aiguille(c2) + '%';
+       $('#ec-achats').textContent = achatsTxt(c2, e2);
+       const k = $('#ec-vente .kpi');
+       if (k) k.outerHTML = venduKpi(c2, e2);
+     };
+     const champs = {
+       '#bl': v => ({ litrageBL:v }),
+       '#jk': v => ({ jeteKg:v }),
+       '#vd': v => ({ ventes:{ total:v }, venteSource:'Saisie manuelle · ' + STATE.user.prenom })
+     };
+     Object.keys(champs).forEach(x => {
+       const el = $(x);
+       if (el) el.oninput = debounce(async () => {
+         await DB.patch('ecart:' + per.id, champs[x](el.value));
+         await majSynthese();
+       }, 700);
+     });
      $('#sbl').onclick = scannerBL;
    
      $('#imp-btn').onclick = () => $('#import-caisse').click();
@@ -4317,14 +4456,14 @@ function modifierPeriode(per) {
        '<button class="btn menthe" id="imp-ok">Enregistrer ' + n1(r.kg) + ' kg</button></div>');
    
      $('#imp-ok').onclick = async () => {
-       const e = await DB.get('ecart:' + per.id, {});
-       e.ventes = { total:+n2(r.kg) };
-       e.venteSource = r.methode + (r.fiable ? '' : ' · approximatif');
-       e.imports = (e.imports || []).concat([{
-         fichier:fichier, kg:+n2(r.kg), lignes:r.lignes, methode:r.methode,
-         fiable:r.fiable, inconnus:r.inconnus.length, par:STATE.user.prenom, at:nowISO()
-       }]);
-       await DB.set('ecart:' + per.id, e);
+       /* Écriture partielle : seules les ventes et la ligne d'import partent,
+          appliquées sur la copie du serveur (voir DB.patch). */
+       await DB.patch('ecart:' + per.id,
+         { ventes:{ total:+n2(r.kg) }, venteSource:r.methode + (r.fiable ? '' : ' · approximatif') },
+         { imports:[{
+           id:uid(), fichier:fichier, kg:+n2(r.kg), lignes:r.lignes, methode:r.methode,
+           fiable:r.fiable, inconnus:r.inconnus.length, par:STATE.user.prenom, at:nowISO()
+         }] });
        await feed('ok', STATE.user.prenom + ' a importé les ventes : ' + n1(r.kg) + ' kg (' + r.lignes + ' lignes)');
        closeSheet();
        toast(n1(r.kg) + ' kg enregistrés');
