@@ -1618,12 +1618,18 @@ V.lots = async function () {
   /* « Valider et scanner le suivant » : la prise de vue repart après chaque
      ouverture confirmée. Le drapeau enchainer n'était lu par personne : le
      bouton faisait la même chose que « Valider ». */
-  $('#lo-scan').onclick = async function scanner() {
+  /* dejaOuvert vaut true (et seulement true : au premier appel, c'est
+     l'événement du clic) quand une ouverture de la chaîne est enregistrée.
+     La fin de chaîne — prise de vue ou confirmation annulée — redessine
+     alors la liste : elle affichait encore « Aucune ouverture enregistrée »
+     avec deux ouvertures en base, de quoi faire rescanner et doubler la
+     traçabilité. */
+  $('#lo-scan').onclick = async function scanner(dejaOuvert) {
     const r = await scannerPhoto('etiquette', { enchainer: true });
-    if (!r) return;
+    if (!r) { if (dejaOuvert === true) rendre('lots'); return; }
     const ok = await confirmerOuverture(r);
-    if (ok && r.enchainer && STATE.view === 'lots') return scanner();
-    if (ok) rendre('lots');
+    if (ok && r.enchainer && STATE.view === 'lots') return scanner(true);
+    if (ok || dejaOuvert === true) rendre('lots');
   };
   /* Saisie manuelle : on demande d'abord la famille. Un coulis ou un topping
      n'a pas d'étiquette lisible — l'équipe le saisit à la main, et on ne veut
