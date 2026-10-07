@@ -1755,26 +1755,65 @@ async function purgerPreuves() {
    d'activité, heures pointées, caisses et leurs brouillons — s'accumulaient
    sans limite sur l'iPad. Au-delà de purgeLocaleJours, la copie LOCALE est
    effacée ; la base garde la sienne (durées de supabase-conservation.sql).
-   Jamais en mode local (la copie de l'iPad est alors la seule), jamais une clé
-   encore en file d'attente ou trop lourde pour la base. */
-const PREFIXES_PURGE_LOCALE = ['feed:', 'pointage:', 'caisse:', 'brouillon:caisse:'];
-function purgerLocalAncien() {
+   Jamais une clé encore en file d'attente ou trop lourde pour la base.
+   DON-05 : les registres datés — températures, check-listes, nettoyage,
+   pertes, réceptions, réassort — manquaient ; leur copie, nominative elle
+   aussi (« validé par », « déclaré par »), restait sans limite. La base les
+   garde (registres HACCP) : seule la copie de l'iPad part, et seulement si
+   la base a bien la ligne. Une saisie abandonnée par la file (refus
+   répétés, file vidée à la main) n'existe qu'ici : un registre sanitaire ne
+   doit pas disparaître pour autant. Base injoignable : rien n'est effacé.
+   En mode local, la copie de l'iPad est la seule : rien n'était purgé. On y
+   applique les durées de la base elle-même — journal 1 an, heures pointées
+   3 ans — et rien d'autre : registres et caisses n'y sont pas purgés, pas
+   plus que dans la base. */
+const PREFIXES_PURGE_LOCALE = ['feed:', 'pointage:', 'caisse:', 'brouillon:caisse:',
+                               'temp:', 'checklist:', 'clean:', 'hebdo:', 'pertes:', 'reception:', 'reassort:'];
+const CONSERVATION_MODE_LOCAL_ANS = { 'feed:': 1, 'pointage:': 3 };   // = supabase-conservation.sql
+async function purgerLocalAncien() {
   const jours = OFFLINE.purgeLocaleJours;
-  if (!DB.configure || !(jours > 0)) return 0;
-  const limite = addD(today(), -jours);
+  const base = DB.configure;
+  if (base && !(jours > 0)) return 0;
+  const t = today();
+  /* « Il y a N ans », comme interval 'N years' de PostgreSQL (29/02 → 28/02). */
+  const ilYA = ans => (Number(t.slice(0, 4)) - ans) + (t.slice(4) === '-02-29' ? '-02-28' : t.slice(4));
+  const limite = p => base ? addD(t, -jours)
+                           : (CONSERVATION_MODE_LOCAL_ANS[p] ? ilYA(CONSERVATION_MODE_LOCAL_ANS[p]) : null);
   let n = 0;
   try {
     const enFile = new Set(fileLire().map(x => x.cle));
-    DB._clesLocales().forEach(cle => {
+    const vieilles = DB._clesLocales().filter(cle => {
       const p = PREFIXES_PURGE_LOCALE.filter(x => cle.indexOf(x) === 0)[0];
-      if (!p) return;
+      const l = p ? limite(p) : null;
+      if (!l) return false;
       const jour = cle.slice(p.length);
-      if (!/^\d{4}-\d{2}-\d{2}$/.test(jour) || jour >= limite) return;
-      if (enFile.has(cle) || (DB._gros && DB._gros[cle])) return;
-      DB._oter(cle); n++;
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(jour) || jour >= l || enFile.has(cle)) return false;
+      /* Trop lourde pour la base : jamais envoyée, la copie locale est la seule. */
+      const brut = DB._lire(cle);
+      return !(brut && brut.length > OFFLINE.tailleMaxOctets);
     });
+    /* Sans table (brouillons de caisse) : jamais envoyées, par nature. Les
+       autres : seulement celles que la base confirme, par lots de 40. */
+    const aEffacer = base ? vieilles.filter(c => !DB._table(c)) : vieilles;
+    const parTable = {};
+    if (base) vieilles.filter(c => DB._table(c)).forEach(c => (parTable[DB._table(c)] = parTable[DB._table(c)] || []).push(c));
+    for (const tb of Object.keys(parTable)) {
+      for (let i = 0; i < parTable[tb].length; i += 40) {
+        const lot = parTable[tb].slice(i, i + 40);
+        try {
+          const l = await DB._appel(tb + '?select=id&id=in.(' +
+                                    lot.map(c => encodeURIComponent('"' + c + '"')).join(',') + ')');
+          const enBase = new Set((l || []).map(r => r.id));
+          lot.filter(c => enBase.has(c)).forEach(c => aEffacer.push(c));
+        } catch (e) { /* base injoignable : on garde, la prochaine connexion réessaiera */ }
+      }
+    }
+    /* Remise en file entre-temps (saisie pendant la vérification) : on garde. */
+    const enFileMaintenant = new Set(fileLire().map(x => x.cle));
+    aEffacer.filter(c => !enFileMaintenant.has(c)).forEach(c => { DB._oter(c); n++; });
   } catch (e) { /* purge sans conséquence si elle échoue */ }
-  if (n) console.info('Purge locale : ' + n + ' clé(s) de plus de ' + jours + ' jours (copie serveur conservée)');
+  if (n) console.info('Purge locale : ' + n + ' clé(s) ancienne(s) ' +
+                      (base ? 'de plus de ' + jours + ' jours (copie serveur conservée)' : '(durées de conservation)'));
   return n;
 }
 
@@ -3090,7 +3129,7 @@ window.addEventListener('error', function (ev) {
   majBandeau();
   initFeedback();
   purgerPreuves();          // copie locale des photos de plus de 7 jours (le serveur garde tout)
-  purgerLocalAncien();      // journal, heures et caisses de plus de purgeLocaleJours (copie locale)
+  purgerLocalAncien();      // copies locales anciennes : journal, heures, caisses, registres (voir sa note)
   /* Bouton de compte : le seul accès à « tout le reste » et à la déconnexion
      pour l'équipe, dont la barre du bas n'a plus d'onglet « Plus ». */
   const bc = $('#compte');
