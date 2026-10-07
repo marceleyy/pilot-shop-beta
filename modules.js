@@ -533,7 +533,8 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
     if (t.lien === 'temp') {
       const mom = (phase === 'fermeture') ? 's' : 'm';
       const v = tempJour.valide && tempJour.valide[mom];
-      return { fait: !!v, ou: 'temp',
+      /* Signé sans aucune mesure : pas fait (voir releveMesure). */
+      return { fait: !!v && releveMesure(tempJour, mom), ou: 'temp',
                quoi: 'le relevé des températures du ' + (mom === 'm' ? 'matin' : 'soir'),
                par: v ? v.par : null, at: v ? v.at : null };
     }
@@ -943,6 +944,7 @@ V.caisse = async function () {
   const dessiner = () => {
     const p = mom + '_';
     const valide = r[mom + '_valide'];
+    const verrou = verrouille();
 
     $('#page').innerHTML =
       navJour(j) +
@@ -957,6 +959,11 @@ V.caisse = async function () {
       (mom === 'm' && fondVeille !== null
         ? '<p class="rappel">Fond de caisse final d’hier soir : <b>' + eur(fondVeille) + '</b>' +
           (veille.s_valide ? ' · ' + esc(veille.s_valide.par) : '') + '</p>'
+        : '') +
+
+      (verrou
+        ? '<p class="lecture">Comptage validé par ' + esc(valide.par) + ' à ' + heure(valide.at) +
+          '. Seul le manager peut le corriger.</p>'
         : '') +
 
       carte(
@@ -986,9 +993,10 @@ V.caisse = async function () {
         '<textarea data-k="' + p + 'com" placeholder="Toute explication utile.">' +
         esc(r[p + 'com'] || '') + '</textarea></div>', 'plat') +
 
+      (verrou ? '' :
       '<button class="btn ' + (valide ? 'clair' : 'menthe') + ' bloc xl" id="cv" style="margin-top:16px">' +
       (valide ? '✓ Déjà validé — revalider'
-              : 'Valider le comptage ' + (mom === 'm' ? 'd’ouverture' : 'de fermeture')) + '</button>' +
+              : 'Valider le comptage ' + (mom === 'm' ? 'd’ouverture' : 'de fermeture')) + '</button>') +
 
       /* Le manager voit le détail du calcul, pas seulement le verdict.
          Un équipier a besoin de savoir si ça tombe juste ; un manager a besoin
@@ -1174,6 +1182,21 @@ V.caisse = async function () {
     await DB.set('caisse:' + j, r);
   }, 400);
 
+  /* Un comptage déjà validé ne se corrige que par le manager. Un équipier le
+     réécrivait sans trace : signature et montants d'origine perdus, journal
+     muet. L'équipe corrige librement un comptage tant qu'il n'est pas validé. */
+  function verrouille() {
+    return !!r[mom + '_valide'] && STATE.user.role !== 'manager';
+  }
+  const LIBELLES_CAISSE = { m_fond:'fond initial', s_cb:'recettes CB', s_esp:'recettes espèces',
+    s_tpe:'TPE', s_retrait:'retrait', s_fond:'fond final' };
+  const champsMoment = m => (m === 'm' ? ['m_fond'] : ['s_cb', 's_esp', 's_tpe', 's_retrait', 's_fond']).concat([m + '_com']);
+  const instantane = m => {
+    const v = {};
+    champsMoment(m).forEach(k => { v[k] = String(lire(k)); });
+    return v;
+  };
+
   function brancher() {
     brancherNavJour('caisse');
     if (!peutModifier(j)) return;
@@ -1181,7 +1204,13 @@ V.caisse = async function () {
       if (b.dataset.mom === mom) return;
       mom = b.dataset.mom; V.caisse._m = mom; dessiner();
     });
-    champsSaisie().forEach(i => i.oninput = () => {
+    if (verrouille()) champsSaisie().forEach(i => { i.disabled = true; });
+    else champsSaisie().forEach(i => i.oninput = () => {
+      /* Correction d'un comptage validé : la signature et les montants
+         d'origine sont gardés jusqu'à la revalidation, qui les journalise. */
+      if (r[mom + '_valide'] && !r[mom + '_avant']) {
+        r[mom + '_avant'] = Object.assign({ valeurs:instantane(mom) }, r[mom + '_valide']);
+      }
       r[i.dataset.k] = i.value;
       /* null et non delete : la fusion avec la copie du serveur ferait revenir
          une clé supprimée, et l'ancienne signature avec elle. */
@@ -1192,15 +1221,34 @@ V.caisse = async function () {
       sauver();
       verdict();
     });
-    $('#cv').onclick = async () => {
+    if ($('#cv')) $('#cv').onclick = async () => {
       const p = mom + '_';
       const requis = (mom === 'm') ? ['m_fond'] : ['s_cb', 's_esp', 's_tpe', 's_retrait', 's_fond'];
       const vides = requis.filter(k => r[k] === undefined || r[k] === '');
       if (vides.length) return toast(mom === 'm'
         ? 'Renseignez le fond de caisse initial'
         : 'Renseignez tous les montants du soir', 'erreur');
+      /* Revalidation d'un comptage déjà signé, corrigé ou non : l'ancienne
+         signature et les anciens montants vont au journal et restent dans la
+         fiche (p_corrections), au lieu d'être écrasés sans trace. */
+      const avant = r[p + 'avant'] ||
+        (r[p + 'valide'] ? Object.assign({ valeurs:instantane(mom) }, r[p + 'valide']) : null);
       r[mom + '_valide'] = { par:STATE.user.prenom, id:STATE.user.id, at:nowISO() };
       champsSaisie().forEach(i => { r[i.dataset.k] = i.value; });
+      let correction = '';
+      if (avant) {
+        const apres = instantane(mom), av = avant.valeurs || {};
+        const change = k => k === p + 'com' ? (av[k] || '') !== (apres[k] || '') : num(av[k]) !== num(apres[k]);
+        const diffs = champsMoment(mom).filter(change).map(k =>
+          k === p + 'com' ? 'commentaire modifié'
+            : LIBELLES_CAISSE[k] + ' ' + eur(num(av[k])) + ' → ' + eur(num(apres[k])));
+        correction = ' — déjà validé par ' + (avant.par || '?') + (avant.at ? ' à ' + heure(avant.at) : '') +
+          ' : ' + (diffs.length ? diffs.join(', ') : 'montants inchangés');
+        r[p + 'corrections'] = (Array.isArray(r[p + 'corrections']) ? r[p + 'corrections'] : []).concat([{
+          par:avant.par || null, id:avant.id || null, at:avant.at || null, valeurs:avant.valeurs || {},
+          corrigePar:STATE.user.prenom, le:nowISO() }]);
+        r[p + 'avant'] = null;
+      }
       /* Le tableau de bord, l'historique et les tendances lisent encore
          ecart / par : sans eux, chaque soir s'affichait à 0 €, sans écart. */
       if (mom === 's') {
@@ -1215,10 +1263,11 @@ V.caisse = async function () {
         r.par = STATE.user.prenom;
       }
       await DB.set('caisse:' + j, r);
-      await feed('ok', STATE.user.prenom + ' a validé le comptage ' +
-        (mom === 'm' ? 'd’ouverture' : 'de fermeture'));
+      await feed(avant ? 'warn' : 'ok', STATE.user.prenom + (avant ? ' a revalidé' : ' a validé') + ' le comptage ' +
+        (mom === 'm' ? 'd’ouverture' : 'de fermeture') + correction);
       toast('Comptage validé');
-      rendre('accueil');
+      /* Le manager revient à sa Tour de contrôle, pas à la vue équipier. */
+      rendre(vueAccueil());
     };
   }
 
@@ -1517,7 +1566,13 @@ V.temp = async function () {
          quelle (affichée « — » jusque-là) ; les appuis suivants font ±1. */
       const nv = !saisi(e) ? defautEnceinte(e)
                : (actuel === 'HS' ? defautEnceinte(e) : actuel) + (+b.dataset.pas);
-      if (nv < e.lo - 5 || nv > e.hi + 5) return;
+      /* Hors de la plage des flèches (ex. 20 °C tapé au lieu de −20), elles
+         restaient muettes. On laisse revenir vers la plage ; s'éloigner encore
+         est refusé, mais en le disant et en indiquant la saisie libre. */
+      const bas = e.lo - 5, haut = e.hi + 5;
+      if ((nv < bas && nv < actuel) || (nv > haut && nv > actuel)) {
+        return toast('Valeur hors de la plage des flèches : touchez la température pour la saisir', 'erreur');
+      }
       rec[cle(e)] = nv;
       invalider();
       vibrer(UI.vibration.ok);
@@ -1528,7 +1583,17 @@ V.temp = async function () {
 
     $$('[data-hs]').forEach(b => b.onclick = async () => {
       const e = ENCEINTES.filter(x => x.id === b.dataset.hs)[0];
-      rec[cle(e)] = (rec[cle(e)] === 'HS') ? '' : 'HS';
+      /* HS puis HS de nouveau effaçait la température déjà relevée : on garde
+         la valeur d'avant pour la remettre si l'on revient sur le HS. */
+      const memo = V.temp._avantHS || (V.temp._avantHS = {});
+      const k = j + '|' + cle(e);
+      if (rec[cle(e)] === 'HS') {
+        rec[cle(e)] = (memo[k] !== undefined) ? memo[k] : '';
+        delete memo[k];
+      } else {
+        if (saisi(e)) memo[k] = rec[cle(e)];
+        rec[cle(e)] = 'HS';
+      }
       invalider();
       await sauver();
       dessiner();
@@ -1566,6 +1631,11 @@ V.temp = async function () {
         if ($('#obs')) $('#obs').focus();
         return;
       }
+      /* Aucune enceinte relevée : « Valider quand même » signait un registre
+         vide, que Ma journée et la Tour de contrôle comptaient comme fait. */
+      if (ENCEINTES.length && reste.length === ENCEINTES.length) {
+        return toast('Aucune température relevée : relevez au moins une enceinte (ou marquez-la HS)', 'erreur');
+      }
       if (reste.length) {
         confirmer('Valider avec ' + reste.length + ' enceinte(s) non relevée(s) ?',
           'Manquantes : ' + reste.map(e => e.nom).join(', ') + '. Un registre incomplet ' +
@@ -1581,7 +1651,8 @@ V.temp = async function () {
       await sauver();
       await feed('ok', STATE.user.prenom + ' a validé les températures du ' + mom.label.toLowerCase());
       toast('Relevé du ' + mom.label.toLowerCase() + ' validé');
-      rendre('accueil');
+      /* Le manager revient à sa Tour de contrôle, pas à la vue équipier. */
+      rendre(vueAccueil());
     }
   }
 
@@ -1964,15 +2035,32 @@ V.anomalie = async function () {
         });
     };
   });
-  $$('[data-res]').forEach(b => b.onclick = async () => {
-    const l = await DB.get('anomalies', []);
-    const a = l.filter(x => x.id === b.dataset.res)[0];
-    if (a) { a.resolue = true; a.resoluePar = STATE.user.prenom; a.resolueAt = nowISO(); }
-    await DB.set('anomalies', l);
-    if (a) await feed('ok', STATE.user.prenom + ' a traité : ' + a.titre);
-    rendre('anomalie');
+  /* Un seul appui, sans confirmation, et ouvert à toute l'équipe : un
+     signalement quittait « En cours » avant que le manager l'ait vu. On
+     confirme, et l'équipier ne clôt que ce qu'il a lui-même signalé. */
+  $$('[data-res]').forEach(b => b.onclick = () => {
+    const vue = liste.filter(x => x.id === b.dataset.res)[0];
+    if (!vue || !peutClore(vue)) return;
+    confirmer('Marquer comme traitée ?',
+      '« ' + (vue.titre || '') + ' » passera dans « Traitées »' +
+      (STATE.user.role === 'manager' ? '.' : ' et ne sera plus suivi par ' +
+        (typeof nomManager === 'function' ? nomManager() : 'le manager') + '.'),
+      'Marquer traitée', async () => {
+        const l = await DB.get('anomalies', []);
+        const a = l.filter(x => x.id === b.dataset.res)[0];
+        if (a) { a.resolue = true; a.resoluePar = STATE.user.prenom; a.resolueAt = nowISO(); }
+        await DB.set('anomalies', l);
+        if (a) await feed('ok', STATE.user.prenom + ' a traité : ' + a.titre);
+        rendre('anomalie');
+      });
   });
 };
+
+/* Le manager clôt tout signalement ; l'équipier, seulement les siens. */
+function peutClore(a) {
+  if (!STATE.user || !a) return false;
+  return STATE.user.role === 'manager' || (!!a.employe && a.employe === STATE.user.id);
+}
 
 function carteAnomalie(a) {
   const c = ANOMALIES.categories.filter(x => x.id === a.categorie)[0] || ANOMALIES.categories[6];
@@ -1991,7 +2079,7 @@ function carteAnomalie(a) {
     (a.photo ? '<img src="' + esc(a.photo) + '" alt="" data-anoph="' + esc(a.id) + '" ' +
       'style="width:100%;max-height:190px;object-fit:cover;border-radius:10px;' +
       'margin-top:10px;cursor:pointer">' : '') +
-    (a.resolue ? '' : '<button class="btn clair bloc sm" data-res="' + esc(a.id) +
+    (a.resolue || !peutClore(a) ? '' : '<button class="btn clair bloc sm" data-res="' + esc(a.id) +
       '" style="margin-top:10px">Marquer comme traitée</button>'),
     a.resolue ? 'plat' : (g.couleur === 'bad' ? 'corail' : g.couleur === 'warn' ? 'ambre' : ''));
 }

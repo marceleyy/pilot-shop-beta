@@ -1559,7 +1559,7 @@ function renderNav() {
      /* Une enceinte marquée hors service compte comme relevée. Et c'est la
         validation explicite qui fait foi, pas le simple remplissage : une
         valeur saisie puis modifiée sans revalider ne compte pas. */
-     const complet = mom => !!(t.valide && t.valide[mom]);
+     const complet = mom => !!(t.valide && t.valide[mom]) && releveMesure(t, mom);
      const crit = ENCEINTES.filter(e => ['m','s'].some(m => etatTemp(e, t[m + '_' + e.id]) === 'crit')).length;
      const rupt = Object.keys(r).filter(k2 => r[k2] && r[k2].rupture).length;
    
@@ -1596,6 +1596,16 @@ function renderNav() {
      if (v >= e.crit) return 'crit';
      if (v >= e.vert[0] && v <= e.vert[1]) return 'vert';
      return 'rouge';
+   }
+
+   /* Une signature sans aucune mesure ne fait pas un relevé : il faut au moins
+      une valeur (ou « HS ») pour ce moment. Un registre validé vide comptait
+      comme fait dans Ma journée et la Tour de contrôle. On lit les clés du
+      document et non ENCEINTES, pour ne pas renier un relevé ancien dont les
+      unités ont été renommées depuis. */
+   function releveMesure(t, mom) {
+     return !!t && Object.keys(t).some(k => k.indexOf(mom + '_') === 0 &&
+       t[k] !== '' && t[k] !== null && t[k] !== undefined);
    }
    
    /* =============================================================================
@@ -1767,10 +1777,15 @@ async function purgerPreuves() {
      $('#pa').onclick = async () => {
        const p = $('#pp').value.trim();
        if (!p) { toast('Indiquez le produit', 'erreur'); return $('#pp').focus(); }
+       /* Nombre vide, nul ou négatif : « num(0) || 1 » enregistrait 1 sans
+          prévenir. On le dit au lieu de deviner. */
+       const nombre = num($('#pn').value);
+       if (!(nombre > 0)) { toast('Indiquez un nombre supérieur à 0', 'erreur'); return $('#pn').focus(); }
+       if (num($('#pl').value) < 0) { toast('Le litrage ne peut pas être négatif', 'erreur'); return $('#pl').focus(); }
        /* parUnite : le litrage est saisi par unité (saisie manuelle comme
           dictée, qui remplit ce même formulaire). Les anciennes lignes, sans
           ce marqueur, gardent leur calcul d'origine. */
-       liste.push({ id:uid(), produit:p, nombre:num($('#pn').value) || 1, litrage:num($('#pl').value),
+       liste.push({ id:uid(), produit:p, nombre:nombre, litrage:num($('#pl').value),
                     parUnite:true,
                     motif:motif, par:STATE.user.prenom, employe:STATE.user.id, at:nowISO() });
        await DB.set('pertes:' + j, liste);
@@ -1781,10 +1796,15 @@ async function purgerPreuves() {
      };
    
      $$('[data-del]').forEach(b => b.onclick = () => {
-       confirmer('Retirer cette ligne ?', 'La perte sera supprimée du registre du jour.', 'Retirer', async () => {
-         liste.splice(+b.dataset.del, 1);
+       confirmer('Retirer cette ligne ?', 'La perte sera supprimée du registre du jour. Le retrait est noté au journal.', 'Retirer', async () => {
+         const w = liste.splice(+b.dataset.del, 1)[0];
          await DB.set('pertes:' + j, liste);
          await cumulerPertesMois(j);
+         /* La création d'une perte est journalisée ; son retrait ne l'était pas :
+            une trace pouvait disparaître sans laisser de ligne (DON-06). */
+         if (w) await feed('warn', STATE.user.prenom + ' a retiré une perte : ' + w.produit + ' (' +
+           w.nombre + ' ×' + (w.litrage ? ', ' + n1(litresPerte(w)) + ' L' : '') + ', déclarée par ' +
+           (w.par || '?') + (w.at ? ' à ' + heure(w.at) : '') + ')');
          rendre('pertes');
        });
      });
@@ -3257,7 +3277,7 @@ function ouvrirPremierePeriode() {
          noms.length
            ? noms.slice(0, 4).join(', ') + (noms.length > 4 ? ' et ' + (noms.length - 4) + ' autre(s)' : '') + '.'
            : 'Signalées par l’équipe lors du réassort.',
-         'controle']);
+         '#urgences']);   // « Ouvrir » renvoyait vers cette même vue : on descend à la liste
      }
      if (perimes) {
        const quoi = [...new Set((fifo || []).filter(x => x.c === 'rouge')
@@ -3302,11 +3322,12 @@ function ouvrirPremierePeriode() {
        (A.length ? '<div class="entete"><h3>Alertes</h3></div><div class="stack">' + A.map(a =>
          '<div class="alerte ' + a[0] + '"><span class="ai">' + (a[0] === 'bad' ? '▲' : '●') + '</span>' +
          '<div><b>' + esc(a[1]) + '</b><p>' + esc(a[2]) + '</p></div>' +
-         '<span class="go"><button class="btn clair sm" data-go="' + a[3] + '">Ouvrir</button></span></div>').join('') + '</div>'
+         '<span class="go"><button class="btn clair sm" ' + (a[3].charAt(0) === '#'
+           ? 'data-ancre="' + a[3].slice(1) + '"' : 'data-go="' + a[3] + '"') + '>Ouvrir</button></span></div>').join('') + '</div>'
          : carte('<div class="alerte ok"><span class="ai">•</span><div><b>Rien à signaler</b>' +
            '<p>Caisse, frigos, nettoyage et stocks sont dans les clous.</p></div></div>', 'plat')) +
    
-       (ruptures.length ? '<div class="entete"><h3>Urgences</h3>' +
+       (ruptures.length ? '<div class="entete" id="urgences" style="scroll-margin-top:90px"><h3>Urgences</h3>' +
          '<button class="btn fantome sm pousse" id="tout-traite">Tout marquer traité</button></div>' +
          '<div class="stack">' + ruptures.slice().reverse().map(r => {
            const niv = RUPTURE.niveaux.filter(n => n.id === r.niveau)[0] || RUPTURE.niveaux[0];
@@ -3338,12 +3359,25 @@ function ouvrirPremierePeriode() {
        rendre('controle');
      });
    
+     $$('#page [data-ancre]').forEach(b => b.onclick = () => {
+       const c = document.getElementById(b.dataset.ancre);
+       if (c) c.scrollIntoView({ behavior:'smooth', block:'start' });
+     });
+
      const tt = $('#tout-traite');
      if (tt) tt.onclick = () => confirmer('Tout marquer traité ?',
        ruptures.length + ' rupture(s) seront classées. L’historique est conservé.', 'Tout traiter', async () => {
          const l = await DB.get('ruptures', []);
-         l.forEach(r => { if (!r.traite) { r.traite = true; r.traitePar = STATE.user.prenom; r.traiteAt = nowISO(); } });
+         const classees = l.filter(r => !r.traite);
+         classees.forEach(r => { r.traite = true; r.traitePar = STATE.user.prenom; r.traiteAt = nowISO(); });
          await DB.set('ruptures', l);
+         /* Comme « Traité » d'une seule rupture : une ligne au fil « En direct »,
+            sinon le classement en masse ne laissait aucune trace. */
+         if (classees.length) {
+           const noms = [...new Set(classees.map(r => r.article).filter(Boolean))];
+           await feed('ok', STATE.user.prenom + ' a traité ' + classees.length + ' rupture(s)' +
+             (noms.length ? ' : ' + noms.slice(0, 6).join(', ') + (noms.length > 6 ? '…' : '') : ''));
+         }
          toast('Urgences classées');
          rendre('controle');
        });
