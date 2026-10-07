@@ -124,13 +124,18 @@ function ecranRattachement() {
       '<h2>Rattacher cet appareil</h2>' +
       '<div class="cs">À faire une seule fois. Ensuite, l’équipe se connecte ' +
       'simplement avec son prénom et son code.</div>' +
-      '<div class="champ" style="margin-top:16px"><label class="f">Compte de la boutique</label>' +
+      /* Un vrai formulaire : la touche Entrée valide, comme partout ailleurs.
+         Le texte d'exemple ne montre plus le format réel de l'identifiant du
+         compte boutique : la page est publique. */
+      '<form id="rt-form" novalidate>' +
+      '<div class="champ" style="margin-top:16px"><label class="f" for="rt-mail">Compte de la boutique</label>' +
       '<input type="email" id="rt-mail" autocapitalize="none" autocomplete="username" ' +
-      'spellcheck="false" placeholder="paccard@pilot-shop.local"></div>' +
-      '<div class="champ" style="margin-top:14px"><label class="f">Mot de passe</label>' +
+      'spellcheck="false" placeholder="adresse e-mail du compte boutique"></div>' +
+      '<div class="champ" style="margin-top:14px"><label class="f" for="rt-mdp">Mot de passe</label>' +
       '<input type="password" id="rt-mdp" autocomplete="current-password"></div>' +
-      '<button class="btn menthe bloc xl" id="rt-ok" style="margin-top:18px">Rattacher</button>' +
-      '<p class="mini" id="rt-etat" style="text-align:center;margin-top:14px"></p>' +
+      '<button type="submit" class="btn menthe bloc xl" id="rt-ok" style="margin-top:18px">Rattacher</button>' +
+      '</form>' +
+      '<p class="mini" id="rt-etat" role="status" style="text-align:center;margin-top:14px"></p>' +
       '</div>' +
       '<p class="mini" style="text-align:center;margin-top:18px">Ces identifiants ' +
       'sont ceux de la boutique, pas les vôtres. Demandez-les à votre manager.</p>' +
@@ -140,7 +145,9 @@ function ecranRattachement() {
     const etat = m => { const e = d.querySelector('#rt-etat'); if (e) e.textContent = m; };
     const bouton = d.querySelector('#rt-ok');
 
-    bouton.onclick = async () => {
+    d.querySelector('#rt-form').onsubmit = ev => { ev.preventDefault(); if (!bouton.disabled) bouton.onclick(); };
+    bouton.onclick = async ev => {
+      if (ev) ev.preventDefault();
       const mail = d.querySelector('#rt-mail').value.trim();
       const mdp = d.querySelector('#rt-mdp').value;
       if (!mail || !mdp) return etat('Renseignez les deux champs.');
@@ -157,8 +164,11 @@ function ecranRattachement() {
         resolve(true);
       } catch (e) {
         bouton.disabled = false;
+        /* Messages en français : « Failed to fetch » ne disait rien à l'équipe. */
         etat(e.statut === 400 ? 'Identifiants refusés.'
-           : 'Échec : ' + e.message + '. Vérifiez la connexion.');
+           : e.statut === 429 ? 'Trop d’essais : patientez une minute avant de réessayer.'
+           : e.statut ? 'La base refuse le rattachement (erreur ' + e.statut + '). Réessayez plus tard.'
+           : 'Base injoignable. Vérifiez le Wi-Fi, puis réessayez.');
       }
     };
   });

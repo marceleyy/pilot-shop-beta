@@ -8,10 +8,11 @@
    elle qui déclenche le re-téléchargement. Un appareil déjà installé garderait
    sinon l'ancien cache, et n'irait jamais chercher les fichiers ajoutés — le
    scan hors ligne ne marcherait que sur les appareils neufs. */
-const CACHE   = 'pilotshop-cache-v11';
-/* Nom FIXE, sans numéro de version : polices et bibliothèques du CDN ne
-   changent pas avec l'application. Le renommer à chaque version les faisait
-   purger à l'activation, donc re-télécharger — impossible en chambre froide. */
+const CACHE   = 'pilotshop-cache-v12';
+/* Cache des ressources externes. Il ne sert plus : XLSX est désormais servi
+   par l'application (vendor/). Son ancien contenu — la copie du CDN, gardée
+   « cache d'abord » sous ce nom fixe et jamais revalidée — est purgé à
+   l'activation : une copie altérée y aurait survécu à toutes les versions. */
 const RUNTIME = 'pilotshop-runtime';
 
 const PRECACHE = [
@@ -36,6 +37,8 @@ const PRECACHE = [
   '/vendor/tesseract-worker.min.js',
   '/vendor/tesseract-core-simd.wasm.js',
   '/vendor/fra.traineddata.gz',
+  /* Lecture des exports de caisse (XLSX 0.18.5), autrefois chargée d'un CDN. */
+  '/vendor/xlsx.full.min.js',
   '/manifest.webmanifest',
   '/icons/icon-192.png',
   '/icons/icon-512.png',
@@ -46,10 +49,8 @@ const PRECACHE = [
   '/icons/icon-512-maskable.png'
 ];
 
-/* Ressources externes : mises en cache à la volée, jamais bloquantes */
-const EXTERNES = [
-  'cdnjs.cloudflare.com'
-];
+/* Ressources externes : aucune aujourd'hui (polices et XLSX sont locaux). */
+const EXTERNES = [];
 
 /* -----------------------------------------------------------------------------
    INSTALLATION — précache tolérant à l'échec unitaire
@@ -81,9 +82,9 @@ self.addEventListener('install', event => {
 self.addEventListener('activate', event => {
   event.waitUntil((async () => {
     const noms = await caches.keys();
-    /* Le cache runtime (nom fixe) est conservé ; les anciens caches
-       « pilotshop-runtime-vN » numérotés, eux, sont purgés. */
-    await Promise.all(noms.map(n => (n !== CACHE && n !== RUNTIME) ? caches.delete(n) : null));
+    /* Tout ce qui n'est pas la version courante est purgé, y compris le
+       cache runtime et sa copie du CDN (voir RUNTIME). */
+    await Promise.all(noms.map(n => (n !== CACHE) ? caches.delete(n) : null));
     if (self.registration.navigationPreload) {
       try { await self.registration.navigationPreload.enable(); } catch (e) {}
     }
@@ -96,7 +97,7 @@ self.addEventListener('activate', event => {
    Navigation      → cache d'abord, réseau en arrière-plan (ouverture instantanée)
    Fichiers du app → réseau d'abord, repli sur le cache
    Modèle Tesseract → cache-first (mis en cache à la première réponse)
-   Polices, CDN    → cache-first, mise en cache runtime
+   Externes        → réseau d'abord, cache en secours (aucun aujourd'hui)
    Écritures / API → réseau seul, jamais de cache
    -------------------------------------------------------------------------- */
 self.addEventListener('fetch', event => {
@@ -195,12 +196,12 @@ self.addEventListener('fetch', event => {
     return;
   }
 
-  /* --- Polices et CDN : cache-first, repli réseau --- */
+  /* --- Ressources externes : réseau d'abord, cache en secours ---
+     Plus de « cache d'abord » : une réponse gardée sans revalidation (même
+     altérée) était resservie indéfiniment. */
   if (EXTERNES.some(h => url.hostname.endsWith(h))) {
     event.respondWith((async () => {
       const cache = await caches.open(RUNTIME);
-      const cachee = await cache.match(req);
-      if (cachee) return cachee;
       try {
         /* Délai maximum : sans lui, un CDN injoignable bloquait la requête
            (et l'écran) sans fin. */
@@ -210,7 +211,7 @@ self.addEventListener('fetch', event => {
         if (r && r.ok) event.waitUntil(cache.put(req, r.clone()).catch(() => {}));
         return r;
       } catch (e) {
-        return cachee || new Response('', { status: 504, statusText: 'Hors ligne' });
+        return (await cache.match(req)) || new Response('', { status: 504, statusText: 'Hors ligne' });
       }
     })());
   }

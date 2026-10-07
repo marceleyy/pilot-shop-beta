@@ -451,7 +451,7 @@ label.f,.f{
 /* Bord des champs à 3,6:1 : c'est lui qui dit « ici on écrit ». Le filet
    décoratif des cartes (1,3:1) ne suffisait pas en plein soleil. */
 input[type=text],input[type=number],input[type=date],input[type=month],
-input[type=password],input[type=search],input[type=time],input[type=datetime-local],
+input[type=password],input[type=email],input[type=search],input[type=time],input[type=datetime-local],
 select,textarea{
   min-height:52px;background-color:var(--porcelaine);color:var(--chocolat);
   border:1px solid var(--contour);border-radius:var(--r-bloc);

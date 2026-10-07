@@ -324,6 +324,15 @@
      const distant = cle => configuré() && !estLocale(cle) && !!table(cle);
    
      async function appel(chemin, options, secondeChance) {
+       /* Base qui refuse un appareil non rattaché : inutile d'insister. Chaque
+          lecture retentait le réseau — une rafale de 401 (52 en 25 s) sans
+          aucune chance d'aboutir. On se tait 30 s, ou jusqu'au rattachement ;
+          les saisies restent locales et en file d'attente, comme hors ligne. */
+       if (STATE.refusJusqua && Date.now() < STATE.refusJusqua &&
+           typeof appareilRattache === 'function' && !appareilRattache()) {
+         const e = new Error('HTTP 401'); e.http = 401; e.motif = 'Appareil non rattaché';
+         throw e;
+       }
        const ctrl = new AbortController();
        const to = setTimeout(() => ctrl.abort(), OFFLINE.timeoutReseauMs);
        try {
@@ -381,6 +390,7 @@
              STATE.erreurBase = rattache
                ? 'Session expirée — rattachez cet appareil'
                : 'Appareil non rattaché';
+             if (!rattache) STATE.refusJusqua = Date.now() + 30000;
            }
            else if (r.status === 404) {
              /* Une table manquante ne réapparaîtra pas d'elle-même : inutile de
@@ -1179,7 +1189,8 @@
 
      STATE.user = { id:e.id, prenom:e.prenom, role:e.role, couleur:e.couleur, initiales:e.initiales };
      STATE._pin = '';
-     await DB.set('session', STATE.user);
+     await DB.set('session', Object.assign({}, STATE.user, { vu:Date.now() }));
+     _sessionTouchee = Date.now();
      await chargerService();
      /* Un échec de démarrage ne doit plus laisser l'équipière devant un écran
         de connexion muet alors que sa session est ouverte. */
@@ -1192,7 +1203,9 @@
        $('#page').innerHTML = carte(
          entete('⚠️', 'L’application n’a pas pu s’ouvrir',
            String(err && err.message || err)) +
-         '<button class="btn clair bloc" onclick="location.reload()">Recharger</button>');
+         '<button class="btn clair bloc" id="demarrage-recharger">Recharger</button>');
+       /* Pas d'onclick en ligne : la politique de sécurité le bloquerait. */
+       $('#demarrage-recharger').onclick = () => location.reload();
      }
    }
    
@@ -1687,6 +1700,34 @@ async function purgerPreuves() {
   } catch (e) { /* purge sans conséquence si elle échoue */ }
   if (effaces) console.info('Purge locale : ' + effaces + ' photo(s) de plus de ' + PREUVE_LOCAL_JOURS + ' jours (copie serveur conservée)');
   return effaces;
+}
+
+/* Rétention locale : OFFLINE.purgeLocaleJours était annoncé mais rien ne le
+   lisait. Les copies locales datées des données nominatives — journal
+   d'activité, heures pointées, caisses et leurs brouillons — s'accumulaient
+   sans limite sur l'iPad. Au-delà de purgeLocaleJours, la copie LOCALE est
+   effacée ; la base garde la sienne (durées de supabase-conservation.sql).
+   Jamais en mode local (la copie de l'iPad est alors la seule), jamais une clé
+   encore en file d'attente ou trop lourde pour la base. */
+const PREFIXES_PURGE_LOCALE = ['feed:', 'pointage:', 'caisse:', 'brouillon:caisse:'];
+function purgerLocalAncien() {
+  const jours = OFFLINE.purgeLocaleJours;
+  if (!DB.configure || !(jours > 0)) return 0;
+  const limite = addD(today(), -jours);
+  let n = 0;
+  try {
+    const enFile = new Set(fileLire().map(x => x.cle));
+    DB._clesLocales().forEach(cle => {
+      const p = PREFIXES_PURGE_LOCALE.filter(x => cle.indexOf(x) === 0)[0];
+      if (!p) return;
+      const jour = cle.slice(p.length);
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(jour) || jour >= limite) return;
+      if (enFile.has(cle) || (DB._gros && DB._gros[cle])) return;
+      DB._oter(cle); n++;
+    });
+  } catch (e) { /* purge sans conséquence si elle échoue */ }
+  if (n) console.info('Purge locale : ' + n + ' clé(s) de plus de ' + jours + ' jours (copie serveur conservée)');
+  return n;
 }
 
 /* =============================================================================
@@ -2346,8 +2387,25 @@ function ecranRemiseAZero(auto) {
    source de vérité, jamais de la session : celle-ci vit dans le localStorage
    et un « role:'manager' » écrit à la main ouvrait l'espace manager. Un rôle
    retiré depuis la dernière connexion est aussi pris en compte. */
+/* La session reprise sans code (rechargement, relance de la PWA) ne vaut que
+   tant que l'appareil sert : après 8 h sans activité — une nuit, un jour de
+   fermeture — le code PIN est redemandé. Un iPad laissé ouvert sur le compte
+   du manager ne donne plus tout, à n'importe qui, le lendemain. Une session
+   sans date d'activité (ancienne, ou fabriquée à la main) n'est pas reprise.
+   Ce n'est qu'un frein local : la vraie barrière est côté base (ACC-03/08). */
+const SESSION_INACTIVITE_MS = 8 * 3600 * 1000;
+let _sessionTouchee = 0;
+function toucherSession() {
+  if (!STATE.user || Date.now() - _sessionTouchee < 60000) return;
+  _sessionTouchee = Date.now();
+  try { DB.set('session', Object.assign({}, STATE.user, { vu:Date.now() })); } catch (e) {}
+}
+document.addEventListener('pointerdown', toucherSession, { passive:true });
+document.addEventListener('keydown', toucherSession, { passive:true });
+
 function utilisateurDeSession(s) {
   if (!s || !s.id) return null;
+  if (!(s.vu > 0) || Date.now() - s.vu > SESSION_INACTIVITE_MS || s.vu > Date.now() + 60000) return null;
   const e = EQUIPE.filter(x => x.id === s.id)[0];
   if (!e) return null;
   return { id:e.id, prenom:e.prenom, role:e.role, couleur:e.couleur, initiales:e.initiales };
@@ -2688,6 +2746,10 @@ setInterval(function () {
    seconde près — ce qui nous a déjà coûté une boutique bloquée.
    -------------------------------------------------------------------------- */
 async function securiteActive() {
+  /* Sans base configurée (mode local), la sonde partait en relatif vers
+     « /rest/v1/reglages » sur l'hôte de l'application : un 404 en console à
+     chaque démarrage, pour une question qui ne se pose pas. */
+  if (!SUPABASE.url || !SUPABASE.anonKey) return false;
   try {
     const ctrl = new AbortController();
     setTimeout(() => ctrl.abort(), 5000);
@@ -2898,6 +2960,7 @@ window.addEventListener('error', function (ev) {
   majBandeau();
   initFeedback();
   purgerPreuves();          // copie locale des photos de plus de 7 jours (le serveur garde tout)
+  purgerLocalAncien();      // journal, heures et caisses de plus de purgeLocaleJours (copie locale)
   /* Bouton de compte : le seul accès à « tout le reste » et à la déconnexion
      pour l'équipe, dont la barre du bas n'a plus d'onglet « Plus ». */
   const bc = $('#compte');

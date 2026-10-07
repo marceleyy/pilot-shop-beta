@@ -18,7 +18,6 @@
 <link rel="icon" href="icons/icon-192.png" sizes="192x192">
 <link rel="manifest" href="manifest.webmanifest">
 
-<link rel="preconnect" href="https://cdnjs.cloudflare.com" crossorigin>
 <link rel="stylesheet" href="style.css">
 <link rel="stylesheet" href="premium.css">
 </head>
@@ -156,10 +155,14 @@
 
 
 <!-- ===================== SCRIPTS ===================== -->
-<!-- async et non defer : en premier dans la file des scripts différés, un CDN
-     muet bloquait app.js. XLSX ne sert qu'à l'import de caisse, au clic. -->
-<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js" crossorigin="anonymous" async></script>
-<script src="env.js" defer onerror="console.info(&quot;env.js absent : mode local&quot;)"></script>
+<!-- async et non defer : XLSX ne sert qu'à l'import de caisse, au clic.
+     Servi par l'application (vendor/, copie vérifiée de la 0.18.5) et non plus
+     par un CDN tiers : un script d'un autre domaine, sans contrôle
+     d'intégrité, pouvait lire et modifier toutes les données de la page.
+     Plus d'attribut onerror sur env.js : la politique de sécurité (vercel.json)
+     refuse tout code en ligne ; son absence signifie simplement le mode local. -->
+<script src="vendor/xlsx.full.min.js" async></script>
+<script src="env.js" defer></script>
 <script src="config.js" defer></script>
 <script src="auth.js" defer></script>
 <script src="vendor/tesseract.min.js" defer></script>

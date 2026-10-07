@@ -2393,8 +2393,10 @@ function formulaireAnomalie() {
        'Ce que l’application a réellement envoyé et reçu.') +
        '<div class="dense"><div class="dl"><span class="c1">Projet</span>' +
        '<span class="c ww">' + esc(String(SUPABASE.url).replace('https://', '').split('.')[0] || 'non configuré') + '</span></div>' +
+       /* Présence seulement : le début de la clé n'aide pas au diagnostic et
+          s'affichait à quiconque regardait l'écran. */
        '<div class="dl"><span class="c1">Clé</span><span class="c ww">' +
-       (SUPABASE.anonKey ? esc(SUPABASE.anonKey.slice(0, 18)) + '…' : 'absente') + '</span></div>' +
+       (SUPABASE.anonKey ? 'présente (masquée)' : 'absente') + '</span></div>' +
        '<div class="dl"><span class="c1">File d’attente</span><span class="c ww num">' + STATE.fileAttente + '</span></div>' +
        '<div class="dl"><span class="c1">Dernière erreur</span><span class="c ww">' +
        (STATE.erreurBase ? esc(STATE.erreurBase) : 'aucune') + '</span></div>' +
@@ -2414,12 +2416,21 @@ function formulaireAnomalie() {
         'journées de photos, en pratique — restent sur cet appareil et ne remonteront pas. ' +
         'Le passage à Supabase Storage réglera ce point.</p></div></div>'
       : '') +
-       '<button class="btn clair bloc" id="dg-test" style="margin-top:14px">Tester lecture et écriture</button>' +
+       /* Mode local : aucune base, rien à tester — le test envoyait des
+          requêtes vers « /rest/v1/… » sur l'hôte de l'application. */
+       (DB.configure
+         ? '<button class="btn clair bloc" id="dg-test" style="margin-top:14px">Tester lecture et écriture</button>'
+         : '<p class="mini" style="margin-top:14px">Mode local : aucune base configurée, rien à tester.</p>') +
        '<div id="dg-res" style="margin-top:12px"></div>' +
        '<button class="btn fantome bloc" id="dg-purge" style="margin-top:8px">Vider la file d’attente</button>', 'plat');
      page.appendChild(bloc.firstChild);
    
-     $('#dg-test').onclick = async () => {
+     /* Le test écrit puis efface une ligne dans des tables du registre : on le
+        dit avant de le faire, au lieu de le découvrir après. */
+     if ($('#dg-test')) $('#dg-test').onclick = () => confirmer('Tester la base ?',
+       'Le test lit quatre tables, puis y écrit et efface aussitôt une ligne « diagnostic:test ».',
+       'Lancer le test', testerBase);
+     const testerBase = async () => {
        $('#dg-res').innerHTML = '<div class="vide">Test en cours…</div>';
        const lignes = [];
        for (const t of ['journal', 'taches_nettoyage', 'checklists', 'reglages']) {

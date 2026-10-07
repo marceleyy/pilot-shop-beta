@@ -183,7 +183,7 @@ button{cursor:pointer;border:0;background:none}
 
 /* --- 7. Formulaires ----------------------------------------------------- */
 label.f{display:block;font-size:12px;font-weight:700;letter-spacing:.02em;text-transform:uppercase;color:var(--brume);margin-bottom:7px}
-input[type=text],input[type=number],input[type=date],input[type=month],input[type=password],input[type=search],select,textarea{
+input[type=text],input[type=number],input[type=date],input[type=month],input[type=password],input[type=email],input[type=search],select,textarea{
   width:100%;min-height:var(--tap);padding:12px 14px;font-size:16px;
   background:rgba(255,255,255,.92);border:1px solid rgba(15,32,39,.12);border-radius:var(--r-btn);
   transition:var(--tr);appearance:none;-webkit-appearance:none;
@@ -680,7 +680,7 @@ select{background-image:linear-gradient(45deg,transparent 50%,var(--brume) 50%),
 
 /* --- Champs ------------------------------------------------------------- */
 input[type=text],input[type=number],input[type=date],input[type=month],
-input[type=password],input[type=search],input[type=time],select,textarea{
+input[type=password],input[type=email],input[type=search],input[type=time],select,textarea{
   background:var(--blanc);border:1px solid var(--line-fort);border-radius:11px;
 }
 .f{font-size:12px;font-weight:600;letter-spacing:.01em;color:var(--brume);text-transform:none}
@@ -998,7 +998,7 @@ body{background:var(--fond);color:var(--encre);
 
 /* --- Champs ------------------------------------------------------------- */
 input[type=text],input[type=number],input[type=date],input[type=month],
-input[type=password],input[type=search],input[type=time],select,textarea{
+input[type=password],input[type=email],input[type=search],input[type=time],select,textarea{
   background:var(--blanc);border:1px solid var(--line-fort);border-radius:var(--r-btn)}
 
 /* --- Barres ------------------------------------------------------------- */
