@@ -342,7 +342,12 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
            '<button class="btn clair bloc" id="rl-plus" style="margin-top:12px">+ Ajouter un produit</button>' +
            '<div class="actions"><button class="btn clair" data-fermer>Annuler</button>' +
            '<button class="btn menthe" id="rl-ok">Enregistrer la réception</button></div>');
-   
+         /* showSheet tient tout contenu pour neuf : sans cette ligne, un
+            toucher du voile jetait sans confirmation le bon, la température,
+            les conformités et les lignes déjà saisis. À cette étape, il y a
+            toujours une saisie à perdre : celle de l'étape 1. */
+         _feuilleModifiee = true;
+
          $$('[data-r]').forEach(inp => inp.oninput = () => {
            const [i, k] = inp.dataset.r.split('.');
            lignes[+i][k] = inp.value;
