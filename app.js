@@ -3378,6 +3378,20 @@ function ouvrirPremierePeriode() {
        return repli();
      }
    }
+   /* La météo ne retient plus le premier écran (#49). Même avec l'échec
+      retenu 10 minutes, Ma journée et la Tour de contrôle attendaient
+      jusqu'à 8 s qu'open-meteo réponde au premier rendu, puis de nouveau
+      toutes les 10 minutes. On dessine avec ce qui est là : la réponse si
+      elle arrive en moins de 300 ms, sinon la dernière météo gardée sur
+      l'iPad (ou rien) ; `suite` livre la réponse quand elle arrive, et la
+      vue complète son bloc météo sans se redessiner. */
+   async function meteoRapide() {
+     if (typeof meteo !== 'function') return { m:null, suite:null };
+     const p = meteo().catch(() => null);
+     const vite = await Promise.race([p, new Promise(r => setTimeout(() => r(undefined), 300))]);
+     if (vite !== undefined) return { m:vite, suite:null };
+     return { m:await DB.get('meteo', null), suite:p };
+   }
    function widgetMeteo(m) {
      if (!m) return '';
      const c = METEO.codes[m.code] || METEO.codes[3];
@@ -3396,7 +3410,8 @@ function ouvrirPremierePeriode() {
    V.controle = async function () {
      const j = today();
      const per = await periodeCourante();
-     const m = await meteo();
+     const mt = await meteoRapide();
+     const m = mt.m;
      const e = await etatJour(j);
    
      const ruptures = (await DB.get('ruptures', [])).filter(r => !r.traite);
@@ -3484,7 +3499,7 @@ function ouvrirPremierePeriode() {
        '<button class="btn sm" id="pdf">Registre</button>';
    
      $('#page').innerHTML =
-       '<div class="grid g2">' + widgetMeteo(m) +
+       '<div class="grid g2" id="ctl-meteo">' + widgetMeteo(m) +
        carte(entete('👥', enService.length ? enService.map(s => s.prenom).join(', ') : 'Personne en service',
          enService.length ? 'En poste depuis ' + enService.map(s => heure(s.debut)).join(', ') : 'Aucun pointage ouvert') +
          '<div class="rang">' + pastille(e.tempM ? 'ok' : 'bad', e.tempM ? 'Frigos matin faits' : 'Frigos matin manquants') +
@@ -3563,6 +3578,17 @@ function ouvrirPremierePeriode() {
    
      $('#pdf').onclick = ouvrirBouclier;
      $('#scanbl').onclick = scannerBL;
+
+     /* Météo arrivée après le dessin (meteoRapide) : la carte est remplacée
+        ou ajoutée en tête de sa grille, sans redessiner la page. */
+     if (mt.suite) mt.suite.then(mm => {
+       const grille = document.getElementById('ctl-meteo');
+       if (!mm || !grille || STATE.view !== 'controle') return;
+       const w = grille.querySelector('.meteo');
+       const ancienne = w && w.closest('.card');
+       if (ancienne) ancienne.outerHTML = widgetMeteo(mm);
+       else grille.insertAdjacentHTML('afterbegin', widgetMeteo(mm));
+     });
    };
    
    const kpi = (k, v, cls, d) =>

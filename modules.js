@@ -649,7 +649,15 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
          vignettes(clichés, j);
   };
    
-     const m = (typeof meteo === 'function') ? await meteo().catch(() => null) : null;
+     /* Sans attendre open-meteo (#49) : voir meteoRapide. */
+     const mt = (typeof meteoRapide === 'function') ? await meteoRapide() : { m:null, suite:null };
+     const m = mt.m;
+     const meteoMini = m => {
+       const c = METEO.codes[m.code] || METEO.codes[3];
+       return '<div class="meteo-mini"><span class="mm-t">' + m.t + '°</span>' +
+              '<span class="mm-d">' + esc(c.l) + '</span>' +
+              '<span class="mm-p">max ' + m.max + '° · pluie ' + m.pluie + ' %</span></div>';
+     };
 
   $('#page').innerHTML =
      /* Salutation et météo sur une seule bande : le prénom parce qu'on tient
@@ -661,12 +669,7 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
      '<span>' + nomJour(j) + ' ' + fmtD(j) + ' · ' +
      (STATE.service ? 'en service depuis ' + heure(STATE.service.debut) : 'pas encore pointé') +
      '</span></div>' +
-     (m ? (function () {
-       const c = METEO.codes[m.code] || METEO.codes[3];
-       return '<div class="meteo-mini"><span class="mm-t">' + m.t + '°</span>' +
-              '<span class="mm-d">' + esc(c.l) + '</span>' +
-              '<span class="mm-p">max ' + m.max + '° · pluie ' + m.pluie + ' %</span></div>';
-     })() : '') +
+     (m ? meteoMini(m) : '') +
      '</div>' +
 
        (R.length
@@ -856,6 +859,16 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
     }
     finir();
   };
+
+  /* Météo arrivée après le dessin (meteoRapide) : la bande du haut se
+     complète, sans redessiner la page ni toucher une case en cours. */
+  if (mt.suite) mt.suite.then(mm => {
+    const h = document.querySelector('#page .accueil-haut');
+    if (!mm || !h || STATE.view !== 'accueil') return;
+    const ancien = h.querySelector('.meteo-mini');
+    if (ancien) ancien.outerHTML = meteoMini(mm);
+    else h.insertAdjacentHTML('beforeend', meteoMini(mm));
+  });
 };
    
    /* Minuteur des 10 minutes de contact du Bactalim */
