@@ -3485,16 +3485,41 @@ function ouvrirPremierePeriode() {
         ajouterait 0 litre aux achats : le stock théorique serait amputé de toute
         la livraison et l'écart accuserait l'équipe d'un manque qui n'existe pas. */
      if (!r.lignes || !r.lignes.length) {
+       /* Le scan lit le numéro du bon, pas son tableau : on demande le total
+          livré au lieu de s'arrêter. Avant, l'écran aboutissait toujours ici et
+          le bouton « Scanner BL » ne pouvait ajouter aucun achat. */
        showSheet(
-         '<h2 id="sheet-titre">Lignes non lisibles</h2>' +
-         '<p class="sub">' + esc(r.numero || 'Bon de livraison') + '</p>' +
-         '<div class="alerte bad"><span class="ai">▲</span><div><b>Aucune référence extraite</b>' +
-         '<p>Le scan sait lire un numéro, pas un tableau de références. Enregistrer ce bon ' +
-         'ajouterait 0 litre aux achats et créerait un écart fantôme de plusieurs centaines ' +
-         'd’euros, sans que rien ne le signale.</p></div></div>' +
+         '<h2 id="sheet-titre">Bon de livraison</h2>' +
+         '<p class="sub">Les lignes du bon ne se lisent pas automatiquement : indiquez le total livré.</p>' +
+         '<div class="grid g2">' +
+         '<div class="champ"><label class="f">N° de bon</label>' +
+         '<input type="text" id="bl-num" value="' + esc(r.numero || '') + '" autocapitalize="characters" spellcheck="false"></div>' +
+         '<div class="champ"><label class="f">Litres livrés (total du bon)</label>' +
+         '<input type="number" id="bl-litres" min="0" step="0.5" inputmode="decimal" placeholder="Ex. 120"></div></div>' +
+         '<div class="alerte info" style="margin-top:14px"><span class="ai">•</span><div><b>Ce que fait la validation</b>' +
+         '<p>Les litres s’ajoutent aux achats de la période en cours, base du calcul d’écart. ' +
+         'Un oubli ici se lit ensuite comme un manque de glace.</p></div></div>' +
          '<div class="actions"><button class="btn clair" data-fermer>Fermer</button>' +
-         '<button class="btn menthe" id="bl-manuel">Saisir la livraison</button></div>');
+         '<button class="btn menthe" id="bl-ajout">Ajouter aux achats</button></div>' +
+         '<button class="btn clair bloc" id="bl-manuel" style="margin-top:10px">Contrôle à réception</button>');
        $('#bl-manuel').onclick = () => { closeSheet(); rendre('reception'); };
+       let enCours = false;
+       $('#bl-ajout').onclick = async () => {
+         const litres = num($('#bl-litres').value);
+         if (!(litres > 0)) { toast('Indiquez le nombre de litres livrés', 'erreur'); return $('#bl-litres').focus(); }
+         if (enCours) return;
+         enCours = true;
+         const numero = $('#bl-num').value.trim().toUpperCase() || 'sans numéro';
+         const per = await periodeCourante();
+         await DB.patch('ecart:' + per.id, {},
+           { bl:[{ id:uid(), numero:numero, date:r.date || today(), bacs:null, litres:litres, lignes:[],
+                   saisie:'manuelle', par:STATE.user.prenom, at:nowISO() }] },
+           { litrageBL:litres });
+         await feed('ok', STATE.user.prenom + ' a saisi le BL ' + numero + ' (' + n1(litres) + ' L)');
+         closeSheet();
+         toast(n1(litres) + ' L ajoutés aux achats');
+         if (STATE.view === 'ecarts') rendre('ecarts');
+       };
        return;
      }
      const total = r.lignes.reduce((s, l) => s + l.bacs, 0);

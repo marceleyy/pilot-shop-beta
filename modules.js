@@ -166,6 +166,12 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
       produits ouverts. Le croisement des deux donne les alertes DLC.
       ========================================================================== */
    async function stockFerme() {
+     /* La réception n'écrit plus « stock:ferme » mais le journal du stock : la
+        liste restait à « 0 article(s) » et les alertes DLC ne partaient jamais.
+        Ce qui reste fermé se déduit maintenant du journal (stock.js). */
+     if (typeof stockFermeJournal === 'function') {
+       try { return await stockFermeJournal(); } catch (e) { return []; }
+     }
      const l = await DB.get('stock:ferme', []);
      return l.filter(x => !x.ouvert && !x.jete);
    }
@@ -311,8 +317,11 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
        }));
        if (!lignes.length) lignes.push({ produit:'', qte:1, unite:'bac', lot:'', dlc:'' });
    
+       /* showSheet et non #sheet-corps : le scan d'une DLC remplace la feuille
+          par celle du cadrage puis la ferme. Réécrite dans une feuille fermée,
+          la réception en cours (bon, conformités, lignes) disparaissait. */
        const rendre2 = () => {
-         $('#sheet-corps').innerHTML =
+         showSheet(
            '<h2 id="sheet-titre">Produits entrants</h2>' +
            '<p class="sub">' + esc(bl.fournisseur) + ' · ' + esc(bl.numero) +
            (bl.refuse ? ' · <b style="color:var(--corail-d)">livraison refusée</b>' : '') + '</p>' +
@@ -330,9 +339,8 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
              '</div>').join('') + '</div>' +
            '<button class="btn clair bloc" id="rl-plus" style="margin-top:12px">+ Ajouter un produit</button>' +
            '<div class="actions"><button class="btn clair" data-fermer>Annuler</button>' +
-           '<button class="btn menthe" id="rl-ok">Enregistrer la réception</button></div>';
+           '<button class="btn menthe" id="rl-ok">Enregistrer la réception</button></div>');
    
-         $$('#sheet-corps [data-fermer]').forEach(b => b.onclick = closeSheet);
          $$('[data-r]').forEach(inp => inp.oninput = () => {
            const [i, k] = inp.dataset.r.split('.');
            lignes[+i][k] = inp.value;
@@ -340,22 +348,31 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
          $$('[data-scandlc]').forEach(b => b.onclick = async () => {
            const i = +b.dataset.scandlc;
            const r = await scannerPhoto('etiquette');
-           if (!r) return;
-           const d = (r.texte || '').match(/(\d{2})[\/.\-](\d{2})[\/.\-](\d{2,4})/);
-           if (d) {
-             const an = d[3].length === 2 ? '20' + d[3] : d[3];
-             lignes[i].dlc = an + '-' + d[2] + '-' + d[1];
-           }
+           if (!r) return rendre2();          // scan annulé : la réception revient telle quelle
+           /* La lecture « code » ne garde que chiffres et majuscules : « 15/11/2026 »
+              revient « 15112026 », et l'expression jj/mm/aaaa ne trouvait jamais
+              rien. extraireCarton lit les deux formes et retient l'expiration. */
+           const c = (typeof extraireCarton === 'function') ? extraireCarton(r.texte || '') : null;
+           const dlc = (c && c.expiration) || r.dluo || '';
+           if (dlc) lignes[i].dlc = dlc;
            if (r.lot) lignes[i].lot = r.lot;
            if (r.parfum && !lignes[i].produit) lignes[i].produit = r.parfum;
-           if (!d) toast('Aucune date lisible — saisissez-la à la main', 'erreur');
+           if (dlc) toast('DLC lue : ' + fmtD(dlc) + ' — vérifiez-la sur l’étiquette');
+           else toast('Aucune date lisible — saisissez-la à la main', 'erreur');
            rendre2();
          });
          $('#rl-plus').onclick = () => { lignes.push({ produit:'', qte:1, unite:'bac', lot:'', dlc:'' }); rendre2(); };
          $('#rl-ok').onclick = enregistrer;
        };
    
+       let enCours = false;
        async function enregistrer() {
+         /* Double appui : une seule réception à la fois. */
+         if (enCours) return;
+         enCours = true;
+         try { await enregistrer1(); } finally { enCours = false; }
+       }
+       async function enregistrer1() {
          const valides = lignes.filter(l => l.produit.trim());
          if (!valides.length) return toast('Saisissez au moins un produit', 'erreur');
          const sansDlc = valides.filter(l => !l.dlc).length;
@@ -397,7 +414,7 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
            STATE.user.prenom + (bl.refuse ? ' a REFUSÉ la livraison ' : ' a réceptionné ') + bl.numero +
            ' (' + valides.length + ' réf.)');
          closeSheet();
-         toast(bl.refuse ? 'Réception refusée et tracée' : valides.length + ' article(s) en stock fermé');
+         toast(bl.refuse ? 'Réception refusée et tracée' : valides.length + ' produit(s) ajouté(s) au stock, DLC suivie');
          rendre('reception');
        }
    

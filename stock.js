@@ -209,36 +209,75 @@ async function ajouterMouvement(type, cle, qte, extra) {
     return null;
   }
 
-  const cm = cleMois();
-  let l = await lireMois(cm);
-
-  /* Garde-fou contre le double appui : deux mouvements identiques à moins de
-     quinze secondes d'intervalle sont presque toujours une erreur de manipulation,
-     et ils fausseraient le stock de façon invisible. */
-  const dernier = l[l.length - 1];
-  if (dernier && dernier.t === type && dernier.c === cle &&
-      dernier.e === (STATE.user ? STATE.user.id : null) &&   // pas le scan d'un autre iPad
-      num(dernier.q) === num(qte) &&
-      ((extra && extra.lot) ? dernier.l === extra.lot : true) &&
-      (Date.now() - new Date(dernier.a)) < 15000) {
-    toast('Déjà enregistré il y a quelques secondes', 'erreur');
-    return dernier;
+  /* Garde-fou contre le double appui : un mouvement identique déjà EN COURS
+     d'écriture est ignoré. L'ancienne garde comparait à la dernière ligne sur
+     quinze secondes : elle rejetait aussi un second bac réel du même lot —
+     même après la confirmation « Ce bac n'est plus au stock » — et la seconde
+     ligne identique d'une même réception. Les écrans protègent en plus leur
+     bouton pendant l'enregistrement. */
+  const sig = [type, cle, num(qte), (extra && extra.lot) || '', STATE.user ? STATE.user.id : ''].join('|');
+  if (_mouvementsEnCours.has(sig)) {
+    toast('Déjà en cours d’enregistrement', 'erreur');
+    return null;
   }
+  _mouvementsEnCours.add(sig);
+  try {
+    const cm = cleMois();
+    let l = await lireMois(cm);
 
-  /* Champs courts : t=type, c=clé, q=quantité, a=horodatage, e=employé, l=lot */
-  const m = { t:type, c:cle, q:q, a:nowISO(),
-              e: STATE.user ? STATE.user.id : null };
-  if (extra && extra.lot) m.l = extra.lot;
-  if (extra && extra.bl)  m.b = extra.bl;
-  if (extra && extra.motif) m.mo = extra.motif;
-  l.push(m);
+    /* Champs courts : t=type, c=clé, q=quantité, a=horodatage, e=employé, l=lot,
+       d=DLC du produit fermé (réception) */
+    const m = { t:type, c:cle, q:q, a:nowISO(),
+                e: STATE.user ? STATE.user.id : null };
+    if (extra && extra.lot) m.l = extra.lot;
+    if (extra && extra.bl)  m.b = extra.bl;
+    if (extra && extra.motif) m.mo = extra.motif;
+    if (extra && extra.dlc && /^\d{4}-\d{2}-\d{2}$/.test(extra.dlc)) m.d = extra.dlc;
+    l.push(m);
 
-  l = await purgerJournal(l);
-  _moisCache = { cle: cm, lignes: l, at: Date.now() };
-  invaliderStock();
-  await DB.set(cm, l);
-  await noterMois(cm);
-  return m;
+    l = await purgerJournal(l);
+    _moisCache = { cle: cm, lignes: l, at: Date.now() };
+    invaliderStock();
+    await DB.set(cm, l);
+    await noterMois(cm);
+    return m;
+  } finally {
+    _mouvementsEnCours.delete(sig);
+  }
+}
+const _mouvementsEnCours = new Set();
+
+/* Stock fermé et DLC. La réception n'écrit plus « stock:ferme » mais le
+   journal du stock, DLC comprise (champ d) : l'écran Réception affichait
+   « 0 article(s) » en stock fermé et les alertes DLC de Ma journée ne
+   partaient jamais. Ce qui reste fermé se déduit du stock réel : les
+   ouvertures prennent d'abord les bacs les plus anciens, ce sont donc les
+   réceptions les plus récentes qui restent en réserve. Une unité comptée à
+   l'inventaire sans réception tracée n'a pas de DLC connue : elle n'apparaît
+   pas ici. */
+async function stockFermeJournal() {
+  const s = await stockReel();
+  const mouv = await tousMouvements(null);
+  const parCle = {};
+  mouv.forEach(m => {
+    if ((m.t || m.type) !== 'reception' || !m.d) return;
+    const c = m.c || m.cle;
+    (parCle[c] = parCle[c] || []).push(m);
+  });
+  const out = [];
+  Object.keys(parCle).forEach(c => {
+    let reste = num(s.articles[c]);
+    parCle[c].sort((x, y) => String(y.a || y.at).localeCompare(String(x.a || x.at)))
+      .forEach(m => {
+        if (reste <= 0) return;
+        const q = Math.min(reste, num(m.q !== undefined ? m.q : m.qte));
+        reste -= q;
+        out.push({ id: c + '|' + (m.a || m.at), cle: c, produit: libelleArticle(c), qte: q,
+                   unite: litArticle(c).taille ? 'bac' : '', lot: m.l || '', dlc: m.d,
+                   recuLe: isoOf(new Date(m.a || m.at)) });
+      });
+  });
+  return out;
 }
 
 /* Tous les mois utiles : depuis le dernier inventaire, ou les douze derniers. */
@@ -1548,10 +1587,14 @@ V.lots = async function () {
         }).join('') + '</div>'
       : vide('', 'Aucune ouverture enregistrée.'));
 
-  $('#lo-scan').onclick = async () => {
-    const r = await scannerPhoto('etiquette');
+  /* « Valider et scanner le suivant » : la prise de vue repart après chaque
+     ouverture confirmée. Le drapeau enchainer n'était lu par personne : le
+     bouton faisait la même chose que « Valider ». */
+  $('#lo-scan').onclick = async function scanner() {
+    const r = await scannerPhoto('etiquette', { enchainer: true });
     if (!r) return;
     const ok = await confirmerOuverture(r);
+    if (ok && r.enchainer && STATE.view === 'lots') return scanner();
     if (ok) rendre('lots');
   };
   /* Saisie manuelle : on demande d'abord la famille. Un coulis ou un topping
@@ -1585,6 +1628,10 @@ function confirmerOuverture(r) {
     const garder = () => {
       const l = $('#co-lot'); if (l) r.lot = l.value.trim().toUpperCase();
     };
+    /* Annuler : la feuille est redessinée par dessiner() sans passer par
+       showSheet, qui seul branche [data-fermer] — le bouton ne faisait rien. */
+    const annuler = () => { closeSheet(); resolve(false); };
+    let enCours = false;
 
     const dessiner = () => {
       const fam = FAMILLES_PRODUIT.filter(f => f.id === famille)[0];
@@ -1636,7 +1683,13 @@ function confirmerOuverture(r) {
       });
       const sp = $('#co-parfum');
       if (sp) sp.onchange = () => { parfum = sp.value; };
-      $('#co-ok').onclick = enregistrer;
+      $$('#sheet-corps [data-fermer]').forEach(b => b.onclick = annuler);
+      $('#co-ok').onclick = async () => {
+        /* Double appui : un seul enregistrement à la fois. */
+        if (enCours) return;
+        enCours = true;
+        try { await enregistrer(); } finally { enCours = false; }
+      };
     };
 
     async function enregistrer() {
@@ -1670,7 +1723,7 @@ function confirmerOuverture(r) {
           ' Soit une ouverture précédente n’a pas été scannée, soit une livraison ' +
           'n’a pas été saisie. Confirmez si le bac est bien là : un recomptage ' +
           'sera proposé pour remettre les compteurs à plat.',
-          'Confirmer l’ouverture', () => { poser(fam, lot); });
+          'Confirmer l’ouverture', () => { poser(fam, lot); }, annuler);
       }
       await poser(fam, lot);
     }
@@ -1696,7 +1749,11 @@ function confirmerOuverture(r) {
       const cleFifo = (fam.id === 'glace' && parfum)
         ? 'g_' + parfum
         : 'a_' + (fam.dlc || 'defaut');
-      lots[cleFifo] = { lot: lot, ouv: today(), par: STATE.user.prenom, at: nowISO(),
+      /* « Ouvert le » de la lecture fait foi (bac ouvert la veille, scanné ce
+         matin) : il était ignoré et la DLC après ouverture partait d'aujourd'hui.
+         Une date future ou illisible retombe sur aujourd'hui. */
+      const ouv = (r.ouv && /^\d{4}-\d{2}-\d{2}$/.test(r.ouv) && r.ouv <= today()) ? r.ouv : today();
+      lots[cleFifo] = { lot: lot, ouv: ouv, par: STATE.user.prenom, at: nowISO(),
                         famille: fam.id, taille: fam.parfums ? taille : null };
       await DB.set('lots:' + m, lots);
 
