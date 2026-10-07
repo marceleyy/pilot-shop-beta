@@ -1752,12 +1752,21 @@ V.parametres = async function () {
      /* Contrôle de cohérence avant d'enregistrer : un début de phase à 18:00
         et une fin à 09:00 étaient acceptés, et Ma journée ne trouvait plus la
         phase en cours. Les heures « HH:MM » se comparent comme du texte. */
+     /* Une fin après minuit (09:30 → 00:30) est refusée, et c'est voulu : Ma
+        journée (phaseCourante) et la date des saisies coupent la journée à
+        minuit. Le message le dit et donne la parade, au lieu de laisser
+        croire à une faute de frappe (B3). */
      const h = ['#h1', '#h2', '#h3', '#h4', '#h5', '#h6'].map(x => $(x).value);
+     const apresMinuit = (de, a) => a < de && a <= '06:00';    // 22:00 → 00:30, pas 18:00 → 17:00
      if (h.some(x => !/^\d\d:\d\d$/.test(x))) return toast('Renseignez les six horaires', 'erreur');
-     if (!(h[0] < h[1])) return toast('La boutique doit fermer après son ouverture (' + h[0] + ' → ' + h[1] + ')', 'erreur');
+     if (!(h[0] < h[1])) return toast(apresMinuit(h[0], h[1])
+       ? 'Fermeture après minuit non prise en charge (' + h[0] + ' → ' + h[1] + ') : indiquez 23:59 au plus tard'
+       : 'La boutique doit fermer après son ouverture (' + h[0] + ' → ' + h[1] + ')', 'erreur');
      if (!(h[2] < h[3])) return toast('La phase d’ouverture doit finir après son début (' + h[2] + ' → ' + h[3] + ')', 'erreur');
      if (!(h[3] <= h[4])) return toast('La phase de fermeture doit commencer après la fin de l’ouverture (' + h[3] + ')', 'erreur');
-     if (!(h[4] < h[5])) return toast('La phase de fermeture doit finir après son début (' + h[4] + ' → ' + h[5] + ')', 'erreur');
+     if (!(h[4] < h[5])) return toast(apresMinuit(h[4], h[5])
+       ? 'La phase de fermeture ne peut pas finir après minuit (' + h[4] + ' → ' + h[5] + ') : indiquez 23:59 au plus tard'
+       : 'La phase de fermeture doit finir après son début (' + h[4] + ' → ' + h[5] + ')', 'erreur');
      Object.assign(HORAIRES, { ouverture:$('#h1').value, fermeture:$('#h2').value,
      debutOuverture:$('#h3').value, finOuverture:$('#h4').value,
      debutFermeture:$('#h5').value, finFermeture:$('#h6').value });
