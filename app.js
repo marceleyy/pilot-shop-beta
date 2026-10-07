@@ -253,7 +253,29 @@
          ? Object.assign({}, a, b)
          : b;
      });
+     if (cle && cle.indexOf('caisse:') === 0) garderComptagesValides(out, distant, local);
      return out;
+   }
+
+   /* Caisse : un comptage validé sur la base ne se réécrit pas avec une
+      saisie faite sans connaître cette validation (iPad hors ligne, écran
+      ouvert avant la signature). Le local gagnait champ par champ : le
+      brouillon d'un équipier, rejoué au retour du réseau, vidait les montants
+      de Marie sous sa signature (s_cb '', s_esp '480'… « validé par Marie »).
+      Le moment validé garde donc les champs du serveur. Une correction du
+      manager, elle, connaît la validation : sa copie porte <moment>_valide
+      (null pendant la correction, puis la nouvelle signature) et passe comme
+      avant. Un moment non validé sur la base reste au local. */
+   const CHAMPS_CAISSE_SOIR = ['ecart', 'ecartCB', 'ecartEsp', 'par'];
+   function garderComptagesValides(out, distant, local) {
+     const a = (o, k) => Object.prototype.hasOwnProperty.call(o, k);
+     ['m', 's'].forEach(mom => {
+       if (!distant[mom + '_valide'] || a(local, mom + '_valide')) return;
+       Object.keys(local).forEach(k => {
+         if (k.indexOf(mom + '_') !== 0 && !(mom === 's' && CHAMPS_CAISSE_SOIR.indexOf(k) >= 0)) return;
+         if (a(distant, k)) out[k] = distant[k]; else delete out[k];
+       });
+     });
    }
 
    /* Écriture partielle (DB.patch) appliquée à une copie de la clé, locale ou
