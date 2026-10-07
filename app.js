@@ -2330,14 +2330,24 @@ function purgerLocalAncien() {
    ========================================================================== */
 /* garderRattachement : « vider les saisies » ne détache plus l'appareil. Le
    jeton du compte de la boutique (AUTH.cle) partait avec le reste : il
-   fallait ressortir les identifiants de la boutique pour repartir. */
+   fallait ressortir les identifiants de la boutique pour repartir.
+   La file d'attente reste avec lui : ces saisies n'existent nulle part
+   ailleurs, et l'appareil, toujours rattaché, les enverra au retour de la
+   base. Elle partait aussi, base injoignable ou non (DON-07). Seul le
+   détachement l'efface, après l'avertissement de la feuille.
+   La copie locale des clés encore en file reste aussi : sans elle, une
+   nouvelle saisie hors ligne sur la même fiche repartait de zéro et
+   remplaçait, dans la file, celle qu'on venait de garder. */
 async function viderAppareil(garderRattachement) {
   let cles = 0, cachesEff = 0, sw = 0;
   try {
     const p = OFFLINE.storeLocal + ':';
     const jeton = (typeof AUTH !== 'undefined') ? AUTH.cle : null;
+    const gardees = garderRattachement
+      ? [jeton, p + OFFLINE.fileAttente].concat(fileLire().map(x => p + x.cle))
+      : [];
     Object.keys(localStorage).filter(k => k.indexOf(p) === 0)
-      .filter(k => !(garderRattachement && k === jeton))
+      .filter(k => gardees.indexOf(k) < 0)
       .forEach(k => { localStorage.removeItem(k); cles++; });
     /* Le compteur d'échecs du PIN survit à la remise à zéro : sinon elle
        servirait à lever le blocage anti-essais. */
@@ -2399,16 +2409,24 @@ function ecranRemiseAZero(auto) {
   if (auto) $('#sheet').dataset.obligatoire = '1';
 
   /* Saisies encore en file d'attente : leur nombre exact, et une dernière
-     tentative d'envoi avant de les effacer. */
+     tentative d'envoi avant le nettoyage.
+     Sans détachement, la file est gardée (viderAppareil) : on le dit, au
+     lieu d'annoncer une perte qui n'aura pas lieu. Cocher « Détacher »
+     change l'annonce : là, elles seraient vraiment perdues. */
   const majFile = () => {
     const zone = $('#rz-file');
     if (!zone) return;
     const nb = fileLire().length;
+    const perdues = !!($('#rz-detacher') && $('#rz-detacher').checked);
     zone.innerHTML = nb
-      ? '<div class="alerte bad" style="margin-top:10px"><span class="ai">▲</span><div>' +
-        '<b>' + nb + ' saisie(s) jamais envoyée(s) à la base</b><p>Elles n’existent que sur cet ' +
-        'appareil et seraient perdues.' + (DB.configure ? ' Reconnectez-le au réseau puis touchez « Envoyer d’abord ».' : '') +
-        '</p></div></div>' +
+      ? (perdues
+        ? '<div class="alerte bad" style="margin-top:10px"><span class="ai">▲</span><div>' +
+          '<b>' + nb + ' saisie(s) jamais envoyée(s) à la base</b><p>Détacher l’appareil les efface : elles n’existent que sur cet ' +
+          'appareil et seront perdues.' + (DB.configure ? ' Reconnectez-le au réseau puis touchez « Envoyer d’abord ».' : '') +
+          '</p></div></div>'
+        : '<div class="alerte warn" style="margin-top:10px"><span class="ai">●</span><div>' +
+          '<b>' + nb + ' saisie(s) pas encore envoyée(s) à la base</b><p>Elles restent sur l’appareil : ' +
+          'il les enverra de lui-même dès que la base répondra.</p></div></div>') +
         (DB.configure ? '<button class="btn clair bloc" id="rz-sync" style="margin-top:10px">Envoyer d’abord</button>' : '')
       : '';
     const b = $('#rz-sync');
@@ -2421,6 +2439,7 @@ function ecranRemiseAZero(auto) {
   };
   majFile();
   if (fileLire().length && DB.configure) journaliserSync().then(majFile, majFile);
+  if ($('#rz-detacher')) $('#rz-detacher').onchange = majFile;
 
   const ok = $('#rz-ok');
   $('#rz-mot').oninput = () => { ok.disabled = $('#rz-mot').value.trim().toUpperCase() !== 'EFFACER'; };
@@ -2436,10 +2455,12 @@ function ecranRemiseAZero(auto) {
     $('#sheet-corps').innerHTML =
       '<h2>Nettoyage en cours…</h2><div class="vide">Un instant</div>';
     const r = await viderAppareil(!detacher);
+    const gardees = detacher ? 0 : fileLire().length;
     $('#sheet-corps').innerHTML =
       '<h2>Appareil remis à zéro</h2>' +
       '<p class="sub">' + r.cles + ' saisie(s), ' + r.sw + ' service worker, ' +
-      r.caches + ' cache(s) effacés' + (rattache && !detacher ? ' · appareil toujours rattaché' : '') + '.</p>' +
+      r.caches + ' cache(s) effacés' + (rattache && !detacher ? ' · appareil toujours rattaché' : '') +
+      (gardees ? ' · ' + gardees + ' envoi(s) en attente gardé(s)' : '') + '.</p>' +
       '<div class="alerte ok" style="margin-top:12px"><span class="ai">•</span><div>' +
       '<b>Redémarrage…</b><p>L’application va se recharger sur sa dernière version.</p></div></div>';
     setTimeout(function () { location.replace(location.pathname); }, 1500);
