@@ -3932,7 +3932,8 @@ function ouvrirPremierePeriode() {
    
        carte(entete('🍦', 'Glace vendue', 'Poids sorti par la caisse sur la période. C’est la donnée qui pèse le plus dans l’écart.') +
          '<button class="btn ciel bloc xl" id="imp-btn">Importer l’export de caisse (Excel ou CSV)</button>' +
-         '<input type="file" id="import-caisse" accept=".xlsx,.xls,.csv,text/csv" hidden>' +
+         /* .txt : l'export « Texte Unicode » (UTF-16) porte souvent cette extension. */
+         '<input type="file" id="import-caisse" accept=".xlsx,.xls,.csv,.txt,text/csv" hidden>' +
          '<div class="grid g2" id="ec-vente" style="margin-top:16px">' + venduKpi(c, e) +
          '<div class="champ"><label class="f">Corriger à la main (kg)</label>' +
          '<input type="number" step="0.01" id="vd" value="' + (num(c.vendu) || '') + '" placeholder="0"></div></div>' +
@@ -4775,12 +4776,21 @@ function modifierPeriode(per) {
        return XLSX.read(o, { type:'array' });
      if (!o.length || commencePar(0x25, 0x50, 0x44, 0x46)) throw illisible();          // vide, PDF
      /* Sinon du texte : CSV, ou tableau HTML que certaines caisses nomment .xls.
-        UTF-8 d'abord, Windows-1252 (CSV d'Excel en français) à défaut. */
+        UTF-8 d'abord, Windows-1252 (CSV d'Excel en français) à défaut.
+        « Texte Unicode » d'Excel et de certaines caisses : UTF-16 annoncé par
+        son BOM (FF FE, ou FE FF). Lu en Windows-1252, chaque caractère sortait
+        suivi d'un caractère nul et le contrôle ci-dessous refusait le fichier,
+        alors que l'ancienne lecture (XLSX.read) l'acceptait. */
      let texte;
-     try { texte = new TextDecoder('utf-8', { fatal:true }).decode(o); }
-     catch (e) {
-       try { texte = new TextDecoder('windows-1252').decode(o); }
-       catch (e2) { texte = Array.from(o, c => String.fromCharCode(c)).join(''); }
+     if (commencePar(0xFF, 0xFE) || commencePar(0xFE, 0xFF)) {
+       try { texte = new TextDecoder(o[0] === 0xFF ? 'utf-16le' : 'utf-16be').decode(o); }
+       catch (e) { throw illisible(); }
+     } else {
+       try { texte = new TextDecoder('utf-8', { fatal:true }).decode(o); }
+       catch (e) {
+         try { texte = new TextDecoder('windows-1252').decode(o); }
+         catch (e2) { texte = Array.from(o, c => String.fromCharCode(c)).join(''); }
+       }
      }
      texte = texte.replace(/^\ufeff/, '');
      const echantillon = texte.slice(0, 4000);
