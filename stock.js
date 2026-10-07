@@ -974,7 +974,16 @@ async function chargerCatalogueSec() {
     if ((m.masques || []).indexOf(r.id) >= 0) x.masque = true;
     return x;
   });
-  (m.ajouts || []).forEach(a => { if (a && a.id && !out.some(r => r.id === a.id)) out.push(a); });
+  /* Une référence ajoutée se modifie et se retire comme une référence
+     d'usine : modifs et masques ne s'appliquaient qu'à celles-ci, si bien que
+     ✎ › Enregistrer et − restaient sans effet sur une référence ajoutée. */
+  (m.ajouts || []).forEach(a => {
+    if (!a || !a.id || out.some(r => r.id === a.id)) return;
+    const mod = (m.modifs || {})[a.id];
+    const x = Object.assign({}, a, mod || {});
+    if ((m.masques || []).indexOf(a.id) >= 0) x.masque = true;
+    out.push(x);
+  });
   _catalogueSec = out;
   return out;
 }

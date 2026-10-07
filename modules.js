@@ -1331,8 +1331,12 @@ async function planHebdo() {
   return TACHES_HEBDO.map(t => {
     const p = perso && perso[t.id];
     const f = Object.assign({}, t, p || {});
-    /* Compatibilité avec l'ancien format à jour unique */
-    if (!Array.isArray(f.jours)) f.jours = (f.jour ? [+f.jour] : []);
+    /* Compatibilité avec l'ancien format à jour unique. Les jours sont
+       COPIÉS : l'éditeur de la semaine les modifie sur place, et ces tableaux
+       étaient ceux de TACHES_HEBDO_DEF (copie superficielle). « Annuler »
+       laissait donc la bascule appliquée, et « Rétablir le tableau
+       d'origine » repartait d'une référence d'usine déjà altérée. */
+    f.jours = Array.isArray(f.jours) ? f.jours.slice() : (f.jour ? [+f.jour] : []);
     return f;
   }).filter(t => !t.retiree);
 }
@@ -1713,25 +1717,28 @@ V.parametres = async function () {
          '<button class="btn clair bloc" id="ea" style="margin-top:12px">+ Ajouter une unité</button>' +
          '<button class="btn menthe bloc" id="ev" style="margin-top:8px">Enregistrer les unités</button>') +
    
-       carte(entete('🗓️', 'Tâches hebdomadaires', 'Jour de passage de chaque tâche récurrente.') +
-         '<div class="stack">' + NETTOYAGE.zones.map(z =>
-           '<div><div class="entete"><h3>' + z.icone + ' ' + esc(z.nom) + '</h3></div>' +
-           z.taches.filter(t => t.jours).map(t =>
-             '<div class="tache"><span class="tx"><span class="tn">' + esc(t.nom) + '</span>' +
-             '<span class="tm">' + t.jours.map(x => JOURS_SEMAINE[x]).join(', ') + '</span></span>' +
-             '<select data-h="' + esc(t.id) + '" style="width:auto;min-width:130px">' +
-             JOURS_SEMAINE.slice(1).map((jn, k) =>
-               '<option value="' + (k + 1) + '"' + (t.jours[0] === k + 1 ? ' selected' : '') + '>' + jn + '</option>').join('') +
-             '</select></div>').join('') + '</div>').join('') + '</div>' +
-         '<div class="entete"><h3>Tâches asynchrones</h3></div>' +
+       /* Une seconde carte « Tâches hebdomadaires » proposait ici un jour pour
+          les tâches du plan de nettoyage et répondait « Jours enregistrés » :
+          aucun écran ne lit ces jours (Tâches du jour et Nettoyage suivent
+          « Organiser la semaine », ci-dessus). On ne garde que le rappel, en
+          lecture, des tâches qui ont leur propre rythme. */
+       carte(entete('🔁', 'Tâches à rythme propre', 'Hors tableau de la semaine : jours fixes ou intervalle.') +
          NETTOYAGE.asynchrones.map(a =>
            '<div class="tache"><span class="tx"><span class="tn">' + a.icone + ' ' + esc(a.nom) + '</span>' +
            '<span class="tm">' + (a.type === 'jours-fixes'
              ? a.jours.map(x => JOURS_SEMAINE[x]).join(', ')
-             : 'tous les ' + a.intervalleJours + ' jours') + '</span></span></div>').join('') +
-         '<button class="btn menthe bloc" id="hbv" style="margin-top:14px">Enregistrer les jours</button>');
+             : 'tous les ' + a.intervalleJours + ' jours') + '</span></span></div>').join(''));
    
      $('#hv').onclick = async () => {
+     /* Contrôle de cohérence avant d'enregistrer : un début de phase à 18:00
+        et une fin à 09:00 étaient acceptés, et Ma journée ne trouvait plus la
+        phase en cours. Les heures « HH:MM » se comparent comme du texte. */
+     const h = ['#h1', '#h2', '#h3', '#h4', '#h5', '#h6'].map(x => $(x).value);
+     if (h.some(x => !/^\d\d:\d\d$/.test(x))) return toast('Renseignez les six horaires', 'erreur');
+     if (!(h[0] < h[1])) return toast('La boutique doit fermer après son ouverture (' + h[0] + ' → ' + h[1] + ')', 'erreur');
+     if (!(h[2] < h[3])) return toast('La phase d’ouverture doit finir après son début (' + h[2] + ' → ' + h[3] + ')', 'erreur');
+     if (!(h[3] <= h[4])) return toast('La phase de fermeture doit commencer après la fin de l’ouverture (' + h[3] + ')', 'erreur');
+     if (!(h[4] < h[5])) return toast('La phase de fermeture doit finir après son début (' + h[4] + ' → ' + h[5] + ')', 'erreur');
      Object.assign(HORAIRES, { ouverture:$('#h1').value, fermeture:$('#h2').value,
      debutOuverture:$('#h3').value, finOuverture:$('#h4').value,
      debutFermeture:$('#h5').value, finFermeture:$('#h6').value });
@@ -1756,10 +1763,16 @@ V.parametres = async function () {
          });
      });
      $('#ea').onclick = async () => {
+       /* Le redessin effaçait sans prévenir un nom ou une plage modifiés mais
+          pas encore enregistrés : on les remet dans leurs champs, toujours à
+          enregistrer avec « Enregistrer les unités ». */
+       const enCours = {};
+       $$('[data-e]').forEach(i => { enCours[i.dataset.e] = i.value; });
        ENCEINTES.push({ id:'u' + uid().slice(0, 4), nom:'Nouvelle unité', cible:'—',
                         lo:-24, hi:8, pas:1, vert:[-20, -17], crit:-15, zone:'boutique' });
        await DB.set('enceintes', ENCEINTES);
-       rendre('parametres');
+       await rendre('parametres');
+       $$('[data-e]').forEach(i => { if (enCours[i.dataset.e] !== undefined) i.value = enCours[i.dataset.e]; });
      };
      $('#ev').onclick = async () => {
        $$('[data-e]').forEach(i => {
@@ -1772,13 +1785,6 @@ V.parametres = async function () {
        });
        await DB.set('enceintes', ENCEINTES);
        toast('Unités enregistrées');
-     };
-     $('#hbv').onclick = async () => {
-       const map = {};
-       $$('[data-h]').forEach(s => map[s.dataset.h] = [+s.value]);
-       NETTOYAGE.zones.forEach(z => z.taches.forEach(t => { if (map[t.id]) t.jours = map[t.id]; }));
-       await DB.set('hebdo', map);
-       toast('Jours enregistrés');
      };
    };
    
@@ -1868,9 +1874,12 @@ async function organiserSemaine() {
       'affiché en boutique. Les tâches déjà validées ne sont pas touchées.',
       'Rétablir', async () => {
         await DB.del('hebdo:plan');
-        TACHES_HEBDO = TACHES_HEBDO_DEF.map(t => Object.assign({}, t));
+        TACHES_HEBDO = TACHES_HEBDO_DEF.map(t => Object.assign({}, t, { jours:(t.jours || []).slice() }));
         closeSheet(); toast('Tableau rétabli'); rendre('parametres');
-      });
+      },
+      /* La confirmation occupe la même feuille : « Annuler » fermait tout et
+         perdait l'organisation en cours. On y revient, bascules comprises. */
+      () => rendreEditeur());
   };
 
   showSheet('<div class="vide">Chargement…</div>');
