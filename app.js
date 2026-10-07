@@ -3668,6 +3668,29 @@ function ouvrirPremierePeriode() {
    /* =============================================================================
       24. SCANNER BON DE LIVRAISON — Jetfreeze
       ========================================================================== */
+   /* Bon déjà compté dans les achats de la période : même numéro, casse
+      ignorée. Rend la ligne existante, sinon null. Un même bon saisi deux
+      fois doublait les achats, et l'écart lisait ensuite un manque de glace
+      qui n'existe pas. */
+   async function blDejaSaisi(per, numero) {
+     const e = await DB.get('ecart:' + per.id, {});
+     return ((e && Array.isArray(e.bl)) ? e.bl : [])
+       .filter(b => b && String(b.numero || '').trim().toUpperCase() === numero)[0] || null;
+   }
+   /* Le doublon est signalé dans la feuille, sans rien enregistrer ; un second
+      appui (« Ajouter quand même ») l'enregistre : deux bons distincts peuvent
+      porter le même numéro. */
+   function signalerDoublonBL(deja, numero, bouton) {
+     const quand = deja.date || String(deja.at || '').slice(0, 10);
+     $('#bl-doublon').innerHTML =
+       '<div class="alerte warn" style="margin-top:14px"><span class="ai">●</span><div>' +
+       '<b>Bon « ' + esc(numero) + ' » déjà compté</b><p>' + n1(num(deja.litres)) + ' L' +
+       (deja.par ? ', saisi par ' + esc(deja.par) : '') +
+       (/^\d{4}-\d{2}-\d{2}$/.test(quand) ? ' le ' + fmtD(quand) : '') +
+       '. S’il s’agit d’un autre bon, touchez « Ajouter quand même ».</p></div></div>';
+     $(bouton).textContent = 'Ajouter quand même';
+   }
+
    async function scannerBL() {
      const r = await scannerPhoto('bl');
      if (!r) return;
@@ -3690,26 +3713,41 @@ function ouvrirPremierePeriode() {
          '<div class="alerte info" style="margin-top:14px"><span class="ai">•</span><div><b>Ce que fait la validation</b>' +
          '<p>Les litres s’ajoutent aux achats de la période en cours, base du calcul d’écart. ' +
          'Un oubli ici se lit ensuite comme un manque de glace.</p></div></div>' +
+         '<div id="bl-doublon"></div>' +
          '<div class="actions"><button class="btn clair" data-fermer>Fermer</button>' +
          '<button class="btn menthe" id="bl-ajout">Ajouter aux achats</button></div>' +
          '<button class="btn clair bloc" id="bl-manuel" style="margin-top:10px">Contrôle à réception</button>');
        $('#bl-manuel').onclick = () => { closeSheet(); rendre('reception'); };
-       let enCours = false;
+       let enCours = false, doublonVu = '';
+       /* Numéro modifié après l'alerte : le contrôle de doublon repart. */
+       $('#bl-num').oninput = () => {
+         doublonVu = '';
+         $('#bl-doublon').innerHTML = '';
+         $('#bl-ajout').textContent = 'Ajouter aux achats';
+       };
        $('#bl-ajout').onclick = async () => {
          const litres = num($('#bl-litres').value);
          if (!(litres > 0)) { toast('Indiquez le nombre de litres livrés', 'erreur'); return $('#bl-litres').focus(); }
          if (enCours) return;
          enCours = true;
-         const numero = $('#bl-num').value.trim().toUpperCase() || 'sans numéro';
-         const per = await periodeCourante();
-         await DB.patch('ecart:' + per.id, {},
-           { bl:[{ id:uid(), numero:numero, date:r.date || today(), bacs:null, litres:litres, lignes:[],
-                   saisie:'manuelle', par:STATE.user.prenom, at:nowISO() }] },
-           { litrageBL:litres });
-         await feed('ok', STATE.user.prenom + ' a saisi le BL ' + numero + ' (' + n1(litres) + ' L)');
-         closeSheet();
-         toast(n1(litres) + ' L ajoutés aux achats');
-         if (STATE.view === 'ecarts') rendre('ecarts');
+         /* try / finally : une erreur (période, base) laissait enCours à true,
+            et « Ajouter aux achats » ne répondait plus jusqu'à la fermeture. */
+         try {
+           const numero = $('#bl-num').value.trim().toUpperCase() || 'sans numéro';
+           const per = await periodeCourante();
+           if (numero !== 'sans numéro' && doublonVu !== numero) {
+             const deja = await blDejaSaisi(per, numero);
+             if (deja) { doublonVu = numero; return signalerDoublonBL(deja, numero, '#bl-ajout'); }
+           }
+           await DB.patch('ecart:' + per.id, {},
+             { bl:[{ id:uid(), numero:numero, date:r.date || today(), bacs:null, litres:litres, lignes:[],
+                     saisie:'manuelle', par:STATE.user.prenom, at:nowISO() }] },
+             { litrageBL:litres });
+           await feed('ok', STATE.user.prenom + ' a saisi le BL ' + numero + ' (' + n1(litres) + ' L)');
+           closeSheet();
+           toast(n1(litres) + ' L ajoutés aux achats');
+           if (STATE.view === 'ecarts') rendre('ecarts');
+         } finally { enCours = false; }
        };
        return;
      }
@@ -3728,21 +3766,33 @@ function ouvrirPremierePeriode() {
          '<span class="c w num">' + (l.bacs * l.taille) + '</span></div>').join('') + '</div></div>' +
        '<div class="alerte info" style="margin-top:14px"><span class="ai">•</span><div><b>Ce que fait la validation</b>' +
        '<p>Les ' + n1(litres) + ' L s’ajoutent aux achats de la période en cours, base du calcul d’écart.</p></div></div>' +
+       '<div id="bl-doublon"></div>' +
        '<div class="actions"><button class="btn clair" data-fermer>Annuler</button>' +
        '<button class="btn menthe" id="bl-ok">Ajouter aux achats</button></div>');
    
+     let enCours = false, doublonVu = false;
      $('#bl-ok').onclick = async () => {
-       const per = await periodeCourante();
-       /* Écriture partielle : le bon s'ajoute à la liste (id unique) et son
-          litrage aux achats, sur la copie du serveur — pas d'objet entier qui
-          écraserait les ventes saisies entre-temps sur un autre iPad. */
-       await DB.patch('ecart:' + per.id, {},
-         { bl:[{ id:uid(), numero:r.numero, date:r.date, bacs:total, litres:litres, lignes:r.lignes,
-                 par:STATE.user.prenom, at:nowISO() }] },
-         { litrageBL:litres });
-       await feed('ok', STATE.user.prenom + ' a saisi le BL ' + r.numero + ' (' + total + ' bacs)');
-       closeSheet();
-       toast(n1(litres) + ' L ajoutés aux achats');
+       /* Double appui, doublon et erreur : mêmes gardes que la saisie manuelle. */
+       if (enCours) return;
+       enCours = true;
+       try {
+         const per = await periodeCourante();
+         const numero = String(r.numero || '').trim().toUpperCase();
+         if (numero && !doublonVu) {
+           const deja = await blDejaSaisi(per, numero);
+           if (deja) { doublonVu = true; return signalerDoublonBL(deja, numero, '#bl-ok'); }
+         }
+         /* Écriture partielle : le bon s'ajoute à la liste (id unique) et son
+            litrage aux achats, sur la copie du serveur — pas d'objet entier qui
+            écraserait les ventes saisies entre-temps sur un autre iPad. */
+         await DB.patch('ecart:' + per.id, {},
+           { bl:[{ id:uid(), numero:r.numero, date:r.date, bacs:total, litres:litres, lignes:r.lignes,
+                   par:STATE.user.prenom, at:nowISO() }] },
+           { litrageBL:litres });
+         await feed('ok', STATE.user.prenom + ' a saisi le BL ' + r.numero + ' (' + total + ' bacs)');
+         closeSheet();
+         toast(n1(litres) + ' L ajoutés aux achats');
+       } finally { enCours = false; }
      };
    }
    
