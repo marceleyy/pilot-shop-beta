@@ -608,6 +608,16 @@
       et rejouée dans l'ordre au retour du réseau. La dernière écriture d'une même
       clé écrase les précédentes, inutile de rejouer dix fois la même saisie.
       -------------------------------------------------------------------------- */
+   /* « Transmis » seulement si c'est vrai : hors ligne, l'envoi attend dans la
+      file de l'iPad (bandeau « saisies en attente ») et le manager ne le voit
+      pas encore. */
+   function messageEnvoi(cle, envoye) {
+     try {
+       if (fileLire().some(x => x.cle === cle)) return 'Enregistré sur l’iPad — envoi dès le retour du réseau';
+     } catch (e) {}
+     return envoye;
+   }
+
    function fileLire() {
      try {
        const v = DB._lire(OFFLINE.fileAttente);
@@ -1156,6 +1166,10 @@
    async function verifierPin() {
      const e = STATE._candidat;
      if (!e) return retourQui();
+     /* Vérification lancée 140 ms après le 4e chiffre : si la personne a
+        effacé entre-temps, on ne juge pas trois chiffres (« Code incorrect »
+        et un essai compté pour le blocage alors qu'elle corrigeait). */
+     if (STATE._pin.length !== 4) return;
 
      if (pinBloqueMs()) {
        STATE._pin = '';
@@ -2108,7 +2122,7 @@ function purgerLocalAncien() {
          await feed('bad', STATE.user.prenom + ' signale une rupture : ' + nomComplet +
                     (reste === 0 ? ' (plus rien)' : ' (reste ' + reste + ' ' + art.unite + ')'));
          closeSheet();
-         toast('Alerte transmise à ' + nomManager());
+         toast(messageEnvoi('ruptures', 'Alerte transmise à ' + nomManager()));
          rendre('reas');
        };
      }
@@ -2151,7 +2165,15 @@ function purgerLocalAncien() {
        $$('#rc .chip').forEach(x => x.classList.remove('on'));
        b.classList.add('on'); cat = b.dataset.rc;
      });
-     $('#rp').onclick = () => { epingle = !epingle; $('#rp').classList.toggle('ambre', epingle); toast(epingle ? 'Message épinglé' : 'Épingle retirée'); };
+     /* « Épingler » est une option du message à publier, pas une action : le
+        toast « Message épinglé » laissait croire que c'était fait. */
+     $('#rp').onclick = () => {
+       epingle = !epingle;
+       $('#rp').classList.toggle('ambre', epingle);
+       $('#rp').textContent = epingle ? 'Épinglé ✓' : 'Épingler';
+       $('#rp').setAttribute('aria-pressed', epingle ? 'true' : 'false');
+       toast(epingle ? 'Le message sera épinglé à sa publication' : 'Le message ne sera pas épinglé');
+     };
    
      $('#rv').onclick = async () => {
        const txt = $('#rt').value.trim();
@@ -2159,7 +2181,7 @@ function purgerLocalAncien() {
        await DB.push('releve', { id:uid(), texte:txt, cat:cat, epingle:epingle, jour:today(),
                                  par:STATE.user.prenom, employe:STATE.user.id, at:nowISO(), luPar:[] });
        await feed('ok', STATE.user.prenom + ' a laissé un mot dans le carnet de relève');
-       toast('Message publié');
+       toast(epingle ? 'Message publié et épinglé' : 'Message publié');
        rendre('releve');
      };
    
@@ -2272,7 +2294,7 @@ function purgerLocalAncien() {
                                      par:STATE.user.prenom, at:nowISO(), version:APP.version });
          await feed('warn', STATE.user.prenom + ' a signalé un souci sur « ' + (PAGES[STATE.view] || {}).titre + ' »');
          closeSheet();
-         toast('Merci, c’est transmis à ' + nomManager());
+         toast(messageEnvoi('feedback', 'Merci, c’est transmis à ' + nomManager()));
        };
      };
    }
@@ -2531,7 +2553,9 @@ function brancherNavJour(vue) {
   /* En consultation, on neutralise tout ce qui modifie. */
   if (!peutModifier(STATE.jour)) {
     $$('#page button').forEach(b => {
-      if (b.dataset.nj !== undefined) return;
+      /* Les vignettes restent ouvrables : en consultation, on regarde une
+         photo sans pouvoir la supprimer (voirPreuve en lecture seule). */
+      if (b.dataset.nj !== undefined || b.dataset.vign !== undefined) return;
       b.disabled = true;
       b.classList.add('fige');
     });
@@ -2799,9 +2823,12 @@ async function securiteActive() {
    lancement d'un site, ou après une remise à zéro. Plutôt qu'un écran vide sans
    explication, on permet de créer l'équipe sur place.
    -------------------------------------------------------------------------- */
+/* Couleurs d'avatar, partagées avec l'ajout d'une personne (V.equipe). */
+const COULEURS_EQUIPE = ['#7FA6A0','#C4907A','#9AA87F','#8FB4CE','#0F2027','#C9A227'];
+
 function ecranAmorcage() {
   if (document.getElementById('amorcage')) return;
-  const COULEURS = ['#7FA6A0','#C4907A','#9AA87F','#8FB4CE','#0F2027','#C9A227'];
+  const COULEURS = COULEURS_EQUIPE;
   let lignes = [{ prenom:'', pin:'', role:'manager' }];
 
   const d = document.createElement('div');
@@ -2849,9 +2876,20 @@ function ecranAmorcage() {
     d.querySelector('#am-ok').onclick = async () => {
       lire();
       const etat = m => { d.querySelector('#am-etat').textContent = m; };
-      const valides = lignes.filter(l => l.prenom && l.pin.length === 4);
+      /* Une ligne commencée mais incomplète n'est plus écartée en silence :
+         « Nina » sans code disparaissait et le message annonçait les autres
+         comme si de rien n'était. Seules les lignes vides sont ignorées. */
+      const valides = lignes.filter(l => l.prenom || l.pin);
+      const incomplete = valides.filter(l => !l.prenom || l.pin.length !== 4)[0];
+      if (incomplete) return etat(incomplete.prenom
+        ? incomplete.prenom + ' : le code doit faire 4 chiffres.'
+        : 'Un code est saisi sans prénom : complétez la ligne ou videz-la.');
       if (!valides.length) return etat('Renseignez au moins un prénom et un code à 4 chiffres.');
       if (!valides.some(l => l.role === 'manager')) return etat('Il faut au moins un manager.');
+      /* Deux prénoms identiques donnaient deux tuiles indiscernables. */
+      const noms = valides.map(l => l.prenom.toLowerCase());
+      const double = valides.filter((l, i) => noms.indexOf(noms[i]) !== i)[0];
+      if (double) return etat('Deux personnes s’appellent « ' + double.prenom + ' » : ajoutez une initiale (ex. ' + double.prenom + ' B.).');
       const codes = valides.map(l => l.pin);
       if (new Set(codes).size !== codes.length) return etat('Deux personnes ont le même code.');
 
@@ -4512,6 +4550,11 @@ function modifierPeriode(per) {
        });
      }
    
+     /* Le manager gère l'équipe ici : ajouter, corriger, changer un code,
+        retirer. L'écran n'affichait que des statistiques. */
+     const gere = !!(STATE.user && STATE.user.role === 'manager');
+     if (gere) $('#vue-actions').innerHTML = '<button class="btn menthe sm" id="eq-ajout">+ Ajouter</button>';
+
      $('#page').innerHTML =
        '<div class="stack">' + EQUIPE.map(e => {
          const p = parPersonne[e.id];
@@ -4522,14 +4565,140 @@ function modifierPeriode(per) {
            '<div class="mini">' + ROLES[e.role].label + ' · ' + p.jours + ' journée(s) sur 30' +
            (enCours ? ' · en service depuis ' + heure(enCours.debut) : '') + '</div></div>' +
            '<div style="text-align:right"><b class="num">' + h + '</b>' +
-           '<div class="mini">' + (feedTot[e.id] || 0) + ' action(s) / 14 j</div></div></div>',
+           '<div class="mini">' + (feedTot[e.id] || 0) + ' action(s) / 14 j</div></div></div>' +
+           (gere ? '<button class="btn clair bloc sm" data-eq="' + esc(e.id) + '" style="margin-top:12px">' +
+             'Modifier ' + esc(e.prenom) + '</button>' : ''),
            enCours ? 'menthe' : '');
        }).join('') + '</div>' +
    
        carte(entete('ℹ️', 'Ce que mesure cette page',
          'Le nombre d’actions compte les validations tracées, pas la qualité du travail. ' +
          'Une personne qui saisit peu peut travailler autant : à croiser avec le terrain avant d’en tirer une conclusion.'), 'plat');
+
+     if (gere) {
+       $('#eq-ajout').onclick = () => editerPersonne(null);
+       $$('[data-eq]').forEach(b => b.onclick = () => editerPersonne(EQUIPE.filter(e => e.id === b.dataset.eq)[0]));
+     }
    };
+
+   /* Écrit l'équipe après transformation. La liste est relue en base juste
+      avant, pour ne pas écraser une modification faite sur un autre iPad ;
+      sans base joignable, on n'écrit rien (comme à l'amorçage). */
+   async function modifierEquipe(transformer) {
+     const lu = await lireEquipeBase();
+     if (lu.etat === 'reseau') throw new Error('Connexion nécessaire pour modifier l’équipe. Réessayez.');
+     const source = (Array.isArray(lu.data) && lu.data.length) ? lu.data : EQUIPE;
+     const liste = await transformer(source.map(e => Object.assign({}, e)));
+     if (!liste.some(e => e.role === 'manager')) throw new Error('Il faut au moins un manager.');
+     await DB.set('equipe', liste);
+     EQUIPE.splice(0, EQUIPE.length, ...liste.filter(ficheValide));
+     return liste;
+   }
+
+   /* Pose un nouveau code sur une fiche, haché ou non selon PIN_HACHAGE —
+      la même règle qu'à l'amorçage ; l'ancien code (clair ou haché) disparaît. */
+   async function ficheAvecCode(fiche, pin) {
+     const f = Object.assign({}, fiche, { pin:pin });
+     delete f.pinH; delete f.sel;
+     return (PIN_HACHAGE && pinHachable()) ? fichePinHachee(f) : f;
+   }
+
+   function editerPersonne(e) {
+     if (!STATE.user || STATE.user.role !== 'manager') return;
+     const neuf = !e;
+     const moi = !neuf && e.id === STATE.user.id;
+     const champCode = (id, libelle) =>
+       '<div class="champ"><label class="f">' + libelle + '</label>' +
+       '<input type="password" id="' + id + '" inputmode="numeric" pattern="[0-9]*" maxlength="4" autocomplete="new-password"></div>';
+     showSheet(
+       '<h2 id="sheet-titre">' + (neuf ? 'Ajouter une personne' : 'Modifier ' + esc(e.prenom)) + '</h2>' +
+       '<p class="sub">' + (neuf ? 'Elle apparaîtra sur l’écran des prénoms de chaque iPad.'
+                                 : 'Laissez le code vide pour garder le code actuel.') + '</p>' +
+       '<div class="champ" style="margin-top:14px"><label class="f">Prénom</label>' +
+       '<input type="text" id="eq-prenom" maxlength="20" autocapitalize="words" value="' + esc(neuf ? '' : e.prenom) + '"></div>' +
+       '<div class="champ" style="margin-top:12px"><label class="f">Rôle</label>' +
+       '<select id="eq-role"' + (moi ? ' disabled' : '') + '>' +
+       '<option value="equipe"' + (!neuf && e.role === 'equipe' ? ' selected' : '') + '>Équipier</option>' +
+       '<option value="manager"' + (!neuf && e.role === 'manager' ? ' selected' : '') + '>Manager</option></select>' +
+       (moi ? '<p class="mini" style="margin-top:6px">Votre propre rôle se change depuis la session d’un autre manager.</p>' : '') +
+       '</div>' +
+       '<div class="grid g2" style="margin-top:12px">' +
+       champCode('eq-pin', neuf ? 'Code à 4 chiffres' : 'Nouveau code') + champCode('eq-pin2', 'Retaper le code') + '</div>' +
+       '<div class="actions"><button class="btn clair" data-fermer>Annuler</button>' +
+       '<button class="btn menthe" id="eq-ok">Enregistrer</button></div>' +
+       (neuf || moi ? '' : '<button class="btn fantome bloc" id="eq-retirer" style="margin-top:8px">Retirer de l’équipe</button>'));
+
+     $('#eq-ok').onclick = async () => {
+       const prenom = $('#eq-prenom').value.trim().replace(/\s+/g, ' ');
+       const role = moi ? e.role : $('#eq-role').value;
+       const pin = $('#eq-pin').value.trim(), pin2 = $('#eq-pin2').value.trim();
+       if (!prenom) return toast('Le prénom est obligatoire', 'erreur');
+       if (neuf || pin || pin2) {
+         if (!/^\d{4}$/.test(pin)) return toast('Le code doit faire 4 chiffres', 'erreur');
+         if (pin !== pin2) return toast('Les deux codes ne correspondent pas', 'erreur');
+       }
+       const changements = [];
+       if (!neuf) {
+         if (prenom !== e.prenom) changements.push('prénom ' + e.prenom + ' → ' + prenom);
+         if (role !== e.role) changements.push('rôle ' + ROLES[role].label);
+         if (pin) changements.push('nouveau code');
+         if (!changements.length) { closeSheet(); return toast('Aucun changement'); }
+       }
+       $('#eq-ok').disabled = true;
+       try {
+         await modifierEquipe(async liste => {
+           const autres = neuf ? liste : liste.filter(x => x.id !== e.id);
+           if (autres.some(x => String(x.prenom || '').trim().toLowerCase() === prenom.toLowerCase()))
+             throw new Error('« ' + prenom + ' » existe déjà : ajoutez une initiale (ex. ' + prenom + ' B.)');
+           /* Même règle qu'à l'amorçage : deux personnes, deux codes. */
+           if (pin) for (const x of autres) if (await pinCorrect(x, pin)) throw new Error('Ce code est déjà utilisé : choisissez-en un autre');
+           let fiche;
+           if (neuf) {
+             const n = liste.reduce((m, x) => Math.max(m, +((/^e(\d+)$/.exec(x.id) || [0, 0])[1])), 0) + 1;
+             fiche = { id:'e' + n, prenom:prenom, role:role, couleur:COULEURS_EQUIPE[liste.length % COULEURS_EQUIPE.length],
+                       initiales:prenom.slice(0, 2).toUpperCase() };
+           } else {
+             const ancienne = liste.filter(x => x.id === e.id)[0];
+             if (!ancienne) throw new Error(e.prenom + ' a été retiré(e) de l’équipe sur un autre appareil');
+             fiche = Object.assign({}, ancienne, { prenom:prenom, role:role,
+               initiales:prenom === ancienne.prenom ? ancienne.initiales : prenom.slice(0, 2).toUpperCase() });
+           }
+           if (pin) fiche = await ficheAvecCode(fiche, pin);
+           return neuf ? liste.concat([fiche]) : liste.map(x => x.id === fiche.id ? fiche : x);
+         });
+       } catch (err) {
+         if ($('#eq-ok')) $('#eq-ok').disabled = false;
+         return toast(err && err.message ? err.message : 'Enregistrement impossible', 'erreur');
+       }
+       /* Jamais le code dans le journal : seulement le fait qu'il a changé. */
+       if (neuf) await feed('ok', STATE.user.prenom + ' a ajouté ' + prenom + ' à l’équipe (' + ROLES[role].label + ')');
+       else await feed(pin || role !== e.role ? 'warn' : 'ok',
+         STATE.user.prenom + ' a modifié la fiche de ' + prenom + ' : ' + changements.join(', '));
+       if (moi) {
+         STATE.user.prenom = prenom;
+         STATE.user.initiales = (EQUIPE.filter(x => x.id === e.id)[0] || {}).initiales || STATE.user.initiales;
+         const bc = $('#compte'); if (bc) bc.textContent = STATE.user.initiales;
+       }
+       closeSheet();
+       toast(neuf ? prenom + ' ajouté(e) à l’équipe' : 'Fiche de ' + prenom + ' enregistrée');
+       rendre('equipe');
+     };
+
+     const rt = $('#eq-retirer');
+     if (rt) rt.onclick = () => confirmer('Retirer ' + e.prenom + ' de l’équipe ?',
+       'Son prénom disparaît de l’écran de connexion et son code ne fonctionne plus. ' +
+       'Ce qu’elle ou il a déjà saisi reste dans les registres.',
+       'Retirer', async () => {
+         try {
+           await modifierEquipe(async liste => liste.filter(x => x.id !== e.id));
+         } catch (err) { return toast(err && err.message ? err.message : 'Retrait impossible', 'erreur'); }
+         await feed('warn', STATE.user.prenom + ' a retiré ' + e.prenom + ' de l’équipe');
+         toast(e.prenom + ' retiré(e) de l’équipe');
+         rendre('equipe');
+       },
+       /* « Annuler » revient à la fiche au lieu de tout fermer. */
+       () => editerPersonne(e));
+   }
    
    /* =============================================================================
       31. RÉGLAGES

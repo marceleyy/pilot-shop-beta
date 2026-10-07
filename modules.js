@@ -106,7 +106,7 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
       ou le fond du bac. Et une photo ratée — floue, dans le vide, prise par
       erreur — restait dans le registre sans moyen de la retirer.
       -------------------------------------------------------------------------- */
-   function voirPreuve(jour, idPreuve, apresSuppression) {
+   function voirPreuve(jour, idPreuve, apresSuppression, lectureSeule) {
      (async function () {
        const cle = 'preuves:' + jour;
        const l = await DB.get(cle, []);
@@ -120,8 +120,10 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
          '<img src="' + esc(p.img) + '" alt="" class="preuve-plein">' +
          '<div class="actions">' +
          '<button class="btn clair" data-fermer>Fermer</button>' +
-         '<button class="btn corail" id="pv-suppr">Supprimer</button></div>');
+         /* Jour en consultation seule : on regarde, on ne supprime pas. */
+         (lectureSeule ? '' : '<button class="btn corail" id="pv-suppr">Supprimer</button>') + '</div>');
 
+       if (lectureSeule) return;
        $('#pv-suppr').onclick = () => {
          confirmer('Supprimer cette photo ?',
            'Elle ne servira plus de preuve pour « ' + (p.libelle || 'cette tâche') + ' ». ' +
@@ -155,9 +157,9 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
    }
 
    /* À appeler après chaque rendu qui contient des vignettes. */
-   function brancherVignettes(revenir) {
+   function brancherVignettes(revenir, lectureSeule) {
      $$('[data-vign]').forEach(b => b.onclick = () =>
-       voirPreuve(b.dataset.vjour, b.dataset.vign, revenir));
+       voirPreuve(b.dataset.vjour, b.dataset.vign, revenir, lectureSeule));
    }
    
    /* =============================================================================
@@ -1118,7 +1120,7 @@ V.caisse = async function () {
           jour:today(), par:STATE.user.prenom, employe:STATE.user.id, at:nowISO(), resolue:false });
         r.m_ecartSignale = { par:STATE.user.prenom, at:nowISO(), montant:d };
         await sauver();
-        toast('Signalement transmis au manager');
+        toast(messageEnvoi('anomalies', 'Signalement transmis au manager'));
         dessiner();
       };
       if (r.m_ecartSignale) {
@@ -1386,11 +1388,9 @@ V.hebdo = async function () {
             ' · ' + ph.length + '/' + HEBDO.photosMax + ' photo(s)</div></div>' +
             (v.ok ? pastille('ok', 'Fait') : pastille('n', 'À faire')) + '</div>' +
 
-            (ph.length
-              ? '<div class="rang" style="margin-top:12px;gap:8px">' + ph.map(p =>
-                  '<img src="' + esc(p.img) + '" alt="Preuve" style="width:74px;height:74px;' +
-                  'object-fit:cover;border-radius:10px;border:1px solid var(--line)">').join('') + '</div>'
-              : '') +
+            /* Vignettes communes : un appui agrandit la photo et permet de
+               retirer une photo ratée. Ici, de simples images ne s'ouvraient pas. */
+            vignettes(ph, j) +
 
             '<div class="btn-row" style="margin-top:12px">' +
             '<button class="btn ' + (ph.length ? 'clair' : 'ciel') + '" data-ph="' + t.id + '"' +
@@ -1412,6 +1412,7 @@ V.hebdo = async function () {
     }).join('') + '</div>';
 
   brancherNavJour('hebdo');
+  brancherVignettes(() => rendre('hebdo'), !peutModifier(j));
   if (!peutModifier(j)) return;
 
   $$('[data-ph]').forEach(b => b.onclick = async () => {
@@ -1957,16 +1958,14 @@ V.clean = async function () {
             '<button class="btn ' + (ph.length ? 'menthe' : 'clair') + ' sm" data-hbp="' + esc(t.id) + '"' +
             (ph.length >= HEBDO.photosMax ? ' disabled' : '') + '>' +
             (ph.length ? '✓ Photo' : 'Photo') + '</button></div>' +
-            (ph.length
-              ? '<div class="rang" style="margin-top:10px;gap:8px">' + ph.map(p =>
-                '<img src="' + esc(p.img) + '" alt="" style="width:62px;height:62px;object-fit:cover;' +
-                'border-radius:9px;border:1px solid var(--line)">').join('') + '</div>'
-              : ''),
+            /* Vignettes communes, cliquables (voir en grand, supprimer). */
+            vignettes(ph, j),
             v.ok ? 'menthe' : '');
         }).join('') + '</div>'
       : vide('', 'Rien de prévu au tableau ce jour.'));
 
   brancherNavJour('clean');
+  brancherVignettes(() => rendre('clean'), !peutModifier(j));
   if (!peutModifier(j)) return;
 
   $$('[data-hbp]').forEach(b => b.onclick = async () => {
@@ -2187,7 +2186,7 @@ function formulaireAnomalie() {
       await feed(gravite === 'bloquant' ? 'bad' : 'warn',
         STATE.user.prenom + ' signale : ' + memo.titre);
       closeSheet();
-      toast('Signalement transmis');
+      toast(messageEnvoi('anomalies', 'Signalement transmis'));
       rendre('anomalie');
     };
   };
