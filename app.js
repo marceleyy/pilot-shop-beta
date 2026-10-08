@@ -399,13 +399,16 @@
          throw e;
        }
        const ctrl = new AbortController();
-       const to = setTimeout(() => ctrl.abort(), OFFLINE.timeoutReseauMs);
+       let to = setTimeout(() => ctrl.abort(), OFFLINE.timeoutReseauMs);
        try {
          /* Jeton de l'appareil plutôt que clé publique : depuis l'activation de
             la sécurité au niveau des lignes, la clé seule ne donne accès à rien.
             Sans rattachement, l'appel échoue et la saisie part en file d'attente,
             exactement comme hors ligne. */
          const jeton = (typeof jetonValide === 'function') ? await jetonValide() : null;
+         /* Jeton obtenu avant l'échéance (renouvellement abouti sur un réseau lent) : la requête
+            garde ses 8 s à elle. Renouvellement raté (réseau muet) : pas de jeton, rien ne change. */
+         if (jeton && !ctrl.signal.aborted) { clearTimeout(to); to = setTimeout(() => ctrl.abort(), OFFLINE.timeoutReseauMs); }
          /* Les en-têtes sont fusionnés D'ABORD, puis posés APRèS options.
             L'ordre inverse laissait options écraser l'objet headers entier :
             toute écriture qui passe ses propres en-têtes — « Prefer: merge-
@@ -490,7 +493,9 @@
             et la sonde rétablit l'état en ligne dès que la base répond. */
          const estAbandon = e && (e.name === 'AbortError' ||
                                   /abort/i.test(String(e.message || '')));
-         const muet = estAbandon && STATE.enLigne && ++STATE.delaisDepasses >= 2;
+         const dejaCompte = !!(e && e._delaiCompte);
+         if (estAbandon && e && typeof e === 'object') e._delaiCompte = true;
+         const muet = estAbandon && !dejaCompte && STATE.enLigne && ++STATE.delaisDepasses >= 2;
          if (STATE.enLigne && ((!e.http && !estAbandon) || muet)) {
            STATE.enLigne = false; STATE.delaisDepasses = 0; majBandeau();
          }
@@ -1119,8 +1124,8 @@
      sondeEnCours = false;
    }
    
-   window.addEventListener('online',  () => { STATE.enLigne = true; STATE.erreurBase = null; majBandeau(); sonderReseau(); });
-   window.addEventListener('offline', () => { STATE.enLigne = false; majBandeau(); });
+   window.addEventListener('online',  () => { STATE.enLigne = true; STATE.delaisDepasses = 0; STATE.erreurBase = null; majBandeau(); sonderReseau(); });
+   window.addEventListener('offline', () => { STATE.enLigne = false; STATE.delaisDepasses = 0; majBandeau(); });
    setInterval(sonderReseau, 15000);
    
    /* Fragments réutilisables */
@@ -1565,6 +1570,7 @@ function renderNav() {
         sur une fenêtre de temps inventée. On l'arrête ici, avec l'explication. */
      if (VUES_PERIODE.indexOf(id) >= 0 && STATE.user.role !== 'manager') {
        const dejaOuverte = await DB.get('periode:courante', null);
+       if (STATE.view !== id) return;          // un autre écran a été demandé entre-temps
        if (!dejaOuverte) {
          $('#page').innerHTML = carte(
            entete('⏸️', 'En attente du manager',
@@ -1596,7 +1602,13 @@ function renderNav() {
            '<p class="mini">L’iPad est hors ligne, ou la base ne répond pas. Une saisie ici serait rangée ' +
            'hors de la période : reconnectez l’iPad, puis réessayez.</p>' +
            '<button class="btn clair bloc" id="per-rt" style="margin-top:14px">Réessayer</button>', 'ambre');
-         $('#per-rt').onclick = () => rendre(id);
+         /* Hors ligne, DB.get ne lit que la copie : sans sonde, « Réessayer » ne changeait rien avant 15 s.
+            La sonde peut attendre 8 s : le bouton le dit, et on ne ramène pas ici qui est parti ailleurs. */
+         $('#per-rt').onclick = async () => {
+           const b = $('#per-rt'); if (b) { b.disabled = true; b.textContent = 'Connexion…'; }
+           await sonderReseau();
+           if (STATE.view === id) rendre(id);
+         };
          if (!viaHistorique && !memeVue) pousserHistorique({ vue:id });
          window.scrollTo(0, 0);
          return;
