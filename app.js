@@ -5287,7 +5287,7 @@ function modifierPeriode(per) {
       caisse donne le produit. Grammages du classeur Amorino ; null = glace dont
       le grammage reste à saisir (macarons, gaufres et crêpes garnies). */
    const GRAMMAGES_NOMS = [
-     [/CONE VIDE/, 0],
+     [/CONE VIDE/, 0], [/MAC TRADITIONNEL/, 0],
      [/^POT ENFANT/, 81], [/^POT PETIT/, 133], [/^POT CLASSI/, 163], [/^POT GRAND/, 221],
      [/^POT GEANT/, 275], [/^POT (A )?PARTAG/, 529],
      [/^CHOCO ?CONE ENFANT/, 67], [/^CHOCO ?CONE PETIT/, 112], [/^CHOCO ?CONE CLASSI/, 149], [/^CHOCO ?CONE GRAND/, 208],
@@ -5295,7 +5295,12 @@ function modifierPeriode(per) {
      [/^(BAC|COFFRET) .*\b550 ?ML\b/, 470], [/^(BAC|COFFRET) .*\b(1100 ?ML|1 1 ?L)\b/, 930],
      [/SHAKE|SORBET DRINK/, 160], [/^AFFOGATO/, 160], [/^ESPRESSO FRAPPE/, 200], [/^INCONTOURNABLE/, 80],
      [/^COUPE/, 160], [/^BRIOCHE GLACE/, 100], [/^EXTRA GLACE/, 50],
-     [/GELATO/, null], [/^(GAUFRE|CREPE) (PARFAITE|DELICIEUSE)/, null]
+     /* Macarons : 25 g par macaron (SKU 13111 à 13116 du catalogue). */
+     [/^1 MAC GELATO/, 25], [/^2 MAC GELATO/, 50], [/^3 MAC GELATO/, 75], [/^4 MAC GELATO/, 100],
+     [/^6 MAC GELATO/, 150], [/^MACARON XL/, 60], [/^GIANDUIOTTO/, 60],
+     /* Gaufres et crêpes garnies : 1 boule (50 g) au catalogue. */
+     [/^(GAUFRE|CREPE) (PARFAITE|DELICIEUSE|TRADITIONNELLE)/, 50],
+     [/GELATO|GLACE|^GAUFRE|^CREPE|^BRIOCHE/, null]
    ];
    const nomCaisse = s => String(s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '')
      .toUpperCase().replace(/[^A-Z0-9]+/g, ' ').trim();
@@ -5430,7 +5435,39 @@ function modifierPeriode(per) {
            return reject(new Error('Aucune colonne de quantité trouvée. Colonnes lues : ' + cols.slice(0, 6).join(', ')));
          }
    
-         /* SKU + quantité × grammage */
+         /* Libellé de caisse (avec ou sans SKU) → chaque produit glacé, avec
+            son grammage : celui déjà saisi, sinon celui du SKU, sinon celui du
+            classeur. Une glace sans grammage connu arrive vide, à compléter :
+            rien de ce qui porte de la glace n'est écarté en silence. */
+         const cCat = trouve(/cat[eé]gorie|famille|rayon/i);
+         if (cNom) {
+           let g = 0, n = 0;
+           const lignes = [], aSaisir = [];
+           rows.forEach(r => {
+             const nom = String(r[cNom]).trim();
+             const q = num(r[cQte]) + (cOpt ? num(r[cOpt]) : 0);
+             if (!nom || q <= 0) return;
+             const sku = cSku ? String(r[cSku]).trim() : '';
+             const n0 = nomCaisse(nom);
+             let gr = (retenus && num(retenus[n0]) > 0) ? num(retenus[n0])
+               : (sku && GRAMMAGES[sku] !== undefined) ? GRAMMAGES[sku] : grammageNom(nom);
+             if (gr === undefined && cCat && /GELATO|GLAC|GAUFRE|CREPE|COUPE/.test(nomCaisse(r[cCat]))) gr = null;
+             if (gr === undefined || gr === 0) return;
+             lignes.push({ nom:nom, g:gr || '', q:q });
+             if (gr === null) { aSaisir.push(nom + ' (' + q + ')'); return; }
+             g += gr * q; n++;
+           });
+           if (lignes.length) {
+             const top = lignes.filter(l => l.g).sort((a, b) => b.g * b.q - a.g * a.q).slice(0, 8)
+               .map(l => [l.nom, n1(l.g * l.q / 1000) + ' kg']);
+             return resolve({
+               kg:g / 1000, lignes:n, fiable:true, detail:top, inconnus:aSaisir, produits:lignes,
+               methode:cSku ? 'SKU et libellés × grammage du catalogue' : 'Libellés de caisse × grammage du classeur'
+             });
+           }
+         }
+
+         /* SKU + quantité × grammage (fichier sans libellés) */
          if (cSku) {
            let g = 0, n = 0;
            const inconnus = {}, parProduit = {};
@@ -5458,30 +5495,6 @@ function modifierPeriode(per) {
            }
          }
    
-         /* Libellé de caisse + quantité → grammage du produit */
-         if (cNom) {
-           let g = 0, n = 0;
-           const lignes = [], aSaisir = [];
-           rows.forEach(r => {
-             const nom = String(r[cNom]).trim();
-             const q = num(r[cQte]) + (cOpt ? num(r[cOpt]) : 0);
-             if (!nom || q <= 0) return;
-             const gr = grammageNom(nom, retenus);
-             if (gr === undefined || gr === 0) return;
-             lignes.push({ nom:nom, g:gr || '', q:q });
-             if (gr === null) { aSaisir.push(nom + ' (' + q + ')'); return; }
-             g += gr * q; n++;
-           });
-           if (lignes.length) {
-             const top = lignes.filter(l => l.g).sort((a, b) => b.g * b.q - a.g * a.q).slice(0, 8)
-               .map(l => [l.nom, n1(l.g * l.q / 1000) + ' kg']);
-             return resolve({
-               kg:g / 1000, lignes:n, methode:'Libellés de caisse × grammage du classeur', fiable:true,
-               detail:top, inconnus:aSaisir, produits:lignes
-             });
-           }
-         }
-
          /* Libellé + quantité, rapprochement par nom de parfum */
          if (cNom) {
            let g = 0, n = 0;
