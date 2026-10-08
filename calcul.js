@@ -1006,7 +1006,8 @@ const CALCUL = {
      const eD = async () => {
        if (!w.ventes.lignes) {
          const cat = await DB.get(CALCUL.cleProduits, []);
-         const base = (Array.isArray(cat) && cat.length) ? cat : CALCUL.produitsDefaut.map(x => ({ nom:x[0], g:x[1] }));
+         const garde = (Array.isArray(cat) ? cat : []).filter(p => p && !HORS_ECART.test(nomCaisse(p.nom)));
+         const base = garde.length ? garde : CALCUL.produitsDefaut.map(x => ({ nom:x[0], g:x[1] }));
          w.ventes.lignes = base.map(p => ({ nom:p.nom, g:p.g, q:'' }));
          if (!w.ventes.lignes.length) w.ventes.lignes = [{ nom:'', g:'', q:'' }];
        }

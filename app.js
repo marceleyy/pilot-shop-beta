@@ -5287,10 +5287,12 @@ function modifierPeriode(per) {
    /* Export Innovorder sans SKU (« ventes tous produits » v2) : le libellé de
       caisse donne le produit. Grammages du classeur Amorino ; null = glace dont
       le grammage reste à saisir. */
+   /* Macarons et gianduiotto : hors du classeur des écarts (manager), jamais
+      comptés, même avec un SKU ou un grammage retenu. */
+   const HORS_ECART = /^(\d+ )?MAC\b|^MACARON|^COFFRET .*\bMAC\b|^GIANDUIOTTO/;
    const GRAMMAGES_NOMS = [
      [/CONE VIDE/, 0], [/MAC TRADITIONNEL/, 0],
-     /* Macarons et gianduiotto : hors du classeur des écarts (manager). */
-     [/\bMAC\b|MACARON|GIANDUIOTTO/, 0],
+     [HORS_ECART, 0],
      [/^POT ENFANT/, 81], [/^POT PETIT/, 133], [/^POT CLASSI/, 163], [/^POT GRAND/, 221],
      [/^POT GEANT/, 275], [/^POT (A )?PARTAG/, 529],
      [/^CHOCO ?CONE ENFANT/, 67], [/^CHOCO ?CONE PETIT/, 112], [/^CHOCO ?CONE CLASSI/, 149], [/^CHOCO ?CONE GRAND/, 208],
@@ -5456,8 +5458,7 @@ function modifierPeriode(per) {
              if (!nom || q <= 0) return;
              const sku = cSku ? String(r[cSku]).trim() : '';
              const n0 = nomCaisse(nom);
-             /* Exclu par son libellé (macarons, cône vide…) : même avec un SKU chiffré. */
-             if (grammageNom(nom) === 0) return;
+             if (HORS_ECART.test(n0)) return;
              let gr = (retenus && num(retenus[n0]) > 0) ? num(retenus[n0])
                : (sku && GRAMMAGES[sku] !== undefined) ? GRAMMAGES[sku] : grammageNom(nom);
              if (gr === undefined && cCat && /GELATO|GLAC|COUPE/.test(nomCaisse(r[cCat]))) gr = null;
