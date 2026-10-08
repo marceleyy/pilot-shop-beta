@@ -4998,16 +4998,73 @@ function modifierPeriode(per) {
 
    /* Écrit l'équipe après transformation. La liste est relue en base juste
       avant, pour ne pas écraser une modification faite sur un autre iPad ;
-      sans base joignable, on n'écrit rien (comme à l'amorçage). */
+      sans base joignable, on n'écrit rien (comme à l'amorçage).
+      La relecture ne suffisait pas : deux managers qui modifiaient l'équipe
+      en même temps sur deux iPads perdaient l'une des deux modifications, et
+      une écriture ratée, gardée en file, remettait plus tard une équipe
+      périmée (une personne retirée revenait, avec son code). La ligne n'est
+      donc remplacée que si sa date d'écriture (updated_at, posée par la base)
+      n'a pas bougé depuis la lecture ; sinon la modification est refaite sur
+      la liste fraîche. Rien ne part en file d'attente. */
+   const CONNEXION_EQUIPE = 'Connexion nécessaire pour modifier l’équipe. Réessayez.';
    async function modifierEquipe(transformer) {
-     const lu = await lireEquipeBase();
-     if (lu.etat === 'reseau') throw new Error('Connexion nécessaire pour modifier l’équipe. Réessayez.');
-     const source = (Array.isArray(lu.data) && lu.data.length) ? lu.data : EQUIPE;
-     const liste = await transformer(source.map(e => Object.assign({}, e)));
-     if (!liste.some(e => e.role === 'manager')) throw new Error('Il faut au moins un manager.');
-     await DB.set('equipe', liste);
-     EQUIPE.splice(0, EQUIPE.length, ...liste.filter(ficheValide));
-     return liste;
+     const copie = l => l.map(e => Object.assign({}, e));
+     const avecManager = liste => {
+       if (!liste.some(e => e.role === 'manager')) throw new Error('Il faut au moins un manager.');
+       return liste;
+     };
+     const garder = liste => {
+       try { DB._ecrire('equipe', JSON.stringify(liste)); } catch (e) {}
+       EQUIPE.splice(0, EQUIPE.length, ...liste.filter(ficheValide));
+       return liste;
+     };
+     /* Écriture d'avant, sans contrôle de version : pas de base, équipe encore
+        en file (amorçage), pas encore de ligne, ou base sans updated_at. */
+     const sansVersion = async () => {
+       const lu = await lireEquipeBase();
+       if (lu.etat === 'reseau') throw new Error(CONNEXION_EQUIPE);
+       const source = (Array.isArray(lu.data) && lu.data.length) ? lu.data : EQUIPE;
+       const liste = avecManager(await transformer(copie(source)));
+       await DB.set('equipe', liste);
+       EQUIPE.splice(0, EQUIPE.length, ...liste.filter(ficheValide));
+       return liste;
+     };
+     if (!DB.configure || !DB._distant('equipe') || fileLire().some(x => x.cle === 'equipe')) return sansVersion();
+     const chemin = DB._table('equipe') + '?id=eq.' + encodeURIComponent('equipe');
+     const lire = async () => {
+       const l = await DB._appel(chemin + '&select=data,updated_at&limit=1');
+       return (l && l.length) ? l[0] : null;
+     };
+     /* La base range les clés à sa façon : on compare clés triées. */
+     const canon = v => JSON.stringify(v, (k, x) => (x && typeof x === 'object' && !Array.isArray(x))
+       ? Object.keys(x).sort().reduce((o, c) => { o[c] = x[c]; return o; }, {}) : x);
+     for (let essai = 0; essai < 3; essai++) {
+       let lu;
+       try { lu = await lire(); }
+       catch (e) {
+         if (e && e.http === 400) return sansVersion();
+         throw new Error(CONNEXION_EQUIPE);
+       }
+       if (!lu || !lu.updated_at || !Array.isArray(lu.data) || !lu.data.length) return sansVersion();
+       const liste = avecManager(await transformer(copie(lu.data)));
+       let r;
+       try {
+         r = await DB._appel(chemin + '&updated_at=eq.' + encodeURIComponent(lu.updated_at) + '&select=updated_at', {
+           method: 'PATCH',
+           headers: { 'Prefer': 'return=representation' },
+           body: JSON.stringify({ data:liste })
+         });
+       } catch (e) {
+         /* Réponse perdue : l'écriture a pu passer. On le vérifie. */
+         let relu = null;
+         try { relu = await lire(); } catch (x) {}
+         if (relu && canon(relu.data) === canon(liste)) return garder(liste);
+         throw new Error(CONNEXION_EQUIPE);
+       }
+       if (Array.isArray(r) && r.length) return garder(liste);
+       /* Ligne modifiée entre-temps sur un autre iPad : on recommence sur la liste fraîche. */
+     }
+     throw new Error('L’équipe vient d’être modifiée sur un autre iPad. Réessayez.');
    }
 
    /* Pose un nouveau code sur une fiche, haché ou non selon PIN_HACHAGE —
