@@ -2036,8 +2036,10 @@ async function purgerLocalAncien() {
    
      $('#page').innerHTML =
        carte(entete('🎙️', 'Dicter la perte', SPEECH
-           /* RGPD : la voix quitte l'iPad, il faut le dire avant le premier mot. */
-           ? 'Appuyez, parlez normalement : « J’ai jeté 2 bacs de vanille ». La voix est transcrite par le service de dictée de l’appareil (Apple ou Google).'
+           /* La voix passe par le service de dictée d'Apple ou de Google : la
+              notice d'information des salariés le dit, l'écran plus (demande de
+              la boutique). */
+           ? 'Appuyez, parlez normalement : « J’ai jeté 2 bacs de vanille ».'
            : 'La dictée n’est pas disponible sur ce navigateur. Utilisez la saisie ci-dessous.') +
          '<button class="btn corail bloc xl mic" id="mic"' + (SPEECH ? '' : ' disabled') + '>' +
          'Dicter la perte</button>' +
@@ -4056,7 +4058,7 @@ function ouvrirPremierePeriode() {
      $$('[data-jeter]').forEach(b => b.onclick = () => {
        const f = fifo.filter(x => x.cle === b.dataset.jeter)[0];
        confirmer('Jeter ' + f.nom + ' ?',
-         'Le lot ' + f.lot + ' sera enregistré en perte et retiré du frigo virtuel.', 'Jeter et déclarer', async () => {
+         'Le lot ' + f.lot + ' sera enregistré en perte et retiré des produits ouverts.', 'Jeter et déclarer', async () => {
            /* Litrage réel du lot : sa taille de bac pour une glace (5 L par
               défaut si elle n'a pas été saisie), 0 pour le reste — une
               chantilly ou un coulis n'a pas de litrage de glace, et lui
@@ -4622,7 +4624,7 @@ function ouvrirPremierePeriode() {
            '<p>Inventaires validés, achats saisis, registres complets.</p></div></div>', 'plat')) +
    
        '<button class="btn ' + (bloquants.length ? 'clair' : 'menthe') + ' bloc xl" id="clo" style="margin-top:16px">' +
-       (anticipee ? '⏭️ Clôture anticipée' : 'Terminer la période') + '</button>' +
+       (anticipee ? 'Clôture anticipée' : 'Terminer la période') + '</button>' +
     '<button class="btn clair bloc" id="modif" style="margin-top:8px">Modifier les dates de la période</button>' +
    
        (historique.length ? '<div class="entete"><h3>Périodes clôturées</h3></div>' +
