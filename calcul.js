@@ -20,10 +20,14 @@ PAGES.calcul = { titre:'Calcul d’écart', sous:'Départ, livraisons, clôture 
 if (MENU_PLUS.manager.indexOf('calcul') < 0) MENU_PLUS.manager.unshift('calcul');
 
 const CALCUL = {
+  /* Ordre du comptage : bacs entiers (chambre froide, congélateur −13), puis
+     bacs entamés (vitrine, congélateur −13). */
   zones: [
-    { id:'froid',   label:'Chambre froide' },
-    { id:'vitrine', label:'Vitrine' }
+    { id:'froid',   label:'Chambre froide',  bacs:true },
+    { id:'congel',  label:'Congélateur −13', bacs:true, entames:true },
+    { id:'vitrine', label:'Vitrine',         entames:true }
   ],
+  ordreEntames: ['vitrine', 'congel'],
   /* À partir de ce jour du mois, un mois sans calcul clôturé se signale. */
   jourAlerteMois: 20,
   /* Produits vendus et leur grammage, retenus d'un calcul à l'autre. */
@@ -71,22 +75,30 @@ const CALCUL = {
    const kgZones = (z, pl) => CALCUL.zones.reduce((t, x) => t + kgStock(z && z[x.id], pl), 0);
 
    function champsZones(p, z, pl) {
-     return '<div id="' + p + '-prop"></div>' + CALCUL.zones.map(x => {
-       const s = (z && z[x.id]) || {};
-       /* Entamés pesés en kg (premières saisies) : convertis en litres au même
-          poids, pour ne pas les perdre en réenregistrant la zone. */
-       const entames = s => num(s.entamesL) + (num(s.entamesKg) > 0 ? +(num(s.entamesKg) / (pl || FOURNISSEUR.poidsMoyenLitre)).toFixed(2) : 0);
-       const v = n => (n === undefined || n === null || n === '' || num(n) === 0) ? '' : n;
-       return '<p class="f" style="margin:16px 0 6px"><b>' + esc(x.label) + '</b></p>' +
-         '<div class="grid g4">' + CALCUL.taillesBac.map(t =>
-           '<div class="champ"><label class="f">Bacs pleins ' + t + ' L</label>' +
-           '<input type="number" min="0" step="1" inputmode="numeric" data-zone="' + x.id + '" data-taille="' + t + '" ' +
-           'id="' + p + '-' + x.id + '-' + t + '" value="' + esc(v((s.bacs || {})[t])) + '" placeholder="0"></div>').join('') +
-         '<div class="champ"><label class="f">Entamés (litres approx.)</label>' +
-         '<input type="number" min="0" step="0.5" inputmode="decimal" data-zone="' + x.id + '" data-entames ' +
-         'id="' + p + '-' + x.id + '-el" value="' + esc(v(entames(s))) + '" placeholder="0"></div></div>';
-     }).join('') +
-     '<p class="mini" id="' + p + '-total" style="margin-top:12px"></p>';
+     const v = n => (n === undefined || n === null || n === '' || num(n) === 0) ? '' : n;
+     /* Entamés pesés en kg (premières saisies) : convertis en litres au même
+        poids, pour ne pas les perdre en réenregistrant la zone. */
+     const entames = s => num(s.entamesL) + (num(s.entamesKg) > 0 ? +(num(s.entamesKg) / (pl || FOURNISSEUR.poidsMoyenLitre)).toFixed(2) : 0);
+     const zs = id => (z && z[id]) || {};
+     /* Un ancien calcul qui avait des bacs pleins en vitrine (ou des entamés en
+        chambre froide) garde son champ, pour ne rien perdre. */
+     const aBacs = x => x.bacs || Object.keys(zs(x.id).bacs || {}).some(t => num(zs(x.id).bacs[t]) > 0);
+     const aEntames = x => x.entames || entames(zs(x.id)) > 0;
+     const entiers = CALCUL.zones.filter(aBacs).map(x =>
+       '<p class="f" style="margin:16px 0 6px"><b>' + esc(x.label) + '</b> · bacs entiers</p>' +
+       '<div class="grid g4">' + CALCUL.taillesBac.map(t =>
+         '<div class="champ"><label class="f">Bacs ' + t + ' L</label>' +
+         '<input type="number" min="0" step="1" inputmode="numeric" data-zone="' + x.id + '" data-taille="' + t + '" ' +
+         'id="' + p + '-' + x.id + '-' + t + '" value="' + esc(v((zs(x.id).bacs || {})[t])) + '" placeholder="0"></div>').join('') +
+       '</div>').join('');
+     const ordre = CALCUL.ordreEntames.concat(CALCUL.zones.map(x => x.id).filter(id => CALCUL.ordreEntames.indexOf(id) < 0));
+     const entam = ordre.map(id => CALCUL.zones.find(x => x.id === id)).filter(x => x && aEntames(x)).map(x =>
+       '<div class="champ"><label class="f">' + esc(x.label) + ' (litres approx.)</label>' +
+       '<input type="number" min="0" step="0.5" inputmode="decimal" data-zone="' + x.id + '" data-entames ' +
+       'id="' + p + '-' + x.id + '-el" value="' + esc(v(entames(zs(x.id)))) + '" placeholder="0"></div>').join('');
+     return '<div id="' + p + '-prop"></div>' + entiers +
+       '<p class="f" style="margin:20px 0 6px"><b>Bacs déjà entamés</b></p><div class="grid g2">' + entam + '</div>' +
+       '<p class="mini" id="' + p + '-total" style="margin-top:12px"></p>';
    }
    function lireZones(p) {
      const z = {};
@@ -103,8 +115,8 @@ const CALCUL = {
      const maj = () => {
        const z = lireZones(p);
        const el = $('#' + p + '-total');
-       if (el) el.textContent = CALCUL.zones.map(x => x.label + ' ' + kgTxt(kgStock(z[x.id], pl))).join(' · ') +
-         ' · Total ' + kgTxt(kgZones(z, pl));
+       if (el) el.textContent = CALCUL.zones.filter(x => kgStock(z[x.id], pl) > 0).map(x => x.label + ' ' + kgTxt(kgStock(z[x.id], pl)))
+         .concat('Total ' + kgTxt(kgZones(z, pl))).join(' · ');
      };
      $$('#sheet-corps [data-zone]').forEach(i => i.oninput = maj);
      maj();
@@ -200,18 +212,24 @@ const CALCUL = {
        }
      } catch (e) {}
      try {
-       for (const k of await DB.list('ecart:')) {
-         const e = await DB.get(k, {});
+       /* Périodes d'écarts lues en parallèle. */
+       const cles = await DB.list('ecart:');
+       const reception = v.livraisons.slice();
+       (await Promise.all(cles.map(k => DB.get(k, {}).catch(() => ({}))))).forEach(e => {
          ((e && e.bl) || []).forEach(b => {
-           const jour = /^\d{4}-\d{2}-\d{2}$/.test(b.date || '') ? b.date : String(b.at || '').slice(0, 10);
+           const jour = /^\d{4}-\d{2}-\d{2}$/.test(b.date || '') ? b.date : (b.at ? isoOf(new Date(b.at)) : '');
            if (!dans(jour) || !(num(b.litres) > 0)) return;
            const numero = String(b.numero || '').trim().toUpperCase();
            /* Même bon déjà vu en réception : on ne le propose pas deux fois. */
-           if (numero && numero !== 'SANS NUMÉRO' && v.livraisons.some(x => x.numero === numero)) return;
+           if (numero && numero !== 'SANS NUMÉRO' && reception.some(x => x.numero === numero)) return;
+           /* Même jour, mêmes litres (à 1 L près) : sans doute la même livraison
+              tracée deux fois. Proposée, mais hors « Tout ajouter » et hors totaux. */
+           const jumeau = reception.find(x => x.date === jour && Math.abs(x.litres - num(b.litres)) <= 1);
            v.livraisons.push({ ref:'bl:' + (b.id || numero + jour), numero:numero === 'SANS NUMÉRO' ? '' : numero,
-                               date:jour, litres:num(b.litres), source:'Bon saisi aux écarts' });
+                               date:jour, litres:num(b.litres), source:'Bon saisi aux écarts',
+                               doublon:jumeau ? (jumeau.numero || 'sans numéro') : '' });
          });
-       }
+       });
      } catch (e) {}
      v.livraisons.sort((a, b) => a.date < b.date ? -1 : a.date > b.date ? 1 : 0);
      try { v.pertesL = await litresPertesRegistre(debut, fin); } catch (e) {}
@@ -231,14 +249,14 @@ const CALCUL = {
          esc(texteDates(debut, fin)) + '.</p>';
        return;
      }
-     const libres = d.livraisons.filter(p => !dejaCompte(l, p));
+     const libres = d.livraisons.filter(p => !p.doublon && !dejaCompte(l, p));
      box.innerHTML = '<p class="f" style="margin:16px 0 6px"><b>Proposé par l’appli</b> · réceptions ' + esc(texteDates(debut, fin)) + '</p>' +
        '<div class="dense">' + d.livraisons.map((p, i) =>
          '<div class="dl"><span class="c1">' + esc(p.numero || 'sans numéro') + ' · ' + esc(fmtDC(p.date)) +
            ' · <span class="mini">' + esc(p.source) + (p.bacs ? ', ' + p.bacs + ' bac(s)' : '') + '</span></span>' +
          '<span class="c w num">' + n1(p.litres) + ' L</span>' +
          '<span class="c w">' + (dejaCompte(l, p) ? pastille('ok', 'compté')
-           : '<button type="button" class="btn clair sm" data-lv-prop="' + i + '">Ajouter</button>') + '</span></div>').join('') +
+           : (p.doublon ? '<span class="mini">même livraison que ' + esc(p.doublon) + ' ?</span> ' : '') + '<button type="button" class="btn clair sm" data-lv-prop="' + i + '">Ajouter</button>') + '</span></div>').join('') +
        '</div>' +
        (libres.length > 1 ? '<button type="button" class="btn clair bloc" id="lv-prop-tout" style="margin-top:8px">Tout ajouter (' +
          n1(libres.reduce((t, p) => t + p.litres, 0)) + ' L)</button>' : '');
@@ -275,7 +293,9 @@ const CALCUL = {
          const el = $('#' + p + '-froid-' + t);
          if (el) { el.value = bacs[t] || ''; el.dispatchEvent(new Event('input')); }
        });
-       toast('Bacs repris : vérifiez-les en chambre froide');
+       const autres = tailles.filter(t => !CALCUL.taillesBac.includes(+t));
+       toast(autres.length ? 'Bacs repris, sauf ' + autres.map(t => bacs[t] + ' × ' + t + ' L').join(', ') + ' (taille non prévue)'
+                           : 'Bacs repris : vérifiez-les en chambre froide');
      };
    }
 
@@ -359,7 +379,7 @@ const CALCUL = {
        const d = await donneesAppli(d0, today());
        if (!el.isConnected) return;
        const jours = Math.round((new Date(today()) - new Date(c.debut)) / 86400000);
-       const recL = d.livraisons.reduce((t, x) => t + x.litres, 0);
+       const recL = d.livraisons.reduce((t, x) => t + (x.doublon ? 0 : x.litres), 0);
        const manque = d.livraisons.filter(p => !dejaCompte(livraisonsDe(c), p));
        el.innerHTML = '<b>Suivi</b> · jour ' + jours + ' · réceptions dans l’appli : ' + n1(recL) + ' L' +
          (manque.length ? ' (' + manque.length + ' pas encore comptée(s) ici)' : '') +
@@ -553,8 +573,8 @@ const CALCUL = {
        '<input type="text" id="lv-num" autocapitalize="characters" spellcheck="false" placeholder="Facultatif"></div>' +
        '<div class="champ"><label class="f">Date</label>' +
        '<input type="date" id="lv-date" max="' + today() + '" value="' + esc(dateDefaut) + '"></div>' +
-       '<div class="champ"><label class="f">Litres livrés</label>' +
-       '<input type="number" id="lv-litres" min="0" step="0.5" inputmode="decimal" placeholder="Ex. 120"></div></div>' +
+       '<div class="champ"><label class="f">Litrage total BL</label>' +
+       '<input type="number" id="lv-litres" min="0" step="0.5" inputmode="decimal" placeholder="En bas du bon"></div></div>' +
        '<button type="button" class="btn clair bloc" id="lv-ajout" style="margin-top:10px">Ajouter cette livraison</button>' +
        '<div id="lv-prop"></div>';
    }
@@ -562,7 +582,8 @@ const CALCUL = {
    function brancherLivraisons(l, redessiner, ecrire) {
      let doublonVu = '';
      const ajouter = xs => {
-       xs.forEach(x => { l.push(x); if (ecrire) ecrire('ajout', x); });
+       l.push(...xs);
+       if (ecrire) ecrire('ajout', xs);
        redessiner();
      };
      $('#lv-num').oninput = () => { doublonVu = ''; $('#lv-doublon').innerHTML = ''; };
@@ -581,7 +602,7 @@ const CALCUL = {
      };
      $$('[data-lv-ret]').forEach(b => b.onclick = () => {
        const i = l.findIndex(x => x.id === b.dataset.lvRet);
-       if (i >= 0) { const x = l.splice(i, 1)[0]; if (ecrire) ecrire('retrait', x); }
+       if (i >= 0) { const x = l.splice(i, 1)[0]; if (ecrire) ecrire('retrait', [x]); }
        redessiner();
      });
      return ajouter;
@@ -647,61 +668,91 @@ const CALCUL = {
      const brouillon = () => DB.patch(c.id, { brouillon:{ fin:w.fin, zones:w.zones, perteL:w.perteL, perteKg:w.perteKg,
                                                           perteSource:w.perteSource, ventes:w.ventes } });
 
+     const changerFin = f => {
+       /* Pertes reprises du registre : relues pour la nouvelle période. */
+       if (f !== w.fin && w.perteSource !== 'Saisie') w.perteL = null;
+       w.fin = f;
+     };
+     const finValide = f => /^\d{4}-\d{2}-\d{2}$/.test(f) && f >= c.debut && f <= today();
+
+     /* Étape 1 : stock de fin, dans l'ordre du comptage en boutique. */
      const eA = () => {
        showSheet(
          '<h2 id="sheet-titre">Clôture du calcul</h2>' +
-         '<p class="sub">Étape 1 sur 4 · Fin de période et livraisons (départ le ' + esc(fmtD(c.debut)) + ')</p>' +
-         '<div class="champ"><label class="f">Date de clôture</label>' +
+         '<p class="sub">Étape 1 sur 4 · Stock de fin (départ le ' + esc(fmtD(c.debut)) + ')</p>' +
+         '<div class="champ"><label class="f">Date du comptage de fin</label>' +
          '<input type="date" id="ca-fin" min="' + esc(c.debut) + '" max="' + today() + '" value="' + esc(w.fin) + '"></div>' +
-         '<label class="f" style="margin-top:14px">Livraisons depuis le départ</label>' +
-         listeLivraisons(w.livraisons, true) + formLivraison(w.fin) + '<div id="lv-doublon"></div>' +
+         champsZones('cf', w.zones, poidsLitre(c)) +
          '<div class="actions"><button class="btn clair" id="ca-tard">Plus tard</button>' +
          '<button class="btn menthe" id="ca-suiv">Suivant</button></div>');
-       /* Les livraisons ajoutées ou retirées ici partent tout de suite, par
-          ajout à des listes : fermer l'assistant ne les perd pas, et celles
-          ajoutées entre-temps sur un autre iPad ne sont pas écrasées. */
-       const ajA = brancherLivraisons(w.livraisons, () => { changerFin($('#ca-fin').value || w.fin); eA(); },
-         (quoi, x) => quoi === 'ajout'
-           ? DB.patch(c.id, {}, { livraisons:[x] })
-           : DB.patch(c.id, {}, { livraisonsRetirees:[x.id] }));
-       proposerLivraisons(w.livraisons, debutFlux(c), w.fin, ajA);
-       const changerFin = f => {
-         /* Pertes reprises du registre : relues pour la nouvelle période. */
-         if (f !== w.fin && w.perteSource !== 'Saisie') w.perteL = null;
-         w.fin = f;
+       suivreTotal('cf', poidsLitre(c));
+       if (!c.essai && w.fin === today()) proposerStock('cf');
+       $('#ca-fin').onchange = () => {
+         const f = $('#ca-fin').value;
+         if (finValide(f) && f !== w.fin) { w.zones = lireZones('cf'); changerFin(f); eA(); }
        };
        $('#ca-tard').onclick = async () => {
          const f = $('#ca-fin').value;
-         if (/^\d{4}-\d{2}-\d{2}$/.test(f) && f >= c.debut && f <= today()) { changerFin(f); await brouillon(); }
+         w.zones = lireZones('cf');
+         if (finValide(f)) changerFin(f);
+         await brouillon();
          closeSheet();
          rendre('calcul');
        };
        $('#ca-suiv').onclick = async () => {
          const f = $('#ca-fin').value;
-         if (!/^\d{4}-\d{2}-\d{2}$/.test(f) || f < c.debut || f > today()) {
-           toast('La clôture doit tomber entre le ' + fmtDC(c.debut) + ' et aujourd’hui', 'erreur'); return;
-         }
-         if (num($('#lv-litres').value) > 0) { toast('Touchez « Ajouter cette livraison » ou videz le champ des litres', 'erreur'); return; }
+         if (!finValide(f)) { toast('La clôture doit tomber entre le ' + fmtDC(c.debut) + ' et aujourd’hui', 'erreur'); return; }
          changerFin(f);
+         w.zones = lireZones('cf');
+         if (!(kgZones(w.zones, poidsLitre(c)) > 0)) { toast('Le stock de fin est vide : comptez au moins une zone', 'erreur'); return; }
          await brouillon();
          eB();
        };
      };
 
+     /* Étape 2 : d'abord « une livraison est-elle arrivée ? », puis le litrage
+        total inscrit en bas de chaque bon. */
      const eB = () => {
+       const periode = texteDates(debutFlux(c), w.fin);
+       if (!w.livraisons.length && w.livraisonRecue !== true) {
+         showSheet(
+           '<h2 id="sheet-titre">Livraison</h2>' +
+           '<p class="sub">Étape 2 sur 4 · Livraisons ' + esc(periode) + '</p>' +
+           '<p style="margin-top:10px"><b>Avez-vous reçu une livraison de glace ' + esc(periode) + ' ?</b></p>' +
+           '<div id="lv-indice"></div>' +
+           '<div class="actions"><button class="btn clair" id="lv-ret">Retour</button>' +
+           '<button class="btn clair" id="lv-non">Non</button>' +
+           '<button class="btn menthe" id="lv-oui">Oui</button></div>');
+         if (!c.essai && debutFlux(c) <= w.fin) donneesAppli(debutFlux(c), w.fin).then(d => {
+           const libres = d.livraisons.filter(p => !p.doublon);
+           const box = $('#lv-indice');
+           if (box && libres.length) box.innerHTML = '<p class="mini" style="margin-top:8px">L’appli a enregistré ' +
+             libres.length + ' réception(s) sur ces dates, ' + n1(libres.reduce((t, p) => t + p.litres, 0)) + ' L au total.</p>';
+         }).catch(() => {});
+         $('#lv-ret').onclick = () => eA();
+         $('#lv-non').onclick = () => { w.livraisonRecue = false; eC(); };
+         $('#lv-oui').onclick = () => { w.livraisonRecue = true; eB(); };
+         return;
+       }
        showSheet(
-         '<h2 id="sheet-titre">Stock de fin</h2>' +
-         '<p class="sub">Étape 2 sur 4 · Comptage du ' + esc(fmtD(w.fin)) + '</p>' +
-         champsZones('cf', w.zones, poidsLitre(c)) +
-         '<div class="actions"><button class="btn clair" id="cf-ret">Retour</button>' +
-         '<button class="btn menthe" id="cf-suiv">Suivant</button></div>');
-       suivreTotal('cf', poidsLitre(c));
-       if (!c.essai && w.fin === today()) proposerStock('cf');
-       $('#cf-ret').onclick = () => { w.zones = lireZones('cf'); eA(); };
-       $('#cf-suiv').onclick = async () => {
-         w.zones = lireZones('cf');
-         if (!(kgZones(w.zones, poidsLitre(c)) > 0)) { toast('Le stock de fin est vide : comptez au moins une zone', 'erreur'); return; }
-         await brouillon();
+         '<h2 id="sheet-titre">Livraison</h2>' +
+         '<p class="sub">Étape 2 sur 4 · Litrage total inscrit en bas de chaque bon</p>' +
+         listeLivraisons(w.livraisons, true) + formLivraison(w.fin) + '<div id="lv-doublon"></div>' +
+         '<div class="actions"><button class="btn clair" id="lv-ret">Retour</button>' +
+         '<button class="btn menthe" id="lv-suiv">Suivant</button></div>');
+       /* Les livraisons ajoutées ou retirées ici partent tout de suite, par
+          ajout à des listes : fermer l'assistant ne les perd pas, et celles
+          ajoutées entre-temps sur un autre iPad ne sont pas écrasées. */
+       const ajB = brancherLivraisons(w.livraisons, eB,
+         /* Un seul envoi par lot : des envois parallèles s'écraseraient hors ligne. */
+         (quoi, xs) => quoi === 'ajout'
+           ? DB.patch(c.id, {}, { livraisons:xs })
+           : DB.patch(c.id, {}, { livraisonsRetirees:xs.map(x => x.id) }));
+       proposerLivraisons(w.livraisons, debutFlux(c), w.fin, ajB);
+       $('#lv-ret').onclick = () => { if (!w.livraisons.length) w.livraisonRecue = undefined; eA(); };
+       $('#lv-suiv').onclick = () => {
+         if (num($('#lv-litres').value) > 0) { toast('Touchez « Ajouter cette livraison » ou videz le champ des litres', 'erreur'); return; }
+         if (!w.livraisons.length) { w.livraisonRecue = undefined; }
          eC();
        };
      };
@@ -853,7 +904,7 @@ const CALCUL = {
        /* Ce que l'appli a enregistré sur la période, gardé avec la clôture. */
        if (!c.essai && debutFlux(c) <= w.fin) {
          const d = await donneesAppli(debutFlux(c), w.fin);
-         fini.appli = { livraisonsL:+d.livraisons.reduce((t, x) => t + x.litres, 0).toFixed(2), pertesL:+num(d.pertesL).toFixed(2) };
+         fini.appli = { livraisonsL:+d.livraisons.reduce((t, x) => t + (x.doublon ? 0 : x.litres), 0).toFixed(2), pertesL:+num(d.pertesL).toFixed(2) };
        }
        const r = resultatCalcul(fini);
        showSheet(
