@@ -1108,6 +1108,10 @@ V.inventaire = async function () {
   /* L'historique du sec, séparé : les deux comptages ne se font pas le même
      jour ni par la même personne, et on doit pouvoir voir l'un sans l'autre. */
   const historiqueSec = await DB.get('stock:secs', []);
+  /* Les bacs de l'armoire −13 sont encore au stock : l'inventaire de la
+     chambre froide doit les compter aussi, sinon ils sortent deux fois
+     (au comptage, puis à leur mise en vitrine). */
+  const nbArmoire = (await bacsArmoire().catch(() => [])).length;
 
   /* Deux comptages distincts. La chambre froide se compte vite et alimente le
      calcul d'écart ; le sec se compte rarement et porte des unités variées.
@@ -1400,6 +1404,10 @@ V.inventaire = async function () {
       '<span id="inv-u">bacs</span>' +
       '<b class="num" id="inv-kg" style="margin-left:auto">0,0 kg</b></div>' +
 
+      (partie === 'froid' && nbArmoire
+        ? '<div class="rappel" style="margin-top:12px"><b>Comptez aussi l’armoire −13</b> : ' +
+          nbArmoire + ' bac(s) y sont notés et font toujours partie du stock.</div>'
+        : '') +
       (partie === 'froid' ? blocFroid() : blocSec()) +
 
       '<div class="champ" style="margin-top:18px"><label class="f">Note</label>' +
@@ -1607,7 +1615,8 @@ async function bacsArmoire() {
   blocs.forEach(l => { if (Array.isArray(l)) ev.push.apply(ev, l); });
   const sortis = new Set(ev.filter(e => e && e.t === 'sortie').map(e => e.r));
   const heures = (DLC_RULES.gelato || DLC_RULES.defaut).h;
-  return ev.filter(e => e && e.t === 'entree' && e.id && !sortis.has(e.id) && e.j)
+  return ev.filter(e => e && e.t === 'entree' && e.id && !sortis.has(e.id) &&
+                       /^\d{4}-\d{2}-\d{2}$/.test(e.j))
     .map(e => {
       const limite = new Date(new Date(e.j + 'T08:00:00').getTime() + heures * 3600e3);
       return { id: e.id, cle: e.c, lot: e.l || '', jour: e.j, at: e.a,
@@ -1626,7 +1635,7 @@ async function noterArmoire(ev) {
 function retirerDeArmoire(b) {
   showSheet(
     '<h2 id="sheet-titre">' + esc(libelleArticle(b.cle)) + '</h2>' +
-    '<p class="cs">À l’armoire depuis le ' + fmtD(b.jour) + (b.lot ? ' · lot ' + esc(b.lot) : '') + '</p>' +
+    '<p class="cs">À l’armoire depuis le ' + esc(fmtD(b.jour)) + (b.lot ? ' · lot ' + esc(b.lot) : '') + '</p>' +
     '<div class="stack" style="margin-top:14px">' +
     '<button class="btn corail bloc" id="ar-jete">Jeté (périmé ou abîmé)</button>' +
     '<button class="btn clair bloc" id="ar-err">Noté par erreur</button></div>' +
@@ -1636,13 +1645,17 @@ function retirerDeArmoire(b) {
     if (enCours) return;
     enCours = true;
     try {
-      if (v === 'perte') await ajouterMouvement('perte', b.cle, 1, { lot: b.lot, motif: 'armoire' });
+      /* La sortie d'armoire d'abord : sans effet sur le stock, elle empêche
+         un second appui de jeter deux fois le même bac. */
       await noterArmoire({ t: 'sortie', r: b.id, v: v });
-      await feed(v === 'perte' ? 'warn' : 'ok', STATE.user.prenom +
-        (v === 'perte' ? ' a jeté ' : ' a retiré (erreur de saisie) ') +
-        libelleArticle(b.cle) + ' de l’armoire −13');
+      if (v === 'perte') await ajouterMouvement('perte', b.cle, 1, { lot: b.lot, motif: 'armoire' });
       closeSheet();
       rendre('lots');
+      feed(v === 'perte' ? 'warn' : 'ok', STATE.user.prenom +
+        (v === 'perte' ? ' a jeté ' : ' a retiré (erreur de saisie) ') +
+        libelleArticle(b.cle) + ' de l’armoire −13').catch(() => {});
+    } catch (e) {
+      toast('Enregistrement impossible, réessayez', 'erreur');
     } finally { enCours = false; }
   };
   $('#ar-jete').onclick = () => sortir('perte');
@@ -1766,11 +1779,18 @@ function confirmerOuverture(r) {
        lequel des bacs de l'armoire, pour reprendre sa date de sortie du −20. */
     let dest = '', orig = '', bacId = '', jourM13 = '';
     let armoire = [];
-    let fini = false;
-    bacsArmoire().then(l => {
-      armoire = l;
-      if (!fini && $('#co-ok')) { garder(); dessiner(); }
-    }).catch(() => {});
+    /* Jeton propre à cette feuille : si elle a été refermée (voile, retour)
+       ou remplacée par une autre, la liste qui arrive ne la redessine pas. */
+    let fini = false, armoireChargee = false;
+    const jeton = uid();
+    const chargement = bacsArmoire().then(l => { armoire = l; })
+      .catch(() => {}).then(() => {
+        armoireChargee = true;
+        const sh = $('#sheet');
+        if (!fini && sh && !sh.hidden && $('#co-ok') && $('#co-ok').dataset.jeton === jeton) {
+          garder(); dessiner();
+        }
+      });
     const estGlace = () => famille === 'glace';
     const cleCourante = () => cleArticle('glace', parfum, taille);
     const candidats = () => armoire.filter(b => b.cle === cleCourante());
@@ -1816,7 +1836,7 @@ function confirmerOuverture(r) {
                 ? '<div class="champ" style="margin-top:14px"><label class="f">Bac de l’armoire</label>' +
                   '<div class="pastilles">' + cands.map(b =>
                     '<button type="button" class="pas' + (b.id === bacId ? ' on' : '') +
-                    '" data-bac="' + esc(b.id) + '">Sorti du −20 le ' + fmtDC(b.jour) +
+                    '" data-bac="' + esc(b.id) + '">Sorti du −20 le ' + esc(fmtDC(b.jour)) +
                     (b.lot ? ' · ' + esc(b.lot) : '') + '</button>').join('') + '</div>' +
                   '<p class="mini" style="margin-top:6px">Sa durée de vie compte depuis cette date.</p></div>'
                 : '<div class="champ" style="margin-top:14px"><label class="f">Sorti du −20 le</label>' +
@@ -1826,7 +1846,7 @@ function confirmerOuverture(r) {
             : '') +
           (dest === 'vitrine' && orig === 'cf' && cands.length
             ? '<div class="rappel" style="margin-top:12px">' + cands.length + ' bac(s) de ce parfum ' +
-              'attendent déjà à l’armoire −13, depuis le ' + fmtDC(cands[0].jour) +
+              'attendent déjà à l’armoire −13, depuis le ' + esc(fmtDC(cands[0].jour)) +
               '. Le plus ancien part d’abord.</div>'
             : '');
       const sousTitre = !glace ? 'Ce produit est ouvert et part en service.'
@@ -1878,10 +1898,12 @@ function confirmerOuverture(r) {
         choixDest +
 
         '<div class="actions"><button class="btn clair" data-fermer>Annuler</button>' +
-        '<button class="btn menthe" id="co-ok">' + esc(libOk) + '</button></div>';
+        '<button class="btn menthe" id="co-ok" data-jeton="' + jeton + '">' + esc(libOk) + '</button></div>';
 
       $$('[data-fam]').forEach(b => b.onclick = () => {
-        garder(); famille = b.dataset.fam; dessiner();
+        garder(); famille = b.dataset.fam;
+        if (famille !== 'glace') { dest = ''; orig = ''; bacId = ''; }
+        dessiner();
       });
       $$('[data-taille]').forEach(b => b.onclick = () => {
         garder(); taille = b.dataset.taille; dessiner();
@@ -1920,6 +1942,13 @@ function confirmerOuverture(r) {
       }
       if (fam.id === 'glace') {
         if (!dest) return toast('Choisissez : vitrine ou armoire −13', 'erreur');
+        /* La liste de l'armoire doit être là avant de choisir le bac : sinon
+           on prendrait la date du jour et le bac resterait affiché. */
+        if (dest === 'vitrine' && orig === 'm13' && !armoireChargee) {
+          await chargement;
+          garder(); dessiner();
+          return toast('Vérifiez le bac de l’armoire, puis validez');
+        }
         if (dest === 'vitrine' && !orig) return toast('Indiquez d’où sort le bac', 'erreur');
         if (dest === 'vitrine' && orig === 'm13' && !bacArmoire() &&
             !(/^\d{4}-\d{2}-\d{2}$/.test(jourM13) && jourM13 <= today())) {
@@ -1941,7 +1970,8 @@ function confirmerOuverture(r) {
          collait un « 5 L » dès qu'ils ont eu des saveurs, et l'alerte cherchait
          un article qui n'existe pas. */
       const cleOuv = cleArticle(fam.id, fam.parfums ? parfum : '', fam.id === 'glace' ? taille : '');
-      const manque = await stockInsuffisant(cleOuv).catch(() => null);
+      /* Vers l'armoire, rien ne sort du stock : pas d'alerte de rupture. */
+      const manque = versArmoire ? null : await stockInsuffisant(cleOuv).catch(() => null);
       if (manque) {
         return confirmer('Ce bac n’est plus au stock',
           'L’application n’a plus de ' + manque.article + ' en réserve' +
@@ -1965,17 +1995,30 @@ function confirmerOuverture(r) {
          de sortie du −20 — c'est elle qui fera partir sa durée de vie. */
       if (fam.id === 'glace' && dest === 'm13') {
         await noterArmoire({ t: 'entree', c: cle, l: lot || '', j: today() });
-        await feed('ok', STATE.user.prenom + ' a mis ' + parfum + ' à l’armoire −13' +
-          (lot ? ' — lot ' + lot : ''));
         fini = true;
         closeSheet();
         resolve(true);
+        feed('ok', STATE.user.prenom + ' a mis ' + parfum + ' à l’armoire −13' +
+          (lot ? ' — lot ' + lot : '')).catch(() => {});
         return;
       }
 
-      const bA = bacArmoire();
-      await ajouterMouvement('ouverture', cle, 1, { lot: lot, famille: fam.id, parfum: parfum });
+      /* Le bac choisi a pu être monté en vitrine depuis un autre iPad : on
+         relit l'armoire juste avant d'écrire et on prend le suivant du même
+         parfum s'il n'y est plus. */
+      let bA = bacArmoire();
+      if (bA) {
+        const frais = await bacsArmoire().catch(() => null);
+        if (frais && !frais.some(b => b.id === bA.id)) {
+          const autres = frais.filter(b => b.cle === bA.cle);
+          bA = autres.filter(b => b.lot && b.lot === lot)[0] || autres[0] || null;
+          if (bA) toast('Ce bac était déjà sorti : le suivant de l’armoire est pris');
+        }
+      }
+      /* La sortie d'armoire avant l'ouverture : si l'ouverture échoue, le
+         bac n'est pas déduit deux fois au prochain essai. */
       if (bA) await noterArmoire({ t: 'sortie', r: bA.id, v: 'vitrine' });
+      await ajouterMouvement('ouverture', cle, 1, { lot: lot, famille: fam.id, parfum: parfum });
 
       /* Le frigo virtuel lit la clé « lots: », pas le journal de stock : sans
          cette écriture il restait désespérément vide alors que l'équipe scannait
