@@ -280,21 +280,36 @@
       Une signature non nulle non plus : une copie lue avant une correction
       porte l'ancienne, que la correction a rangée dans <moment>_corrections.
       Elle ne passe pas : sinon la saisie du soir d'un équipier, écran ouvert
-      depuis le matin, remettait 150 € à la place des 200 € corrigés. */
+      depuis le matin, remettait 150 € à la place des 200 € corrigés.
+      Même chose pendant la correction elle-même (signature en base à null,
+      <moment>_avant gardé) : seules passent la copie du manager qui corrige
+      (même <moment>_avant) et sa revalidation (signature nouvelle). La copie
+      lue avant la correction porte encore la signature corrigée : écrite
+      pendant la correction, elle remettait 150 € et l'ancienne signature
+      jusqu'à ce que le manager revalide. */
    const CHAMPS_CAISSE_SOIR = ['ecart', 'ecartCB', 'ecartEsp', 'par'];
    function garderComptagesValides(out, distant, local) {
      const a = (o, k) => Object.prototype.hasOwnProperty.call(o, k);
+     const dejaCorrigee = (mom, sig) => Array.isArray(distant[mom + '_corrections']) &&
+       distant[mom + '_corrections'].some(c => c && c.at && c.at === sig.at);
      const auCourant = mom => {
        if (!a(local, mom + '_valide')) return false;
        const sl = local[mom + '_valide'];
        /* (Re)validation : elle passe, sauf si cette signature a déjà été corrigée. */
-       if (sl) return !(Array.isArray(distant[mom + '_corrections']) &&
-                        distant[mom + '_corrections'].some(c => c && c.at && c.at === sl.at));
+       if (sl) return !dejaCorrigee(mom, sl);
        const av = local[mom + '_avant'], sig = distant[mom + '_valide'];
        return !!(av && sig && av.at && av.at === sig.at);   // correction de la signature en base
      };
+     const auCourantCorrection = mom => {
+       const av = distant[mom + '_avant'], la = local[mom + '_avant'], sl = local[mom + '_valide'];
+       if (la && la.at === av.at) return true;                        // le manager qui corrige
+       return !!(sl && sl.at !== av.at && !dejaCorrigee(mom, sl));    // sa revalidation
+     };
      ['m', 's'].forEach(mom => {
-       if (!distant[mom + '_valide'] || auCourant(mom)) return;
+       const enCorrection = !distant[mom + '_valide'] &&
+         !!(distant[mom + '_avant'] && distant[mom + '_avant'].at);
+       if (!distant[mom + '_valide'] && !enCorrection) return;
+       if (enCorrection ? auCourantCorrection(mom) : auCourant(mom)) return;
        Object.keys(local).forEach(k => {
          if (k.indexOf(mom + '_') !== 0 && !(mom === 's' && CHAMPS_CAISSE_SOIR.indexOf(k) >= 0)) return;
          if (a(distant, k)) out[k] = distant[k]; else delete out[k];
