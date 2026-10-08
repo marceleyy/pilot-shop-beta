@@ -5237,6 +5237,10 @@ function modifierPeriode(per) {
          const cQte   = trouve(/qte|qté|quantit|nombre|nb\.?$/i);
          const cSku   = trouve(/\bsku\b|code|référence|reference|\bref\b/i);
          const cNom   = trouve(/produit|libell|désignation|designation|article|nom/i);
+         /* Export Innovorder : « QteOption » compte les unités vendues en
+            option d'un autre produit (macaron glacé d'une formule…). Pour un
+            SKU de glace, elles sortent aussi de la vitrine. */
+         const cOpt   = cols.filter(c => c !== cQte && /qt[eé]\s*option/i.test(c))[0];
    
          /* Colonne de poids : la plus sûre */
          if (cPoids) {
@@ -5256,7 +5260,7 @@ function modifierPeriode(per) {
            const inconnus = {}, parProduit = {};
            rows.forEach(r => {
              const sku = String(r[cSku]).trim();
-             const q = num(r[cQte]);
+             const q = num(r[cQte]) + (cOpt ? num(r[cOpt]) : 0);
              if (!sku || q <= 0) return;
              const gr = GRAMMAGES[sku];
              if (gr === undefined) { inconnus[sku] = (inconnus[sku] || 0) + q; return; }

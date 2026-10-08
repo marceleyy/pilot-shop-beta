@@ -71,7 +71,7 @@ const CALCUL = {
    const kgZones = (z, pl) => CALCUL.zones.reduce((t, x) => t + kgStock(z && z[x.id], pl), 0);
 
    function champsZones(p, z, pl) {
-     return CALCUL.zones.map(x => {
+     return '<div id="' + p + '-prop"></div>' + CALCUL.zones.map(x => {
        const s = (z && z[x.id]) || {};
        /* Entamés pesés en kg (premières saisies) : convertis en litres au même
           poids, pour ne pas les perdre en réenregistrant la zone. */
@@ -168,6 +168,117 @@ const CALCUL = {
      return l;
    }
 
+   /* ---------------------------------------------------------------------------
+      Ce que l'appli sait déjà, proposé à chaque étape
+      ------------------------------------------------------------------------ */
+   const _appli = {};
+   /* Réceptions de glace (journal du stock), bons saisis à l'écran Écarts et
+      pertes du registre entre deux dates. Mémorisé 30 s : chaque étape de
+      l'assistant se redessine souvent. */
+   async function donneesAppli(debut, fin) {
+     const cle = debut + '|' + fin;
+     if (_appli[cle] && Date.now() - _appli[cle].at < 30000) return _appli[cle].v;
+     const v = { livraisons:[], pertesL:0 };
+     const dans = j => j && j >= debut && j <= fin;
+     try {
+       if (typeof tousMouvements === 'function') {
+         const parBon = {};
+         (await tousMouvements(debut)).forEach(m => {
+           if ((m.t || m.type) !== 'reception') return;
+           const a = litArticle(m.c || m.cle);
+           if (a.famille !== 'glace') return;
+           const jour = isoOf(new Date(m.a || m.at));
+           if (!dans(jour)) return;
+           const numero = String(m.b || '').trim().toUpperCase();
+           const k = (numero || 'sans numéro') + '|' + jour;
+           const taille = num(a.taille) || FOURNISSEUR.tailleParDefaut;
+           parBon[k] = parBon[k] || { ref:'rec:' + k, numero:numero, date:jour, litres:0, bacs:0, source:'Réception' };
+           parBon[k].litres += num(m.q !== undefined ? m.q : m.qte) * taille;
+           parBon[k].bacs += num(m.q !== undefined ? m.q : m.qte);
+         });
+         Object.keys(parBon).forEach(k => v.livraisons.push(parBon[k]));
+       }
+     } catch (e) {}
+     try {
+       for (const k of await DB.list('ecart:')) {
+         const e = await DB.get(k, {});
+         ((e && e.bl) || []).forEach(b => {
+           const jour = /^\d{4}-\d{2}-\d{2}$/.test(b.date || '') ? b.date : String(b.at || '').slice(0, 10);
+           if (!dans(jour) || !(num(b.litres) > 0)) return;
+           const numero = String(b.numero || '').trim().toUpperCase();
+           /* Même bon déjà vu en réception : on ne le propose pas deux fois. */
+           if (numero && numero !== 'SANS NUMÉRO' && v.livraisons.some(x => x.numero === numero)) return;
+           v.livraisons.push({ ref:'bl:' + (b.id || numero + jour), numero:numero === 'SANS NUMÉRO' ? '' : numero,
+                               date:jour, litres:num(b.litres), source:'Bon saisi aux écarts' });
+         });
+       }
+     } catch (e) {}
+     v.livraisons.sort((a, b) => a.date < b.date ? -1 : a.date > b.date ? 1 : 0);
+     try { v.pertesL = await litresPertesRegistre(debut, fin); } catch (e) {}
+     _appli[cle] = { at:Date.now(), v:v };
+     return v;
+   }
+   const dejaCompte = (l, p) => l.some(x => (x.ref && x.ref === p.ref) || (p.numero && x.numero === p.numero));
+
+   /* Propositions de livraisons sous le formulaire : une touche les ajoute. */
+   async function proposerLivraisons(l, debut, fin, ajouter) {
+     const box = $('#lv-prop');
+     if (!box || debut > fin) return;
+     const d = await donneesAppli(debut, fin);
+     if (!box.isConnected) return;
+     if (!d.livraisons.length) {
+       box.innerHTML = '<p class="mini" style="margin-top:12px">Aucune réception de glace enregistrée dans l’appli ' +
+         esc(texteDates(debut, fin)) + '.</p>';
+       return;
+     }
+     const libres = d.livraisons.filter(p => !dejaCompte(l, p));
+     box.innerHTML = '<p class="f" style="margin:16px 0 6px"><b>Proposé par l’appli</b> · réceptions ' + esc(texteDates(debut, fin)) + '</p>' +
+       '<div class="dense">' + d.livraisons.map((p, i) =>
+         '<div class="dl"><span class="c1">' + esc(p.numero || 'sans numéro') + ' · ' + esc(fmtDC(p.date)) +
+           ' · <span class="mini">' + esc(p.source) + (p.bacs ? ', ' + p.bacs + ' bac(s)' : '') + '</span></span>' +
+         '<span class="c w num">' + n1(p.litres) + ' L</span>' +
+         '<span class="c w">' + (dejaCompte(l, p) ? pastille('ok', 'compté')
+           : '<button type="button" class="btn clair sm" data-lv-prop="' + i + '">Ajouter</button>') + '</span></div>').join('') +
+       '</div>' +
+       (libres.length > 1 ? '<button type="button" class="btn clair bloc" id="lv-prop-tout" style="margin-top:8px">Tout ajouter (' +
+         n1(libres.reduce((t, p) => t + p.litres, 0)) + ' L)</button>' : '');
+     const prendre = p => ({ id:uid(), ref:p.ref, numero:p.numero, date:p.date, litres:+p.litres.toFixed(2),
+                             source:'appli', par:STATE.user.prenom, at:nowISO() });
+     $$('[data-lv-prop]').forEach(b => b.onclick = () => ajouter([prendre(d.livraisons[+b.dataset.lvProp])]));
+     if ($('#lv-prop-tout')) $('#lv-prop-tout').onclick = () => ajouter(libres.map(prendre));
+   }
+
+   /* Stock de la chambre froide d'après l'appli : dernier inventaire + réceptions
+      − ouvertures − pertes tracées. Une touche le recopie. */
+   async function proposerStock(p) {
+     const box = $('#' + p + '-prop');
+     if (!box || typeof stockReel !== 'function') return;
+     let s = null;
+     try { s = await stockReel(); } catch (e) {}
+     if (!box.isConnected || !s || !s.articles) return;
+     const bacs = {};
+     Object.keys(s.articles).forEach(k => {
+       const a = litArticle(k);
+       if (a.famille !== 'glace') return;
+       const t = num(a.taille) || FOURNISSEUR.tailleParDefaut;
+       bacs[t] = (bacs[t] || 0) + Math.max(0, num(s.articles[k]));
+     });
+     const tailles = Object.keys(bacs).filter(t => bacs[t] > 0);
+     if (!tailles.length) return;
+     box.innerHTML = '<div class="alerte info" style="margin-top:12px"><span class="ai">•</span><div>' +
+       '<b>Proposé par l’appli : chambre froide aujourd’hui</b><p>' +
+       tailles.map(t => bacs[t] + ' × ' + t + ' L').join(' · ') +
+       (s.depuis ? ' (inventaire du ' + esc(fmtDC(s.depuis)) + ' + mouvements tracés)' : ' (mouvements tracés)') + '.</p>' +
+       '<button type="button" class="btn clair sm" id="' + p + '-prop-ok" style="margin-top:6px">Reprendre ces bacs</button></div></div>';
+     $('#' + p + '-prop-ok').onclick = () => {
+       CALCUL.taillesBac.forEach(t => {
+         const el = $('#' + p + '-froid-' + t);
+         if (el) { el.value = bacs[t] || ''; el.dispatchEvent(new Event('input')); }
+       });
+       toast('Bacs repris : vérifiez-les en chambre froide');
+     };
+   }
+
    function etatMois(cs) {
      const mois = today().slice(0, 7);
      const fait = cs.filter(c => !c.essai && c.statut === 'clos' && String(c.fin).slice(0, 7) === mois)[0] || null;
@@ -201,7 +312,8 @@ const CALCUL = {
          '<div class="rang"><div style="flex:1"><h2>' + (c.essai ? 'Essai' : 'Calcul en cours') +
            ' depuis le ' + esc(fmtD(c.debut)) + '</h2>' +
          '<div class="cs">Départ ' + kgTxt(r.debut) + ' · ' + livraisonsDe(c).length + ' livraison(s), ' +
-           n1(r.livreL) + ' L' + (c.brouillon ? ' · clôture commencée' : '') + '</div></div>' +
+           n1(r.livreL) + ' L' + (c.brouillon ? ' · clôture commencée' : '') + '</div>' +
+         (c.essai ? '' : '<div class="mini" data-cg-suivi="' + esc(c.id) + '" style="margin-top:6px"></div>') + '</div>' +
          (c.essai ? pastille('ciel', 'ESSAI') : pastille('ok', 'OUVERT')) + '</div>' +
          '<div class="actions">' +
          '<button class="btn clair" data-cg-liv="' + esc(c.id) + '">Ajouter une livraison</button>' +
@@ -237,6 +349,22 @@ const CALCUL = {
                '<span class="c w">' + pastille(st.c, pctTxt(r)) + '</span></div>';
            }).join('') + '</div>'
          : vide('', 'Aucun calcul clôturé pour l’instant.'));
+
+     /* Suivi des calculs en cours : ce que l'appli a enregistré depuis le
+        départ, face à ce qui a été saisi ici. */
+     ouverts.filter(c => !c.essai).forEach(async c => {
+       const d0 = debutFlux(c);
+       const el = $('[data-cg-suivi="' + c.id + '"]');
+       if (!el || d0 > today()) return;
+       const d = await donneesAppli(d0, today());
+       if (!el.isConnected) return;
+       const jours = Math.round((new Date(today()) - new Date(c.debut)) / 86400000);
+       const recL = d.livraisons.reduce((t, x) => t + x.litres, 0);
+       const manque = d.livraisons.filter(p => !dejaCompte(livraisonsDe(c), p));
+       el.innerHTML = '<b>Suivi</b> · jour ' + jours + ' · réceptions dans l’appli : ' + n1(recL) + ' L' +
+         (manque.length ? ' (' + manque.length + ' pas encore comptée(s) ici)' : '') +
+         ' · pertes au registre : ' + n1(d.pertesL) + ' L';
+     });
 
      $('#cg-new').onclick = () => demarrerCalcul();
      if ($('#cg-new2')) $('#cg-new2').onclick = () => demarrerCalcul();
@@ -329,6 +457,7 @@ const CALCUL = {
          '<div class="actions"><button class="btn clair" id="cz-ret">Retour</button>' +
          '<button class="btn menthe" id="cz-suiv">Suivant</button></div>');
        suivreTotal('cz', poidsNeuf(w));
+       if (!w.essai && w.debut === today()) proposerStock('cz');
        $('#cz-ret').onclick = () => { w.zones = lireZones('cz'); e1(); };
        $('#cz-suiv').onclick = () => {
          w.zones = lireZones('cz');
@@ -346,7 +475,8 @@ const CALCUL = {
          '<div id="lv-doublon"></div>' +
          '<div class="actions"><button class="btn clair" id="lv-ret">Retour</button>' +
          '<button class="btn menthe" id="lv-suiv">Suivant</button></div>');
-       brancherLivraisons(w.livraisons, e3);
+       const aj3 = brancherLivraisons(w.livraisons, e3);
+       proposerLivraisons(w.livraisons, w.source === 'precedent' && !w.essai ? addD(w.debut, 1) : w.debut, today(), aj3);
        $('#lv-ret').onclick = () => (!w.essai && w.source === 'precedent' && prec) ? e1() : e2();
        $('#lv-suiv').onclick = () => {
          if (num($('#lv-litres').value) > 0) { toast('Touchez « Ajouter cette livraison » ou videz le champ des litres', 'erreur'); return; }
@@ -425,11 +555,16 @@ const CALCUL = {
        '<input type="date" id="lv-date" max="' + today() + '" value="' + esc(dateDefaut) + '"></div>' +
        '<div class="champ"><label class="f">Litres livrés</label>' +
        '<input type="number" id="lv-litres" min="0" step="0.5" inputmode="decimal" placeholder="Ex. 120"></div></div>' +
-       '<button type="button" class="btn clair bloc" id="lv-ajout" style="margin-top:10px">Ajouter cette livraison</button>';
+       '<button type="button" class="btn clair bloc" id="lv-ajout" style="margin-top:10px">Ajouter cette livraison</button>' +
+       '<div id="lv-prop"></div>';
    }
    /* Ajout et retrait dans une liste tenue en mémoire (assistants). */
    function brancherLivraisons(l, redessiner, ecrire) {
      let doublonVu = '';
+     const ajouter = xs => {
+       xs.forEach(x => { l.push(x); if (ecrire) ecrire('ajout', x); });
+       redessiner();
+     };
      $('#lv-num').oninput = () => { doublonVu = ''; $('#lv-doublon').innerHTML = ''; };
      $('#lv-ajout').onclick = () => {
        const litres = num($('#lv-litres').value);
@@ -441,17 +576,15 @@ const CALCUL = {
            '<b>Bon « ' + esc(numero) + ' » déjà compté</b><p>Touchez encore « Ajouter » s’il s’agit d’un autre bon.</p></div></div>';
          return;
        }
-       const x = { id:uid(), numero:numero, date:$('#lv-date').value || today(), litres:litres,
-                   par:STATE.user.prenom, at:nowISO() };
-       l.push(x);
-       if (ecrire) ecrire('ajout', x);
-       redessiner();
+       ajouter([{ id:uid(), numero:numero, date:$('#lv-date').value || today(), litres:litres,
+                  par:STATE.user.prenom, at:nowISO() }]);
      };
      $$('[data-lv-ret]').forEach(b => b.onclick = () => {
        const i = l.findIndex(x => x.id === b.dataset.lvRet);
        if (i >= 0) { const x = l.splice(i, 1)[0]; if (ecrire) ecrire('retrait', x); }
        redessiner();
      });
+     return ajouter;
    }
 
    /* Livraison ajoutée à un calcul déjà ouvert : écriture partielle. */
@@ -468,7 +601,8 @@ const CALCUL = {
          listeLivraisons(l, false) + formLivraison(today()) + '<div id="lv-doublon"></div>' +
          '<div class="actions"><button class="btn clair" data-fermer>Fermer</button>' +
          '<button class="btn menthe" id="lv-fin">Enregistrer</button></div>');
-       brancherLivraisons(l, dessiner);
+       const ajL = brancherLivraisons(l, dessiner);
+       proposerLivraisons(l, debutFlux(c), today(), ajL);
        let enCours = false;
        $('#lv-fin').onclick = async () => {
          if (enCours) return;
@@ -526,10 +660,11 @@ const CALCUL = {
        /* Les livraisons ajoutées ou retirées ici partent tout de suite, par
           ajout à des listes : fermer l'assistant ne les perd pas, et celles
           ajoutées entre-temps sur un autre iPad ne sont pas écrasées. */
-       brancherLivraisons(w.livraisons, () => { changerFin($('#ca-fin').value || w.fin); eA(); },
+       const ajA = brancherLivraisons(w.livraisons, () => { changerFin($('#ca-fin').value || w.fin); eA(); },
          (quoi, x) => quoi === 'ajout'
            ? DB.patch(c.id, {}, { livraisons:[x] })
            : DB.patch(c.id, {}, { livraisonsRetirees:[x.id] }));
+       proposerLivraisons(w.livraisons, debutFlux(c), w.fin, ajA);
        const changerFin = f => {
          /* Pertes reprises du registre : relues pour la nouvelle période. */
          if (f !== w.fin && w.perteSource !== 'Saisie') w.perteL = null;
@@ -561,6 +696,7 @@ const CALCUL = {
          '<div class="actions"><button class="btn clair" id="cf-ret">Retour</button>' +
          '<button class="btn menthe" id="cf-suiv">Suivant</button></div>');
        suivreTotal('cf', poidsLitre(c));
+       if (!c.essai && w.fin === today()) proposerStock('cf');
        $('#cf-ret').onclick = () => { w.zones = lireZones('cf'); eA(); };
        $('#cf-suiv').onclick = async () => {
          w.zones = lireZones('cf');
@@ -634,7 +770,10 @@ const CALCUL = {
            : '<button type="button" class="btn ciel bloc xl" id="cv-imp">Choisir l’export de caisse (Excel ou CSV)</button>' +
              '<input type="file" id="cv-fichier" accept=".xlsx,.xls,.csv,.txt,text/csv" hidden>' +
              '<p class="mini" id="cv-lu" style="margin-top:10px">' +
-               (v.fichier ? esc(v.fichier) + ' · ' + esc(v.methode || '') + ' · ' + kgTxt(v.kg) : 'Aucun fichier lu.') + '</p>') +
+               (v.fichier ? esc(v.fichier) + ' · ' + esc(v.methode || '') + ' · ' + kgTxt(v.kg) : 'Aucun fichier lu.') + '</p>' +
+             '<p class="mini" style="margin-top:6px">Export Innovorder « ventes tous produits » sur les dates ci-dessus : ' +
+               'les SKU de glace sont convertis avec les grammages du catalogue.</p>' +
+             '<div id="cv-detail">' + detailVentes(v.detail) + '</div>') +
          '</div>' +
          '<p class="mini" id="cv-total" style="margin-top:12px"></p>' +
          '<div class="actions"><button class="btn clair" id="cv-ret">Retour</button>' +
@@ -661,7 +800,7 @@ const CALCUL = {
          lireLignes();
          if (v.mode === 'total') v.kg = Math.max(0, num($('#cv-kg').value));
          v.mode = bt.dataset.m;
-         if (v.mode !== 'fichier') { delete v.fichier; delete v.methode; }
+         if (v.mode !== 'fichier') { delete v.fichier; delete v.methode; delete v.detail; }
          eD();
        });
        if ($('#cv-plus')) $('#cv-plus').onclick = () => { lireLignes(); v.lignes.push({ nom:'', g:'', q:'' }); eD(); };
@@ -680,8 +819,10 @@ const CALCUL = {
            v.kg = +num(r.kg).toFixed(3);
            v.fichier = f.name;
            v.methode = r.methode + (r.fiable ? '' : ' · approximatif') +
-             (r.inconnus && r.inconnus.length ? ' · ' + r.inconnus.length + ' SKU sans grammage' : '');
+             (r.inconnus && r.inconnus.length ? ' · ' + r.inconnus.length + ' produit(s) sans glace connue ignoré(s) (boissons, crêpes nature…)' : '');
+           v.detail = (r.detail || []).slice(0, 8);
            $('#cv-lu').textContent = v.fichier + ' · ' + v.methode + ' · ' + kgTxt(v.kg);
+           if ($('#cv-detail')) $('#cv-detail').innerHTML = detailVentes(v.detail);
            calcule();
          };
        }
@@ -709,11 +850,16 @@ const CALCUL = {
                   kg:+(kgDeLitres(w.perteL, poidsLitre(c)) + num(w.perteKg)).toFixed(3), source:w.perteSource },
          ventes:ventesAEnregistrer(w.ventes)
        });
+       /* Ce que l'appli a enregistré sur la période, gardé avec la clôture. */
+       if (!c.essai && debutFlux(c) <= w.fin) {
+         const d = await donneesAppli(debutFlux(c), w.fin);
+         fini.appli = { livraisonsL:+d.livraisons.reduce((t, x) => t + x.litres, 0).toFixed(2), pertesL:+num(d.pertesL).toFixed(2) };
+       }
        const r = resultatCalcul(fini);
        showSheet(
          '<h2 id="sheet-titre">Résultat</h2>' +
          '<p class="sub">' + (c.essai ? 'Essai · ' : '') + esc(fmtD(c.debut)) + ' → ' + esc(fmtD(w.fin)) + '</p>' +
-         blocResultat(r) +
+         blocResultat(r) + blocComparaison(r, fini) +
          (horsPeriode.length ? '<div class="alerte warn" style="margin-top:12px"><span class="ai">●</span><div>' +
            '<b>' + horsPeriode.length + ' livraison(s) datée(s) hors de la période</b><p>' +
            esc(horsPeriode.map(x => (x.numero || 'sans numéro') + ' du ' + fmtDC(x.date)).join(', ')) +
@@ -740,7 +886,7 @@ const CALCUL = {
            }
            await DB.patch(c.id, {
              statut:'clos', fin:fini.fin, livraisonsArretees:fini.livraisonsArretees, arrivee:fini.arrivee,
-             pertes:fini.pertes, ventes:fini.ventes,
+             pertes:fini.pertes, ventes:fini.ventes, appli:fini.appli || null,
              resultat:{ theo:+r.theo.toFixed(3), reel:+r.reel.toFixed(3), ecart:+r.ecart.toFixed(3), pct:+r.pct.toFixed(2),
                         incoherent:r.incoherent },
              brouillon:null, closPar:STATE.user.prenom, closAt:nowISO()
@@ -764,6 +910,13 @@ const CALCUL = {
      eA();
    }
 
+   function detailVentes(d) {
+     if (!d || !d.length) return '';
+     return '<div class="dense" style="margin-top:10px"><div class="dense-h"><span class="c1">Principaux produits</span>' +
+       '<span class="c w">Poids</span></div>' + d.map(x =>
+       '<div class="dl"><span class="c1">' + esc(x[0]) + '</span><span class="c w num">' + esc(x[1]) + '</span></div>').join('') + '</div>';
+   }
+
    function texteDates(a, b) {
      if (a > b) return 'de la période (aucun jour après le comptage de départ)';
      return a === b ? 'du ' + fmtD(a) : 'du ' + fmtD(a) + ' au ' + fmtD(b);
@@ -773,7 +926,7 @@ const CALCUL = {
      const o = { mode:v.mode, kg:+num(v.kg).toFixed(3) };
      if (v.mode === 'produits') o.lignes = (v.lignes || []).filter(l => l.nom || num(l.q) > 0)
        .map(l => ({ nom:l.nom, g:num(l.g), q:num(l.q) }));
-     if (v.mode === 'fichier') { o.fichier = v.fichier || ''; o.methode = v.methode || ''; }
+     if (v.mode === 'fichier') { o.fichier = v.fichier || ''; o.methode = v.methode || ''; o.detail = v.detail || []; }
      o.source = v.mode === 'produits' ? 'Saisie par produit' : v.mode === 'total' ? 'Total saisi' : 'Fichier de caisse';
      return o;
    }
@@ -806,6 +959,26 @@ const CALCUL = {
          'Objectif ±' + SEUILS.ecartGlacePct + ' %.</p>';
    }
 
+   /* Saisi ici / enregistré dans l'appli : un écart entre les deux se voit
+      avant de valider (un bon oublié, une perte non déclarée). */
+   function blocComparaison(r, c) {
+     const a = c.appli;
+     if (!a) return '';
+     const pertesSaisiesL = num(c.pertes && c.pertes.litres);
+     const ligne = (lib, saisi, appli) => {
+       const diff = Math.abs(saisi - appli) > 0.05;
+       return '<div class="dl"><span class="c1">' + esc(lib) + '</span>' +
+         '<span class="c w num">' + n1(saisi) + ' L</span><span class="c w num">' + n1(appli) + ' L</span>' +
+         '<span class="c w">' + pastille(diff ? 'warn' : 'ok', diff ? 'à vérifier' : 'pareil') + '</span></div>';
+     };
+     return '<p class="f" style="margin:16px 0 6px"><b>Saisi ici / enregistré dans l’appli</b></p>' +
+       '<div class="dense"><div class="dense-h"><span class="c1"></span><span class="c w">Saisi</span>' +
+       '<span class="c w">Appli</span><span class="c w"></span></div>' +
+       ligne('Livraisons', r.livreL, a.livraisonsL) +
+       ligne('Pertes' + (num(c.pertes && c.pertes.kgSaisis) > 0 ? ' (hors kg pesés)' : ''), pertesSaisiesL, a.pertesL) +
+       '</div>';
+   }
+
    function voirCalcul(c) {
      if (!c) return;
      const r = resultatCalcul(c);
@@ -813,7 +986,7 @@ const CALCUL = {
      showSheet(
        '<h2 id="sheet-titre">' + (c.essai ? 'Essai · ' : '') + esc(fmtD(c.debut)) + ' → ' + esc(fmtD(c.fin)) + '</h2>' +
        '<p class="sub">Démarré par ' + esc(c.par || '?') + ', clôturé par ' + esc(c.closPar || '?') + '</p>' +
-       blocResultat(r) +
+       blocResultat(r) + blocComparaison(r, c) +
        '<p class="mini" style="margin-top:14px"><b>Départ</b> : ' +
          (c.depart && c.depart.source === 'precedent' ? 'clôture du calcul précédent' : 'comptage') + '. ' +
        '<b>Pertes</b> : ' + kgTxt(num(c.pertes && c.pertes.kg)) + ' (' + esc((c.pertes && c.pertes.source) || '') + '). ' +
