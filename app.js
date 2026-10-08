@@ -292,7 +292,15 @@
       (signature nouvelle, correction connue dans <moment>_corrections). La copie
       lue avant la correction porte encore la signature corrigée : écrite
       pendant la correction, elle remettait 150 € et l'ancienne signature
-      jusqu'à ce que le manager revalide. */
+      jusqu'à ce que le manager revalide.
+      Une validation faite sans connaître la signature en base (écran ouvert
+      avant, iPad hors ligne, validation arrivée pendant la relecture) passe
+      toujours : c'est la dernière. Mais la signature remplacée et ses montants
+      vont dans <moment>_corrections, marqués « inconnue », au lieu de
+      disparaître (vérifié : Lucas valide 150 €, Marie, écran resté ouvert,
+      valide 155 €, et plus rien ne disait que Lucas avait compté). Et les
+      corrections de la base s'ajoutent à celles de la copie qui passe : sa
+      liste, plus ancienne, les remplaçait. */
    const CHAMPS_CAISSE_SOIR = ['ecart', 'ecartCB', 'ecartEsp', 'par'];
    function garderComptagesValides(out, distant, local) {
      const a = (o, k) => Object.prototype.hasOwnProperty.call(o, k);
@@ -313,11 +321,28 @@
          local[mom + '_corrections'].some(c => c && c.at && c.at === av.at);
        return !!(sl && sl.at !== av.at && connue && !dejaCorrigee(mom, sl));   // sa revalidation
      };
+     const garderTrace = (mom, valide) => {
+       const l = Array.isArray(local[mom + '_corrections']) ? local[mom + '_corrections'] : [];
+       const d = Array.isArray(distant[mom + '_corrections']) ? distant[mom + '_corrections'] : [];
+       const tout = l.concat(d.filter(x => x && !l.some(c => c && c.at === x.at && c.le === x.le)));
+       const sig = distant[mom + '_valide'], sl = local[mom + '_valide'];
+       if (valide && sl && sl.at !== sig.at && !tout.some(c => c && c.at === sig.at)) {
+         const valeurs = {};
+         Object.keys(distant).forEach(k => {
+           if (k.indexOf(mom + '_') === 0 && !/_(valide|avant|corrections)$/.test(k)) {
+             valeurs[k] = distant[k] == null ? '' : String(distant[k]);
+           }
+         });
+         tout.push({ par:sig.par || null, id:sig.id || null, at:sig.at || null, valeurs:valeurs,
+                     corrigePar:sl.par || null, le:sl.at || null, inconnue:true });
+       }
+       if (tout.length) out[mom + '_corrections'] = tout;
+     };
      ['m', 's'].forEach(mom => {
        const enCorrection = !distant[mom + '_valide'] &&
          !!(distant[mom + '_avant'] && distant[mom + '_avant'].at);
        if (!distant[mom + '_valide'] && !enCorrection) return;
-       if (enCorrection ? auCourantCorrection(mom) : auCourant(mom)) return;
+       if (enCorrection ? auCourantCorrection(mom) : auCourant(mom)) return garderTrace(mom, !enCorrection);
        Object.keys(local).forEach(k => {
          if (k.indexOf(mom + '_') !== 0 && !(mom === 's' && CHAMPS_CAISSE_SOIR.indexOf(k) >= 0)) return;
          if (a(distant, k)) out[k] = distant[k]; else delete out[k];
