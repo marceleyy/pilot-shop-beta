@@ -1305,7 +1305,17 @@ V.caisse = async function () {
          devant toute signature. Le manager, qui peut corriger, devant une
          signature que son écran ne connaît pas : il voit d'abord ce qui a été
          validé, puis corrige s'il le faut (Lucas valide 150 €, Marie, écran
-         resté ouvert, validait 155 € par-dessus sans le savoir). */
+         resté ouvert, validait 155 € par-dessus sans le savoir).
+         Une saisie de cette fiche encore en file d'attente (réponse perdue,
+         réseau tout juste revenu) : DB.get rendait la copie de l'iPad, qui
+         ignore la validation du collègue, et laissait tout passer (vérifié :
+         une réponse perdue sur la saisie de Marie, Lucas valide 150 €, Marie
+         valide 155 € sans arrêt). La file part d'abord, un délai réseau au
+         plus : la relecture lit alors le serveur, et l'écran rechargé après
+         un arrêt montre la validation. */
+      if (STATE.enLigne && fileLire().some(x => x.cle === 'caisse:' + j)) {
+        try { await Promise.race([journaliserSync(), new Promise(ok => setTimeout(ok, OFFLINE.timeoutReseauMs))]); } catch (e) {}
+      }
       const frais = await DB.get('caisse:' + j, null);
       const sig = frais && (frais[p + 'valide'] || frais[p + 'avant']);
       const manager = STATE.user.role === 'manager';
