@@ -317,10 +317,27 @@
       disparaître (vérifié : Lucas valide 150 €, Marie, écran resté ouvert,
       valide 155 €, et plus rien ne disait que Lucas avait compté). Et les
       corrections de la base s'ajoutent à celles de la copie qui passe : sa
-      liste, plus ancienne, les remplaçait. */
+      liste, plus ancienne, les remplaçait.
+      Pendant une correction, en revanche, une validation qui ne la connaît pas
+      ne passe pas (voir plus haut) : elle va elle aussi dans
+      <moment>_corrections, marquée « inconnue » et « refusee », au lieu de
+      disparaître. Sans cette trace, elle revenait (vérifié : Lucas, hors
+      ligne, valide 160 € ; Marie corrige 150 → 155 et revalide ; la copie
+      locale de Lucas, que le rejeu ne réécrit pas, repartait avec sa saisie
+      du soir et, dejaCorrigee ne la reconnaissant pas, ses 160 € remplaçaient
+      la correction de Marie). */
    const CHAMPS_CAISSE_SOIR = ['ecart', 'ecartCB', 'ecartEsp', 'par'];
+   /* Montants d'un comptage, comme instantane() dans V.caisse : ce que l'on
+      archive d'une signature remplacée ou refusée. Toutes les clés m_… y
+      mettaient aussi m_ecartSignale, un objet, enregistré « [object Object] ». */
+   const CHAMPS_COMPTAGE = { m:['m_fond', 'm_com'], s:['s_cb', 's_esp', 's_tpe', 's_retrait', 's_fond', 's_com'] };
    function garderComptagesValides(out, distant, local) {
      const a = (o, k) => Object.prototype.hasOwnProperty.call(o, k);
+     const montants = (mom, o) => {
+       const v = {};
+       CHAMPS_COMPTAGE[mom].forEach(k => { if (a(o, k)) v[k] = o[k] == null ? '' : String(o[k]); });
+       return v;
+     };
      const dejaCorrigee = (mom, sig) => Array.isArray(distant[mom + '_corrections']) &&
        distant[mom + '_corrections'].some(c => c && c.at && c.at === sig.at);
      const auCourant = mom => {
@@ -344,13 +361,7 @@
        const tout = l.concat(d.filter(x => x && !l.some(c => c && c.at === x.at && c.le === x.le)));
        const sig = distant[mom + '_valide'], sl = local[mom + '_valide'];
        if (valide && sl && sl.at !== sig.at && !tout.some(c => c && c.at === sig.at)) {
-         const valeurs = {};
-         Object.keys(distant).forEach(k => {
-           if (k.indexOf(mom + '_') === 0 && !/_(valide|avant|corrections)$/.test(k)) {
-             valeurs[k] = distant[k] == null ? '' : String(distant[k]);
-           }
-         });
-         tout.push({ par:sig.par || null, id:sig.id || null, at:sig.at || null, valeurs:valeurs,
+         tout.push({ par:sig.par || null, id:sig.id || null, at:sig.at || null, valeurs:montants(mom, distant),
                      corrigePar:sl.par || null, le:sl.at || null, inconnue:true });
        }
        if (tout.length) out[mom + '_corrections'] = tout;
@@ -364,6 +375,14 @@
          if (k.indexOf(mom + '_') !== 0 && !(mom === 's' && CHAMPS_CAISSE_SOIR.indexOf(k) >= 0)) return;
          if (a(distant, k)) out[k] = distant[k]; else delete out[k];
        });
+       /* Validation refusée pendant une correction, sans rien en savoir : archivée
+          (une seule fois : rejouée, elle est déjà dans la liste de la base). */
+       const sl = local[mom + '_valide'], av = distant[mom + '_avant'];
+       const liste = Array.isArray(out[mom + '_corrections']) ? out[mom + '_corrections'] : [];
+       if (enCorrection && sl && sl.at && sl.at !== av.at && !liste.some(c => c && c.at === sl.at)) {
+         out[mom + '_corrections'] = liste.concat([{ par:sl.par || null, id:sl.id || null, at:sl.at,
+           valeurs:montants(mom, local), corrigePar:null, le:null, inconnue:true, refusee:true }]);
+       }
      });
    }
 
