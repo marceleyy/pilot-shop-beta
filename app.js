@@ -4448,6 +4448,10 @@ function ouvrirPremierePeriode() {
          return;
        }
        if (!encoreLa()) return;   // lecture abandonnée entre-temps
+       if (!(r.kg > 0)) {
+         closeSheet();
+         return toast('Aucune glace chiffrée dans ce fichier : saisissez les grammages depuis le calcul d’écart', 'erreur');
+       }
        confirmerImport(per, f.name, r);
      };
    };
@@ -5311,6 +5315,44 @@ function modifierPeriode(per) {
      '31132':50,  '31134':50,  '31312':50,  '31313':50,  '31314':50,
      '71111':50
    };
+
+   /* Export Innovorder sans SKU (« ventes tous produits » v2) : le libellé de
+      caisse donne le produit. Grammages du classeur Amorino ; null = glace dont
+      le grammage reste à saisir (macarons, gaufres et crêpes garnies). */
+   const GRAMMAGES_NOMS = [
+     [/CONE VIDE/, 0], [/MAC TRADITIONNEL/, 0],
+     [/^POT ENFANT/, 81], [/^POT PETIT/, 133], [/^POT CLASSI/, 163], [/^POT GRAND/, 221],
+     [/^POT GEANT/, 275], [/^POT (A )?PARTAG/, 529],
+     [/^CHOCO ?CONE ENFANT/, 67], [/^CHOCO ?CONE PETIT/, 112], [/^CHOCO ?CONE CLASSI/, 149], [/^CHOCO ?CONE GRAND/, 208],
+     [/^CORNET ENFANT/, 69], [/^CORNET PETIT/, 114], [/^CORNET CLASSI/, 153], [/^CORNET GRAND/, 224],
+     [/^(BAC|COFFRET) .*\b550 ?ML\b/, 470], [/^(BAC|COFFRET) .*\b(1100 ?ML|1 1 ?L)\b/, 930],
+     [/SHAKE|SORBET DRINK/, 160], [/^AFFOGATO/, 160], [/^ESPRESSO FRAPPE/, 200], [/^INCONTOURNABLE/, 80],
+     [/^COUPE/, 160], [/^BRIOCHE .*X ?2\b/, 160], [/^BRIOCHE GLACE/, 100],
+     /* « x2 glace », « 2 glaces » : 50 g par boule, comme le classeur. */
+     [/\b(X ?1 GLACE|1 GLACE)\b/, 50], [/\bX? ?2 GLACES?\b/, 100], [/\bX? ?3 GLACES?\b/, 150],
+     [/^EXTRA GLACE X ?2/, 100], [/^EXTRA GLACE/, 50],
+     /* Macarons : 25 g par macaron (SKU 13111 à 13116 du catalogue). */
+     [/^1 MAC GELATO/, 25], [/^2 MAC GELATO/, 50], [/^3 MAC GELATO/, 75], [/^4 MAC GELATO/, 100],
+     [/^6 MAC GELATO/, 150], [/^MACARON XL/, 60], [/^GIANDUIOTTO/, 60],
+     [/^COFFRET 12 MAC GELATO/, 300],
+     /* Gaufres et crêpes garnies : 1 boule (50 g) au catalogue. */
+     [/^(GAUFRE|CREPE) (PARFAITE|DELICIEUSE|TRADITIONNELLE)/, 50],
+     /* Crêpe gianduja : vendue avec une boule (liste du manager). */
+     [/^CREPE GIANDUJA\b/, 50],
+     /* Autres crêpes ou gaufres nature (sucre, chocolat…) : sans glace. */
+     [/^(GAUFRE|CREPE)\b/, 0],
+     [/GELATO|^BRIOCHE/, null]
+   ];
+   const nomCaisse = s => String(s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+     .toUpperCase().replace(/[^A-Z0-9]+/g, ' ').trim();
+   /* undefined : pas de glace ; null : glace, grammage à saisir. Le grammage
+      déjà saisi pour ce libellé (catalogue du calcul d'écart) passe devant. */
+   function grammageNom(nom, retenus) {
+     const n = nomCaisse(nom);
+     if (retenus && num(retenus[n]) > 0) return num(retenus[n]);
+     const r = GRAMMAGES_NOMS.filter(x => x[0].test(n))[0];
+     return r ? r[1] : undefined;
+   }
    
    /* XLSX n'est chargé qu'au premier import de caisse : exécuté à chaque
       démarrage, il retardait la liste des prénoms d'environ 600 ms sur iPad.
@@ -5379,7 +5421,8 @@ function modifierPeriode(per) {
      return XLSX.read(texte, { type:'string', raw:true, FS:sep });
    }
 
-   function lireExportCaisse(file) {
+   /* retenus : grammages déjà saisis, par libellé de caisse (facultatif). */
+   function lireExportCaisse(file, retenus) {
      return new Promise((resolve, reject) => {
        const fr = new FileReader();
    
@@ -5433,7 +5476,39 @@ function modifierPeriode(per) {
            return reject(new Error('Aucune colonne de quantité trouvée. Colonnes lues : ' + cols.slice(0, 6).join(', ')));
          }
    
-         /* SKU + quantité × grammage */
+         /* Libellé de caisse (avec ou sans SKU) → chaque produit glacé, avec
+            son grammage : celui déjà saisi, sinon celui du SKU, sinon celui du
+            classeur. Une glace sans grammage connu (libellé ou catégorie
+            glace) arrive vide, à compléter. */
+         const cCat = trouve(/cat[eé]gorie|famille|rayon/i);
+         if (cNom) {
+           let g = 0, n = 0;
+           const lignes = [], aSaisir = [];
+           rows.forEach(r => {
+             const nom = String(r[cNom]).trim();
+             const q = num(r[cQte]) + (cOpt ? num(r[cOpt]) : 0);
+             if (!nom || q <= 0) return;
+             const sku = cSku ? String(r[cSku]).trim() : '';
+             const n0 = nomCaisse(nom);
+             let gr = (retenus && num(retenus[n0]) > 0) ? num(retenus[n0])
+               : (sku && GRAMMAGES[sku] !== undefined) ? GRAMMAGES[sku] : grammageNom(nom);
+             if (gr === undefined && cCat && /GELATO|GLAC|COUPE/.test(nomCaisse(r[cCat]))) gr = null;
+             if (gr === undefined || gr === 0) return;
+             lignes.push({ nom:nom, g:gr || '', q:q });
+             if (gr === null) { aSaisir.push(nom + ' (' + q + ')'); return; }
+             g += gr * q; n++;
+           });
+           if (lignes.length) {
+             const top = lignes.filter(l => l.g).sort((a, b) => b.g * b.q - a.g * a.q).slice(0, 8)
+               .map(l => [l.nom, n1(l.g * l.q / 1000) + ' kg']);
+             return resolve({
+               kg:g / 1000, lignes:n, fiable:true, detail:top, inconnus:aSaisir, produits:lignes,
+               methode:cSku ? 'SKU et libellés × grammage du catalogue' : 'Libellés de caisse × grammage du classeur'
+             });
+           }
+         }
+
+         /* SKU + quantité × grammage (fichier sans libellés) */
          if (cSku) {
            let g = 0, n = 0;
            const inconnus = {}, parProduit = {};
@@ -5515,7 +5590,7 @@ function modifierPeriode(per) {
    
        (r.inconnus.length
          ? '<div class="alerte warn" style="margin-top:14px"><span class="ai">•</span>' +
-           '<div><b>' + r.inconnus.length + ' SKU sans grammage</b><p>' +
+           '<div><b>' + r.inconnus.length + ' produit(s) sans grammage</b><p>' +
            esc(r.inconnus.slice(0, 8).join(', ')) + (r.inconnus.length > 8 ? '…' : '') +
            '. Leur glace n’est pas comptée dans les ventes, donc elle apparaîtra comme un manque.</p></div></div>'
          : '') +
