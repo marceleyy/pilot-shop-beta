@@ -52,6 +52,19 @@ const PRECACHE = [
 /* Ressources externes : aucune aujourd'hui (polices et XLSX sont locaux). */
 const EXTERNES = [];
 
+/* Wi-Fi connecté mais sans Internet : la navigation attendait 4 s, puis
+   chaque vague de fichiers 4 s de plus (styles et scripts, puis la police) :
+   12 s avant la liste des prénoms. La page garde 4 s pour arriver, pas moins :
+   sur un réseau lent (2 à 4 s par réponse), un délai plus court servait
+   l'ancienne version à chaque ouverture, tant que le réseau restait lent.
+   Une fois la page servie par le cache (réseau muet ou trop lent, serveur en
+   panne), ses fichiers en sortent aussi pendant 20 s, sans nouvelle attente
+   de 4 s par vague. L'application le demande au démarrage (message RESEAU)
+   pour partir hors ligne d'emblée. */
+const DELAI_NAVIGATION_MS = 4000;
+const FENETRE_MUET_MS = 20000;
+let muetJusqua = 0;
+
 /* -----------------------------------------------------------------------------
    INSTALLATION — précache tolérant à l'échec unitaire
    Un seul fichier absent ne doit pas faire échouer toute l'installation.
@@ -94,8 +107,9 @@ self.addEventListener('activate', event => {
 
 /* -----------------------------------------------------------------------------
    RÉCUPÉRATION
-   Navigation      → cache d'abord, réseau en arrière-plan (ouverture instantanée)
-   Fichiers du app → réseau d'abord, repli sur le cache
+   Navigation      → réseau d'abord (4 s au plus), repli sur le cache
+   Fichiers du app → réseau d'abord, repli sur le cache ; cache seul pendant
+                     20 s après une page servie par le cache
    Modèle Tesseract → cache-first (mis en cache à la première réponse)
    Externes        → réseau d'abord, cache en secours (aucun aujourd'hui)
    Écritures / API → réseau seul, jamais de cache
@@ -127,20 +141,23 @@ self.addEventListener('fetch', event => {
       const cache = await caches.open(CACHE);
       try {
         /* Le préchargement de navigation peut lui aussi rester pendu sur un
-           Wi-Fi muet : même délai que le fetch, et repli sur le cache. */
-        const preload = await avecDelai(Promise.resolve(event.preloadResponse), 4000);
-        const r = preload || await avecDelai(fetch(req), 4000);
+           Wi-Fi muet : un seul délai pour lui et le fetch, puis le cache. */
+        const fin = Date.now() + DELAI_NAVIGATION_MS;
+        const preload = await avecDelai(Promise.resolve(event.preloadResponse), fin - Date.now());
+        const r = preload || await avecDelai(fetch(req), Math.max(0, fin - Date.now()));
         /* Une panne serveur (5xx) passe au secours du cache ; un 4xx (page
            absente, protection Vercel) est montré tel quel. Seule la page
            d'accueil peut remplacer la coquille hors ligne — pas un PDF ou une
            image ouverts dans l'application. */
         if (!r || r.status >= 500) throw new Error('navigation ' + (r && r.status));
+        muetJusqua = 0;
         if (r.ok && (url.pathname === '/' || url.pathname === '/index.html')) {
           event.waitUntil(cache.put('/index.html', r.clone()).catch(() => {}));
         }
         return r;
       } catch (e) {
         const cachee = await cache.match('/index.html');
+        if (cachee) muetJusqua = Date.now() + FENETRE_MUET_MS;
         return cachee || new Response(pageSecours(), {
           status: 200,
           headers: { 'Content-Type': 'text/html; charset=utf-8' }
@@ -180,6 +197,11 @@ self.addEventListener('fetch', event => {
   if (url.origin === self.location.origin) {
     event.respondWith((async () => {
       const cache = await caches.open(CACHE);
+      /* Une page vient d'être servie par le cache (voir DELAI_NAVIGATION_MS) :
+         pas de nouvelle attente. */
+      if (Date.now() < muetJusqua) {
+        return (await cache.match(req)) || new Response('', { status: 504, statusText: 'Hors ligne' });
+      }
       try {
         const r = await avecDelai(fetch(req), 4000);
         /* 200 seulement : une réponse partielle (206) ou un quota plein ferait
@@ -237,6 +259,9 @@ self.addEventListener('message', event => {
   if (d.type === 'SKIP_WAITING') self.skipWaiting();
   if (d.type === 'VERSION' && event.ports && event.ports[0]) {
     event.ports[0].postMessage({ cache: CACHE });
+  }
+  if (d.type === 'RESEAU' && event.ports && event.ports[0]) {
+    event.ports[0].postMessage({ muet: Date.now() < muetJusqua });
   }
   if (d.type === 'PURGE') {
     event.waitUntil(caches.keys().then(k => Promise.all(k.map(n => caches.delete(n)))));

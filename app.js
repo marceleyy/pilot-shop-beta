@@ -34,6 +34,10 @@
    const n1  = v => (Number(v) || 0).toLocaleString('fr-FR',
      { minimumFractionDigits: 1, maximumFractionDigits: 1 });
    const n2  = v => (Number(v) || 0).toFixed(2);
+   /* Signal qui coupe une requête au bout du délai réseau. Sans lui, un Wi-Fi
+      connecté mais sans Internet laisse la requête pendue sans fin. */
+   const signalDelai = () => { const c = new AbortController();
+     setTimeout(() => c.abort(), OFFLINE.timeoutReseauMs); return c.signal; };
    /* Moins d'un demi-centime : 0, sans signe (« -0,00 € » sur un stock juste). */
    const eur = v => { const n = Number(v) || 0;
      return (Math.abs(n) < 0.005 ? 0 : n).toLocaleString(APP.locale, { style:'currency', currency:APP.devise }); };
@@ -525,14 +529,18 @@
            try {
              let aEcrire = valeur;
              if (aFusionner(cle)) {
-               try {
-                 const l = await appel(table(cle) + '?id=eq.' + encodeURIComponent(cle) +
-                                       '&select=data&limit=1');
-                 if (l && l.length && l[0].data) {
-                   aEcrire = fusionner(l[0].data, valeur, cle);
-                   try { ecrire(cle, JSON.stringify(aEcrire)); } catch (x) {}
-                 }
-               } catch (x) { /* relecture impossible : on écrit ce qu'on a */ }
+               /* Pas d'envoi sans relecture : la copie de l'iPad, envoyée telle
+                  quelle, effaçait ce que les autres appareils avaient écrit
+                  entre-temps (une correction de caisse du manager, par exemple).
+                  Relecture impossible : l'écriture est traitée comme hors ligne
+                  (catch ci-dessous) : mise en file et fusionnée au rejeu, ou
+                  alerte « Mémoire pleine » si la file ne peut pas la garder. */
+               const l = await appel(table(cle) + '?id=eq.' + encodeURIComponent(cle) +
+                                     '&select=data&limit=1');
+               if (l && l.length && l[0].data) {
+                 aEcrire = fusionner(l[0].data, valeur, cle);
+                 try { ecrire(cle, JSON.stringify(aEcrire)); } catch (x) {}
+               }
              }
              await appel(table(cle), {
                method: 'POST',
@@ -768,11 +776,13 @@
            const parti = await enFile(item.cle, async () => {
              if (!fileLire().some(x => id(x) === id(item))) return false;
              let data = item.valeur;
-             try {
-               const l = await DB._appel(DB._table(item.cle) + '?id=eq.' + encodeURIComponent(item.cle) +
-                                         '&select=data&limit=1');
-               if (l && l.length && l[0].data) data = fusionner(l[0].data, item.valeur, item.cle);
-             } catch (x) { /* relecture impossible : l'envoi dira si le réseau est là */ }
+             /* Relecture impossible : on n'envoie rien, comme pour une écriture
+                partielle. La copie rejouée sans fusion effaçait les saisies des
+                autres iPads. L'erreur suit le sort d'un envoi raté (ci-dessous) :
+                gardée en file, sauf table absente ou refus répétés. */
+             const l = await DB._appel(DB._table(item.cle) + '?id=eq.' + encodeURIComponent(item.cle) +
+                                       '&select=data&limit=1');
+             if (l && l.length && l[0].data) data = fusionner(l[0].data, item.valeur, item.cle);
              await DB._appel(DB._table(item.cle), {
                method: 'POST',
                headers: { 'Prefer': 'resolution=merge-duplicates,return=minimal' },
@@ -1273,6 +1283,10 @@
      await DB.set('session', Object.assign({}, STATE.user, { vu:Date.now() }));
      _sessionTouchee = Date.now();
      await chargerService();
+     /* Comme pour la reprise de session : les prénoms s'affichent dès
+        qu'app.js s'exécute, avant modules.js et stock.js, et demarrer() sans
+        eux ouvrait des vues indisponibles. */
+     await documentPret;
      /* Un échec de démarrage ne doit plus laisser l'équipière devant un écran
         de connexion muet alors que sa session est ouverte. */
      try {
@@ -1515,6 +1529,25 @@ function renderNav() {
            '<button class="btn clair bloc" data-go="accueil" style="margin-top:14px">Revenir à ma journée</button>',
            'ambre');
          $$('#page [data-go]').forEach(b => b.onclick = () => rendre(b.dataset.go));
+         window.scrollTo(0, 0);
+         return;
+       }
+     }
+     /* Côté manager, une période illisible (hors ligne sans copie, base
+        injoignable) revient sous la forme de l'objet « attente ». Affiché comme
+        une vraie période, il faisait saisir les écarts sous « ecart:attente »,
+        ou « corriger » des dates qui remplaçaient, au retour du réseau, la
+        période de toute la boutique. */
+     if (VUES_PERIODE.indexOf(id) >= 0 && STATE.user.role === 'manager') {
+       const per = await periodeCourante();
+       if (STATE.view !== id) return;          // un autre écran a été demandé entre-temps
+       if (per && per.id === 'attente') {
+         $('#page').innerHTML = carte(
+           entete('⏸️', 'Période indisponible', 'La période de la boutique n’a pas pu être lue.') +
+           '<p class="mini">L’iPad est hors ligne, ou la base ne répond pas. Une saisie ici serait rangée ' +
+           'hors de la période : reconnectez l’iPad, puis réessayez.</p>' +
+           '<button class="btn clair bloc" id="per-rt" style="margin-top:14px">Réessayer</button>', 'ambre');
+         $('#per-rt').onclick = () => rendre(id);
          window.scrollTo(0, 0);
          return;
        }
@@ -2593,18 +2626,6 @@ function utilisateurDeSession(s) {
   return { id:e.id, prenom:e.prenom, role:e.role, couleur:e.couleur, initiales:e.initiales };
 }
 
-/* Reprend le parcours de connexion normal après un passage par …/?reset */
-async function demarrerConnexion() {
-  try {
-    const u = utilisateurDeSession(await DB.get('session', null));
-    if (u) {
-      STATE.user = u;
-      await chargerService();
-      demarrer();
-    }
-  } catch (e) { /* on reste sur l'écran des prénoms */ }
-}
-
 /* -----------------------------------------------------------------------------
    BOUTON RETOUR DU TÉLÉPHONE
    Une application d'une seule page n'a pas d'historique : un appui sur « retour »
@@ -2772,7 +2793,9 @@ async function pinCorrect(e, saisi) {
 }
 
 async function chargerEquipe() {
-  /* 1. Ce qu'on a déjà en local : la connexion doit marcher hors ligne. */
+  /* 1. Ce qu'on a déjà en local : la connexion doit marcher hors ligne.
+     Étape synchrone, avant tout await : le démarrage lit EQUIPE dès le retour
+     de l'appel, pour afficher les prénoms sans attendre la base. */
   const local = (() => {
     try { return JSON.parse(localStorage.getItem('pilotshop.v3:equipe') || 'null'); }
     catch (e) { return null; }
@@ -2808,7 +2831,8 @@ async function chargerEquipe() {
       const jeton = (typeof jetonValide === 'function') ? await jetonValide() : null;
       if (jeton) {
         const r = await fetch(SUPABASE.url + '/rest/v1/equipe?select=*&actif=eq.true&order=prenom', {
-          headers: { 'apikey': SUPABASE.anonKey, 'Authorization': 'Bearer ' + jeton }
+          headers: { 'apikey': SUPABASE.anonKey, 'Authorization': 'Bearer ' + jeton },
+          signal: signalDelai()
         });
         if (r.status === 404) {
           try { localStorage.removeItem('pilotshop.v3:table-equipe'); } catch (e) {}
@@ -3240,6 +3264,37 @@ window.addEventListener('error', function (ev) {
      window.addEventListener('load', () => r(), { once:true });
    });
 
+   /* Le service worker vient-il de servir une page depuis son cache (réseau
+      muet ou trop lent, serveur en panne) ? C'est son état des 20 dernières
+      secondes, pas celui de cette seule page. Réponse en quelques
+      millisecondes ; sans service worker, ou sans réponse sous 300 ms : non. */
+   function reseauMuetSelonSW() {
+     return new Promise(fin => {
+       const sw = navigator.serviceWorker && navigator.serviceWorker.controller;
+       if (!sw || typeof MessageChannel === 'undefined') return fin(false);
+       const canal = new MessageChannel();
+       const t = setTimeout(() => fin(false), 300);
+       canal.port1.onmessage = ev => { clearTimeout(t); fin(!!(ev.data && ev.data.muet)); };
+       try { sw.postMessage({ type:'RESEAU' }, [canal.port2]); }
+       catch (e) { clearTimeout(t); fin(false); }
+     });
+   }
+
+   /* La reprise de session attend que TOUS les scripts soient chargés. Le
+      démarrage n'enchaîne que des lectures locales, résolues aussitôt : il
+      appelait demarrer() avant l'exécution de modules.js et stock.js — page
+      vide et « Vue indisponible » pour l'équipe, Tour de contrôle sans son
+      complément de stock pour le manager, après tout rechargement hors ligne. */
+   async function reprendreSession() {
+     await documentPret;
+     if (STATE.user) return;
+     const u = utilisateurDeSession(await DB.get('session', null));
+     if (!u || STATE.user) return;
+     STATE.user = u;
+     await chargerService();
+     demarrer();
+   }
+
    (async function () {
      initLogin();
      majBandeau();
@@ -3255,6 +3310,14 @@ window.addEventListener('error', function (ev) {
        return;
      }
 
+     /* Wi-Fi connecté mais sans Internet, ou trop lent : le service worker
+        vient de servir la page depuis son cache. L'application démarre donc
+        hors ligne, au lieu de découvrir la panne lecture après lecture (8 s
+        chacune : session rouverte au bout de 32 s). La première lecture qui
+        aboutit, ou la sonde des 15 s, la remet en ligne. Sans base configurée,
+        il n'y a rien à joindre ni à sonder. */
+     if (DB.configure && await reseauMuetSelonSW() && STATE.enLigne) { STATE.enLigne = false; majBandeau(); }
+
      /* Rattachement de l'appareil, mais SEULEMENT si la base l'exige. Tant que
         la sécurité n'est pas activée côté base, on n'impose rien : l'application
         doit rester utilisable pendant la migration, pas après. */
@@ -3263,10 +3326,18 @@ window.addEventListener('error', function (ev) {
          await ecranRattachement();
        }
      }
-     const etatEquipe = (typeof chargerEquipe === 'function') ? await chargerEquipe() : 'vide';
-     /* La liste des prénoms a été dessinée par initLogin alors qu'EQUIPE était
-        encore vide : on la redessine une fois l'équipe chargée depuis la base. */
+     /* chargerEquipe pose d'abord l'équipe gardée sur l'iPad, avant toute
+        lecture réseau : les prénoms s'affichent et la session reprend sans
+        attendre la base (16 s et 32 s avec un Wi-Fi muet). */
+     const lecture = (typeof chargerEquipe === 'function') ? chargerEquipe() : Promise.resolve('vide');
+     const equipeLocale = EQUIPE.length > 0;
+     let reprise = null;
+     if (equipeLocale) { initLogin(); reprise = reprendreSession(); }
+     const etatEquipe = await lecture;
+     /* L'équipe relue en base : prénoms redessinés, et la session ouverte suit
+        (personne retirée, rôle changé) une fois l'application affichée. */
      if (typeof initLogin === 'function') initLogin();
+     if (reprise) reprise.then(() => { if (STATE.user) revaliderSession(); });
      /* Toujours aucune équipe : soit l'appareil n'est pas rattaché — et c'est
         le rattachement qu'il faut proposer, pas la création d'une équipe qui
         existe déjà — soit la boutique démarre vraiment de zéro. */
@@ -3294,19 +3365,9 @@ window.addEventListener('error', function (ev) {
        }
      }
 
-     /* La reprise de session attend que TOUS les scripts soient chargés. Le
-        démarrage n'enchaîne que des lectures locales, résolues aussitôt : il
-        appelait demarrer() avant l'exécution de modules.js et stock.js — page
-        vide et « Vue indisponible » pour l'équipe, Tour de contrôle sans son
-        complément de stock pour le manager, après tout rechargement hors ligne. */
-     await documentPret;
-     const s = await DB.get('session', null);
-     const u = utilisateurDeSession(s);
-     if (u) {
-       STATE.user = u;
-       await chargerService();
-       demarrer();
-     }
+     /* Sans équipe sur l'iPad, la session ne peut reprendre qu'après la
+        lecture de la base. */
+     if (!equipeLocale) await reprendreSession();
    })();
    /* =============================================================================
       PILOT-SHOP — app.js  ·  PARTIE 2 / 2
@@ -3337,6 +3398,15 @@ window.addEventListener('error', function (ev) {
         période, on vérifie qu'on a bien pu joindre la base : sinon on attend
         plutôt que de faire recréer une période qui existe déjà — ce qui
         créerait deux lignes de départ concurrentes. */
+     /* Hors ligne, cette vérification est impossible : on attend aussi. En
+        Wi-Fi sans Internet, l'application démarre hors ligne ; un manager sur
+        un iPad sans copie de la période devait en définir une nouvelle, qui
+        remplaçait au retour du réseau celle de toute la boutique (les écarts
+        déjà saisis n'étaient plus lus). */
+     if (!p && !STATE.enLigne && DB.configure) {
+       return { id:'attente', type:PERIODES.parDefaut, debut:today(), fin:today(),
+                ouverte:false, nonInitialisee:true, indisponible:true };
+     }
      if (!p && STATE.enLigne && DB.configure) {
        try {
          const jeton = (typeof jetonValide === 'function') ? await jetonValide() : null;
@@ -3344,7 +3414,7 @@ window.addEventListener('error', function (ev) {
            const r = await fetch(SUPABASE.url + '/rest/v1/' +
              SUPABASE.tables.periodes + '?id=eq.' + encodeURIComponent('periode:courante') +
              '&select=data&limit=1',
-             { headers: { apikey: SUPABASE.anonKey, Authorization: 'Bearer ' + jeton } });
+             { headers: { apikey: SUPABASE.anonKey, Authorization: 'Bearer ' + jeton }, signal: signalDelai() });
            if (r.ok) {
              const l = await r.json();
              if (l && l.length && l[0].data) {
@@ -3918,6 +3988,14 @@ function ouvrirPremierePeriode() {
    }
 
    async function scannerBL() {
+     /* « Scanner BL » s'ouvre aussi depuis la Tour de contrôle, hors des vues
+        gardées par rendre() : période illisible, les litres partiraient sous
+        « ecart:attente », hors de la période de la boutique. */
+     const perLue = await periodeCourante();
+     if (perLue && perLue.id === 'attente') {
+       toast('Période indisponible : reconnectez l’iPad, puis réessayez', 'erreur');
+       return;
+     }
      const r = await scannerPhoto('bl');
      if (!r) return;
 

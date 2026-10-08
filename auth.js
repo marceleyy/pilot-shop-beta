@@ -43,18 +43,30 @@ function enregistrerSession(s) {
 
 /* --- Appels d'authentification -------------------------------------------- */
 async function appelAuth(chemin, corps) {
-  const r = await fetch(SUPABASE.url + '/auth/v1' + chemin, {
-    method: 'POST',
-    headers: { 'apikey': SUPABASE.anonKey, 'Content-Type': 'application/json' },
-    body: JSON.stringify(corps)
-  });
-  const d = await r.json().catch(() => ({}));
-  if (!r.ok) {
-    const e = new Error(d.error_description || d.msg || d.message || ('HTTP ' + r.status));
-    e.statut = r.status;
-    throw e;
-  }
-  return d;
+  /* Délai maximum. Sans lui, un Wi-Fi connecté mais sans Internet laissait le
+     renouvellement du jeton pendu, et avec lui toutes les lectures, qui
+     attendent ce jeton : après une nuit (jeton expiré), la liste des prénoms
+     restait vide et personne ne pouvait travailler hors ligne. */
+  const ctrl = new AbortController();
+  const to = setTimeout(() => ctrl.abort(), OFFLINE.timeoutReseauMs);
+  try {
+    const r = await fetch(SUPABASE.url + '/auth/v1' + chemin, {
+      method: 'POST',
+      headers: { 'apikey': SUPABASE.anonKey, 'Content-Type': 'application/json' },
+      body: JSON.stringify(corps),
+      signal: ctrl.signal
+    });
+    /* Corps illisible, ou coupé par le délai : sur une réponse 200, c'est un
+       échec, pas une session vide. Mémorisée telle quelle, elle effaçait les
+       jetons, et l'appareil devait être rattaché à nouveau. */
+    const d = await r.json().catch(e => { if (r.ok) throw e; return {}; });
+    if (!r.ok) {
+      const e = new Error(d.error_description || d.msg || d.message || ('HTTP ' + r.status));
+      e.statut = r.status;
+      throw e;
+    }
+    return d;
+  } finally { clearTimeout(to); }
 }
 
 function memoriser(d) {
