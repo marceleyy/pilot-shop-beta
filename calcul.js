@@ -266,37 +266,101 @@ const CALCUL = {
      if ($('#lv-prop-tout')) $('#lv-prop-tout').onclick = () => ajouter(libres.map(prendre));
    }
 
-   /* Stock de la chambre froide d'après l'appli : dernier inventaire + réceptions
-      − ouvertures − pertes tracées. Une touche le recopie. */
-   async function proposerStock(p) {
-     const box = $('#' + p + '-prop');
-     if (!box || typeof stockReel !== 'function') return;
-     let s = null;
-     try { s = await stockReel(); } catch (e) {}
-     if (!box.isConnected || !s || !s.articles) return;
-     const bacs = {};
-     Object.keys(s.articles).forEach(k => {
-       const a = litArticle(k);
-       if (a.famille !== 'glace') return;
-       const t = num(a.taille) || FOURNISSEUR.tailleParDefaut;
-       bacs[t] = (bacs[t] || 0) + Math.max(0, num(s.articles[k]));
-     });
-     const tailles = Object.keys(bacs).filter(t => bacs[t] > 0);
-     if (!tailles.length) return;
-     box.innerHTML = '<div class="alerte info" style="margin-top:12px"><span class="ai">•</span><div>' +
-       '<b>Proposé par l’appli : bacs fermés aujourd’hui</b><p>' +
-       tailles.map(t => bacs[t] + ' × ' + t + ' L').join(' · ') +
-       (s.depuis ? ' (inventaire du ' + esc(fmtDC(s.depuis)) + ' + mouvements tracés)' : ' (mouvements tracés)') + '. L’appli ne sait pas où ils sont rangés : ils sont repris en chambre froide, déplacez ceux du congélateur −13.</p>' +
-       '<button type="button" class="btn clair sm" id="' + p + '-prop-ok" style="margin-top:6px">Reprendre ces bacs</button></div></div>';
-     $('#' + p + '-prop-ok').onclick = () => {
-       CALCUL.taillesBac.forEach(t => {
-         const el = $('#' + p + '-froid-' + t);
-         if (el) { el.value = bacs[t] || ''; el.dispatchEvent(new Event('input')); }
+   /* Comptages que l'appli connaît pour un jour donné : clôture ou départ
+      d'un autre calcul, inventaire du stock, stock du jour (dernier inventaire
+      + réceptions − ouvertures − pertes tracées). */
+   async function stockAppli(jour, sauf) {
+     const props = [];
+     try {
+       (await lireCalculs()).forEach(c => {
+         if (c.essai || c.id === sauf) return;
+         if (c.statut === 'clos' && c.fin === jour && c.arrivee && c.arrivee.zones)
+           props.push({ libelle:'Stock de fin du calcul clôturé le ' + fmtDC(c.fin), zones:c.arrivee.zones, kg:num(c.arrivee.kg) });
+         else if (c.debut === jour && c.depart && c.depart.zones)
+           props.push({ libelle:'Stock de départ du calcul du ' + fmtDC(c.debut), zones:c.depart.zones, kg:num(c.depart.kg) });
        });
-       const autres = tailles.filter(t => !CALCUL.taillesBac.includes(+t));
-       toast(autres.length ? 'Bacs repris, sauf ' + autres.map(t => bacs[t] + ' × ' + t + ' L').join(', ') + ' (taille non prévue)'
-                           : 'Bacs repris : vérifiez-les en chambre froide');
+     } catch (e) {}
+     /* Bacs fermés comptés sans leur rangement : repris en chambre froide. */
+     const parTaille = lignes => {
+       const bacs = {};
+       Object.keys(lignes || {}).forEach(k => {
+         const a = litArticle(k);
+         if (a.famille !== 'glace') return;
+         const t = num(a.taille) || FOURNISSEUR.tailleParDefaut;
+         bacs[t] = (bacs[t] || 0) + Math.max(0, num(lignes[k]));
+       });
+       return Object.keys(bacs).some(t => bacs[t] > 0) ? { froid:{ bacs:bacs } } : null;
      };
+     try {
+       const inv = ((await DB.get('stock:inventaires', [])) || []).filter(h => h && h.jour === jour).pop();
+       const z = inv && parTaille(inv.lignes);
+       if (z) props.push({ libelle:'Inventaire du ' + fmtDC(jour) + (inv.par ? ' par ' + inv.par : ''), zones:z, sansRangement:true });
+     } catch (e) {}
+     if (jour === today() && typeof stockReel === 'function') {
+       try {
+         const sr = await stockReel();
+         const z = sr && parTaille(sr.articles);
+         if (z) props.push({ libelle:'Stock tracé aujourd’hui' + (sr.depuis ? ' (inventaire du ' + fmtDC(sr.depuis) + ' + mouvements)' : ''),
+                             zones:z, sansRangement:true });
+       } catch (e) {}
+     }
+     return props;
+   }
+
+   /* Sous les champs d'un comptage : ce que l'appli a pour ce jour, sinon
+      on dit qu'il faut le saisir. Une touche recopie la proposition. */
+   async function proposerStock(p, jour, pl, sauf) {
+     const box = $('#' + p + '-prop');
+     if (!box) return;
+     const props = await stockAppli(jour, sauf);
+     if (!box.isConnected) return;
+     if (!props.length) {
+       box.innerHTML = '<p class="mini" style="margin-top:10px">L’appli n’a pas de comptage du ' + esc(fmtDC(jour)) +
+         ' : saisissez-le ci-dessous.</p>';
+       return;
+     }
+     const resume = z => CALCUL.zones.map(x => {
+       const s = (z && z[x.id]) || {};
+       const b = Object.keys(s.bacs || {}).filter(t => num(s.bacs[t]) > 0).map(t => s.bacs[t] + ' × ' + t + ' L');
+       if (num(s.entamesL) > 0) b.push(n1(s.entamesL) + ' L entamés');
+       return b.length ? x.label + ' : ' + b.join(', ') : '';
+     }).filter(Boolean).join(' · ');
+     box.innerHTML = props.map((x, i) =>
+       '<div class="alerte info" style="margin-top:12px"><span class="ai">•</span><div>' +
+       '<b>Proposé par l’appli : ' + esc(x.libelle) + '</b><p>' + esc(resume(x.zones)) + ' (' + kgTxt(x.kg || kgZones(x.zones, pl)) + ')' +
+       (x.sansRangement ? '. L’appli ne sait pas où les bacs sont rangés : ils sont repris en chambre froide, déplacez ceux du congélateur −13.' : '.') +
+       '</p><button type="button" class="btn clair sm" data-st-prop="' + i + '" style="margin-top:6px">Reprendre ce comptage</button></div></div>').join('');
+     $$('[data-st-prop]', box).forEach(bt => bt.onclick = () => {
+       const z = props[+bt.dataset.stProp].zones;
+       const oublis = [];
+       CALCUL.zones.forEach(x => {
+         const s = z[x.id] || {};
+         CALCUL.taillesBac.forEach(t => { const el = $('#' + p + '-' + x.id + '-' + t); if (el) el.value = num((s.bacs || {})[t]) || ''; });
+         Object.keys(s.bacs || {}).forEach(t => {
+           if (num(s.bacs[t]) > 0 && !$('#' + p + '-' + x.id + '-' + t)) oublis.push(s.bacs[t] + ' × ' + t + ' L');
+         });
+         const el = $('#' + p + '-' + x.id + '-el');
+         const l = num(s.entamesL) + (num(s.entamesKg) > 0 ? num(s.entamesKg) / (pl || FOURNISSEUR.poidsMoyenLitre) : 0);
+         if (el) el.value = l > 0 ? +l.toFixed(2) : '';
+       });
+       const un = $('#sheet-corps [data-zone]');
+       if (un) un.dispatchEvent(new Event('input'));
+       toast(oublis.length ? 'Comptage repris, sauf ' + oublis.join(', ') + ' (taille non prévue)' : 'Comptage repris : vérifiez-le');
+     });
+   }
+
+   /* Ventes déjà enregistrées dans l'appli sur exactement ces dates : écart
+      d'une période de gestion (import de caisse ou saisie). */
+   async function ventesAppli(debut, fin) {
+     try {
+       const pers = ((await DB.get('periodes', [])) || []).filter(x => x && x.debut === debut && x.fin === fin);
+       for (const per of pers) {
+         const e = await DB.get('ecart:' + per.id, {});
+         const kg = Object.keys((e && e.ventes) || {}).reduce((t, k) => t + num(e.ventes[k]), 0);
+         if (kg > 0) return { kg:kg, source:e.venteSource || 'Écarts de la période' };
+       }
+     } catch (e) {}
+     return null;
    }
 
    function etatMois(cs) {
@@ -410,13 +474,13 @@ const CALCUL = {
    async function demarrerCalcul() {
      const cs = await lireCalculs();
      const prec = derniereCloture(cs);
-     const w = { essai:false, debut:today(), source:prec ? 'precedent' : 'manuel', zones:null, livraisons:[] };
+     const w = { essai:false, debut:today(), fin:today(), source:prec ? 'precedent' : 'manuel', zones:null, livraisons:[] };
      const debutReel = () => (!w.essai && w.source === 'precedent' && prec) ? prec.fin : w.debut;
 
      const e1 = () => {
        showSheet(
          '<h2 id="sheet-titre">Nouveau calcul d’écart</h2>' +
-         '<p class="sub">Étape 1 · Le départ</p>' +
+         '<p class="sub">Étape 1 · La période</p>' +
          '<label class="f">Type de calcul</label><div class="chips" id="cd-type">' +
          '<button type="button" class="chip' + (w.essai ? '' : ' on') + '" data-t="reel">Calcul réel</button>' +
          '<button type="button" class="chip' + (w.essai ? ' on' : '') + '" data-t="essai">Essai (vérification)</button></div>' +
@@ -427,8 +491,12 @@ const CALCUL = {
          (prec ? '<button type="button" class="chip' + (w.source === 'precedent' ? ' on' : '') + '" data-s="precedent">' +
            'Reprendre la clôture du ' + esc(fmtDC(prec.fin)) + ' (' + kgTxt(num(prec.arrivee && prec.arrivee.kg)) + ')</button>' : '') +
          '<button type="button" class="chip' + (w.source === 'manuel' ? ' on' : '') + '" data-s="manuel">Compter maintenant</button></div></div>' +
-         '<div class="champ" style="margin-top:14px"><label class="f">Date de départ</label>' +
+         '<div class="grid g2" style="margin-top:14px"><div class="champ"><label class="f">Du</label>' +
          '<input type="date" id="cd-debut" max="' + today() + '" value="' + esc(debutReel()) + '"></div>' +
+         '<div class="champ"><label class="f">Au</label>' +
+         '<input type="date" id="cd-fin" value="' + esc(w.fin) + '"></div></div>' +
+         '<p class="mini" style="margin-top:6px">Une fin passée : le calcul se fait tout de suite, avec ce que l’appli a enregistré ' +
+           'sur ces dates. Une fin à venir : le calcul reste ouvert jusque-là.</p>' +
          '<div id="cd-ouvert"></div>' +
          '<div class="actions"><button class="btn clair" data-fermer>Fermer</button>' +
          '<button class="btn menthe" id="cd-suiv">Suivant</button></div>');
@@ -441,6 +509,7 @@ const CALCUL = {
        majDate();
        $$('#cd-type .chip').forEach(b => b.onclick = () => {
          w.debut = $('#cd-debut').value || w.debut;
+         w.fin = $('#cd-fin').value || w.fin;
          w.essai = b.dataset.t === 'essai';
          if (w.essai) w.source = 'manuel';
          else if (prec) w.source = 'precedent';
@@ -455,6 +524,9 @@ const CALCUL = {
          const d = $('#cd-debut').value;
          if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) { toast('Indiquez la date de départ', 'erreur'); return; }
          if (d > today()) { toast('La date de départ ne peut pas être dans le futur', 'erreur'); return; }
+         const f = $('#cd-fin').value;
+         if (!/^\d{4}-\d{2}-\d{2}$/.test(f) || f < d) { toast('La fin de la période doit tomber après le départ', 'erreur'); return; }
+         w.fin = f;
          if (!w.essai) {
            const ouvert = reelOuvert(cs);
            if (ouvert) {
@@ -465,7 +537,7 @@ const CALCUL = {
            }
          }
          w.debut = d;
-         if (!w.essai && w.source === 'precedent' && prec) e3(); else e2();
+         if (!w.essai && w.source === 'precedent' && prec) suite(); else e2();
        };
      };
 
@@ -477,13 +549,46 @@ const CALCUL = {
          '<div class="actions"><button class="btn clair" id="cz-ret">Retour</button>' +
          '<button class="btn menthe" id="cz-suiv">Suivant</button></div>');
        suivreTotal('cz', poidsNeuf(w));
-       if (!w.essai && w.debut === today()) proposerStock('cz');
+       if (!w.essai) proposerStock('cz', w.debut, poidsNeuf(w));
        $('#cz-ret').onclick = () => { w.zones = lireZones('cz'); e1(); };
        $('#cz-suiv').onclick = () => {
          w.zones = lireZones('cz');
          if (!(kgZones(w.zones, poidsNeuf(w)) > 0)) { toast('Le stock de départ est vide : comptez au moins une zone', 'erreur'); return; }
-         e3();
+         suite();
        };
+     };
+
+     /* Période déjà finie : on crée le calcul et on passe à la clôture, qui
+        reprend livraisons, pertes et ventes enregistrées sur ces dates. */
+     const suite = async () => {
+       if (w.fin >= today()) return e3();
+       const c = await enregistrer();
+       if (c) cloturerCalcul(c);
+     };
+
+     let enCours = false, cree = null;
+     const boutons = on => ['#cl-non', '#cl-oui', '#cl-ret', '#cz-suiv', '#cd-suiv'].forEach(x => { if ($(x)) $(x).disabled = !on; });
+     const enregistrer = async () => {
+       /* Déjà créé (appui répété pendant l'ouverture de la clôture) : on
+          reprend le même calcul au lieu d'en créer un second. */
+       if (cree) return cree;
+       if (enCours) return null;
+       enCours = true;
+       boutons(false);
+       try {
+         const id = 'calcul:' + w.debut + ':' + uid();
+         const depart = (!w.essai && w.source === 'precedent' && prec)
+           ? { source:'precedent', ref:prec.id, zones:(prec.arrivee && prec.arrivee.zones) || null,
+               kg:+num(prec.arrivee && prec.arrivee.kg).toFixed(3) }
+           : { source:'manuel', zones:w.zones, kg:+kgZones(w.zones, poidsNeuf(w)).toFixed(3) };
+         const c = { id:id, essai:w.essai, debut:w.debut, finPrevue:w.fin, statut:'ouvert', depart:depart, poidsLitre:poidsNeuf(w),
+                     livraisons:w.livraisons, par:STATE.user.prenom, at:nowISO() };
+         await DB.patch(id, c);
+         await feed('ok', STATE.user.prenom + ' a démarré ' + (w.essai ? 'un essai de calcul' : 'un calcul d’écart') +
+           ' au ' + fmtD(w.debut) + ' (' + kgTxt(depart.kg) + ')');
+         cree = c;
+         return c;
+       } finally { enCours = false; if (!cree) boutons(true); }
      };
 
      const e3 = () => {
@@ -513,30 +618,6 @@ const CALCUL = {
          '<div class="actions"><button class="btn clair" id="cl-non">Non, plus tard</button>' +
          '<button class="btn menthe" id="cl-oui">Oui, clôturer</button></div>' +
          '<button class="btn fantome bloc" id="cl-ret" style="margin-top:8px">Retour</button>');
-       let enCours = false, cree = null;
-       const boutons = on => ['#cl-non', '#cl-oui', '#cl-ret'].forEach(x => { if ($(x)) $(x).disabled = !on; });
-       const enregistrer = async () => {
-         /* Déjà créé (appui répété pendant l'ouverture de la clôture) : on
-            reprend le même calcul au lieu d'en créer un second. */
-         if (cree) return cree;
-         if (enCours) return null;
-         enCours = true;
-         boutons(false);
-         try {
-           const id = 'calcul:' + w.debut + ':' + uid();
-           const depart = (!w.essai && w.source === 'precedent' && prec)
-             ? { source:'precedent', ref:prec.id, zones:(prec.arrivee && prec.arrivee.zones) || null,
-                 kg:+num(prec.arrivee && prec.arrivee.kg).toFixed(3) }
-             : { source:'manuel', zones:w.zones, kg:+kgZones(w.zones, poidsNeuf(w)).toFixed(3) };
-           const c = { id:id, essai:w.essai, debut:w.debut, statut:'ouvert', depart:depart, poidsLitre:poidsNeuf(w),
-                       livraisons:w.livraisons, par:STATE.user.prenom, at:nowISO() };
-           await DB.patch(id, c);
-           await feed('ok', STATE.user.prenom + ' a démarré ' + (w.essai ? 'un essai de calcul' : 'un calcul d’écart') +
-             ' au ' + fmtD(w.debut) + ' (' + kgTxt(depart.kg) + ')');
-           cree = c;
-           return c;
-         } finally { enCours = false; if (!cree) boutons(true); }
-       };
        $('#cl-ret').onclick = e3;
        $('#cl-non').onclick = async () => {
          const c = await enregistrer();
@@ -657,7 +738,7 @@ const CALCUL = {
      if (c.statut !== 'ouvert') { toast('Ce calcul n’est plus ouvert'); rendre('calcul'); return; }
      const b = c.brouillon || {};
      const w = {
-       fin: b.fin || today(),
+       fin: b.fin || (c.finPrevue && c.finPrevue < today() && c.finPrevue >= c.debut ? c.finPrevue : today()),
        livraisons: livraisonsDe(c).slice(),
        zones: b.zones || null,
        perteL: b.perteL !== undefined ? b.perteL : null,
@@ -686,7 +767,7 @@ const CALCUL = {
          '<div class="actions"><button class="btn clair" id="ca-tard">Plus tard</button>' +
          '<button class="btn menthe" id="ca-suiv">Suivant</button></div>');
        suivreTotal('cf', poidsLitre(c));
-       if (!c.essai && w.fin === today()) proposerStock('cf');
+       if (!c.essai) proposerStock('cf', w.fin, poidsLitre(c), c.id);
        $('#ca-fin').onchange = () => {
          const f = $('#ca-fin').value;
          if (finValide(f) && f !== w.fin) { w.zones = lireZones('cf'); changerFin(f); eA(); }
@@ -802,7 +883,8 @@ const CALCUL = {
        showSheet(
          '<h2 id="sheet-titre">Ventes de la période</h2>' +
          '<p class="sub">Étape 4 sur 4 · Exportez de la caisse les ventes ' + esc(texteDates(debutFlux(c), w.fin)) + '</p>' +
-         '<div class="chips" id="cv-mode">' + modes.map(m =>
+         '<div id="cv-prop"></div>' +
+         '<div class="chips" id="cv-mode" style="margin-top:12px">' + modes.map(m =>
            '<button type="button" class="chip' + (v.mode === m[0] ? ' on' : '') + '" data-m="' + m[0] + '">' + m[1] + '</button>').join('') + '</div>' +
          '<div id="cv-corps" style="margin-top:14px">' +
          (v.mode === 'produits'
@@ -878,6 +960,19 @@ const CALCUL = {
          };
        }
        $('#cv-ret').onclick = () => { lireLignes(); calcule(); eC(); };
+       if (!c.essai && debutFlux(c) <= w.fin) ventesAppli(debutFlux(c), w.fin).then(va => {
+         const box = $('#cv-prop');
+         if (!box) return;
+         if (!va) {
+           box.innerHTML = '<p class="mini">L’appli n’a pas de ventes enregistrées ' + esc(texteDates(debutFlux(c), w.fin)) +
+             ' : importez l’export de caisse ou saisissez-les.</p>';
+           return;
+         }
+         box.innerHTML = '<div class="alerte info"><span class="ai">•</span><div><b>Proposé par l’appli : ' + kgTxt(va.kg) +
+           ' vendus sur ces dates</b><p>' + esc(va.source) + '.</p>' +
+           '<button type="button" class="btn clair sm" id="cv-prop-ok" style="margin-top:6px">Reprendre ce total</button></div></div>';
+         $('#cv-prop-ok').onclick = () => { lireLignes(); v.mode = 'total'; v.kg = +num(va.kg).toFixed(3); delete v.fichier; delete v.methode; delete v.detail; eD(); };
+       });
        $('#cv-suiv').onclick = async () => {
          lireLignes(); calcule();
          if (v.mode === 'fichier' && !v.fichier) { toast('Choisissez le fichier de la caisse', 'erreur'); return; }
