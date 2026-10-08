@@ -48,8 +48,10 @@ const CALCUL = {
    /* Poids d'un litre de glace. Un calcul réel prend la valeur mesurée ; un
       essai, qui rejoue l'ancien classeur, prend la sienne pour retrouver ses
       chiffres. Retenue sur le calcul à sa création. */
-   const poidsLitre = c => (c && num(c.poidsLitre) > 0) ? num(c.poidsLitre)
-     : (c && c.essai && FOURNISSEUR.poidsMoyenLitreClasseur) ? FOURNISSEUR.poidsMoyenLitreClasseur
+   /* Un calcul créé avant cette règle n'a pas de poids retenu : ses kg ont été
+      enregistrés avec la valeur mesurée, il la garde. */
+   const poidsLitre = c => (c && num(c.poidsLitre) > 0) ? num(c.poidsLitre) : FOURNISSEUR.poidsMoyenLitre;
+   const poidsNeuf = w => (w.essai && FOURNISSEUR.poidsMoyenLitreClasseur) ? FOURNISSEUR.poidsMoyenLitreClasseur
      : FOURNISSEUR.poidsMoyenLitre;
    const kgDeLitres = (l, pl) => num(l) * (pl || FOURNISSEUR.poidsMoyenLitre);
    const kgTxt = v => n1(v) + ' kg';
@@ -68,9 +70,12 @@ const CALCUL = {
    }
    const kgZones = (z, pl) => CALCUL.zones.reduce((t, x) => t + kgStock(z && z[x.id], pl), 0);
 
-   function champsZones(p, z) {
+   function champsZones(p, z, pl) {
      return CALCUL.zones.map(x => {
        const s = (z && z[x.id]) || {};
+       /* Entamés pesés en kg (premières saisies) : convertis en litres au même
+          poids, pour ne pas les perdre en réenregistrant la zone. */
+       const entames = s => num(s.entamesL) + (num(s.entamesKg) > 0 ? +(num(s.entamesKg) / (pl || FOURNISSEUR.poidsMoyenLitre)).toFixed(2) : 0);
        const v = n => (n === undefined || n === null || n === '' || num(n) === 0) ? '' : n;
        return '<p class="f" style="margin:16px 0 6px"><b>' + esc(x.label) + '</b></p>' +
          '<div class="grid g4">' + CALCUL.taillesBac.map(t =>
@@ -79,7 +84,7 @@ const CALCUL = {
            'id="' + p + '-' + x.id + '-' + t + '" value="' + esc(v((s.bacs || {})[t])) + '" placeholder="0"></div>').join('') +
          '<div class="champ"><label class="f">Entamés (litres approx.)</label>' +
          '<input type="number" min="0" step="0.5" inputmode="decimal" data-zone="' + x.id + '" data-entames ' +
-         'id="' + p + '-' + x.id + '-el" value="' + esc(v(s.entamesL)) + '" placeholder="0"></div></div>';
+         'id="' + p + '-' + x.id + '-el" value="' + esc(v(entames(s))) + '" placeholder="0"></div></div>';
      }).join('') +
      '<p class="mini" id="' + p + '-total" style="margin-top:12px"></p>';
    }
@@ -320,14 +325,14 @@ const CALCUL = {
        showSheet(
          '<h2 id="sheet-titre">Stock de départ</h2>' +
          '<p class="sub">Étape 2 · Comptage du ' + esc(fmtD(w.debut)) + '</p>' +
-         champsZones('cz', w.zones) +
+         champsZones('cz', w.zones, poidsNeuf(w)) +
          '<div class="actions"><button class="btn clair" id="cz-ret">Retour</button>' +
          '<button class="btn menthe" id="cz-suiv">Suivant</button></div>');
-       suivreTotal('cz', poidsLitre(w));
+       suivreTotal('cz', poidsNeuf(w));
        $('#cz-ret').onclick = () => { w.zones = lireZones('cz'); e1(); };
        $('#cz-suiv').onclick = () => {
          w.zones = lireZones('cz');
-         if (!(kgZones(w.zones, poidsLitre(w)) > 0)) { toast('Le stock de départ est vide : comptez au moins une zone', 'erreur'); return; }
+         if (!(kgZones(w.zones, poidsNeuf(w)) > 0)) { toast('Le stock de départ est vide : comptez au moins une zone', 'erreur'); return; }
          e3();
        };
      };
@@ -372,8 +377,8 @@ const CALCUL = {
            const depart = (!w.essai && w.source === 'precedent' && prec)
              ? { source:'precedent', ref:prec.id, zones:(prec.arrivee && prec.arrivee.zones) || null,
                  kg:+num(prec.arrivee && prec.arrivee.kg).toFixed(3) }
-             : { source:'manuel', zones:w.zones, kg:+kgZones(w.zones, poidsLitre(w)).toFixed(3) };
-           const c = { id:id, essai:w.essai, debut:w.debut, statut:'ouvert', depart:depart, poidsLitre:poidsLitre(w),
+             : { source:'manuel', zones:w.zones, kg:+kgZones(w.zones, poidsNeuf(w)).toFixed(3) };
+           const c = { id:id, essai:w.essai, debut:w.debut, statut:'ouvert', depart:depart, poidsLitre:poidsNeuf(w),
                        livraisons:w.livraisons, par:STATE.user.prenom, at:nowISO() };
            await DB.patch(id, c);
            await feed('ok', STATE.user.prenom + ' a démarré ' + (w.essai ? 'un essai de calcul' : 'un calcul d’écart') +
@@ -552,7 +557,7 @@ const CALCUL = {
        showSheet(
          '<h2 id="sheet-titre">Stock de fin</h2>' +
          '<p class="sub">Étape 2 sur 4 · Comptage du ' + esc(fmtD(w.fin)) + '</p>' +
-         champsZones('cf', w.zones) +
+         champsZones('cf', w.zones, poidsLitre(c)) +
          '<div class="actions"><button class="btn clair" id="cf-ret">Retour</button>' +
          '<button class="btn menthe" id="cf-suiv">Suivant</button></div>');
        suivreTotal('cf', poidsLitre(c));
