@@ -5304,7 +5304,9 @@ function modifierPeriode(per) {
      [/^COFFRET 12 MAC GELATO/, 300],
      /* Gaufres et crêpes garnies : 1 boule (50 g) au catalogue. */
      [/^(GAUFRE|CREPE) (PARFAITE|DELICIEUSE|TRADITIONNELLE)/, 50],
-     /* Crêpe ou gaufre nature (sucre, chocolat, gianduja…) : sans glace. */
+     /* Crêpe gianduja : vendue avec une boule (liste du manager). */
+     [/^CREPE GIANDUJA$/, 50],
+     /* Autres crêpes ou gaufres nature (sucre, chocolat…) : sans glace. */
      [/^(GAUFRE|CREPE)\b/, 0],
      [/GELATO|^BRIOCHE/, null]
    ];
