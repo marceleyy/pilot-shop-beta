@@ -1046,6 +1046,7 @@ const CALCUL = {
          if (v.mode === 'total') v.kg = Math.max(0, num($('#cv-kg').value));
          v.mode = bt.dataset.m;
          if (v.mode !== 'fichier') { delete v.fichier; delete v.methode; delete v.detail; }
+         if (v.mode !== 'produits') delete v.fichierLu;
          eD();
        });
        if ($('#cv-plus')) $('#cv-plus').onclick = () => { lireLignes(); v.lignes.push({ nom:'', g:'', q:'' }); eD(); };
@@ -1099,7 +1100,7 @@ const CALCUL = {
            (va.couvre ? ' vendus sur ces dates' : ' vendus, mais une partie des dates manque') + '</b><p>' + esc(va.source) + '.' +
            (va.couvre ? '' : ' Pour le reste, importez l’export de caisse ou saisissez le total complet.') + '</p>' +
            '<button type="button" class="btn clair sm" id="cv-prop-ok" style="margin-top:6px">Reprendre ce total</button></div></div>';
-         $('#cv-prop-ok').onclick = () => { lireLignes(); v.mode = 'total'; v.kg = +num(va.kg).toFixed(3); delete v.fichier; delete v.methode; delete v.detail; eD(); };
+         $('#cv-prop-ok').onclick = () => { lireLignes(); v.mode = 'total'; v.kg = +num(va.kg).toFixed(3); delete v.fichierLu; delete v.fichier; delete v.methode; delete v.detail; eD(); };
        });
        $('#cv-suiv').onclick = async () => {
          lireLignes(); calcule();

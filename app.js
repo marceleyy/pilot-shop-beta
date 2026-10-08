@@ -4448,6 +4448,10 @@ function ouvrirPremierePeriode() {
          return;
        }
        if (!encoreLa()) return;   // lecture abandonnée entre-temps
+       if (!(r.kg > 0)) {
+         closeSheet();
+         return toast('Aucune glace chiffrée dans ce fichier : saisissez les grammages depuis le calcul d’écart', 'erreur');
+       }
        confirmerImport(per, f.name, r);
      };
    };
@@ -5288,7 +5292,7 @@ function modifierPeriode(per) {
      [/^POT GEANT/, 275], [/^POT (A )?PARTAG/, 529],
      [/^CHOCO ?CONE ENFANT/, 67], [/^CHOCO ?CONE PETIT/, 112], [/^CHOCO ?CONE CLASSI/, 149], [/^CHOCO ?CONE GRAND/, 208],
      [/^CORNET ENFANT/, 69], [/^CORNET PETIT/, 114], [/^CORNET CLASSI/, 153], [/^CORNET GRAND/, 224],
-     [/^(BAC|COFFRET) .*\b550\b/, 470], [/^(BAC|COFFRET) .*\b1100\b/, 930],
+     [/^(BAC|COFFRET) .*\b550 ?ML\b/, 470], [/^(BAC|COFFRET) .*\b(1100 ?ML|1 1 ?L)\b/, 930],
      [/SHAKE|SORBET DRINK/, 160], [/^AFFOGATO/, 160], [/^ESPRESSO FRAPPE/, 200], [/^INCONTOURNABLE/, 80],
      [/^COUPE/, 160], [/^BRIOCHE GLACE/, 100], [/^EXTRA GLACE/, 50],
      [/GELATO/, null], [/^(GAUFRE|CREPE) (PARFAITE|DELICIEUSE)/, null]
