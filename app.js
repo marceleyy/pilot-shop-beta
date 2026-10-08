@@ -34,7 +34,9 @@
    const n1  = v => (Number(v) || 0).toLocaleString('fr-FR',
      { minimumFractionDigits: 1, maximumFractionDigits: 1 });
    const n2  = v => (Number(v) || 0).toFixed(2);
-   const eur = v => (Number(v) || 0).toLocaleString(APP.locale, { style:'currency', currency:APP.devise });
+   /* Moins d'un demi-centime : 0, sans signe (« -0,00 € » sur un stock juste). */
+   const eur = v => { const n = Number(v) || 0;
+     return (Math.abs(n) < 0.005 ? 0 : n).toLocaleString(APP.locale, { style:'currency', currency:APP.devise }); };
    
    const MOIS  = ['janvier','février','mars','avril','mai','juin','juillet','août','septembre','octobre','novembre','décembre'];
    const isoOf = d => {
@@ -269,13 +271,20 @@
       Une signature à null ne prouve rien à elle seule : une copie lue pendant
       une correction la porte aussi. Elle ne passe que si son <moment>_avant
       date de la signature encore en base ; sinon la base a été revalidée
-      depuis, et la copie est périmée. */
+      depuis, et la copie est périmée.
+      Une signature non nulle non plus : une copie lue avant une correction
+      porte l'ancienne, que la correction a rangée dans <moment>_corrections.
+      Elle ne passe pas : sinon la saisie du soir d'un équipier, écran ouvert
+      depuis le matin, remettait 150 € à la place des 200 € corrigés. */
    const CHAMPS_CAISSE_SOIR = ['ecart', 'ecartCB', 'ecartEsp', 'par'];
    function garderComptagesValides(out, distant, local) {
      const a = (o, k) => Object.prototype.hasOwnProperty.call(o, k);
      const auCourant = mom => {
        if (!a(local, mom + '_valide')) return false;
-       if (local[mom + '_valide']) return true;              // (re)validation : elle passe
+       const sl = local[mom + '_valide'];
+       /* (Re)validation : elle passe, sauf si cette signature a déjà été corrigée. */
+       if (sl) return !(Array.isArray(distant[mom + '_corrections']) &&
+                        distant[mom + '_corrections'].some(c => c && c.at && c.at === sl.at));
        const av = local[mom + '_avant'], sig = distant[mom + '_valide'];
        return !!(av && sig && av.at && av.at === sig.at);   // correction de la signature en base
      };
@@ -1454,6 +1463,7 @@ function renderNav() {
 
    async function rendre(id, viaHistorique) {
    if (!V[id]) { toast('Vue indisponible'); return; }
+   if (!vueAutorisee(id)) id = vueAccueil();
    /* Rôle changé pendant qu'une feuille était ouverte, et la feuille se ferme
       sur un lien (« Équipe » du menu, « Ouvrir »…) : on ne dessine pas la vue
       de l'ancien rôle, qui pouvait finir après l'accueil et le recouvrir. Le
@@ -2606,6 +2616,17 @@ function vueAccueil() {
   return (STATE.user && STATE.user.role === 'manager') ? 'controle' : 'accueil';
 }
 
+/* Vue réservée au manager demandée sans le rôle : bouton retour (historique
+   d'un manager rétrogradé, ou d'une autre personne sur un iPad partagé), action
+   lancée avant une rétrogradation (« Tout traiter »). rendre() sert l'accueil.
+   Les menus sont lus à l'appel : les vues ajoutées par modules.js comptent. */
+function vueAutorisee(id) {
+  const role = STATE.user && STATE.user.role;
+  if (!role || role === 'manager') return true;
+  const de = r => (TABS[r] || []).map(t => t.id).concat(MENU_PLUS[r] || []);
+  return de('manager').indexOf(id) < 0 || de(role).indexOf(id) >= 0;
+}
+
 window.addEventListener('popstate', function (ev) {
   /* 0. Retour provoqué par closeSheet lui-même : l'entrée de la feuille est
      retirée, il n'y a rien d'autre à faire (sinon : boucle, ou vue changée). */
@@ -3021,13 +3042,13 @@ function ecranAmorcage() {
       lignes.map((l, i) =>
         '<div class="card plat" style="margin-top:14px">' +
         '<div class="grid g2">' +
-        '<div class="champ"><label class="f">Prénom</label>' +
-        '<input type="text" data-p="' + i + '" value="' + esc(l.prenom) + '" autocapitalize="words"></div>' +
-        '<div class="champ"><label class="f">Code à 4 chiffres</label>' +
-        '<input type="text" inputmode="numeric" maxlength="4" data-c="' + i + '" value="' + esc(l.pin) + '"></div>' +
+        '<div class="champ"><label class="f" for="am-p' + i + '">Prénom</label>' +
+        '<input type="text" id="am-p' + i + '" data-p="' + i + '" value="' + esc(l.prenom) + '" autocapitalize="words"></div>' +
+        '<div class="champ"><label class="f" for="am-c' + i + '">Code à 4 chiffres</label>' +
+        '<input type="text" id="am-c' + i + '" inputmode="numeric" maxlength="4" data-c="' + i + '" value="' + esc(l.pin) + '"></div>' +
         '</div>' +
-        '<div class="champ" style="margin-top:10px"><label class="f">Rôle</label>' +
-        '<select data-r="' + i + '">' +
+        '<div class="champ" style="margin-top:10px"><label class="f" for="am-r' + i + '">Rôle</label>' +
+        '<select id="am-r' + i + '" data-r="' + i + '">' +
         '<option value="equipe"' + (l.role === 'equipe' ? ' selected' : '') + '>Équipier</option>' +
         '<option value="manager"' + (l.role === 'manager' ? ' selected' : '') + '>Manager</option>' +
         '</select></div></div>').join('') +
@@ -4150,7 +4171,7 @@ function ouvrirPremierePeriode() {
          kpi('Stock théorique', n1(c.theo) + '<span class="u">kg</span>', '', 'Calculé') +
          /* Écart arrondi à zéro : ni + ni −. « −0,0 kg » laissait croire à un manque. */
          kpi('Écart', (Math.abs(c.ecart) < 0.05 ? '' : c.ecart > 0 ? '+' : '−') + n1(Math.abs(c.ecart)) + '<span class="u">kg</span>', st.c, st.t) +
-         kpi('Coût', eur(c.valeur), st.c, 'à ' + eur(FOURNISSEUR.prixMoyenKg) + '/kg');
+         kpi('Coût', eur(Math.abs(c.ecart) < 0.05 ? 0 : c.valeur), st.c, 'à ' + eur(FOURNISSEUR.prixMoyenKg) + '/kg');
      };
      const aiguille = c => 50 + (Math.max(-25, Math.min(25, -c.pct)) / 25) * 50;
      const achatsTxt = (c, e) => n1(c.achats) + ' kg · ' + ((e.bl || []).length) + ' bon(s) scanné(s)';
@@ -4251,19 +4272,26 @@ function ouvrirPremierePeriode() {
        if (!f) return;
        showSheet('<h2 id="sheet-titre">Lecture de l’export</h2>' +
          '<p class="sub">' + esc(f.name) + '</p>' +
-         '<div class="vide">Analyse du fichier…</div>');
+         '<div class="vide" id="imp-analyse">Analyse du fichier…</div>');
+       /* XLSX peut mettre plusieurs secondes à arriver au premier import : la
+          personne a pu fermer cette fenêtre et en ouvrir une autre. On ne la
+          ferme pas, on ne la recouvre pas. On garde l'élément de CETTE
+          lecture : un second import lancé entre-temps pose le sien, du même id. */
+       const analyse = $('#imp-analyse');
+       const encoreLa = () => !$('#sheet').hidden && !!analyse && analyse.isConnected;
        if (!(await chargerXLSX())) {
-         closeSheet();
+         if (encoreLa()) closeSheet();
          return toast('Lecture des fichiers de caisse indisponible : réessayez avec le réseau', 'erreur');
        }
    
        let r;
        try { r = await lireExportCaisse(f); }
        catch (err) {
-         closeSheet();
+         if (encoreLa()) closeSheet();
          toast(err && err.message ? err.message : 'Fichier illisible', 'erreur');
          return;
        }
+       if (!encoreLa()) return;   // lecture abandonnée entre-temps
        confirmerImport(per, f.name, r);
      };
    };
@@ -4313,7 +4341,7 @@ function ouvrirPremierePeriode() {
        out.push({ icone:'', niveau:'n', compte:Math.round(pertesTotal),
                   titre:'Volume de pertes déclarées',
                   detail:n1(pertesTotal) + ' L jetés sur ' + FRAUDE.fenetreJours + ' jours, soit ' +
-                         n1(pertesTotal * FOURNISSEUR.poidsMoyenLitre * FOURNISSEUR.prixMoyenKg) + ' € de marchandise.' });
+                         eur(pertesTotal * FOURNISSEUR.poidsMoyenLitre * FOURNISSEUR.prixMoyenKg) + ' de marchandise.' });
      return out;
    }
    

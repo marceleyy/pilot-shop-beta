@@ -1140,7 +1140,9 @@ V.caisse = async function () {
             ', ' + eur(num(compte)) + ' comptés ce matin.',
           jour:today(), par:STATE.user.prenom, employe:STATE.user.id, at:nowISO(), resolue:false });
         r.m_ecartSignale = { par:STATE.user.prenom, at:nowISO(), montant:d };
-        await sauver();
+        /* Le seul champ du signalement : la fiche entière, lue avant une
+           correction du manager, serait refusée avec lui (garderComptagesValides). */
+        await DB.patch('caisse:' + j, { m_ecartSignale:r.m_ecartSignale });
         toast(messageEnvoi('anomalies', 'Signalement transmis au manager'));
         dessiner();
       };
