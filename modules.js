@@ -1214,10 +1214,11 @@ V.caisse = async function () {
   const champsSaisie = () =>
     $$('#page input[data-k], #page textarea[data-k], #page select[data-k]');
 
-  const sauver = debounce(async () => {
-    champsSaisie().forEach(i => { r[i.dataset.k] = i.value; });
-    await DB.set('caisse:' + j, r);
-  }, 400);
+  /* r est tenu à jour par oninput : l'enregistrement différé ne relit plus
+     l'écran. 400 ms après la frappe, #page pouvait montrer un autre jour :
+     « Jour précédent » touché aussitôt, le fond de la veille (999 €) partait
+     sous aujourd'hui, prêt à être validé. */
+  const sauver = debounce(() => DB.set('caisse:' + j, r), 400);
 
   /* Un comptage déjà validé ne se corrige que par le manager. Un équipier le
      réécrivait sans trace : signature et montants d'origine perdus, journal
@@ -1635,10 +1636,9 @@ V.temp = async function () {
     brancher();
   };
 
-  const sauver = async () => {
-    if ($('#obs')) rec.obs = $('#obs').value;
-    await DB.set('temp:' + j, rec);
-  };
+  /* rec.obs suit la frappe (voir #obs plus bas) : l'enregistrement ne relit
+     plus l'écran, qui peut être déjà celui d'un autre jour. */
+  const sauver = () => DB.set('temp:' + j, rec);
 
   /* Modifier une valeur après validation annule celle-ci : le registre doit
      porter la signature de la personne qui a vu la dernière valeur. */
@@ -1721,7 +1721,12 @@ V.temp = async function () {
       };
     });
 
-    if ($('#obs')) $('#obs').oninput = debounce(sauver, 600);
+    /* L'action corrective entre dans rec à chaque frappe ; seule l'écriture est
+       différée. Relue 600 ms plus tard, #obs pouvait être celui d'un autre jour
+       (« Jour précédent » touché aussitôt) : son texte partait sous ce jour. Et
+       « Valider » touché dans ce délai demandait une action déjà tapée. */
+    const ecrireObs = debounce(sauver, 600);
+    if ($('#obs')) $('#obs').oninput = ev => { rec.obs = ev.target.value; ecrireObs(); };
 
     $('#tvalider').onclick = async () => {
       const reste = manquants();
