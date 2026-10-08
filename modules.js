@@ -571,8 +571,10 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
        : '<button class="btn menthe sm" id="ptg">Début de service</button>';
    
      const R = [];
-     if (!e.tempM) R.push(['bad', 'Frigos du matin non relevés', 'À faire dès l’ouverture, avant la mise en vitrine.', 'temp']);
-     if (e.tempCrit) R.push(['bad', e.tempCrit + ' frigo(s) en limite critique', 'Transférez les produits et prévenez ' + (typeof nomManager === 'function' ? nomManager() : 'le manager') + '.', 'temp']);
+     if (!e.tempM) R.push(['bad', 'Frigos du matin non relevés', 'À faire dès l’ouverture, avant la mise en vitrine.', 'temp', 'm']);
+     if (e.tempCrit) R.push(['bad', e.tempCrit + ' frigo(s) en limite critique', 'Transférez les produits et prévenez ' + (typeof nomManager === 'function' ? nomManager() : 'le manager') + '.', 'temp',
+       /* Le moment du dépassement (le soir s'il y en a un), pas celui de l'heure. */
+       ENCEINTES.some(en => etatTemp(en, tempJour['s_' + en.id]) === 'crit') ? 's' : 'm']);
      alertes.filter(a => a.niveau !== 'jaune').forEach(a => R.push(['bad',
        'DLC ' + (a.reste < 0 ? 'dépassée' : 'dans ' + a.reste + ' j') + ' : ' + a.produit,
        'Produit non ouvert reçu le ' + fmtDC(a.recuLe) + '. À écouler ou à jeter.', 'stock']));
@@ -640,7 +642,9 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
        '" data-lib="' + esc(t.t) + '">' +
        (clichés.length ? '✓ ' + clichés.length : 'Photo') + '</button>' : '') +
      (t.lien ? '<button class="btn ' + (lie && !lie.fait ? 'menthe' : urgente ? 'corail' : 'clair') + ' sm" data-go="' + t.lien + '"' +
-       (t.partie ? ' data-partie="' + esc(t.partie) + '"' : '') + '>' +
+       (t.partie ? ' data-partie="' + esc(t.partie) + '"' : '') +
+       /* Relevé ou caisse : le moment de la phase, comme etatLie. */
+       (t.lien === 'temp' || t.lien === 'caisse' ? ' data-moment="' + (phase === 'fermeture' ? 's' : 'm') + '"' : '') + '>' +
        /* Même mot que la consigne « puis « Y aller » » de la tâche urgente. */
        ((lie && !lie.fait) || urgente ? 'Y aller' : '→') + '</button>' : '') +
          '</div>' +
@@ -676,7 +680,8 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
          ? '<div class="stack">' + R.slice(0, 4).map(r =>
              '<div class="alerte ' + r[0] + '"><div style="flex:1;min-width:0">' +
              '<b>' + esc(r[1]) + '</b><p>' + esc(r[2]) + '</p></div>' +
-             '<button class="btn clair sm" data-go="' + r[3] + '">Ouvrir</button></div>').join('') + '</div>'
+             '<button class="btn clair sm" data-go="' + r[3] + '"' + (r[4] ? ' data-moment="' + r[4] + '"' : '') +
+             '>Ouvrir</button></div>').join('') + '</div>'
          : '<div class="alerte ok"><div style="flex:1"><b>Tout est à jour</b>' +
            '<p>Aucun relevé ni contrôle en retard.</p></div></div>') +
    
@@ -950,10 +955,7 @@ V.caisse = async function () {
        : (veille.ff !== undefined && veille.ff !== '' ? num(veille.ff) : null))
     : null;
 
-  if (!V.caisse._m) {
-    const h = new Date().getHours();
-    V.caisse._m = (h < 15 && !r.m_valide) ? 'm' : (r.s_valide ? 'm' : 's');
-  }
+  if (!V.caisse._m) V.caisse._m = (!soirCommence() && !r.m_valide) ? 'm' : (r.s_valide ? 'm' : 's');
   let mom = V.caisse._m;
 
   /* Relecture des anciennes clés pour préremplir sans rien perdre */
@@ -1250,6 +1252,9 @@ V.caisse = async function () {
       if (r[mom + '_valide'] && !r[mom + '_avant']) {
         r[mom + '_avant'] = Object.assign({ valeurs:instantane(mom) }, r[mom + '_valide']);
       }
+      /* Numéro de saisie : une copie lue pendant la correction en porte un plus
+         petit, et la fusion ne la laisse pas remettre ses montants. */
+      if (r[mom + '_avant']) r[mom + '_avant'] = Object.assign({}, r[mom + '_avant'], { n:(+r[mom + '_avant'].n || 0) + 1 });
       r[i.dataset.k] = i.value;
       /* null et non delete : la fusion avec la copie du serveur ferait revenir
          une clé supprimée, et l'ancienne signature avec elle. */
@@ -1261,24 +1266,46 @@ V.caisse = async function () {
       verdict();
     });
     if ($('#cv')) $('#cv').onclick = async () => {
-      const p = mom + '_';
-      const requis = (mom === 'm') ? ['m_fond'] : ['s_cb', 's_esp', 's_tpe', 's_retrait', 's_fond'];
+      /* Moment et montants pris au clic : la relecture ci-dessous peut durer
+         8 s, et l'équipier peut entre-temps changer d'onglet, de jour ou
+         d'écran. Relus après, c'était l'autre onglet qui était signé, et les
+         montants affichés (ceux de la veille) partaient sous ce jour. */
+      const mo = mom, p = mo + '_';
+      const requis = (mo === 'm') ? ['m_fond'] : ['s_cb', 's_esp', 's_tpe', 's_retrait', 's_fond'];
       const vides = requis.filter(k => r[k] === undefined || r[k] === '');
-      if (vides.length) return toast(mom === 'm'
+      if (vides.length) return toast(mo === 'm'
         ? 'Renseignez le fond de caisse initial'
         : 'Renseignez tous les montants du soir', 'erreur');
+      champsSaisie().forEach(i => { r[i.dataset.k] = i.value; });
+      /* Écran ouvert avant une validation ou une correction faite sur un autre
+         iPad : la fusion refuserait cette validation (correction en cours) ou la
+         laisserait remplacer celle du collègue (comptage validé), sans rien dire,
+         et le fil annoncerait « a validé ». L'équipier relit d'abord la fiche. */
+      if (STATE.user.role !== 'manager') {
+        const bouton = $('#cv');
+        bouton.disabled = true; bouton.textContent = 'Vérification…';
+        const frais = await DB.get('caisse:' + j, null);
+        const sig = frais && (frais[p + 'valide'] || frais[p + 'avant']);
+        if (sig) {
+          toast(frais[p + 'valide']
+            ? 'Comptage déjà validé par ' + (sig.par || 'un collègue') + ' : seul le manager peut le modifier'
+            : 'Comptage en cours de correction par le manager', 'erreur');
+          /* Parti entre-temps sur un autre onglet, un autre jour ou un autre
+             écran : le message suffit, on ne l'en arrache pas. */
+          return bouton.isConnected ? rendre('caisse') : undefined;
+        }
+      }
       /* Revalidation d'un comptage déjà signé, corrigé ou non : l'ancienne
          signature et les anciens montants vont au journal et restent dans la
          fiche (p_corrections), au lieu d'être écrasés sans trace. */
       const avant = r[p + 'avant'] ||
-        (r[p + 'valide'] ? Object.assign({ valeurs:instantane(mom) }, r[p + 'valide']) : null);
-      r[mom + '_valide'] = { par:STATE.user.prenom, id:STATE.user.id, at:nowISO() };
-      champsSaisie().forEach(i => { r[i.dataset.k] = i.value; });
+        (r[p + 'valide'] ? Object.assign({ valeurs:instantane(mo) }, r[p + 'valide']) : null);
+      r[mo + '_valide'] = { par:STATE.user.prenom, id:STATE.user.id, at:nowISO() };
       let correction = '';
       if (avant) {
-        const apres = instantane(mom), av = avant.valeurs || {};
+        const apres = instantane(mo), av = avant.valeurs || {};
         const change = k => k === p + 'com' ? (av[k] || '') !== (apres[k] || '') : num(av[k]) !== num(apres[k]);
-        const diffs = champsMoment(mom).filter(change).map(k =>
+        const diffs = champsMoment(mo).filter(change).map(k =>
           k === p + 'com' ? 'commentaire modifié'
             : LIBELLES_CAISSE[k] + ' ' + eur(num(av[k])) + ' → ' + eur(num(apres[k])));
         correction = ' — déjà validé par ' + (avant.par || '?') + (avant.at ? ' à ' + heure(avant.at) : '') +
@@ -1290,7 +1317,7 @@ V.caisse = async function () {
       }
       /* Le tableau de bord, l'historique et les tendances lisent encore
          ecart / par : sans eux, chaque soir s'affichait à 0 €, sans écart. */
-      if (mom === 's') {
+      if (mo === 's') {
         const fondOuv = (r.m_fond !== undefined && r.m_fond !== '') ? num(r.m_fond)
                       : (fondVeille !== null ? fondVeille : null);
         /* ecart garde son ancien sens : carte + espèces, comme les fiches
@@ -1303,7 +1330,7 @@ V.caisse = async function () {
       }
       await DB.set('caisse:' + j, r);
       await feed(avant ? 'warn' : 'ok', STATE.user.prenom + (avant ? ' a revalidé' : ' a validé') + ' le comptage ' +
-        (mom === 'm' ? 'd’ouverture' : 'de fermeture') + correction);
+        (mo === 'm' ? 'd’ouverture' : 'de fermeture') + correction);
       toast('Comptage validé');
       /* Le manager revient à sa Tour de contrôle, pas à la vue équipier. */
       rendre(vueAccueil());
@@ -1476,6 +1503,16 @@ V.hebdo = async function () {
    défaut, deux flèches, un bouton hors service, une saisie libre, et un
    bouton de validation unique en bas qui ramène à l'accueil.
    ========================================================================== */
+/* Le soir commence avec la phase de fermeture de la boutique, comme dans la
+   check-liste. Températures et Caisse basculaient à 15 h fixes : une demi-heure
+   après une ouverture à 14:30, elles ouvraient le soir, matin pas encore fait. */
+function soirCommence() {
+  const d = new Date(), bf = HORAIRES.debutFermeture;
+  return /^\d{2}:\d{2}$/.test(bf || '')
+    ? d.getHours() * 60 + d.getMinutes() >= +bf.slice(0, 2) * 60 + +bf.slice(3, 5)
+    : d.getHours() >= 15;
+}
+
 function defautEnceinte(e) {
   return Math.round((e.vert[0] + e.vert[1]) / 2);
 }
@@ -1494,13 +1531,15 @@ V.temp = async function () {
   /* Un seul moment à l'écran : le matin ou le soir, jamais les deux.
      Le moment proposé dépend de l'heure et de ce qui reste à faire. */
   const moments = RELEVES.moments;
-  if (!V.temp._m || V.temp._j !== j) {
+  /* Un lien demande un moment précis (voir rendre) : il passe avant ce choix. */
+  if (V.temp._voulu) { V.temp._m = V.temp._voulu; V.temp._j = j; V.temp._voulu = null; }
+  else if (!V.temp._m || V.temp._j !== j) {
     V.temp._j = j;
-    const h = new Date().getHours();
-    if (!rec.valide.m && h < 15)      V.temp._m = 'm';
+    const soir = soirCommence();
+    if (!rec.valide.m && !soir)       V.temp._m = 'm';
     else if (!rec.valide.s)           V.temp._m = 's';
     else if (!rec.valide.m)           V.temp._m = 'm';
-    else                              V.temp._m = (h < 15) ? 'm' : 's';
+    else                              V.temp._m = soir ? 's' : 'm';
   }
   /* « let » et non « const » : le moment change quand on bascule, et toutes
      les fonctions ci-dessous doivent suivre. Avec const, le clic sur « Soir »
