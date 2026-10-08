@@ -1107,6 +1107,7 @@ function voirInventaire(h, partie) {
   const l = h.lignes || {};
   const ecarts = h.ecarts || {};
   const groupes = [];          // [{ titre, lignes:[{ nom, q, saisi, ecart, unite }] }]
+  const nb = v => Number.isInteger(num(v)) ? String(num(v)) : n1(v);
   const vus = new Set();
   const ligne = (cle, nom, unite) => {
     vus.add(cle);
@@ -1118,7 +1119,8 @@ function voirInventaire(h, partie) {
     const tailles = (FOURNISSEUR.taillesCourantes || TAILLES_BAC || []).map(String);
     /* Les tailles réellement comptées s'ajoutent aux tailles courantes : un
        7 L saisi ce jour-là doit apparaître. */
-    Object.keys(l).forEach(c => {
+    const cles = Object.keys(l).concat(Object.keys(ecarts).filter(c => l[c] === undefined));
+    cles.forEach(c => {
       const a = litArticle(c);
       if (a.famille === 'glace' && a.taille && tailles.indexOf(a.taille) < 0) tailles.push(a.taille);
     });
@@ -1128,10 +1130,15 @@ function voirInventaire(h, partie) {
       const parT = tailles.map(t => ligne(cleArticle('glace', p, t), '', ''));
       return { nom: p, saisi: parT.some(x => x.saisi),
                ecart: parT.reduce((s2, x) => s2 + num(x.ecart), 0),
-               texte: tailles.map((t, k) => t + ' L : ' + parT[k].q).join(' · ') };
+               texte: tailles.map((t, k) => t + ' L : ' + nb(parT[k].q)).join(' · ') };
     }) });
+    /* Les autres familles comptées en chambre froide (macarons, gaufres…),
+       saveur par saveur, comptées ou non. */
+    FAMILLES_PRODUIT.filter(f => f.id !== 'glace' && f.lieu !== 'sec' && f.stock !== 'sec')
+      .forEach(f => groupes.push({ titre: f.libelle, lignes: (f.saveurs && f.saveurs.length ? f.saveurs : [''])
+        .map(sv => ligne(cleArticle(f.id, sv, ''), sv || f.libelle, f.unite)) }));
     const autres = {};
-    Object.keys(l).filter(c => !vus.has(c)).sort().forEach(c => {
+    cles.filter(c => !vus.has(c)).sort().forEach(c => {
       const f = FAMILLES_PRODUIT.filter(x => x.id === litArticle(c).famille)[0];
       const t = f ? f.libelle : 'Autres';
       (autres[t] = autres[t] || []).push(ligne(c, litArticle(c).parfum || (f ? f.libelle : c),
@@ -1140,7 +1147,9 @@ function voirInventaire(h, partie) {
     Object.keys(autres).forEach(t => groupes.push({ titre: t, lignes: autres[t] }));
   } else {
     const parSection = {};
-    catalogueSec().forEach(r => {
+    /* Une référence masquée ne se compte plus : elle n'apparaît que si elle
+       a été saisie ce jour-là (rubrique « Retirées du catalogue »). */
+    catalogueSec().filter(r => !r.masque).forEach(r => {
       const sec = r.sec || 'Autres';
       const lst = parSection[sec] = parSection[sec] || [];
       (r.variantes && r.variantes.length ? r.variantes : ['']).forEach(v =>
@@ -1149,11 +1158,15 @@ function voirInventaire(h, partie) {
     /* Références retirées du catalogue depuis : on les montre quand même. */
     const retirees = Object.keys(l).filter(c => !vus.has(c)).sort()
       .map(c => ligne(c, c.split('|').slice(1).filter(Boolean).join(' · '), ''));
-    Object.keys(parSection).forEach(t => groupes.push({ titre: t, lignes: parSection[t] }));
+    /* Même ordre de sections qu'à la saisie. */
+    const ordre = (typeof SEC_SECTIONS !== 'undefined')
+      ? SEC_SECTIONS.map(x => typeof x === 'string' ? x : x.id) : [];
+    Object.keys(parSection)
+      .sort((x, y) => (ordre.indexOf(x) < 0 ? 999 : ordre.indexOf(x)) - (ordre.indexOf(y) < 0 ? 999 : ordre.indexOf(y)))
+      .forEach(t => groupes.push({ titre: t, lignes: parSection[t] }));
     if (retirees.length) groupes.push({ titre: 'Retirées du catalogue', lignes: retirees });
   }
 
-  const nb = v => Number.isInteger(num(v)) ? String(num(v)) : n1(v);
   const nbSaisis = Object.keys(l).length;
   showSheet(
     '<h2 id="sheet-titre">Inventaire ' + (partie === 'froid' ? 'chambre froide' : 'sec') +

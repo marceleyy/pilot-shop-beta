@@ -4696,7 +4696,7 @@ function modifierPeriode(per) {
    }
    
    /* =============================================================================
-      29. HISTORIQUE + BOUCLIER SANITAIRE
+      29. HISTORIQUE + REGISTRE SANITAIRE
       ========================================================================== */
    V.histo = async function () {
      const onglet = V.histo._t || 'caisse';
@@ -4755,7 +4755,7 @@ function modifierPeriode(per) {
          '<button type="button" class="chip' + (onglet === k ? ' on' : '') + '" data-h="' + k + '">' +
          esc(defs[k].l) + '</button>').join('') + '</div>' +
    
-       carte(entete('🛡️', 'Bouclier sanitaire',
+       carte(entete('🛡️', 'Registre sanitaire',
          'Compile températures, nettoyage et lots ouverts en un document présentable à un contrôle.') +
          '<button class="btn ciel bloc xl" id="pdf2">Export PDF contrôle sanitaire</button>', 'ciel') +
    
