@@ -152,7 +152,11 @@
       des iPads différents. Sans fusion, un iPad revenu en ligne rejouait sa
       copie entière, périmée : les ventes importées entre-temps sur l'autre
       iPad disparaissaient (vérifié : ventes et imports effacés). */
-   const FUSIONNER = ['checklist:', 'hebdo:', 'temp:', 'caisse:', 'reassort:',
+   /* « feed: » : le fil du jour, où chaque iPad ajoute ses lignes. Sans fusion,
+      la copie d'un iPad resté hors ligne, rejouée au retour du réseau,
+      remplaçait le fil écrit entre-temps par les autres iPads (vérifié : les
+      lignes de Marie disparaissaient). Voir unirFil. */
+   const FUSIONNER = ['feed:', 'checklist:', 'hebdo:', 'temp:', 'caisse:', 'reassort:',
                       'preuves:', 'ruptures', 'releve', 'lots:', 'clean:',
                       'anomalies', 'reception:', 'stock:mv:', 'stock:m13:', 'pointage:', 'ecart:'];
    const aFusionner = cle => FUSIONNER.some(p => cle.indexOf(p) === 0);
@@ -241,7 +245,20 @@
      return out.every(x => x && x.at) ? out.sort((p, q) => p.at < q.at ? -1 : p.at > q.at ? 1 : 0) : out;
    }
 
+   /* Fil du jour : on n'y fait qu'ajouter des lignes. Leur « id » est celui de
+      leur auteur, pas de la ligne : unirListes les confondrait. Une ligne se
+      reconnaît donc à son heure, son auteur et son texte. Le fil reste dans
+      l'ordre des heures et garde ses 400 dernières lignes, comme dans feed(). */
+   function unirFil(distant, local) {
+     const cleFil = x => [x.at, x.id || x.par, x.x].join('|');
+     const vus = new Set(local.filter(Boolean).map(cleFil));
+     const out = local.concat(distant.filter(x => x && !vus.has(cleFil(x))));
+     return (out.every(x => x && x.at) ? out.sort((p, q) => p.at < q.at ? -1 : p.at > q.at ? 1 : 0) : out).slice(-400);
+   }
+
    function fusionner(distant, local, cle) {
+     if (Array.isArray(distant) && Array.isArray(local) && cle &&
+         cle.indexOf('feed:') === 0) return unirFil(distant, local);
      if (Array.isArray(distant) && Array.isArray(local) && cle &&
          UNIR.some(p => cle.indexOf(p) === 0)) return unirListes(distant, local, cle);
      if (!distant || typeof distant !== 'object' || Array.isArray(distant)) return local;
