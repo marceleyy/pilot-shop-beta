@@ -1250,6 +1250,9 @@ V.caisse = async function () {
       if (r[mom + '_valide'] && !r[mom + '_avant']) {
         r[mom + '_avant'] = Object.assign({ valeurs:instantane(mom) }, r[mom + '_valide']);
       }
+      /* Numéro de saisie : une copie lue pendant la correction en porte un plus
+         petit, et la fusion ne la laisse pas remettre ses montants. */
+      if (r[mom + '_avant']) r[mom + '_avant'] = Object.assign({}, r[mom + '_avant'], { n:(+r[mom + '_avant'].n || 0) + 1 });
       r[i.dataset.k] = i.value;
       /* null et non delete : la fusion avec la copie du serveur ferait revenir
          une clé supprimée, et l'ancienne signature avec elle. */
@@ -1267,6 +1270,20 @@ V.caisse = async function () {
       if (vides.length) return toast(mom === 'm'
         ? 'Renseignez le fond de caisse initial'
         : 'Renseignez tous les montants du soir', 'erreur');
+      /* Écran ouvert avant une validation ou une correction faite sur un autre
+         iPad : la fusion refuserait cette validation sans rien dire, et le fil
+         annoncerait quand même « a validé ». L'équipier relit d'abord la fiche. */
+      if (STATE.user.role !== 'manager') {
+        $('#cv').disabled = true;
+        const frais = await DB.get('caisse:' + j, null);
+        const sig = frais && (frais[p + 'valide'] || frais[p + 'avant']);
+        if (sig) {
+          toast(frais[p + 'valide']
+            ? 'Comptage déjà validé par ' + (sig.par || 'un collègue') + ' : seul le manager peut le modifier'
+            : 'Comptage en cours de correction par le manager', 'erreur');
+          return rendre('caisse');
+        }
+      }
       /* Revalidation d'un comptage déjà signé, corrigé ou non : l'ancienne
          signature et les anciens montants vont au journal et restent dans la
          fiche (p_corrections), au lieu d'être écrasés sans trace. */

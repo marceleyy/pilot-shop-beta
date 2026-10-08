@@ -283,7 +283,9 @@
       depuis le matin, remettait 150 € à la place des 200 € corrigés.
       Même chose pendant la correction elle-même (signature en base à null,
       <moment>_avant gardé) : seules passent la copie du manager qui corrige
-      (même <moment>_avant) et sa revalidation (signature nouvelle). La copie
+      (même <moment>_avant, numéro de saisie n à jour : une copie lue en cours
+      de correction ne remet plus 180 € sur les 200 €) et sa revalidation
+      (signature nouvelle, correction connue dans <moment>_corrections). La copie
       lue avant la correction porte encore la signature corrigée : écrite
       pendant la correction, elle remettait 150 € et l'ancienne signature
       jusqu'à ce que le manager revalide. */
@@ -302,8 +304,10 @@
      };
      const auCourantCorrection = mom => {
        const av = distant[mom + '_avant'], la = local[mom + '_avant'], sl = local[mom + '_valide'];
-       if (la && la.at === av.at) return true;                        // le manager qui corrige
-       return !!(sl && sl.at !== av.at && !dejaCorrigee(mom, sl));    // sa revalidation
+       if (la && la.at === av.at) return (+la.n || 0) >= (+av.n || 0); // le manager qui corrige, copie à jour
+       const connue = Array.isArray(local[mom + '_corrections']) &&
+         local[mom + '_corrections'].some(c => c && c.at && c.at === av.at);
+       return !!(sl && sl.at !== av.at && connue && !dejaCorrigee(mom, sl));   // sa revalidation
      };
      ['m', 's'].forEach(mom => {
        const enCorrection = !distant[mom + '_valide'] &&
