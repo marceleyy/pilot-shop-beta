@@ -27,36 +27,59 @@ const CALCUL = {
   /* À partir de ce jour du mois, un mois sans calcul clôturé se signale. */
   jourAlerteMois: 20,
   /* Produits vendus et leur grammage, retenus d'un calcul à l'autre. */
-  cleProduits: 'catalogue:ventes'
+  cleProduits: 'catalogue:ventes',
+  /* Tailles du classeur Amorino : le 4 L y a sa colonne. */
+  taillesBac: [3, 4, 5, 7],
+  /* Produits et grammages du classeur Amorino (poids de glace théorique, cornet
+     ou coque déduit), proposés tant qu'aucun catalogue n'a été retenu. */
+  produitsDefaut: [
+    ['Coppa enfant', 81], ['Coppa petit', 133], ['Coppa classic', 163], ['Coppa grand', 221],
+    ['Coppa géant', 275], ['Coppa à partager', 529], ['Cornetto enfant', 69], ['Cornetto petit', 114],
+    ['Cornetto classique', 153], ['Cornetto grand', 224], ['Choco-cône enfant', 67], ['Choco-cône petit', 112],
+    ['Choco-cône classique', 149], ['Choco-cône grand', 208], ['Coffret 550 ml', 470], ['Coffret 1100 ml', 930],
+    ['Brioche Glace', 100], ['Brioche x1 glace', 50], ['Brioche x2 glace', 160], ['Sorbet Drink', 160],
+    ['Coupe Gourmand', 160], ['Milkshake', 160], ['Affogato al caffé', 160], ['Affogato al Chocolat', 160],
+    ['Espresso Frappé', 200], ['Incontour', 80], ['Gaufre x1 glace', 50], ['Gaufre x2 glace', 100],
+    ['Gaufre x3 glace', 150], ['Crêpe x1 glace', 50], ['Crêpe x2 glace', 100], ['Crêpe x3 glace', 150],
+    ['Cornet Sans Gluten', 153], ['Extra glace x1', 50], ['Extra glace x2', 100]
+  ]
 };
 
-   const kgDeLitres = l => num(l) * FOURNISSEUR.poidsMoyenLitre;
+   /* Poids d'un litre de glace. Un calcul réel prend la valeur mesurée ; un
+      essai, qui rejoue l'ancien classeur, prend la sienne pour retrouver ses
+      chiffres. Retenue sur le calcul à sa création. */
+   const poidsLitre = c => (c && num(c.poidsLitre) > 0) ? num(c.poidsLitre)
+     : (c && c.essai && FOURNISSEUR.poidsMoyenLitreClasseur) ? FOURNISSEUR.poidsMoyenLitreClasseur
+     : FOURNISSEUR.poidsMoyenLitre;
+   const kgDeLitres = (l, pl) => num(l) * (pl || FOURNISSEUR.poidsMoyenLitre);
    const kgTxt = v => n1(v) + ' kg';
    /* Pourcentage d'écart avec le vrai signe moins, comme l'écart en kg. */
    const pctTxt = r => r.incoherent ? 'incohérent' :
      (Math.abs(r.pct) < 0.05 ? '' : r.pct > 0 ? '−' : '+') + n1(Math.abs(r.pct)) + ' %';
 
-   /* Un stock de zone : bacs pleins par taille + entamés pesés. */
-   function kgStock(s) {
+   /* Un stock de zone, comme dans le classeur : bacs pleins par taille +
+      litrage approximatif des bacs entamés. (entamesKg : premières saisies,
+      pesées.) */
+   function kgStock(s, pl) {
      if (!s) return 0;
-     let l = 0;
+     let l = num(s.entamesL);
      Object.keys(s.bacs || {}).forEach(t => { l += num(s.bacs[t]) * num(t); });
-     return kgDeLitres(l) + num(s.entamesKg);
+     return kgDeLitres(l, pl) + num(s.entamesKg);
    }
-   const kgZones = z => CALCUL.zones.reduce((t, x) => t + kgStock(z && z[x.id]), 0);
+   const kgZones = (z, pl) => CALCUL.zones.reduce((t, x) => t + kgStock(z && z[x.id], pl), 0);
 
    function champsZones(p, z) {
      return CALCUL.zones.map(x => {
        const s = (z && z[x.id]) || {};
        const v = n => (n === undefined || n === null || n === '' || num(n) === 0) ? '' : n;
        return '<p class="f" style="margin:16px 0 6px"><b>' + esc(x.label) + '</b></p>' +
-         '<div class="grid g4">' + TAILLES_BAC.map(t =>
+         '<div class="grid g4">' + CALCUL.taillesBac.map(t =>
            '<div class="champ"><label class="f">Bacs pleins ' + t + ' L</label>' +
            '<input type="number" min="0" step="1" inputmode="numeric" data-zone="' + x.id + '" data-taille="' + t + '" ' +
            'id="' + p + '-' + x.id + '-' + t + '" value="' + esc(v((s.bacs || {})[t])) + '" placeholder="0"></div>').join('') +
-         '<div class="champ"><label class="f">Entamés (kg pesés)</label>' +
-         '<input type="number" min="0" step="0.01" inputmode="decimal" data-zone="' + x.id + '" data-entames ' +
-         'id="' + p + '-' + x.id + '-ek" value="' + esc(v(s.entamesKg)) + '" placeholder="0"></div></div>';
+         '<div class="champ"><label class="f">Entamés (litres approx.)</label>' +
+         '<input type="number" min="0" step="0.5" inputmode="decimal" data-zone="' + x.id + '" data-entames ' +
+         'id="' + p + '-' + x.id + '-el" value="' + esc(v(s.entamesL)) + '" placeholder="0"></div></div>';
      }).join('') +
      '<p class="mini" id="' + p + '-total" style="margin-top:12px"></p>';
    }
@@ -64,19 +87,19 @@ const CALCUL = {
      const z = {};
      CALCUL.zones.forEach(x => {
        const bacs = {};
-       TAILLES_BAC.forEach(t => { const el = $('#' + p + '-' + x.id + '-' + t); bacs[t] = el ? Math.max(0, num(el.value)) : 0; });
-       const ek = $('#' + p + '-' + x.id + '-ek');
-       z[x.id] = { bacs:bacs, entamesKg:ek ? Math.max(0, num(ek.value)) : 0 };
+       CALCUL.taillesBac.forEach(t => { const el = $('#' + p + '-' + x.id + '-' + t); bacs[t] = el ? Math.max(0, num(el.value)) : 0; });
+       const el = $('#' + p + '-' + x.id + '-el');
+       z[x.id] = { bacs:bacs, entamesL:el ? Math.max(0, num(el.value)) : 0 };
      });
      return z;
    }
    /* Total recalculé à chaque frappe, sous les champs. */
-   function suivreTotal(p) {
+   function suivreTotal(p, pl) {
      const maj = () => {
        const z = lireZones(p);
        const el = $('#' + p + '-total');
-       if (el) el.textContent = CALCUL.zones.map(x => x.label + ' ' + kgTxt(kgStock(z[x.id]))).join(' · ') +
-         ' · Total ' + kgTxt(kgZones(z));
+       if (el) el.textContent = CALCUL.zones.map(x => x.label + ' ' + kgTxt(kgStock(z[x.id], pl))).join(' · ') +
+         ' · Total ' + kgTxt(kgZones(z, pl));
      };
      $$('#sheet-corps [data-zone]').forEach(i => i.oninput = maj);
      maj();
@@ -117,7 +140,7 @@ const CALCUL = {
    function resultatCalcul(c) {
      const debut  = num(c.depart && c.depart.kg);
      const livreL = livraisonsDe(c).reduce((t, l) => t + num(l.litres), 0);
-     const livre  = kgDeLitres(livreL);
+     const livre  = kgDeLitres(livreL, poidsLitre(c));
      const perte  = num(c.pertes && c.pertes.kg);
      const vendu  = num(c.ventes && c.ventes.kg);
      const theo   = debut + livre - perte - vendu;
@@ -300,11 +323,11 @@ const CALCUL = {
          champsZones('cz', w.zones) +
          '<div class="actions"><button class="btn clair" id="cz-ret">Retour</button>' +
          '<button class="btn menthe" id="cz-suiv">Suivant</button></div>');
-       suivreTotal('cz');
+       suivreTotal('cz', poidsLitre(w));
        $('#cz-ret').onclick = () => { w.zones = lireZones('cz'); e1(); };
        $('#cz-suiv').onclick = () => {
          w.zones = lireZones('cz');
-         if (!(kgZones(w.zones) > 0)) { toast('Le stock de départ est vide : comptez au moins une zone', 'erreur'); return; }
+         if (!(kgZones(w.zones, poidsLitre(w)) > 0)) { toast('Le stock de départ est vide : comptez au moins une zone', 'erreur'); return; }
          e3();
        };
      };
@@ -349,8 +372,8 @@ const CALCUL = {
            const depart = (!w.essai && w.source === 'precedent' && prec)
              ? { source:'precedent', ref:prec.id, zones:(prec.arrivee && prec.arrivee.zones) || null,
                  kg:+num(prec.arrivee && prec.arrivee.kg).toFixed(3) }
-             : { source:'manuel', zones:w.zones, kg:+kgZones(w.zones).toFixed(3) };
-           const c = { id:id, essai:w.essai, debut:w.debut, statut:'ouvert', depart:depart,
+             : { source:'manuel', zones:w.zones, kg:+kgZones(w.zones, poidsLitre(w)).toFixed(3) };
+           const c = { id:id, essai:w.essai, debut:w.debut, statut:'ouvert', depart:depart, poidsLitre:poidsLitre(w),
                        livraisons:w.livraisons, par:STATE.user.prenom, at:nowISO() };
            await DB.patch(id, c);
            await feed('ok', STATE.user.prenom + ' a démarré ' + (w.essai ? 'un essai de calcul' : 'un calcul d’écart') +
@@ -479,9 +502,10 @@ const CALCUL = {
        zones: b.zones || null,
        perteL: b.perteL !== undefined ? b.perteL : null,
        perteSource: b.perteSource || '',
+       perteKg: num(b.perteKg),
        ventes: b.ventes || { mode:'produits', lignes:null, kg:0 }
      };
-     const brouillon = () => DB.patch(c.id, { brouillon:{ fin:w.fin, zones:w.zones, perteL:w.perteL,
+     const brouillon = () => DB.patch(c.id, { brouillon:{ fin:w.fin, zones:w.zones, perteL:w.perteL, perteKg:w.perteKg,
                                                           perteSource:w.perteSource, ventes:w.ventes } });
 
      const eA = () => {
@@ -531,11 +555,11 @@ const CALCUL = {
          champsZones('cf', w.zones) +
          '<div class="actions"><button class="btn clair" id="cf-ret">Retour</button>' +
          '<button class="btn menthe" id="cf-suiv">Suivant</button></div>');
-       suivreTotal('cf');
+       suivreTotal('cf', poidsLitre(c));
        $('#cf-ret').onclick = () => { w.zones = lireZones('cf'); eA(); };
        $('#cf-suiv').onclick = async () => {
          w.zones = lireZones('cf');
-         if (!(kgZones(w.zones) > 0)) { toast('Le stock de fin est vide : comptez au moins une zone', 'erreur'); return; }
+         if (!(kgZones(w.zones, poidsLitre(c)) > 0)) { toast('Le stock de fin est vide : comptez au moins une zone', 'erreur'); return; }
          await brouillon();
          eC();
        };
@@ -554,16 +578,21 @@ const CALCUL = {
          (reg !== null ? '<p class="mini">Registre des pertes : ' + n1(reg) + ' L sur ces dates.</p>' : '') +
          '<div class="champ" style="margin-top:10px"><label class="f">Litres jetés</label>' +
          '<input type="number" id="cp-l" min="0" step="0.1" inputmode="decimal" value="' + (w.perteL || '') + '" placeholder="0"></div>' +
+         '<div class="champ" style="margin-top:10px"><label class="f">Et/ou kg jetés (pesés)</label>' +
+         '<input type="number" id="cp-k" min="0" step="0.01" inputmode="decimal" value="' + (w.perteKg || '') + '" placeholder="0"></div>' +
          '<p class="mini" id="cp-kg" style="margin-top:8px"></p>' +
          '<div class="actions"><button class="btn clair" id="cp-ret">Retour</button>' +
          '<button class="btn menthe" id="cp-suiv">Suivant</button></div>');
-       const maj = () => { $('#cp-kg').textContent = 'Soit ' + kgTxt(kgDeLitres($('#cp-l').value)); };
-       $('#cp-l').oninput = maj; maj();
+       const maj = () => { $('#cp-kg').textContent = 'Pertes : ' +
+         kgTxt(kgDeLitres($('#cp-l').value, poidsLitre(c)) + Math.max(0, num($('#cp-k').value))); };
+       $('#cp-l').oninput = maj; $('#cp-k').oninput = maj; maj();
        const lire = () => {
          const v = Math.max(0, num($('#cp-l').value));
          if (reg === null || Math.abs(v - reg) > 0.001) w.perteSource = 'Saisie';
          else w.perteSource = 'Registre des pertes';
          w.perteL = v;
+         w.perteKg = Math.max(0, num($('#cp-k').value));
+         if (w.perteKg > 0) w.perteSource = 'Saisie';
        };
        $('#cp-ret').onclick = () => { lire(); eB(); };
        $('#cp-suiv').onclick = async () => { lire(); await brouillon(); eD(); };
@@ -572,7 +601,8 @@ const CALCUL = {
      const eD = async () => {
        if (!w.ventes.lignes) {
          const cat = await DB.get(CALCUL.cleProduits, []);
-         w.ventes.lignes = (Array.isArray(cat) ? cat : []).map(p => ({ nom:p.nom, g:p.g, q:'' }));
+         const base = (Array.isArray(cat) && cat.length) ? cat : CALCUL.produitsDefaut.map(x => ({ nom:x[0], g:x[1] }));
+         w.ventes.lignes = base.map(p => ({ nom:p.nom, g:p.g, q:'' }));
          if (!w.ventes.lignes.length) w.ventes.lignes = [{ nom:'', g:'', q:'' }];
        }
        const v = w.ventes;
@@ -669,8 +699,9 @@ const CALCUL = {
        const horsPeriode = livs.filter(x => x.date && (x.date < debutFlux(c) || x.date > w.fin));
        const fini = Object.assign({}, frais, {
          statut:'clos', fin:w.fin, livraisonsArretees:livs.map(x => x.id),
-         arrivee:{ zones:w.zones, kg:+kgZones(w.zones).toFixed(3) },
-         pertes:{ litres:w.perteL, kg:+kgDeLitres(w.perteL).toFixed(3), source:w.perteSource },
+         arrivee:{ zones:w.zones, kg:+kgZones(w.zones, poidsLitre(c)).toFixed(3) },
+         pertes:{ litres:w.perteL, kgSaisis:w.perteKg,
+                  kg:+(kgDeLitres(w.perteL, poidsLitre(c)) + num(w.perteKg)).toFixed(3), source:w.perteSource },
          ventes:ventesAEnregistrer(w.ventes)
        });
        const r = resultatCalcul(fini);
@@ -780,7 +811,7 @@ const CALCUL = {
        blocResultat(r) +
        '<p class="mini" style="margin-top:14px"><b>Départ</b> : ' +
          (c.depart && c.depart.source === 'precedent' ? 'clôture du calcul précédent' : 'comptage') + '. ' +
-       '<b>Pertes</b> : ' + n1(num(c.pertes && c.pertes.litres)) + ' L (' + esc((c.pertes && c.pertes.source) || '') + '). ' +
+       '<b>Pertes</b> : ' + kgTxt(num(c.pertes && c.pertes.kg)) + ' (' + esc((c.pertes && c.pertes.source) || '') + '). ' +
        '<b>Ventes</b> : ' + esc(v.source || '') + (v.fichier ? ' · ' + esc(v.fichier) : '') + '.</p>' +
        (v.lignes && v.lignes.length
          ? '<div class="dense" style="margin-top:10px"><div class="dense-h"><span class="c1">Produit</span>' +
