@@ -141,6 +141,12 @@ async function jetonValide() {
   if (_renouvellementEnCours) {
     const s = await _renouvellementEnCours;
     if (s) return s.access_token;
+    /* Raté : on n'en relance pas un autre aussitôt. Sinon chaque appel qui
+       attendait repartait pour 8 s de plus (hors ligne, jeton expiré :
+       renouvellements en chaîne) ; et après un refus (400/401), _session
+       est nul : la suite levait une TypeError, prise pour une panne réseau. */
+    return (_session && _session.expires_at - Date.now() > AUTH.margeRenouvellementSec * 1000)
+      ? _session.access_token : null;
   }
   const reste = _session.expires_at - Date.now();
   const encoreValide = reste > AUTH.margeRenouvellementSec * 1000;
