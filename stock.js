@@ -1576,17 +1576,93 @@ V.inventaire = async function () {
   dessiner();
 };
 
+/* -----------------------------------------------------------------------------
+   ARMOIRE −13
+   Le bac de glace sort de la chambre froide (−20) et attend à l'armoire −13
+   avant de monter en vitrine. Tant qu'il y est, il reste au stock : seule la
+   mise en vitrine le déduit (mouvement « ouverture »).
+   Sa durée de vie commence à la SORTIE de la chambre froide, pas à la mise en
+   vitrine : cette date est notée ici, plus sur le bac au feutre.
+
+   Journal en ajout seul, découpé par mois comme celui du stock :
+     { id, t:'entree', c:clé article, l:lot, j:jour de sortie du −20, a, e }
+     { id, t:'sortie', r:id de l'entrée, v:'vitrine'|'perte'|'erreur', a, e }
+   Une sortie ne modifie pas l'entrée : deux iPads qui écrivent en même temps
+   se réunissent sans s'écraser (UNIR, app.js).
+   -------------------------------------------------------------------------- */
+const ARMOIRE = { nom: 'Armoire −13', moisLus: 3 };
+const cleArmoire = d => 'stock:m13:' + String(d || today()).slice(0, 7);
+
+/* Bacs présents à l'armoire, du plus ancien au plus récent. Lit les trois
+   derniers mois : un gelato vit dix jours, un bac plus ancien serait périmé
+   depuis longtemps. Sert aussi au comptage par lieu (chambre froide / −13). */
+async function bacsArmoire() {
+  const fin = new Date(today() + 'T12:00:00');
+  const cles = [];
+  for (let i = 0; i < ARMOIRE.moisLus; i++) {
+    cles.push(cleArmoire(isoOf(new Date(fin.getFullYear(), fin.getMonth() - i, 15))));
+  }
+  const blocs = await Promise.all(cles.map(c => DB.get(c, []).catch(() => [])));
+  const ev = [];
+  blocs.forEach(l => { if (Array.isArray(l)) ev.push.apply(ev, l); });
+  const sortis = new Set(ev.filter(e => e && e.t === 'sortie').map(e => e.r));
+  const heures = (DLC_RULES.gelato || DLC_RULES.defaut).h;
+  return ev.filter(e => e && e.t === 'entree' && e.id && !sortis.has(e.id) && e.j)
+    .map(e => {
+      const limite = new Date(new Date(e.j + 'T08:00:00').getTime() + heures * 3600e3);
+      return { id: e.id, cle: e.c, lot: e.l || '', jour: e.j, at: e.a,
+               limite: isoOf(limite), resteH: Math.round((limite - Date.now()) / 3600e3) };
+    })
+    .sort((x, y) => (x.jour + (x.at || '')).localeCompare(y.jour + (y.at || '')));
+}
+
+async function noterArmoire(ev) {
+  return DB.push(cleArmoire(), Object.assign(
+    { id: uid(), a: nowISO(), e: STATE.user ? STATE.user.id : null }, ev));
+}
+
+/* Retirer un bac de l'armoire sans le monter en vitrine : jeté (il sort du
+   stock, comme une perte) ou noté par erreur (le stock ne bouge pas). */
+function retirerDeArmoire(b) {
+  showSheet(
+    '<h2 id="sheet-titre">' + esc(libelleArticle(b.cle)) + '</h2>' +
+    '<p class="cs">À l’armoire depuis le ' + fmtD(b.jour) + (b.lot ? ' · lot ' + esc(b.lot) : '') + '</p>' +
+    '<div class="stack" style="margin-top:14px">' +
+    '<button class="btn corail bloc" id="ar-jete">Jeté (périmé ou abîmé)</button>' +
+    '<button class="btn clair bloc" id="ar-err">Noté par erreur</button></div>' +
+    '<div class="actions"><button class="btn clair" data-fermer>Annuler</button></div>');
+  let enCours = false;
+  const sortir = async (v) => {
+    if (enCours) return;
+    enCours = true;
+    try {
+      if (v === 'perte') await ajouterMouvement('perte', b.cle, 1, { lot: b.lot, motif: 'armoire' });
+      await noterArmoire({ t: 'sortie', r: b.id, v: v });
+      await feed(v === 'perte' ? 'warn' : 'ok', STATE.user.prenom +
+        (v === 'perte' ? ' a jeté ' : ' a retiré (erreur de saisie) ') +
+        libelleArticle(b.cle) + ' de l’armoire −13');
+      closeSheet();
+      rendre('lots');
+    } finally { enCours = false; }
+  };
+  $('#ar-jete').onclick = () => sortir('perte');
+  $('#ar-err').onclick = () => sortir('erreur');
+}
+
 V.lots = async function () {
   const mouv = await tousMouvements(null);
   const ouvertures = mouv.map(litMouvement)
     .filter(m => m.type === 'ouverture').slice(-40).reverse();
+  const armoire = await bacsArmoire().catch(() => []);
+  const seuilH = (typeof seuilOrangeHeures === 'function')
+    ? seuilOrangeHeures((DLC_RULES.gelato || DLC_RULES.defaut).h) : 72;
 
   $('#vue-actions').innerHTML = '';
   $('#page').innerHTML =
     carte('<h2>Traçabilité</h2>' +
       '<div class="cs">À l’ouverture de tout nouveau produit, pas à la livraison. ' +
-      'Le bac sort de la chambre froide, on l’ouvre, il monte en vitrine : ' +
-      'un seul geste.</div>' +
+      'Un bac de glace qui sort de la chambre froide se scanne tout de suite : ' +
+      'il monte en vitrine ou attend à l’armoire −13. Plus de date au feutre.</div>' +
       /* Le scanner ne lit que les étiquettes de glace et de macarons : ce sont
          les seules avec un numéro de lot imprimé en clair. La chantilly, les
          coulis, les cakes n'en ont pas de lisible — on les saisit à la main.
@@ -1597,6 +1673,23 @@ V.lots = async function () {
       'Scanner une étiquette</button>' +
       '<button class="btn clair bloc" id="lo-main" style="margin-top:8px">' +
       'Saisir à la main</button>', 'solide') +
+
+    (armoire.length
+      ? '<div class="entete" style="margin-top:20px"><h3>À l’armoire −13</h3>' +
+        '<span class="pousse mini num">' + armoire.length + '</span></div>' +
+        '<div class="stack">' + armoire.map(b => {
+          const a = litArticle(b.cle);
+          const etat = b.resteH < 0 ? pastille('bad', 'Périmé')
+            : b.resteH <= seuilH ? pastille('warn', 'Jusqu’au ' + fmtDC(b.limite))
+            : pastille('ok', 'Jusqu’au ' + fmtDC(b.limite));
+          return '<div class="lotl">' +
+            '<span class="invn">' + esc(a.parfum || libelleArticle(b.cle)) +
+            '<small>' + esc([a.taille ? a.taille + ' L' : '', 'sorti du −20 le ' + fmtDC(b.jour),
+                             b.lot ? 'lot ' + b.lot : ''].filter(Boolean).join(' · ')) + '</small></span>' +
+            '<span class="invc">' + etat + '<br>' +
+            '<button type="button" class="btn clair sm" data-armoire="' + esc(b.id) + '">Retirer</button></span></div>';
+        }).join('') + '</div>'
+      : '') +
 
     (ouvertures.length
       ? '<div class="entete" style="margin-top:20px"><h3>Dernières ouvertures</h3>' +
@@ -1629,6 +1722,10 @@ V.lots = async function () {
      alors la liste : elle affichait encore « Aucune ouverture enregistrée »
      avec deux ouvertures en base, de quoi faire rescanner et doubler la
      traçabilité. */
+  $$('[data-armoire]').forEach(bt => bt.onclick = () => {
+    const b = armoire.filter(x => x.id === bt.dataset.armoire)[0];
+    if (b) retirerDeArmoire(b);
+  });
   $('#lo-scan').onclick = async function scanner(dejaOuvert) {
     const r = await scannerPhoto('etiquette', { enchainer: true });
     if (!r) { if (dejaOuvert === true) rendre('lots'); return; }
@@ -1664,19 +1761,85 @@ function confirmerOuverture(r) {
       else if (/^1[34]\d{3}[A-Z]$/i.test(r.lot)) famille = 'glace';
     }
 
+    /* Glace seulement : où va le bac (vitrine ou armoire −13), d'où il sort
+       quand il monte en vitrine (chambre froide −20 ou armoire −13), et
+       lequel des bacs de l'armoire, pour reprendre sa date de sortie du −20. */
+    let dest = '', orig = '', bacId = '', jourM13 = '';
+    let armoire = [];
+    let fini = false;
+    bacsArmoire().then(l => {
+      armoire = l;
+      if (!fini && $('#co-ok')) { garder(); dessiner(); }
+    }).catch(() => {});
+    const estGlace = () => famille === 'glace';
+    const cleCourante = () => cleArticle('glace', parfum, taille);
+    const candidats = () => armoire.filter(b => b.cle === cleCourante());
+    const bacArmoire = () => (estGlace() && dest === 'vitrine' && orig === 'm13')
+      ? candidats().filter(b => b.id === bacId)[0] || null : null;
+
     const garder = () => {
       const l = $('#co-lot'); if (l) r.lot = l.value.trim().toUpperCase();
+      const sp = $('#co-parfum'); if (sp) parfum = sp.value;
+      const jm = $('#co-j13'); if (jm) jourM13 = jm.value;
     };
     /* Annuler : la feuille est redessinée par dessiner() sans passer par
        showSheet, qui seul branche [data-fermer] — le bouton ne faisait rien. */
-    const annuler = () => { closeSheet(); resolve(false); };
+    const annuler = () => { fini = true; closeSheet(); resolve(false); };
     let enCours = false;
 
     const dessiner = () => {
       const fam = FAMILLES_PRODUIT.filter(f => f.id === famille)[0];
+      const glace = estGlace();
+      /* Bac de l'armoire : celui dont le lot correspond au scan, sinon le plus
+         ancien du parfum — c'est lui qui doit partir en premier. */
+      const cands = glace ? candidats() : [];
+      if (glace && dest === 'vitrine' && orig === 'm13' &&
+          !cands.some(b => b.id === bacId)) {
+        const parLot = r.lot ? cands.filter(b => b.lot && b.lot === String(r.lot).toUpperCase())[0] : null;
+        bacId = (parLot || cands[0] || {}).id || '';
+      }
+      const choixDest = !glace ? ''
+        : '<div class="champ" style="margin-top:16px"><label class="f">Où va ce bac ?</label>' +
+          '<div class="pastilles">' +
+          [['vitrine', 'Vitrine'], ['m13', ARMOIRE.nom]].map(d =>
+            '<button type="button" class="pas' + (dest === d[0] ? ' on' : '') +
+            '" data-dest="' + d[0] + '">' + esc(d[1]) + '</button>').join('') + '</div></div>' +
+          (dest === 'vitrine'
+            ? '<div class="champ" style="margin-top:14px"><label class="f">Il sort de</label>' +
+              '<div class="pastilles">' +
+              [['cf', 'Chambre froide −20'], ['m13', ARMOIRE.nom]].map(d =>
+                '<button type="button" class="pas' + (orig === d[0] ? ' on' : '') +
+                '" data-orig="' + d[0] + '">' + esc(d[1]) + '</button>').join('') + '</div></div>'
+            : '') +
+          (dest === 'vitrine' && orig === 'm13'
+            ? (cands.length
+                ? '<div class="champ" style="margin-top:14px"><label class="f">Bac de l’armoire</label>' +
+                  '<div class="pastilles">' + cands.map(b =>
+                    '<button type="button" class="pas' + (b.id === bacId ? ' on' : '') +
+                    '" data-bac="' + esc(b.id) + '">Sorti du −20 le ' + fmtDC(b.jour) +
+                    (b.lot ? ' · ' + esc(b.lot) : '') + '</button>').join('') + '</div>' +
+                  '<p class="mini" style="margin-top:6px">Sa durée de vie compte depuis cette date.</p></div>'
+                : '<div class="champ" style="margin-top:14px"><label class="f">Sorti du −20 le</label>' +
+                  '<input type="date" id="co-j13" max="' + today() + '" value="' + esc(jourM13 || today()) + '">' +
+                  '<p class="mini" style="margin-top:6px">Aucun bac de ce parfum n’est noté à l’armoire : ' +
+                  'indiquez la date écrite sur le bac.</p></div>')
+            : '') +
+          (dest === 'vitrine' && orig === 'cf' && cands.length
+            ? '<div class="rappel" style="margin-top:12px">' + cands.length + ' bac(s) de ce parfum ' +
+              'attendent déjà à l’armoire −13, depuis le ' + fmtDC(cands[0].jour) +
+              '. Le plus ancien part d’abord.</div>'
+            : '');
+      const sousTitre = !glace ? 'Ce produit est ouvert et part en service.'
+        : dest === 'm13' ? 'Le bac reste au stock. La date du jour est sa date de sortie du −20.'
+        : dest === 'vitrine' ? 'Le bac monte en vitrine : il sort du stock.'
+        : 'Le bac sort de la chambre froide.';
+      const libOk = !glace ? 'Confirmer l’ouverture'
+        : dest === 'm13' ? 'Mettre à l’armoire −13'
+        : 'Mettre en vitrine';
+
       $('#sheet-corps').innerHTML =
-        '<h2 id="sheet-titre">Ouvrir un produit</h2>' +
-        '<p class="cs">Ce bac sort de la chambre froide et monte en vitrine.</p>' +
+        '<h2 id="sheet-titre">' + (glace ? 'Sortie d’un bac de glace' : 'Ouvrir un produit') + '</h2>' +
+        '<p class="cs">' + esc(sousTitre) + '</p>' +
 
         '<div class="champ" style="margin-top:16px"><label class="f">Famille</label>' +
         '<div class="pastilles">' + FAMILLES_PRODUIT.map(f =>
@@ -1707,12 +1870,15 @@ function confirmerOuverture(r) {
               : '')
           : '') +
 
-        '<div class="champ" style="margin-top:14px"><label class="f">Numéro de lot</label>' +
+        '<div class="champ" style="margin-top:14px"><label class="f">Numéro de lot' +
+        (glace && dest === 'm13' ? ' (facultatif)' : '') + '</label>' +
         '<input type="text" id="co-lot" value="' + esc(r.lot || '') + '" ' +
         'autocapitalize="characters" spellcheck="false" placeholder="14001A"></div>' +
 
+        choixDest +
+
         '<div class="actions"><button class="btn clair" data-fermer>Annuler</button>' +
-        '<button class="btn menthe" id="co-ok">Confirmer l’ouverture</button></div>';
+        '<button class="btn menthe" id="co-ok">' + esc(libOk) + '</button></div>';
 
       $$('[data-fam]').forEach(b => b.onclick = () => {
         garder(); famille = b.dataset.fam; dessiner();
@@ -1720,8 +1886,18 @@ function confirmerOuverture(r) {
       $$('[data-taille]').forEach(b => b.onclick = () => {
         garder(); taille = b.dataset.taille; dessiner();
       });
+      $$('[data-dest]').forEach(b => b.onclick = () => {
+        garder(); dest = b.dataset.dest; if (dest !== 'vitrine') orig = ''; dessiner();
+      });
+      $$('[data-orig]').forEach(b => b.onclick = () => {
+        garder(); orig = b.dataset.orig; dessiner();
+      });
+      $$('[data-bac]').forEach(b => b.onclick = () => {
+        garder(); bacId = b.dataset.bac; dessiner();
+      });
       const sp = $('#co-parfum');
-      if (sp) sp.onchange = () => { parfum = sp.value; };
+      /* Le parfum change les bacs de l'armoire proposés : on redessine. */
+      if (sp) sp.onchange = () => { garder(); if (estGlace()) dessiner(); };
       $$('#sheet-corps [data-fermer]').forEach(b => b.onclick = annuler);
       $('#co-ok').onclick = async () => {
         /* Double appui : un seul enregistrement à la fois. */
@@ -1742,8 +1918,19 @@ function confirmerOuverture(r) {
         if (sp) parfum = sp.value;
         if (!parfum) return toast('Choisissez le parfum', 'erreur');
       }
-      const lot = (r.lot || '').trim().toUpperCase();
-      if (!lot) return toast('Le numéro de lot est obligatoire', 'erreur');
+      if (fam.id === 'glace') {
+        if (!dest) return toast('Choisissez : vitrine ou armoire −13', 'erreur');
+        if (dest === 'vitrine' && !orig) return toast('Indiquez d’où sort le bac', 'erreur');
+        if (dest === 'vitrine' && orig === 'm13' && !bacArmoire() &&
+            !(/^\d{4}-\d{2}-\d{2}$/.test(jourM13) && jourM13 <= today())) {
+          return toast('Indiquez la date de sortie du −20', 'erreur');
+        }
+      }
+      /* Le bac repris de l'armoire garde le lot noté à son entrée. */
+      const bA = bacArmoire();
+      const lot = ((r.lot || '').trim() || (bA && bA.lot) || '').toUpperCase();
+      const versArmoire = fam.id === 'glace' && dest === 'm13';
+      if (!lot && !versArmoire) return toast('Le numéro de lot est obligatoire', 'erreur');
 
       /* Le lot n'identifie pas un bac — deux bacs de vanille peuvent porter le
          même numéro. Le vrai signal est le stock : ouvrir un bac qu'on n'a plus
@@ -1773,7 +1960,22 @@ function confirmerOuverture(r) {
       const cle = cleArticle(fam.id,
         fam.parfums ? parfum : '',
         fam.id === 'glace' ? taille : '');
+
+      /* Vers l'armoire −13 : le bac reste au stock, on note seulement sa date
+         de sortie du −20 — c'est elle qui fera partir sa durée de vie. */
+      if (fam.id === 'glace' && dest === 'm13') {
+        await noterArmoire({ t: 'entree', c: cle, l: lot || '', j: today() });
+        await feed('ok', STATE.user.prenom + ' a mis ' + parfum + ' à l’armoire −13' +
+          (lot ? ' — lot ' + lot : ''));
+        fini = true;
+        closeSheet();
+        resolve(true);
+        return;
+      }
+
+      const bA = bacArmoire();
       await ajouterMouvement('ouverture', cle, 1, { lot: lot, famille: fam.id, parfum: parfum });
+      if (bA) await noterArmoire({ t: 'sortie', r: bA.id, v: 'vitrine' });
 
       /* Le frigo virtuel lit la clé « lots: », pas le journal de stock : sans
          cette écriture il restait désespérément vide alors que l'équipe scannait
@@ -1791,13 +1993,23 @@ function confirmerOuverture(r) {
       /* « Ouvert le » de la lecture fait foi (bac ouvert la veille, scanné ce
          matin) : il était ignoré et la DLC après ouverture partait d'aujourd'hui.
          Une date future ou illisible retombe sur aujourd'hui. */
-      const ouv = (r.ouv && /^\d{4}-\d{2}-\d{2}$/.test(r.ouv) && r.ouv <= today()) ? r.ouv : today();
+      /* Bac venu de l'armoire −13 : sa durée de vie compte depuis sa sortie
+         du −20, notée à l'entrée dans l'armoire (ou saisie s'il n'y était pas
+         noté). Venu directement du −20 : depuis aujourd'hui. */
+      const dateValide = d => d && /^\d{4}-\d{2}-\d{2}$/.test(d) && d <= today();
+      const ouv = (fam.id === 'glace' && orig === 'm13')
+        ? (bA ? bA.jour : (dateValide(jourM13) ? jourM13 : today()))
+        : fam.id === 'glace' && orig === 'cf' ? today()
+        : (dateValide(r.ouv) ? r.ouv : today());
       lots[cleFifo] = { lot: lot, ouv: ouv, par: STATE.user.prenom, at: nowISO(),
                         famille: fam.id, taille: fam.parfums ? taille : null };
       await DB.set('lots:' + m, lots);
 
-      await feed('ok', STATE.user.prenom + ' a ouvert ' +
-        (parfum || fam.libelle) + ' — lot ' + lot);
+      await feed('ok', STATE.user.prenom +
+        (fam.id === 'glace' ? ' a mis en vitrine ' : ' a ouvert ') +
+        (parfum || fam.libelle) + (bA || orig === 'm13' ? ' (depuis l’armoire −13)' : '') +
+        ' — lot ' + lot);
+      fini = true;
       closeSheet();
       resolve(true);
     }

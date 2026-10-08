@@ -151,7 +151,7 @@
       iPad disparaissaient (vérifié : ventes et imports effacés). */
    const FUSIONNER = ['checklist:', 'hebdo:', 'temp:', 'caisse:', 'reassort:',
                       'preuves:', 'ruptures', 'releve', 'lots:', 'clean:',
-                      'anomalies', 'reception:', 'stock:mv:', 'pointage:', 'ecart:'];
+                      'anomalies', 'reception:', 'stock:mv:', 'stock:m13:', 'pointage:', 'ecart:'];
    const aFusionner = cle => FUSIONNER.some(p => cle.indexOf(p) === 0);
 
    /* Fusion superficielle, champ par champ. Suffisante : chaque personne
@@ -167,7 +167,9 @@
       l'union la ferait revenir. */
    /* « pointage: » : deux équipiers qui pointent sur deux iPads le même jour
       ajoutent chacun leur session ; sans union, la seconde effaçait la première. */
-   const UNIR = ['ruptures', 'releve', 'anomalies', 'reception:', 'stock:mv:', 'pointage:', 'preuves:'];
+   /* « stock:m13: » : entrées et sorties de l'armoire −13, en ajout seul. Deux
+      iPads qui y posent chacun un bac ne doivent pas s'effacer. */
+   const UNIR = ['ruptures', 'releve', 'anomalies', 'reception:', 'stock:mv:', 'stock:m13:', 'pointage:', 'preuves:'];
    const ts = x => (x && (x.a || x.at)) || '';
    const idLigne = x => x && (x.id || [ts(x), x.c || x.cle, x.t || x.type, x.e || x.employe || '',
                                        x.q !== undefined ? x.q : x.qte, x.l || x.lot || ''].join('|'));
