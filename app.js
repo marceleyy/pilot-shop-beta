@@ -77,6 +77,7 @@
      enLigne: navigator.onLine,
      erreurBase: null,
      dernierEchec: null,
+     delaisDepasses: 0,   // délais dépassés de suite, sans réponse entre-temps (voir appel)
      fileAttente: 0,
      _pin: '',
      _candidat: null
@@ -406,6 +407,7 @@
            Object.assign({ signal: ctrl.signal }, options || {}, { headers: entetes }));
          clearTimeout(to);
          /* Le réseau a répondu : on est en ligne, même si le serveur refuse. */
+         STATE.delaisDepasses = 0;
          if (!STATE.enLigne) { STATE.enLigne = true; STATE.erreurBase = null; majBandeau(); }
          if (!r.ok) {
            const err = new Error('HTTP ' + r.status);
@@ -461,11 +463,18 @@
          clearTimeout(to);
          /* Seule une vraie panne réseau bascule l'application hors ligne.
             Un dépassement de délai sur UNE requête n'en est pas une : le Wi-Fi
-            d'une boutique peut traîner sans être coupé. On laisse la sonde
-            trancher plutôt que de déclarer la panne sur un seul incident. */
+            d'une boutique peut traîner sans être coupé. Deux de suite, sans
+            aucune réponse entre les deux, en sont une : la sonde ne tourne que
+            hors ligne, elle ne tranchait donc jamais, et un Wi-Fi devenu muet
+            en pleine journée faisait attendre 8 s chaque lecture (plus d'une
+            minute pour Ma journée). Hors ligne, l'iPad lit sa copie aussitôt,
+            et la sonde rétablit l'état en ligne dès que la base répond. */
          const estAbandon = e && (e.name === 'AbortError' ||
                                   /abort/i.test(String(e.message || '')));
-         if (!e.http && !estAbandon && STATE.enLigne) { STATE.enLigne = false; majBandeau(); }
+         const muet = estAbandon && STATE.enLigne && ++STATE.delaisDepasses >= 2;
+         if (STATE.enLigne && ((!e.http && !estAbandon) || muet)) {
+           STATE.enLigne = false; STATE.delaisDepasses = 0; majBandeau();
+         }
          throw e;
        }
      }
