@@ -48,6 +48,26 @@ const CALCUL = {
     ['Espresso Frappé', 200], ['Incontour', 80], ['Gaufre x1 glace', 50], ['Gaufre x2 glace', 100],
     ['Gaufre x3 glace', 150], ['Crêpe x1 glace', 50], ['Crêpe x2 glace', 100], ['Crêpe x3 glace', 150],
     ['Cornet Sans Gluten', 153], ['Extra glace x1', 50], ['Extra glace x2', 100]
+  ],
+  /* Produit de caisse (libellé Innovorder) → colonne du classeur où il se
+     range. Testé dans l'ordre ; un produit sans colonne (macarons…) garde sa
+     propre ligne. */
+  colonnes: [
+    [/^POT ENFANT/, 'Coppa enfant'], [/^POT PETIT/, 'Coppa petit'], [/^POT CLASSI/, 'Coppa classic'],
+    [/^POT GRAND/, 'Coppa grand'], [/^POT GEANT/, 'Coppa géant'], [/^POT (A )?PARTAG/, 'Coppa à partager'],
+    [/^CORNET .*SANS GLUTEN/, 'Cornet Sans Gluten'],
+    [/^CORNET ENFANT/, 'Cornetto enfant'], [/^CORNET PETIT/, 'Cornetto petit'],
+    [/^CORNET CLASSI/, 'Cornetto classique'], [/^CORNET GRAND/, 'Cornetto grand'],
+    [/^CHOCO ?CONE ENFANT/, 'Choco-cône enfant'], [/^CHOCO ?CONE PETIT/, 'Choco-cône petit'],
+    [/^CHOCO ?CONE CLASSI/, 'Choco-cône classique'], [/^CHOCO ?CONE GRAND/, 'Choco-cône grand'],
+    [/^(BAC|COFFRET) .*\b550 ?ML\b/, 'Coffret 550 ml'], [/^(BAC|COFFRET) .*\b(1100 ?ML|1 1 ?L)\b/, 'Coffret 1100 ml'],
+    [/^BRIOCHE .*X ?2\b/, 'Brioche x2 glace'], [/^BRIOCHE .*X ?1\b/, 'Brioche x1 glace'], [/^BRIOCHE/, 'Brioche Glace'],
+    [/^SORBET DRINK/, 'Sorbet Drink'], [/^COUPE|^CG /, 'Coupe Gourmand'], [/SHAKE/, 'Milkshake'],
+    [/^AFFOGATO CHOC/, 'Affogato al Chocolat'], [/^AFFOGATO/, 'Affogato al caffé'],
+    [/^ESPRESSO FRAPPE/, 'Espresso Frappé'], [/^INCONTOURNABLE/, 'Incontour'],
+    [/^GAUFRE .*\b(X ?3|3) GLACES?\b/, 'Gaufre x3 glace'], [/^GAUFRE .*\b(X ?2|2) GLACES?\b/, 'Gaufre x2 glace'], [/^GAUFRE/, 'Gaufre x1 glace'],
+    [/^CREPE .*\b(X ?3|3) GLACES?\b/, 'Crêpe x3 glace'], [/^CREPE .*\b(X ?2|2) GLACES?\b/, 'Crêpe x2 glace'], [/^CREPE/, 'Crêpe x1 glace'],
+    [/^EXTRA GLACE X ?2/, 'Extra glace x2'], [/^EXTRA GLACE/, 'Extra glace x1']
   ]
 };
 
@@ -1069,11 +1089,13 @@ const CALCUL = {
               où les grammages se vérifient et se complètent. */
            if (r.produits) {
              v.mode = 'produits';
-             v.lignes = r.produits.map(l => ({ nom:l.nom, g:l.g, q:l.q }));
+             const cat = await DB.get(CALCUL.cleProduits, []);
+             v.lignes = rangerClasseur(r.produits, (Array.isArray(cat) && cat.length) ? cat
+               : CALCUL.produitsDefaut.map(x => ({ nom:x[0], g:x[1] })));
              v.fichierLu = f.name;
              delete v.fichier; delete v.methode; delete v.detail;
              eD();
-             toast(r.produits.length + ' produits glacés lus dans ' + f.name +
+             toast(r.produits.length + ' produits de caisse rangés dans les colonnes du classeur' +
                (r.inconnus.length ? ' : ' + r.inconnus.length + ' grammage(s) à compléter' : ''), r.inconnus.length ? 'erreur' : undefined);
              return;
            }
@@ -1183,6 +1205,31 @@ const CALCUL = {
      };
 
      eA();
+   }
+
+   /* Range les produits de caisse dans les lignes du classeur (Coppa petit,
+      Gaufre x1 glace…) : quantités additionnées, grammage de la ligne. Les
+      lignes du classeur restent toutes affichées, même à 0 ; un produit sans
+      colonne (macarons…) s'ajoute à la fin avec son propre grammage. */
+   function rangerClasseur(produits, base) {
+     const lignes = base.map(p => ({ nom:p.nom, g:p.g, q:0, de:[] }));
+     const parNom = {};
+     lignes.forEach(l => { parNom[nomCaisse(l.nom)] = l; });
+     produits.forEach(p => {
+       const n = nomCaisse(p.nom);
+       const col = (CALCUL.colonnes.filter(c => c[0].test(n))[0] || [])[1];
+       let l = col ? parNom[nomCaisse(col)] : null;
+       if (!l) l = parNom[n];
+       if (!l) {
+         l = { nom:col || p.nom, g:p.g, q:0, de:[] };
+         lignes.push(l);
+         parNom[nomCaisse(l.nom)] = l;
+       }
+       if (!(num(l.g) > 0) && num(p.g) > 0) l.g = p.g;
+       l.q += num(p.q);
+       l.de.push(p.nom);
+     });
+     return lignes.map(l => ({ nom:l.nom, g:l.g, q:l.q || '' }));
    }
 
    function detailVentes(d) {
