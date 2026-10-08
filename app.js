@@ -1885,7 +1885,8 @@ async function purgerLocalAncien() {
    
      $('#page').innerHTML =
        carte(entete('🎙️', 'Dicter la perte', SPEECH
-           ? 'Appuyez, parlez normalement : « J’ai jeté 2 bacs de vanille ».'
+           /* RGPD : la voix quitte l'iPad, il faut le dire avant le premier mot. */
+           ? 'Appuyez, parlez normalement : « J’ai jeté 2 bacs de vanille ». La voix est transcrite par le service de dictée de l’appareil (Apple ou Google).'
            : 'La dictée n’est pas disponible sur ce navigateur. Utilisez la saisie ci-dessous.') +
          '<button class="btn corail bloc xl mic" id="mic"' + (SPEECH ? '' : ' disabled') + '>' +
          'Dicter la perte</button>' +
@@ -3254,6 +3255,16 @@ window.addEventListener('error', function (ev) {
        if (SUPABASE.url && SUPABASE.anonKey && typeof appareilRattache === 'function' && !appareilRattache() &&
            typeof ecranRattachement === 'function') {
          await ecranRattachement();
+         /* Rattachée, la boutique peut n'avoir encore aucune équipe : l'écran
+            des prénoms restait vide jusqu'au rechargement. Nouvelle lecture
+            pour distinguer la base vide (on crée l'équipe) de la base
+            injoignable (on réessaie, surtout pas de nouvelle équipe). */
+         if (!EQUIPE.length) {
+           const apres = await chargerEquipe();
+           if (EQUIPE.length) initLogin();
+           else if (apres === 'reseau') ecranEquipeInjoignable();
+           else if (typeof ecranAmorcage === 'function') ecranAmorcage();
+         }
        } else if (etatEquipe === 'reseau') {
          /* La base n'a pas répondu : ce n'est pas une boutique vide. */
          ecranEquipeInjoignable();
