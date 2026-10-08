@@ -309,7 +309,7 @@ const CALCUL = {
 
    /* Sous les champs d'un comptage : ce que l'appli a pour ce jour, sinon
       on dit qu'il faut le saisir. Une touche recopie la proposition. */
-   async function proposerStock(p, jour, pl, sauf) {
+   async function proposerStock(p, jour, pl, sauf, reprendre) {
      const box = $('#' + p + '-prop');
      if (!box) return;
      const props = await stockAppli(jour, sauf);
@@ -330,22 +330,12 @@ const CALCUL = {
        '<b>Proposé par l’appli : ' + esc(x.libelle) + '</b><p>' + esc(resume(x.zones)) + ' (' + kgTxt(x.kg || kgZones(x.zones, pl)) + ')' +
        (x.sansRangement ? '. L’appli ne sait pas où les bacs sont rangés : ils sont repris en chambre froide, déplacez ceux du congélateur −13.' : '.') +
        '</p><button type="button" class="btn clair sm" data-st-prop="' + i + '" style="margin-top:6px">Reprendre ce comptage</button></div></div>').join('');
+     /* Le comptage repris remplace celui de l'étape, qui se redessine : les
+        champs suivent alors les zones reprises (anciens entamés en chambre
+        froide, bacs pleins en vitrine), rien n'est perdu. */
      $$('[data-st-prop]', box).forEach(bt => bt.onclick = () => {
-       const z = props[+bt.dataset.stProp].zones;
-       const oublis = [];
-       CALCUL.zones.forEach(x => {
-         const s = z[x.id] || {};
-         CALCUL.taillesBac.forEach(t => { const el = $('#' + p + '-' + x.id + '-' + t); if (el) el.value = num((s.bacs || {})[t]) || ''; });
-         Object.keys(s.bacs || {}).forEach(t => {
-           if (num(s.bacs[t]) > 0 && !$('#' + p + '-' + x.id + '-' + t)) oublis.push(s.bacs[t] + ' × ' + t + ' L');
-         });
-         const el = $('#' + p + '-' + x.id + '-el');
-         const l = num(s.entamesL) + (num(s.entamesKg) > 0 ? num(s.entamesKg) / (pl || FOURNISSEUR.poidsMoyenLitre) : 0);
-         if (el) el.value = l > 0 ? +l.toFixed(2) : '';
-       });
-       const un = $('#sheet-corps [data-zone]');
-       if (un) un.dispatchEvent(new Event('input'));
-       toast(oublis.length ? 'Comptage repris, sauf ' + oublis.join(', ') + ' (taille non prévue)' : 'Comptage repris : vérifiez-le');
+       reprendre(JSON.parse(JSON.stringify(props[+bt.dataset.stProp].zones)));
+       toast('Comptage repris : vérifiez-le');
      });
    }
 
@@ -353,12 +343,21 @@ const CALCUL = {
       d'une période de gestion (import de caisse ou saisie). */
    async function ventesAppli(debut, fin) {
      try {
-       const pers = ((await DB.get('periodes', [])) || []).filter(x => x && x.debut === debut && x.fin === fin);
+       const pers = ((await DB.get('periodes', [])) || [])
+         .filter(x => x && x.debut && x.fin && x.debut >= debut && x.fin <= fin)
+         .sort((x, y) => x.debut < y.debut ? -1 : 1);
+       const vues = [];
        for (const per of pers) {
          const e = await DB.get('ecart:' + per.id, {});
          const kg = Object.keys((e && e.ventes) || {}).reduce((t, k) => t + num(e.ventes[k]), 0);
-         if (kg > 0) return { kg:kg, source:e.venteSource || 'Écarts de la période' };
+         if (kg > 0) vues.push({ debut:per.debut, fin:per.fin, kg:kg, source:e.venteSource || 'Écarts de la période' });
        }
+       if (!vues.length) return null;
+       /* Couvre toutes les dates seulement si les périodes se suivent sans trou. */
+       const couvre = vues[0].debut === debut && vues[vues.length - 1].fin === fin &&
+         vues.every((x, i) => !i || x.debut === addD(vues[i - 1].fin, 1));
+       return { kg:vues.reduce((t, x) => t + x.kg, 0), couvre:couvre,
+                source:vues.map(x => texteDates(x.debut, x.fin) + ' : ' + x.source).join(' · ') };
      } catch (e) {}
      return null;
    }
@@ -549,7 +548,7 @@ const CALCUL = {
          '<div class="actions"><button class="btn clair" id="cz-ret">Retour</button>' +
          '<button class="btn menthe" id="cz-suiv">Suivant</button></div>');
        suivreTotal('cz', poidsNeuf(w));
-       if (!w.essai) proposerStock('cz', w.debut, poidsNeuf(w));
+       if (!w.essai) proposerStock('cz', w.debut, poidsNeuf(w), null, z => { w.zones = z; e2(); });
        $('#cz-ret').onclick = () => { w.zones = lireZones('cz'); e1(); };
        $('#cz-suiv').onclick = () => {
          w.zones = lireZones('cz');
@@ -581,8 +580,11 @@ const CALCUL = {
            ? { source:'precedent', ref:prec.id, zones:(prec.arrivee && prec.arrivee.zones) || null,
                kg:+num(prec.arrivee && prec.arrivee.kg).toFixed(3) }
            : { source:'manuel', zones:w.zones, kg:+kgZones(w.zones, poidsNeuf(w)).toFixed(3) };
-         const c = { id:id, essai:w.essai, debut:w.debut, finPrevue:w.fin, statut:'ouvert', depart:depart, poidsLitre:poidsNeuf(w),
+         const c = { id:id, essai:w.essai, debut:w.debut, statut:'ouvert', depart:depart, poidsLitre:poidsNeuf(w),
                      livraisons:w.livraisons, par:STATE.user.prenom, at:nowISO() };
+         /* Fin déjà passée : la clôture la reprend. Fin à venir : on clôturera
+            le jour du comptage, la date proposée est alors aujourd'hui. */
+         if (w.fin < today()) c.finPrevue = w.fin;
          await DB.patch(id, c);
          await feed('ok', STATE.user.prenom + ' a démarré ' + (w.essai ? 'un essai de calcul' : 'un calcul d’écart') +
            ' au ' + fmtD(w.debut) + ' (' + kgTxt(depart.kg) + ')');
@@ -767,7 +769,7 @@ const CALCUL = {
          '<div class="actions"><button class="btn clair" id="ca-tard">Plus tard</button>' +
          '<button class="btn menthe" id="ca-suiv">Suivant</button></div>');
        suivreTotal('cf', poidsLitre(c));
-       if (!c.essai) proposerStock('cf', w.fin, poidsLitre(c), c.id);
+       if (!c.essai) proposerStock('cf', w.fin, poidsLitre(c), c.id, z => { w.zones = z; eA(); });
        $('#ca-fin').onchange = () => {
          const f = $('#ca-fin').value;
          if (finValide(f) && f !== w.fin) { w.zones = lireZones('cf'); changerFin(f); eA(); }
@@ -968,8 +970,9 @@ const CALCUL = {
              ' : importez l’export de caisse ou saisissez-les.</p>';
            return;
          }
-         box.innerHTML = '<div class="alerte info"><span class="ai">•</span><div><b>Proposé par l’appli : ' + kgTxt(va.kg) +
-           ' vendus sur ces dates</b><p>' + esc(va.source) + '.</p>' +
+         box.innerHTML = '<div class="alerte ' + (va.couvre ? 'info' : 'warn') + '"><span class="ai">•</span><div><b>Proposé par l’appli : ' + kgTxt(va.kg) +
+           (va.couvre ? ' vendus sur ces dates' : ' vendus, mais une partie des dates manque') + '</b><p>' + esc(va.source) + '.' +
+           (va.couvre ? '' : ' Pour le reste, importez l’export de caisse ou saisissez le total complet.') + '</p>' +
            '<button type="button" class="btn clair sm" id="cv-prop-ok" style="margin-top:6px">Reprendre ce total</button></div></div>';
          $('#cv-prop-ok').onclick = () => { lireLignes(); v.mode = 'total'; v.kg = +num(va.kg).toFixed(3); delete v.fichier; delete v.methode; delete v.detail; eD(); };
        });
