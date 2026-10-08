@@ -5064,6 +5064,7 @@ function modifierPeriode(per) {
      /* La base range les clés à sa façon : on compare clés triées. */
      const canon = v => JSON.stringify(v, (k, x) => (x && typeof x === 'object' && !Array.isArray(x))
        ? Object.keys(x).sort().reduce((o, c) => { o[c] = x[c]; return o; }, {}) : x);
+     let versionVue = null;
      for (let essai = 0; essai < 3; essai++) {
        let lu;
        try { lu = await lire(); }
@@ -5072,6 +5073,9 @@ function modifierPeriode(per) {
          throw new Error(CONNEXION_EQUIPE);
        }
        if (!lu || !lu.updated_at || !Array.isArray(lu.data) || !lu.data.length) return sansVersion();
+       /* [] alors que la ligne n'a pas bougé : ce n'est pas un autre iPad, la base refuse. */
+       if (versionVue === lu.updated_at) throw new Error('La base refuse la modification de l’équipe. Réessayez plus tard.');
+       versionVue = lu.updated_at;
        const liste = avecManager(await transformer(copie(lu.data)));
        let r;
        try {
@@ -5084,8 +5088,15 @@ function modifierPeriode(per) {
          /* Réponse perdue : l'écriture a pu passer. On le vérifie. */
          let relu = null;
          try { relu = await lire(); } catch (x) {}
-         if (relu && canon(relu.data) === canon(liste)) return garder(liste);
-         throw new Error(CONNEXION_EQUIPE);
+         const refus = e && e.http >= 400 && e.http < 500 && [408, 429].indexOf(e.http) < 0;
+         if (!refus && relu && canon(relu.data) === canon(liste)) return garder(liste);
+         if (relu && Array.isArray(relu.data) && relu.data.length) garder(relu.data);
+         if (refus) throw new Error('La base a refusé la modification (erreur ' + e.http + ').');
+         /* Aucune réponse HTTP et relecture impossible : la modification a pu passer. */
+         if (!relu && !(e && e.http)) throw new Error('Réseau coupé pendant l’enregistrement : la modification ' +
+                                                      'est peut-être passée. Vérifiez la liste avant de réessayer.');
+         if (!relu || relu.updated_at === lu.updated_at) throw new Error(CONNEXION_EQUIPE);   // rien n'est passé
+         throw new Error('L’équipe vient d’être modifiée sur un autre iPad : vérifiez la liste, puis réessayez.');
        }
        if (Array.isArray(r) && r.length) return garder(liste);
        /* Ligne modifiée entre-temps sur un autre iPad : on recommence sur la liste fraîche. */
@@ -5105,6 +5116,9 @@ function modifierPeriode(per) {
      if (!STATE.user || STATE.user.role !== 'manager') return;
      const neuf = !e;
      const moi = !neuf && e.id === STATE.user.id;
+     /* Identifiant tiré une fois par feuille : un second « Enregistrer » après une réponse perdue
+        retrouve la fiche déjà ajoutée au lieu d'en créer une seconde (« existe déjà »). */
+     const idNouveau = neuf ? 'e' + uid() : null;
      const champCode = (id, libelle) =>
        '<div class="champ"><label class="f">' + libelle + '</label>' +
        '<input type="password" id="' + id + '" inputmode="numeric" pattern="[0-9]*" maxlength="4" autocomplete="new-password"></div>';
@@ -5145,29 +5159,30 @@ function modifierPeriode(per) {
        $('#eq-ok').disabled = true;
        try {
          await modifierEquipe(async liste => {
-           const autres = neuf ? liste : liste.filter(x => x.id !== e.id);
+           const cible = neuf ? idNouveau : e.id;
+           const dejaLa = neuf && liste.some(x => x.id === idNouveau);
+           const autres = liste.filter(x => x.id !== cible);
            if (autres.some(x => String(x.prenom || '').trim().toLowerCase() === prenom.toLowerCase()))
              throw new Error('« ' + prenom + ' » existe déjà : ajoutez une initiale (ex. ' + prenom + ' B.)');
            /* Même règle qu'à l'amorçage : deux personnes, deux codes. */
            if (pin) for (const x of autres) if (await pinCorrect(x, pin)) throw new Error('Ce code est déjà utilisé : choisissez-en un autre');
            let fiche;
-           if (neuf) {
+           if (neuf && !dejaLa) {
              /* Identifiant jamais réutilisé. Le numéro suivait le plus grand id
                 restant : après le retrait de Nina (e3), Paul recevait e3, et
                 l'iPad où Nina était connectée se rouvrait sous le nom de Paul,
                 manager, sans code ; Paul héritait aussi de ses actions. */
-             let id = 'e' + uid();
-             while (liste.some(x => x.id === id)) id = 'e' + uid();
+             const id = idNouveau;
              fiche = { id:id, prenom:prenom, role:role, couleur:COULEURS_EQUIPE[liste.length % COULEURS_EQUIPE.length],
                        initiales:prenom.slice(0, 2).toUpperCase() };
            } else {
-             const ancienne = liste.filter(x => x.id === e.id)[0];
+             const ancienne = liste.filter(x => x.id === cible)[0];
              if (!ancienne) throw new Error(e.prenom + ' a été retiré(e) de l’équipe sur un autre appareil');
              fiche = Object.assign({}, ancienne, { prenom:prenom, role:role,
                initiales:prenom === ancienne.prenom ? ancienne.initiales : prenom.slice(0, 2).toUpperCase() });
            }
            if (pin) fiche = await ficheAvecCode(fiche, pin);
-           return neuf ? liste.concat([fiche]) : liste.map(x => x.id === fiche.id ? fiche : x);
+           return (neuf && !dejaLa) ? liste.concat([fiche]) : liste.map(x => x.id === fiche.id ? fiche : x);
          });
        } catch (err) {
          if ($('#eq-ok')) $('#eq-ok').disabled = false;
