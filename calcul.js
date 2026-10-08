@@ -1201,3 +1201,26 @@ const CALCUL = {
        $('#cg-ouvrir').onclick = () => rendre('calcul');
      };
    })();
+
+   /* En arrivant sur « Écarts glace » (pas en le redessinant), l'appli propose
+      de faire le calcul d'écart, ou de clôturer celui qui est en cours. */
+   (function () {
+     if (typeof rendre !== 'function') return;
+     const r0 = rendre;
+     rendre = async function (id) {
+       const arrivee = id === 'ecarts' && STATE.view !== 'ecarts';
+       const res = await r0.apply(this, arguments);
+       if (arrivee && STATE.view === 'ecarts' && vueAutorisee('calcul') && $('#sheet').hidden) {
+         let ouvert = null;
+         try { ouvert = reelOuvert(await lireCalculs()); } catch (e) {}
+         if (STATE.view !== 'ecarts' || !$('#sheet').hidden) return res;
+         if (ouvert) confirmer('Calcul d’écart en cours',
+           'Démarré le ' + fmtD(ouvert.debut) + '. Voulez-vous le clôturer maintenant ?',
+           'Clôturer', () => cloturerCalcul(ouvert), null, 'Plus tard');
+         else confirmer('Faire le calcul d’écart ?',
+           'L’appli vous guide : période, stock, livraison, pertes et ventes.',
+           'Oui, commencer', () => demarrerCalcul(), null, 'Non');
+       }
+       return res;
+     };
+   })();
