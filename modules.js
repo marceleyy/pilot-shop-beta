@@ -571,7 +571,7 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
        : '<button class="btn menthe sm" id="ptg">Début de service</button>';
    
      const R = [];
-     if (!e.tempM) R.push(['bad', 'Frigos du matin non relevés', 'À faire dès l’ouverture, avant la mise en vitrine.', 'temp']);
+     if (!e.tempM) R.push(['bad', 'Frigos du matin non relevés', 'À faire dès l’ouverture, avant la mise en vitrine.', 'temp', 'm']);
      if (e.tempCrit) R.push(['bad', e.tempCrit + ' frigo(s) en limite critique', 'Transférez les produits et prévenez ' + (typeof nomManager === 'function' ? nomManager() : 'le manager') + '.', 'temp']);
      alertes.filter(a => a.niveau !== 'jaune').forEach(a => R.push(['bad',
        'DLC ' + (a.reste < 0 ? 'dépassée' : 'dans ' + a.reste + ' j') + ' : ' + a.produit,
@@ -640,7 +640,9 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
        '" data-lib="' + esc(t.t) + '">' +
        (clichés.length ? '✓ ' + clichés.length : 'Photo') + '</button>' : '') +
      (t.lien ? '<button class="btn ' + (lie && !lie.fait ? 'menthe' : urgente ? 'corail' : 'clair') + ' sm" data-go="' + t.lien + '"' +
-       (t.partie ? ' data-partie="' + esc(t.partie) + '"' : '') + '>' +
+       (t.partie ? ' data-partie="' + esc(t.partie) + '"' : '') +
+       /* Relevé ou caisse : le moment de la phase, comme etatLie. */
+       (t.lien === 'temp' || t.lien === 'caisse' ? ' data-moment="' + (phase === 'fermeture' ? 's' : 'm') + '"' : '') + '>' +
        /* Même mot que la consigne « puis « Y aller » » de la tâche urgente. */
        ((lie && !lie.fait) || urgente ? 'Y aller' : '→') + '</button>' : '') +
          '</div>' +
@@ -676,7 +678,8 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
          ? '<div class="stack">' + R.slice(0, 4).map(r =>
              '<div class="alerte ' + r[0] + '"><div style="flex:1;min-width:0">' +
              '<b>' + esc(r[1]) + '</b><p>' + esc(r[2]) + '</p></div>' +
-             '<button class="btn clair sm" data-go="' + r[3] + '">Ouvrir</button></div>').join('') + '</div>'
+             '<button class="btn clair sm" data-go="' + r[3] + '"' + (r[4] ? ' data-moment="' + r[4] + '"' : '') +
+             '>Ouvrir</button></div>').join('') + '</div>'
          : '<div class="alerte ok"><div style="flex:1"><b>Tout est à jour</b>' +
            '<p>Aucun relevé ni contrôle en retard.</p></div></div>') +
    
@@ -1494,7 +1497,9 @@ V.temp = async function () {
   /* Un seul moment à l'écran : le matin ou le soir, jamais les deux.
      Le moment proposé dépend de l'heure et de ce qui reste à faire. */
   const moments = RELEVES.moments;
-  if (!V.temp._m || V.temp._j !== j) {
+  /* Un lien demande un moment précis (voir rendre) : il passe avant ce choix. */
+  if (V.temp._voulu) { V.temp._m = V.temp._voulu; V.temp._j = j; V.temp._voulu = null; }
+  else if (!V.temp._m || V.temp._j !== j) {
     V.temp._j = j;
     const h = new Date().getHours();
     if (!rec.valide.m && h < 15)      V.temp._m = 'm';

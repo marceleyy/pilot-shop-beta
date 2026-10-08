@@ -1502,7 +1502,7 @@ function renderNav() {
    /* Écrans à barre de dates : un lien peut les ouvrir sur un jour donné. */
    const VUES_DATEES = ['temp', 'clean', 'caisse', 'hebdo'];
 
-   async function rendre(id, viaHistorique, jour) {
+   async function rendre(id, viaHistorique, jour, moment) {
    if (!V[id]) { toast('Vue indisponible'); return; }
    if (!vueAutorisee(id)) id = vueAccueil();
    /* Rôle changé pendant qu'une feuille était ouverte, et la feuille se ferme
@@ -1541,6 +1541,13 @@ function renderNav() {
   if (jour && VUES_DATEES.indexOf(id) >= 0 && /^\d{4}-\d{2}-\d{2}$/.test(jour) && jour <= today()) {
     STATE.jour = jour;
     if (V.temp) { V.temp._d = jour; V.temp._auj = today(); }
+  }
+  /* Moment demandé par le lien (« Frigos du matin non relevés ») : Températures
+     et Caisse le choisissaient seules d'après l'heure, et passé 15 h ce lien
+     ouvrait le relevé du soir. */
+  if (moment === 'm' || moment === 's') {
+    if (id === 'temp' && V.temp) V.temp._voulu = moment;
+    if (id === 'caisse' && V.caisse) V.caisse._m = moment;
   }
   STATE.view = id;
      const p = PAGES[id] || { titre:id, sous:'' };
@@ -1603,7 +1610,7 @@ function renderNav() {
         sur le mauvais onglet. */
      $$('#page [data-go]').forEach(b => b.onclick = () => {
        if (b.dataset.partie) STATE.inventairePartie = b.dataset.partie;
-       rendre(b.dataset.go, false, b.dataset.jour);
+       rendre(b.dataset.go, false, b.dataset.jour, b.dataset.moment);
      });
 
      /* Chaque vue laisse une trace dans l'historique du navigateur : sans cela,
@@ -3763,9 +3770,9 @@ function ouvrirPremierePeriode() {
      const passe = h => { const x = minutesDe(h); return x !== null && maintenant >= x; };
      const matinDu = passe(horaires.ouverture), soirDu = passe(horaires.fermeture);
      if (matinDu && !e.tempM) A.push(['bad', 'Frigos du matin non relevés',
-       'Relevé à faire dès l’ouverture (' + horaires.ouverture + '), avant la mise en vitrine.', 'temp']);
+       'Relevé à faire dès l’ouverture (' + horaires.ouverture + '), avant la mise en vitrine.', 'temp', 'm']);
      if (soirDu && !e.tempS) A.push(['warn', 'Frigos du soir non relevés',
-       'Relevé à faire avant la fermeture (' + horaires.fermeture + ').', 'temp']);
+       'Relevé à faire avant la fermeture (' + horaires.fermeture + ').', 'temp', 's']);
      if (tempCrit) A.push(['bad', tempCrit + ' relevé(s) en limite critique',
        (enceintesCrit.length ? enceintesCrit.slice(0, 3).join(', ') + '. ' : '') +
        'Chaque dépassement doit avoir une action corrective écrite.', 'temp']);
@@ -3804,7 +3811,8 @@ function ouvrirPremierePeriode() {
          '<div class="alerte ' + a[0] + '"><span class="ai">' + (a[0] === 'bad' ? '▲' : '●') + '</span>' +
          '<div><b>' + esc(a[1]) + '</b><p>' + esc(a[2]) + '</p></div>' +
          '<span class="go"><button class="btn clair sm" ' + (a[3].charAt(0) === '#'
-           ? 'data-ancre="' + a[3].slice(1) + '"' : 'data-go="' + a[3] + '"') + '>Ouvrir</button></span></div>').join('') + '</div>'
+           ? 'data-ancre="' + a[3].slice(1) + '"' : 'data-go="' + a[3] + '"') +
+           (a[4] ? ' data-moment="' + a[4] + '"' : '') + '>Ouvrir</button></span></div>').join('') + '</div>'
          : carte('<div class="alerte ok"><span class="ai">•</span><div><b>Rien à signaler</b>' +
            '<p>Aucune alerte sur la caisse, les frigos, le nettoyage et les stocks.</p></div></div>', 'plat')) +
    
@@ -4497,9 +4505,10 @@ function ouvrirPremierePeriode() {
    
      for (const d of joursEntre(per.debut, today() < per.fin ? today() : per.fin)) {
        const st = await etatJour(d);
-       if (!st.tempM || !st.tempS) B.push({ id:'temp', txt:'Températures incomplètes le ' + fmtDC(d), go:'temp', jour:d });
+       if (!st.tempM || !st.tempS) B.push({ id:'temp', txt:'Températures incomplètes le ' + fmtDC(d), go:'temp', jour:d,
+                                            moment:st.tempM ? 's' : 'm' });
        if (st.netTotal && st.net === 0) B.push({ id:'nettoyage', txt:'Aucun nettoyage validé le ' + fmtDC(d), go:'clean', jour:d });
-       if (!st.caisse) B.push({ id:'caisse', txt:'Fermeture de caisse non validée le ' + fmtDC(d), go:'caisse', jour:d });
+       if (!st.caisse) B.push({ id:'caisse', txt:'Fermeture de caisse non validée le ' + fmtDC(d), go:'caisse', jour:d, moment:'s' });
      }
      return B.map(b => Object.assign(b, {
        forcable: (PERIODES.blocages.filter(x => x.id === b.id)[0] || { forcable:false }).forcable
@@ -4527,7 +4536,7 @@ function ouvrirPremierePeriode() {
          '<div class="alerte ' + (b.forcable ? 'warn' : 'bad') + '"><span class="ai">' + (b.forcable ? '●' : '▲') + '</span>' +
          '<div><b>' + esc(b.txt) + '</b><p>' + (b.forcable ? 'Peut être forcé avec un motif écrit.' : 'Bloquant : la clôture est impossible sans cela.') + '</p></div>' +
          '<span class="go"><button class="btn clair sm" data-go="' + b.go + '"' + (b.jour ? ' data-jour="' + b.jour + '"' : '') +
-         '>Ouvrir</button></span></div>').join('') + '</div>'
+         (b.moment ? ' data-moment="' + b.moment + '"' : '') + '>Ouvrir</button></span></div>').join('') + '</div>'
          : carte('<div class="alerte ok"><span class="ai">•</span><div><b>Tout est en ordre</b>' +
            '<p>Inventaires validés, achats saisis, registres complets.</p></div></div>', 'plat')) +
    
@@ -4632,12 +4641,12 @@ function modifierPeriode(per) {
          '<div class="stack">' + bloquants.map(b =>
            '<div class="alerte bad"><span class="ai">▲</span><div><b>' + esc(b.txt) + '</b></div>' +
            '<span class="go"><button class="btn clair sm" data-saut="' + b.go + '"' + (b.jour ? ' data-jour="' + b.jour + '"' : '') +
-           '>Ouvrir</button></span></div>').join('') + '</div>' +
+           (b.moment ? ' data-moment="' + b.moment + '"' : '') + '>Ouvrir</button></span></div>').join('') + '</div>' +
          '<div class="alerte info" style="margin-top:14px"><span class="ai">ℹ️</span><div><b>Pourquoi c’est bloquant</b>' +
          '<p>Sans inventaire de glace réel et sans achats saisis, le stock de fin est une invention : ' +
          'l’écart calculé serait faux et toute la période suivante partirait de travers.</p></div></div>' +
          '<div class="actions"><button class="btn clair" data-fermer>Fermer</button></div>');
-       $$('[data-saut]').forEach(b => b.onclick = () => { closeSheet(); rendre(b.dataset.saut, false, b.dataset.jour); });
+       $$('[data-saut]').forEach(b => b.onclick = () => { closeSheet(); rendre(b.dataset.saut, false, b.dataset.jour, b.dataset.moment); });
        return;
      }
    
