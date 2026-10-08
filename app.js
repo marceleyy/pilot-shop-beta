@@ -4262,13 +4262,17 @@ function ouvrirPremierePeriode() {
    
        (rec.valide ? '' : '<button class="btn menthe bloc xl" id="vs" style="margin-top:16px">Valider l’inventaire sec</button>');
    
-     const collecte = () => $$('[data-s]').forEach(i => {
+     const lireChamp = i => {
        const a = i.dataset.s.split('.');
        if (!rec.l[a[0]]) rec.l[a[0]] = {};
        rec.l[a[0]][a[1]] = i.value;
-     });
-     const save = debounce(() => { collecte(); DB.set(cle, rec); }, 400);
-     $$('[data-s]').forEach(i => i.oninput = save);
+     };
+     const collecte = () => $$('[data-s]').forEach(lireChamp);
+     /* La saisie entre dans rec à chaque frappe ; seule l'écriture est différée.
+        Relus 400 ms plus tard, les champs avaient quitté l'écran si l'on venait
+        de passer à l'onglet Glace : la dernière quantité tapée était perdue. */
+     const save = debounce(() => DB.set(cle, rec), 400);
+     $$('[data-s]').forEach(i => i.oninput = () => { lireChamp(i); save(); });
    
      const ro = $('#ro');
      /* Même confirmation que « Rouvrir » de l'onglet Glace : rouvrir rend les
