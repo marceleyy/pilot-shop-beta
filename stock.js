@@ -1140,7 +1140,8 @@ function voirInventaire(h, partie) {
     const autres = {};
     cles.filter(c => !vus.has(c)).sort().forEach(c => {
       const f = FAMILLES_PRODUIT.filter(x => x.id === litArticle(c).famille)[0];
-      const t = f ? f.libelle : 'Autres';
+      if (f && (f.lieu === 'sec' || f.stock === 'sec')) return;   // écarts d'anciens inventaires
+      const t = f ? f.libelle + ' (hors catalogue)' : 'Autres';
       (autres[t] = autres[t] || []).push(ligne(c, litArticle(c).parfum || (f ? f.libelle : c),
         f ? f.unite : ''));
     });
