@@ -342,8 +342,21 @@ const CALCUL = {
          .filter(h => h && h.jour && h.jour <= jour)
          .sort((x, y) => x.jour < y.jour ? -1 : x.jour > y.jour ? 1 : 0).pop();
        const r = inv && repartir(inv.lignes, inv.jour === jour ? armoire : await armoireAu(inv.jour));
+       /* Inventaire plus ancien : on compte les mouvements de glace tracés
+          depuis, pour que le manager sache qu'il faut recompter. */
+       let depuis = 0;
+       if (r && inv.jour < jour && typeof tousMouvements === 'function') {
+         try {
+           (await tousMouvements(addD(inv.jour, 1))).forEach(m => {
+             const j = isoOf(new Date(m.a || m.at));
+             if (j > inv.jour && j <= jour && litArticle(m.c || m.cle).famille === 'glace') depuis++;
+           });
+         } catch (e) {}
+       }
        if (r) props.push({ libelle:'Inventaire du ' + fmtDC(inv.jour) + (inv.par ? ' par ' + inv.par : '') +
                              (inv.jour < jour ? ' (dernier inventaire avant le ' + fmtDC(jour) + ')' : ''),
+                           avis:depuis ? depuis + ' mouvement(s) de glace tracé(s) depuis (réceptions, ouvertures, pertes) : ' +
+                             'ce comptage n’est plus exact, recomptez ce qui a bougé.' : '',
                            zones:r.zones, sansRangement:!r.rangement, rangement:r.rangement });
      } catch (e) {}
      if (jour === today() && typeof stockReel === 'function') {
@@ -379,6 +392,7 @@ const CALCUL = {
        '<div class="alerte info" style="margin-top:12px"><span class="ai">•</span><div>' +
        '<b>Proposé par l’appli : ' + esc(x.libelle) + '</b><p>' + esc(resume(x.zones)) + ' (' + kgTxt(x.kg || kgZones(x.zones, pl)) + ')' +
        (x.sansRangement ? '. L’appli ne sait pas où les bacs sont rangés : ils sont repris en chambre froide, déplacez ceux du congélateur −13.' : '.') +
+       (x.avis ? ' <b>' + esc(x.avis) + '</b>' : '') +
        '</p><button type="button" class="btn clair sm" data-st-prop="' + i + '" style="margin-top:6px">Reprendre ce comptage</button></div></div>').join('');
      /* Le comptage repris remplace celui de l'étape, qui se redessine : les
         champs suivent alors les zones reprises (anciens entamés en chambre
