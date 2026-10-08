@@ -1350,10 +1350,30 @@ V.inventaire = async function () {
     }
   };
 
+  /* Glaces, macarons et gianduiotti se replient comme les déclinaisons du
+     sec : un bouton par famille, qui dit ce qui est déjà compté, et la liste
+     des parfums ou saveurs seulement quand on l'ouvre. On compte une famille
+     à la fois au lieu de faire défiler soixante champs. */
+  const enteteFamille = (id, nom, cles, nbDecl, unites, mot) => {
+    const saisies = cles.filter(c => saisie[c] !== undefined);
+    const total = saisies.reduce((s, c) => s + num(saisie[c]), 0);
+    return '<button type="button" class="invp-h depliable" data-deplier="' + esc(id) + '"' +
+      ' aria-expanded="' + (deplies[id] ? 'true' : 'false') + '"' +
+      (deplies[id] ? '' : ' style="margin-bottom:0"') + '>' +
+      '<b>' + esc(nom) + '</b>' +
+      '<span class="invc">' + (saisies.length
+        ? total + ' ' + esc(unites) + ' · ' + saisies.length + ' saisie(s)'
+        : nbDecl + ' ' + (mot || 'déclinaisons') + ' · en ' + esc(unites)) + '</span>' +
+      '<span class="chev">' + (deplies[id] ? '−' : '+') + '</span></button>';
+  };
+
   /* --- Chambre froide : une ligne par parfum, tailles côte à côte --------- */
   const blocFroid = () =>
-    '<div class="entete"><h3>Glaces</h3>' +
-    '<button class="btn clair sm pousse" id="inv-rares">' +
+    '<div class="invp" style="margin-top:14px">' +
+    enteteFamille('f:glace', 'Glaces',
+      Object.keys(saisie).filter(c => litArticle(c).famille === 'glace'), PARFUMS.length, 'bacs', 'parfums') +
+    (!deplies['f:glace'] ? '' :
+    '<div class="entete" style="margin-top:8px"><button class="btn clair sm pousse" id="inv-rares">' +
     (montrerRares ? 'Masquer le 7 L' : '+ 7 L') + '</button></div>' +
     '<div class="stack">' + PARFUMS.map(p => {
       const base = montrerRares ? COURANTES.concat(RARES) : COURANTES;
@@ -1380,7 +1400,7 @@ V.inventaire = async function () {
             'aria-label="' + esc(p + ', bacs de ' + t + ' L') + '" ' +
             'value="' + (saisie[c] !== undefined ? esc(saisie[c]) : '') + '" placeholder="0"></label>';
         }).join('') + '</div></div>';
-    }).join('') + '</div>' +
+    }).join('') + '</div>') + '</div>' +
 
     '<div class="entete"><h3>Autres familles</h3>' +
     '<span class="pousse mini">comptées à l’unité</span></div>' +
@@ -1389,10 +1409,12 @@ V.inventaire = async function () {
        pistache et un coulis caramel ne se remplacent pas l'un l'autre,
        et « Coulis : 4 » ne disait pas lequel manquait. */
     if (f.saveurs) {
+    const fid = 'f:' + f.id;
     return '<div class="invp">' +
-      '<div class="invp-h"><b>' + esc(f.libelle) + '</b>' +
-      '<span class="invc">en ' + esc(f.unites) + '</span></div>' +
-      '<div class="stack">' + f.saveurs.map(sv => {
+      enteteFamille(fid, f.libelle, f.saveurs.map(sv => cleArticle(f.id, sv, '')),
+        f.saveurs.length, f.unites) +
+      (!deplies[fid] ? '' :
+      '<div class="stack" style="margin-top:8px">' + f.saveurs.map(sv => {
               const c = cleArticle(f.id, sv, '');
               const q = num(articles[c]);
               return '<div class="invl">' +
@@ -1401,7 +1423,7 @@ V.inventaire = async function () {
                 '<input type="number" inputmode="numeric" min="0" step="1" data-inv="' + esc(c) + '" ' +
                 'aria-label="' + esc(f.libelle + ', ' + sv) + '" ' +
                 'value="' + (saisie[c] !== undefined ? esc(saisie[c]) : '') + '" placeholder="0"></div>';
-            }).join('') + '</div></div>';
+            }).join('') + '</div>') + '</div>';
         }
         const c = cleArticle(f.id, '', '');
         const q = num(articles[c]);
@@ -1420,6 +1442,8 @@ V.inventaire = async function () {
      l'autorise : deux cartons pleins et un à moitié, ça se tape 2,5. Zéro
      veut dire « à commander », 0,5 veut dire « je réfléchis ». */
   let deplies = {};
+  /* La note survit au redessin : ouvrir une famille redessine l'écran. */
+  let note = '';
   const cleSec = (r, v) => 'sec|' + r.id + '|' + (v || '');
 
   /* nom : ce qu'un lecteur d'écran annonce, la ligne n'ayant pas d'étiquette. */
@@ -1535,7 +1559,8 @@ V.inventaire = async function () {
       (partie === 'froid' ? blocFroid() : blocSec()) +
 
       '<div class="champ" style="margin-top:18px"><label class="f">Note</label>' +
-      '<textarea id="inv-note" placeholder="Ce qui explique un écart, un bac abîmé, un doute."></textarea></div>' +
+      '<textarea id="inv-note" placeholder="Ce qui explique un écart, un bac abîmé, un doute.">' +
+      esc(note) + '</textarea></div>' +
 
       '<button class="btn menthe bloc xl" id="inv-ok" style="margin-top:16px"' +
       (ouvert ? '' : ' disabled') + '>' +
@@ -1602,6 +1627,7 @@ V.inventaire = async function () {
     $$('[data-partie]').forEach(b => b.onclick = () => {
       if (b.dataset.partie === partie) return;
       partie = b.dataset.partie;
+      note = '';
       dessiner();
     });
 
@@ -1624,7 +1650,7 @@ V.inventaire = async function () {
       };
     });
     const zn = $('#inv-note');
-    if (zn) zn.disabled = !ouvert;
+    if (zn) { zn.disabled = !ouvert; zn.oninput = () => { note = zn.value; }; }
     majTotaux();
 
     const br = $('#inv-rares');
@@ -1834,7 +1860,11 @@ V.lots = async function () {
             '<span class="invc">' + etat + '<br>' +
             '<button type="button" class="btn clair sm" data-armoire="' + esc(b.id) + '">Retirer</button></span></div>';
         }).join('') + '</div>'
-      : '') +
+      /* La section reste visible même vide : sinon personne ne sait où
+         regarder, et « rien ici » se lit comme « l'écran n'existe pas ». */
+      : '<div class="entete" style="margin-top:20px"><h3>À l’armoire −13</h3></div>' +
+        '<p class="cs">Aucun bac noté à l’armoire −13. Scannez un bac et choisissez ' +
+        '« Armoire −13 » pour qu’il apparaisse ici.</p>') +
 
     (ouvertures.length
       ? '<div class="entete" style="margin-top:20px"><h3>Dernières ouvertures</h3>' +

@@ -4782,10 +4782,31 @@ function modifierPeriode(per) {
      const defs = {
        caisse:{ l:'Caisse', p:'caisse:' }, temp:{ l:'Frigos', p:'temp:' }, clean:{ l:'Nettoyage', p:'clean:' },
        reassort:{ l:'Réassort', p:'reassort:' }, pertes:{ l:'Pertes', p:'pertes:' },
-       pointage:{ l:'Heures', p:'pointage:' }, feedback:{ l:'Retours', p:'feedback' }
+       pointage:{ l:'Heures', p:'pointage:' }, feedback:{ l:'Retours', p:'feedback' },
+       inventaires:{ l:'Inventaires', p:null }
      };
-     const cles = (await DB.list(defs[onglet].p)).reverse();
+     /* Les inventaires ne sont pas rangés par jour mais dans deux listes
+        (chambre froide, sec) : on les lit à part. Chaque ligne s'ouvre sur le
+        comptage complet (voirInventaire, stock.js). */
+     const cles = defs[onglet].p ? (await DB.list(defs[onglet].p)).reverse() : [];
      const lignes = [];
+     const invs = [];
+     if (onglet === 'inventaires') {
+       /* Catalogue du sec à jour (références ajoutées, renommées, masquées)
+          avant d'ouvrir un comptage du sec. */
+       if (typeof chargerCatalogueSec === 'function') await chargerCatalogueSec().catch(() => {});
+       const [hf, hs] = await Promise.all([DB.get('stock:inventaires', []), DB.get('stock:secs', [])]);
+       (hf || []).forEach(h => invs.push({ h: h, p: 'froid' }));
+       (hs || []).forEach(h => invs.push({ h: h, p: 'sec' }));
+       invs.sort((a, b) => String(b.h.at || b.h.jour).localeCompare(String(a.h.at || a.h.jour)));
+       invs.forEach((x, i) => {
+         const n = Object.keys(x.h.lignes || {}).length;
+         lignes.push([fmtD(x.h.jour) + ' · ' + (x.p === 'froid' ? 'chambre froide' : 'sec'),
+                      n + ' produit(s)',
+                      x.h.manquants ? x.h.manquants + ' manquant(s)' : (x.p === 'froid' ? 'Sans manquant' : 'Compté'),
+                      x.h.par || '—', x.h.manquants ? 'warn' : 'ok', i]);
+       });
+     }
    
      for (const c of cles) {
        const j = c.replace(defs[onglet].p, ''), v = await DB.get(c);
@@ -4838,17 +4859,29 @@ function modifierPeriode(per) {
          'Compile températures, nettoyage et lots ouverts en un document présentable à un contrôle.') +
          '<button class="btn ciel bloc xl" id="pdf2">Export PDF contrôle sanitaire</button>', 'ciel') +
    
+       (onglet === 'inventaires' && lignes.length
+         ? '<p class="mini" style="margin-top:14px">Touchez un inventaire pour voir tous ses produits.</p>' : '') +
        (lignes.length
          ? '<div class="dense" style="margin-top:14px"><div class="dense-h">' +
            '<span class="c1">Date</span><span class="c w">Volume</span><span class="c w">Résultat</span><span class="c ww">Par</span></div>' +
            '<div class="dense-scroll">' + lignes.map(l =>
-             '<div class="dl"><span class="c1">' + esc(l[0]) + '</span>' +
+             '<div class="dl"' + (l[5] !== undefined
+               ? ' data-inv="' + l[5] + '" role="button" tabindex="0" style="cursor:pointer"' : '') +
+             '><span class="c1">' + esc(l[0]) + '</span>' +
              '<span class="c w">' + esc(l[1]) + '</span>' +
              '<span class="c w">' + pastille(l[4], String(l[2]).slice(0, 22)) + '</span>' +
              '<span class="c ww">' + esc(l[3]) + '</span></div>').join('') + '</div></div>'
          : vide('📚', 'Aucun enregistrement pour ce registre.'));
    
      $$('[data-h]').forEach(b => b.onclick = () => { V.histo._t = b.dataset.h; rendre('histo'); });
+     $$('[data-inv]').forEach(r => {
+       const ouvrir = () => {
+         const x = invs[+r.dataset.inv];
+         if (x && typeof voirInventaire === 'function') voirInventaire(x.h, x.p);
+       };
+       r.onclick = ouvrir;
+       r.onkeydown = e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); ouvrir(); } };
+     });
      $('#pdf').onclick = ouvrirBouclier;
      $('#pdf2').onclick = ouvrirBouclier;
      $('#csv').onclick = () => {
