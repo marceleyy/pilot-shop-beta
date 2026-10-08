@@ -34,6 +34,8 @@ const CALCUL = {
   cleProduits: 'catalogue:ventes',
   /* Tailles du classeur Amorino : le 4 L y a sa colonne. */
   taillesBac: [3, 4, 5, 7],
+  /* Taille proposée pour estimer les entamés au quart de bac. */
+  tailleQuarts: 5,
   /* Produits et grammages du classeur Amorino (poids de glace théorique, cornet
      ou coque déduit), proposés tant qu'aucun catalogue n'a été retenu. */
   produitsDefaut: [
@@ -94,10 +96,21 @@ const CALCUL = {
      const ordre = CALCUL.ordreEntames.concat(CALCUL.zones.map(x => x.id).filter(id => CALCUL.ordreEntames.indexOf(id) < 0));
      const entam = ordre.map(id => CALCUL.zones.find(x => x.id === id)).filter(x => x && aEntames(x)).map(x =>
        '<div class="champ"><label class="f">' + esc(x.label) + ' (litres approx.)</label>' +
-       '<input type="number" min="0" step="0.5" inputmode="decimal" data-zone="' + x.id + '" data-entames ' +
-       'id="' + p + '-' + x.id + '-el" value="' + esc(v(entames(zs(x.id)))) + '" placeholder="0"></div>').join('');
+       '<input type="number" min="0" step="0.25" inputmode="decimal" data-zone="' + x.id + '" data-entames ' +
+       'id="' + p + '-' + x.id + '-el" value="' + esc(v(entames(zs(x.id)))) + '" placeholder="0">' +
+       /* Estimation au quart de bac, comme en boutique : chaque touche ajoute
+          ¼, ½ ou ¾ d'un bac de la taille choisie. */
+       '<div class="chips" style="margin-top:8px" data-quarts="' + p + '-' + x.id + '">' +
+         CALCUL.taillesBac.map(t => '<button type="button" class="chip' + (t === CALCUL.tailleQuarts ? ' on' : '') +
+           '" data-qt="' + t + '">' + t + ' L</button>').join('') + '</div>' +
+       '<div class="chips" style="margin-top:6px">' +
+         [[0.25, '+ ¼'], [0.5, '+ ½'], [0.75, '+ ¾']].map(q =>
+           '<button type="button" class="chip" data-qa="' + p + '-' + x.id + '" data-qf="' + q[0] + '">' + q[1] + '</button>').join('') +
+         '<button type="button" class="chip" data-qz="' + p + '-' + x.id + '">0</button></div></div>').join('');
      return '<div id="' + p + '-prop"></div>' + entiers +
-       '<p class="f" style="margin:20px 0 6px"><b>Bacs déjà entamés</b></p><div class="grid g2">' + entam + '</div>' +
+       '<p class="f" style="margin:20px 0 6px"><b>Bacs déjà entamés</b></p>' +
+       '<p class="mini">Estimez chaque bac entamé au quart : choisissez sa taille, puis touchez ¼, ½ ou ¾.</p>' +
+       '<div class="grid g2" style="margin-top:8px">' + entam + '</div>' +
        '<p class="mini" id="' + p + '-total" style="margin-top:12px"></p>';
    }
    function lireZones(p) {
@@ -119,6 +132,25 @@ const CALCUL = {
          .concat('Total ' + kgTxt(kgZones(z, pl))).join(' · ');
      };
      $$('#sheet-corps [data-zone]').forEach(i => i.oninput = maj);
+     /* Quarts de bac : taille choisie par zone, chaque touche ajoute au champ. */
+     const taille = {};
+     $$('#sheet-corps [data-quarts]').forEach(g => {
+       taille[g.dataset.quarts] = CALCUL.tailleQuarts;
+       $$('[data-qt]', g).forEach(b => b.onclick = () => {
+         taille[g.dataset.quarts] = +b.dataset.qt;
+         $$('[data-qt]', g).forEach(x => x.classList.toggle('on', x === b));
+       });
+     });
+     $$('#sheet-corps [data-qa]').forEach(b => b.onclick = () => {
+       const el = $('#' + b.dataset.qa + '-el');
+       if (!el) return;
+       el.value = +(Math.max(0, num(el.value)) + num(b.dataset.qf) * (taille[b.dataset.qa] || CALCUL.tailleQuarts)).toFixed(2);
+       maj();
+     });
+     $$('#sheet-corps [data-qz]').forEach(b => b.onclick = () => {
+       const el = $('#' + b.dataset.qz + '-el');
+       if (el) { el.value = ''; maj(); }
+     });
      maj();
    }
 
