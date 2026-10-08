@@ -5294,9 +5294,9 @@ function modifierPeriode(per) {
      [/^CORNET ENFANT/, 69], [/^CORNET PETIT/, 114], [/^CORNET CLASSI/, 153], [/^CORNET GRAND/, 224],
      [/^(BAC|COFFRET) .*\b550 ?ML\b/, 470], [/^(BAC|COFFRET) .*\b(1100 ?ML|1 1 ?L)\b/, 930],
      [/SHAKE|SORBET DRINK/, 160], [/^AFFOGATO/, 160], [/^ESPRESSO FRAPPE/, 200], [/^INCONTOURNABLE/, 80],
-     [/^COUPE/, 160], [/^BRIOCHE GLACE/, 100], [/^BRIOCHE .*X ?2\b/, 160],
+     [/^COUPE/, 160], [/^BRIOCHE .*X ?2\b/, 160], [/^BRIOCHE GLACE/, 100],
      /* « x2 glace », « 2 glaces » : 50 g par boule, comme le classeur. */
-     [/\b(X ?1 GLACE|1 GLACE)\b/, 50], [/\b(X ?2 GLACES?|2 GLACES)\b/, 100], [/\b(X ?3 GLACES?|3 GLACES)\b/, 150],
+     [/\b(X ?1 GLACE|1 GLACE)\b/, 50], [/\bX? ?2 GLACES?\b/, 100], [/\bX? ?3 GLACES?\b/, 150],
      [/^EXTRA GLACE X ?2/, 100], [/^EXTRA GLACE/, 50],
      /* Macarons : 25 g par macaron (SKU 13111 à 13116 du catalogue). */
      [/^1 MAC GELATO/, 25], [/^2 MAC GELATO/, 50], [/^3 MAC GELATO/, 75], [/^4 MAC GELATO/, 100],
@@ -5305,7 +5305,7 @@ function modifierPeriode(per) {
      /* Gaufres et crêpes garnies : 1 boule (50 g) au catalogue. */
      [/^(GAUFRE|CREPE) (PARFAITE|DELICIEUSE|TRADITIONNELLE)/, 50],
      /* Crêpe gianduja : vendue avec une boule (liste du manager). */
-     [/^CREPE GIANDUJA$/, 50],
+     [/^CREPE GIANDUJA\b/, 50],
      /* Autres crêpes ou gaufres nature (sucre, chocolat…) : sans glace. */
      [/^(GAUFRE|CREPE)\b/, 0],
      [/GELATO|^BRIOCHE/, null]
