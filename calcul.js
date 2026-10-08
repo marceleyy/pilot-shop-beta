@@ -1207,19 +1207,30 @@ const CALCUL = {
    (function () {
      if (typeof rendre !== 'function') return;
      const r0 = rendre;
-     rendre = async function (id) {
-       const arrivee = id === 'ecarts' && STATE.view !== 'ecarts';
+     /* « Non » retenu pour la journée : la question ne revient pas à chaque
+        passage sur l'écran. */
+     let refusLe = '';
+     const poser = (titre, texte, oui, onOui) => {
+       showSheet(
+         '<h2 id="sheet-titre">' + esc(titre) + '</h2><p class="sub">' + esc(texte) + '</p>' +
+         '<div class="actions"><button class="btn clair" id="qe-non">' + (oui === 'Clôturer' ? 'Plus tard' : 'Non') + '</button>' +
+         '<button class="btn menthe" id="qe-oui">' + esc(oui) + '</button></div>');
+       $('#qe-non').onclick = () => { refusLe = today(); closeSheet(); };
+       $('#qe-oui').onclick = () => { closeSheet(); onOui(); };
+     };
+     rendre = async function (id, viaHistorique) {
+       const arrivee = id === 'ecarts' && STATE.view !== 'ecarts' && !viaHistorique && refusLe !== today();
        const res = await r0.apply(this, arguments);
        if (arrivee && STATE.view === 'ecarts' && vueAutorisee('calcul') && $('#sheet').hidden) {
          let ouvert = null;
          try { ouvert = reelOuvert(await lireCalculs()); } catch (e) {}
          if (STATE.view !== 'ecarts' || !$('#sheet').hidden) return res;
-         if (ouvert) confirmer('Calcul d’écart en cours',
+         if (ouvert) poser('Calcul d’écart en cours',
            'Démarré le ' + fmtD(ouvert.debut) + '. Voulez-vous le clôturer maintenant ?',
-           'Clôturer', () => cloturerCalcul(ouvert), null, 'Plus tard');
-         else confirmer('Faire le calcul d’écart ?',
+           'Clôturer', () => cloturerCalcul(ouvert));
+         else poser('Faire le calcul d’écart ?',
            'L’appli vous guide : période, stock, livraison, pertes et ventes.',
-           'Oui, commencer', () => demarrerCalcul(), null, 'Non');
+           'Oui, commencer', () => demarrerCalcul());
        }
        return res;
      };
