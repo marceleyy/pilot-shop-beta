@@ -1130,6 +1130,26 @@ const HORAIRES_DEF = {
 let HORAIRES = Object.assign({}, HORAIRES_DEF);
 
 /* Preuve photo d'une tâche */
+/* Rappel sous les champs de texte libre (retours, passation, anomalies) :
+   ces textes restent en base et sont lus par toute l'équipe. */
+const CONSIGNE_TEXTE_LIBRE = 'Pas d’information de santé ni d’avis sur une personne.';
+
+/* Durées de conservation appliquées par l'application. La base applique les
+   mêmes chaque nuit (supabase-conservation.sql) ; sans ce rognage côté iPad,
+   les listes réunies avec la copie locale faisaient revenir ce que la base
+   venait d'effacer. */
+const CONSERVATION = {
+  listesJours: 365,               // retours, anomalies résolues, passation
+  listes: ['feedback', 'anomalies', 'releve']
+};
+
+/* Codes PIN : la lecture accepte déjà les codes hachés. L'ÉCRITURE hachée
+   (conversion de l'équipe, création d'équipe) ne s'active qu'une fois TOUS
+   les iPads passés à cette version : un iPad resté sur l'ancien code ne sait
+   pas lire un code haché et ne connecterait plus personne. Vérifier la
+   version dans les retours (champ « version »), puis passer à true. */
+const PIN_HACHAGE = false;
+
 const PREUVE = {
   actif: true,
   cotePx: 640,           // suffisant pour constater, assez léger pour tenir en base
@@ -1163,7 +1183,7 @@ const STOCK = {
 
 
 const CONFIG = {
-  CHECKLISTS, HORAIRES, HORAIRES_DEF, PREUVE, RECEPTION, STOCK, ENCEINTES_DEF,
+  CHECKLISTS, HORAIRES, HORAIRES_DEF, PREUVE, CONSIGNE_TEXTE_LIBRE, CONSERVATION, PIN_HACHAGE, RECEPTION, STOCK, ENCEINTES_DEF,
   TACHES_HEBDO, TACHES_HEBDO_DEF, RESPONSABLES, HEBDO,
   APP, SUPABASE, OFFLINE, PWA, ROLES, EQUIPE, POINTEUSE,
   DLC_RULES, DLC_SEUILS, DLC_MATCH, ENCEINTES, RELEVES,

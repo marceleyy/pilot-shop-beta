@@ -160,6 +160,24 @@
    const ts = x => (x && (x.a || x.at)) || '';
    const idLigne = x => x && (x.id || [ts(x), x.c || x.cle, x.t || x.type, x.e || x.employe || '',
                                        x.q !== undefined ? x.q : x.qte, x.l || x.lot || ''].join('|'));
+   /* Éléments trop anciens des listes soumises à une durée de conservation
+      (CONSERVATION.listes). Même règle que la purge nocturne de la base :
+      un message épinglé ou une anomalie non résolue reste. */
+   function rognerAncien(cle, l) {
+     if (!Array.isArray(l) || typeof CONSERVATION === 'undefined' ||
+         CONSERVATION.listes.indexOf(cle) < 0) return l;
+     const limite = addD(today(), -CONSERVATION.listesJours);
+     const date = v => (typeof v === 'string' && /^\d{4}-\d{2}-\d{2}/.test(v)) ? v.slice(0, 10) : null;
+     const jourDe = x => (cle === 'anomalies' && date(x.resolueAt)) || date(x.jour) || date(x.at);
+     return l.filter(x => {
+       if (!x || typeof x !== 'object') return true;
+       if (x.epingle === true) return true;
+       if (cle === 'anomalies' && x.resolue !== true) return true;
+       const j = jourDe(x);
+       return !j || j >= limite;
+     });
+   }
+
    function unirListes(distant, local, cle) {
      /* Journal du stock : les lignes antérieures au dernier inventaire ne
         comptent plus et sont rognées exprès (purgerJournal) — on ne les fait
@@ -191,9 +209,9 @@
      });
      const vus = new Set(local.map(idLigne));
      const ajout = distant.filter(x => x && !vus.has(idLigne(x)) && !(borne && ts(x) && ts(x) <= borne));
-     if (!ajout.length) return fusion;
+     if (!ajout.length) return rognerAncien(cle, fusion);
      const out = fusion.concat(ajout);
-     return out.every(x => ts(x)) ? out.sort((p, q) => ts(p) < ts(q) ? -1 : ts(p) > ts(q) ? 1 : 0) : out;
+     return rognerAncien(cle, out.every(x => ts(x)) ? out.sort((p, q) => ts(p) < ts(q) ? -1 : ts(p) > ts(q) ? 1 : 0) : out);
    }
 
    function fusionner(distant, local, cle) {
@@ -438,7 +456,7 @@
        },
    
        async push(cle, element) {
-         const l = await this.get(cle, []);
+         const l = rognerAncien(cle, await this.get(cle, []));
          l.push(element);
          await this.set(cle, l);
          return l;
@@ -1020,7 +1038,7 @@
        return;
      }
 
-     if (STATE._pin !== e.pin) {
+     if (!(await pinCorrect(e, STATE._pin))) {
        majPoints(true);
        vibrer(UI.vibration.erreur);
        STATE._pin = '';
@@ -1913,7 +1931,8 @@ async function purgerPreuves() {
            '<button type="button" class="chip' + (i === 3 ? ' on' : '') + '" data-rc="' + c.id + '">' +
            esc(c.label) + '</button>').join('') + '</div>' +
          '<div class="champ" style="margin-top:14px">' +
-         '<textarea id="rt" placeholder="' + esc(RELEVE.exemples[0]) + '"></textarea></div>' +
+         '<textarea id="rt" placeholder="' + esc(RELEVE.exemples[0]) + '"></textarea>' +
+         '<p class="mini" style="margin-top:6px">' + esc(CONSIGNE_TEXTE_LIBRE) + '</p></div>' +
          '<div class="btn-row" style="margin-top:14px">' +
          '<button class="btn menthe" id="rv">Publier</button>' +
          '<button class="btn clair" id="rp">Épingler</button></div>', 'solide') +
@@ -2040,7 +2059,8 @@ async function purgerPreuves() {
          ['Ça ne marche pas', 'Un chiffre est faux', 'Une idée', 'Autre'].map((t, i) =>
            '<button type="button" class="chip' + (i === 0 ? ' on' : '') + '" data-t="' + esc(t) + '">' + esc(t) + '</button>').join('') +
          '</div><div class="champ" style="margin-top:14px">' +
-         '<textarea id="fbx" data-autofocus aria-label="Décrivez le souci" placeholder="Ex. quand je valide le nettoyage, la ligne ne se coche pas."></textarea></div>' +
+         '<textarea id="fbx" data-autofocus aria-label="Décrivez le souci" placeholder="Ex. quand je valide le nettoyage, la ligne ne se coche pas."></textarea>' +
+         '<p class="mini" style="margin-top:6px">' + esc(CONSIGNE_TEXTE_LIBRE) + '</p></div>' +
          '<div class="actions"><button class="btn clair" data-fermer>Annuler</button>' +
          '<button class="btn menthe" id="fbv">Envoyer</button></div>');
    
@@ -2257,20 +2277,75 @@ function brancherNavJour(vue) {
    « equipe », servie au seul appareil rattaché. La liste est gardée localement
    pour que la connexion fonctionne hors ligne.
    -------------------------------------------------------------------------- */
+/* -----------------------------------------------------------------------------
+   CODES PIN HACHÉS
+   Le code n'est plus gardé en clair, ni en base ni dans l'iPad : seulement
+   SHA-256(sel + code), avec un sel tiré au hasard par personne. Quatre chiffres
+   se retrouvent en 10 000 essais, donc ce n'est pas un coffre-fort ; mais un
+   équipier réutilise souvent le code de sa carte bancaire, et celui-là ne doit
+   plus se lire en ouvrant la ligne « equipe ».
+   Les anciennes fiches (champ « pin ») restent acceptées, puis sont converties
+   dès que la base répond (migrerPins).
+   -------------------------------------------------------------------------- */
+const pinHachable = () => !!(window.crypto && crypto.subtle && crypto.getRandomValues);
+
+async function hacherPin(sel, pin) {
+  const brut = new TextEncoder().encode(sel + ':' + pin);
+  const h = await crypto.subtle.digest('SHA-256', brut);
+  return Array.from(new Uint8Array(h)).map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+function nouveauSel() {
+  const a = new Uint8Array(16);
+  crypto.getRandomValues(a);
+  return Array.from(a).map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+/* Fiche { pin } → { pinH, sel }. Fiche déjà hachée : rendue telle quelle. */
+async function fichePinHachee(e) {
+  if (e.pinH || e.pin === undefined || e.pin === null || e.pin === '') return e;
+  const sel = nouveauSel();
+  const f = Object.assign({}, e, { sel: sel, pinH: await hacherPin(sel, String(e.pin)) });
+  delete f.pin;
+  return f;
+}
+
+/* Fiche avec un code exploitable. « undefined » est ce qu'écrit un iPad
+   resté sur l'ancien code face à une fiche hachée : elle est écartée. */
+function ficheValide(e) {
+  return !!e && (e.pinH ? !!e.sel
+    : (e.pin !== undefined && e.pin !== null && /^\d{4}$/.test(String(e.pin))));
+}
+
+async function pinCorrect(e, saisi) {
+  if (!e || !saisi) return false;
+  if (e.pinH) {
+    if (!pinHachable() || !e.sel) return false;
+    return (await hacherPin(e.sel, saisi)) === e.pinH;
+  }
+  return e.pin !== undefined && String(e.pin) === saisi;
+}
+
 async function chargerEquipe() {
   /* 1. Ce qu'on a déjà en local : la connexion doit marcher hors ligne. */
   const local = (() => {
     try { return JSON.parse(localStorage.getItem('pilotshop.v3:equipe') || 'null'); }
     catch (e) { return null; }
   })();
-  if (local && local.length) EQUIPE.splice(0, EQUIPE.length, ...local);
+  const localValide = Array.isArray(local) ? local.filter(ficheValide) : [];
+  if (localValide.length) EQUIPE.splice(0, EQUIPE.length, ...localValide);
 
   const garder = l => {
     if (!Array.isArray(l) || !l.length) return false;
-    EQUIPE.splice(0, EQUIPE.length, ...l.map(e => ({
-      id: e.id, prenom: e.prenom, pin: String(e.pin), role: e.role,
-      couleur: e.couleur, initiales: e.initiales
-    })));
+    const valides = l.filter(ficheValide);
+    if (!valides.length) return false;
+    EQUIPE.splice(0, EQUIPE.length, ...valides.map(e => {
+      const f = { id: e.id, prenom: e.prenom, role: e.role,
+                  couleur: e.couleur, initiales: e.initiales };
+      if (e.pinH) { f.pinH = e.pinH; f.sel = e.sel; }
+      else f.pin = String(e.pin);
+      return f;
+    }));
     try { localStorage.setItem('pilotshop.v3:equipe', JSON.stringify(EQUIPE)); } catch (x) {}
     return true;
   };
@@ -2303,12 +2378,31 @@ async function chargerEquipe() {
      base n'a pas de ligne que quand le réseau a échoué, et ce null-là
      faisait proposer de « créer l'équipe » à un iPad simplement hors ligne. */
   const lu = await lireEquipeBase();
-  if (lu.etat === 'base' && garder(lu.data)) return 'base';
+  if (lu.etat === 'base' && garder(lu.data)) {
+    const hachee = await migrerPins(lu.data);
+    if (hachee) garder(hachee);
+    return 'base';
+  }
 
   /* 4. Toujours rien : « vide » si la base a vraiment répondu sans équipe
      (l'écran d'amorçage prendra le relais), « reseau » si on n'a pas pu la
      joindre (il faudra réessayer, surtout pas recréer une équipe). */
   return EQUIPE.length ? 'local' : (lu.etat === 'reseau' ? 'reseau' : 'vide');
+}
+
+/* La base a répondu avec des codes encore en clair : on les hache et on
+   réécrit la ligne. Seulement depuis une lecture fraîche de la base, jamais
+   depuis la copie locale, pour ne pas écraser une équipe modifiée ailleurs.
+   Rend la liste hachée, ou null s'il n'y avait rien à faire. */
+async function migrerPins(liste) {
+  if (!PIN_HACHAGE || !pinHachable() || !Array.isArray(liste)) return null;
+  if (!liste.some(e => !e.pinH && e.pin !== undefined && e.pin !== null && e.pin !== '')) return null;
+  try {
+    const hachee = [];
+    for (const e of liste) hachee.push(await fichePinHachee(e));
+    await DB.set('equipe', hachee);
+    return hachee;
+  } catch (e) { return null; /* on réessaiera au prochain chargement */ }
 }
 
 /* Lecture de la ligne « equipe » en distinguant l'échec réseau d'une réponse
@@ -2501,11 +2595,13 @@ function ecranAmorcage() {
         return;
       }
 
-      const equipe = valides.map((l, i) => ({
+      let equipe = valides.map((l, i) => ({
         id: 'e' + (i + 1), prenom: l.prenom, pin: l.pin, role: l.role,
         couleur: COULEURS[i % COULEURS.length],
         initiales: l.prenom.slice(0, 2).toUpperCase()
       }));
+      /* Les codes ne quittent jamais cet écran en clair. */
+      if (PIN_HACHAGE && pinHachable()) equipe = await Promise.all(equipe.map(fichePinHachee));
 
       EQUIPE.splice(0, EQUIPE.length, ...equipe);
       try { localStorage.setItem('pilotshop.v3:equipe', JSON.stringify(equipe)); } catch (e) {}

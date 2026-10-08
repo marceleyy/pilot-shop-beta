@@ -8,7 +8,7 @@
    elle qui déclenche le re-téléchargement. Un appareil déjà installé garderait
    sinon l'ancien cache, et n'irait jamais chercher les fichiers ajoutés — le
    scan hors ligne ne marcherait que sur les appareils neufs. */
-const CACHE   = 'pilotshop-cache-v9';
+const CACHE   = 'pilotshop-cache-v10';
 /* Nom FIXE, sans numéro de version : polices et bibliothèques du CDN ne
    changent pas avec l'application. Le renommer à chaque version les faisait
    purger à l'activation, donc re-télécharger — impossible en chambre froide. */
@@ -21,6 +21,7 @@ const PRECACHE = [
      les saisies restent locales et ne partent jamais en file d'attente. */
   '/env.js',
   '/style.css',
+  '/fonts/inter.woff2',
   '/config.js',
   '/auth.js',
   '/app.js',
@@ -45,8 +46,6 @@ const PRECACHE = [
 
 /* Ressources externes : mises en cache à la volée, jamais bloquantes */
 const EXTERNES = [
-  'fonts.googleapis.com',
-  'fonts.gstatic.com',
   'cdnjs.cloudflare.com'
 ];
 
