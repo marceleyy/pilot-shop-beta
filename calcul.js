@@ -334,7 +334,11 @@ const CALCUL = {
         champs suivent alors les zones reprises (anciens entamés en chambre
         froide, bacs pleins en vitrine), rien n'est perdu. */
      $$('[data-st-prop]', box).forEach(bt => bt.onclick = () => {
-       reprendre(JSON.parse(JSON.stringify(props[+bt.dataset.stProp].zones)));
+       const x = props[+bt.dataset.stProp];
+       const z = JSON.parse(JSON.stringify(x.zones));
+       /* Bacs fermés sans rangement : seule la chambre froide est remplacée, le
+          congélateur et les entamés déjà saisis restent. */
+       reprendre(x.sansRangement ? Object.assign(lireZones(p), z) : z);
        toast('Comptage repris : vérifiez-le');
      });
    }
@@ -344,7 +348,7 @@ const CALCUL = {
    async function ventesAppli(debut, fin) {
      try {
        const pers = ((await DB.get('periodes', [])) || [])
-         .filter(x => x && x.debut && x.fin && x.debut >= debut && x.fin <= fin)
+         .filter((x, i, l) => x && x.debut && x.fin && x.debut >= debut && x.fin <= fin && l.findIndex(y => y && y.id === x.id) === i)
          .sort((x, y) => x.debut < y.debut ? -1 : 1);
        const vues = [];
        for (const per of pers) {
