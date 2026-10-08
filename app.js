@@ -104,6 +104,8 @@
      ['invsec:',      SUPABASE.tables.inventaires],
      ['caisse:',      SUPABASE.tables.caisse],
      ['ecart:',       SUPABASE.tables.ventes],
+     /* Calcul d'écart guidé (calcul.js) : même table que les écarts de période. */
+     ['calcul:',      SUPABASE.tables.ventes],
      ['periode:',     SUPABASE.tables.periodes],
      ['periodes',     SUPABASE.tables.periodes],
      ['pointage:',    SUPABASE.tables.sessions],
@@ -3694,6 +3696,11 @@ function ouvrirPremierePeriode() {
        A.push(['bad', 'Période terminée depuis ' + per.joursDepuisFin + ' jour(s)',
          'La semaine du ' + fmtD(per.debut) + ' au ' + fmtD(per.fin) + ' attend sa clôture. ' +
          'Les saisies d’aujourd’hui s’y rattachent encore.', 'periodes']);
+     }
+     /* Un calcul d'écart clôturé au moins une fois par mois (calcul.js). */
+     if (typeof alerteCalculMensuel === 'function') {
+       const ac = await alerteCalculMensuel();
+       if (ac) A.push(ac);
      }
      /* Une alerte doit nommer le produit. « 2 ruptures non traitées » oblige le
         manager à ouvrir un autre écran pour savoir s'il s'agit de cornets ou
