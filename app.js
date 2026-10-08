@@ -66,7 +66,8 @@
      view: '',
      jour: today(),
      phase: null,         // 'ouverture' | 'service' | 'fermeture'
-     service: null,       // session de pointeuse en cours
+     service: null,       // session de pointeuse en cours ({…, jour} : jour de début)
+     moisFrigo: null,     // mois affiché par le Frigo virtuel (« AAAA-MM »), indépendant de jour
      enLigne: navigator.onLine,
      erreurBase: null,
      dernierEchec: null,
@@ -128,7 +129,8 @@
    });
    
    /* Clés propres à l'appareil : elles ne partent jamais sur le réseau. */
-   const LOCALES = ['session', 'seuils', 'meteo', OFFLINE.fileAttente];
+   /* « pinEchecs » : compteur d'échecs du code PIN, propre à cette tablette. */
+   const LOCALES = ['session', 'seuils', 'meteo', 'pinEchecs', OFFLINE.fileAttente];
    
    /* Clés partagées entre plusieurs personnes, modifiées par petits bouts :
       une check-liste où chacune coche sa tâche, un relevé rempli à deux, un
@@ -138,7 +140,7 @@
       Pour ces clés, on relit la base juste avant d'écrire et on fusionne. */
    const FUSIONNER = ['checklist:', 'hebdo:', 'temp:', 'caisse:', 'reassort:',
                       'preuves:', 'ruptures', 'releve', 'lots:', 'clean:',
-                      'anomalies', 'reception:', 'stock:mv:'];
+                      'anomalies', 'reception:', 'stock:mv:', 'pointage:'];
    const aFusionner = cle => FUSIONNER.some(p => cle.indexOf(p) === 0);
 
    /* Fusion superficielle, champ par champ. Suffisante : chaque personne
@@ -146,8 +148,15 @@
       réassort. Les tableaux sont remplacés, jamais mélangés. */
    /* Listes où l'on ne fait qu'ajouter (ou cocher) des lignes : deux iPads qui
       ajoutent chacun la leur ne doivent pas s'écraser. Les autres listes
-      (preuves, pertes) suppriment des lignes : une union les ferait revenir. */
-   const UNIR = ['ruptures', 'releve', 'anomalies', 'reception:', 'stock:mv:'];
+      (pertes) suppriment des lignes : une union les ferait revenir. */
+   /* « preuves: » : la copie locale est purgée au bout de 7 jours ; une photo
+      ajoutée ensuite sur ce jour, sans union, envoyait [nouvelle] et écrasait
+      la liste du serveur. Chaque preuve a un id ; une suppression ne retire
+      plus la ligne mais la marque « supprime » (filtrée à l'affichage), sinon
+      l'union la ferait revenir. */
+   /* « pointage: » : deux équipiers qui pointent sur deux iPads le même jour
+      ajoutent chacun leur session ; sans union, la seconde effaçait la première. */
+   const UNIR = ['ruptures', 'releve', 'anomalies', 'reception:', 'stock:mv:', 'pointage:', 'preuves:'];
    const ts = x => (x && (x.a || x.at)) || '';
    const idLigne = x => x && (x.id || [ts(x), x.c || x.cle, x.t || x.type, x.e || x.employe || '',
                                        x.q !== undefined ? x.q : x.qte, x.l || x.lot || ''].join('|'));
@@ -171,6 +180,10 @@
          if (d[f] && !m[f]) { m[f] = d[f]; m[f + 'Par'] = d[f + 'Par']; m[f + 'At'] = d[f + 'At']; }
        });
        if (d.lu) m.lu = true;   // luPar, lui, est réuni juste après
+       /* Preuve supprimée sur un autre iPad : elle le reste ici aussi. */
+       if (d.supprime && !m.supprime) { m.supprime = d.supprime; m.img = ''; }
+       /* Pointage : une fin de service saisie sur un autre iPad n'est pas perdue. */
+       if (d.fin && !m.fin) { m.fin = d.fin; if (d.minutes !== undefined) m.minutes = d.minutes; }
        if (Array.isArray(d.luPar)) {
          m.luPar = (m.luPar || []).concat(d.luPar.filter(p => (m.luPar || []).indexOf(p) < 0));
        }
@@ -358,10 +371,16 @@
        },
    
        async set(cle, valeur) {
+         /* Mémoire locale pleine : on n'abandonne plus la saisie pour autant.
+            En ligne, elle part quand même au serveur ; l'alerte « Mémoire
+            pleine » ne s'affiche que si cet envoi échoue aussi (ou s'il est
+            impossible) — c'est alors seulement que la saisie est perdue. */
+         let horsMemoire = false;
          try { ecrire(cle, JSON.stringify(valeur)); }
-         catch (e) { toast('Mémoire pleine — libérez de l’espace sur l’iPad', 'erreur'); return false; }
-   
-         if (!distant(cle)) return true;
+         catch (e) { horsMemoire = true; }
+         const memoirePleine = () => { toast('Mémoire pleine — libérez de l’espace sur l’iPad', 'erreur'); return false; };
+
+         if (!distant(cle)) return horsMemoire ? memoirePleine() : true;
 
          /* Garde-fou : une journée de photos en base64 pèse plusieurs centaines
             de kilo-octets. Au-delà du seuil, on garde en local sans tenter
@@ -373,10 +392,15 @@
              DB._gros[cle] = poids;
              console.warn('Trop lourd pour la base (' + Math.round(poids / 1024) + ' Ko) :', cle);
            }
-           return true;
+           return horsMemoire ? memoirePleine() : true;
          }
 
-         if (!STATE.enLigne) { await empiler('set', cle, valeur); return true; }
+         /* Hors ligne et mémoire pleine : la file d'attente vit elle aussi en
+            mémoire locale, elle ne peut rien garder. */
+         if (!STATE.enLigne) {
+           if (horsMemoire) return memoirePleine();
+           await empiler('set', cle, valeur); return true;
+         }
    
          /* Les clés partagées passent par une file : relire puis écrire doit
             être insensible aux écritures concurrentes. */
@@ -405,7 +429,10 @@
              const perimee = x => x.cle === cle && x.at <= t0;   // pas une saisie empilée depuis
              if (f.some(perimee)) fileEcrire(f.filter(x => !perimee(x)));
              return true;
-           } catch (e) { await empiler('set', cle, valeur); return true; }
+           } catch (e) {
+             if (horsMemoire) return memoirePleine();
+             await empiler('set', cle, valeur); return true;
+           }
          };
          return aFusionner(cle) ? enFile(cle, envoyer) : envoyer();
        },
@@ -489,9 +516,17 @@
      } catch (e) { return []; }
    }
    function fileEcrire(f) {
-     try { DB._ecrire(OFFLINE.fileAttente, JSON.stringify(f)); } catch (e) {}
+     /* L'échec n'est plus avalé : une saisie qui n'entre pas dans la file est
+        une saisie perdue, la personne doit le savoir. Le compteur reste alors
+        sur la file réellement enregistrée. */
+     try { DB._ecrire(OFFLINE.fileAttente, JSON.stringify(f)); }
+     catch (e) {
+       toast('Saisie non mise en file — mémoire pleine', 'erreur');
+       return false;
+     }
      STATE.fileAttente = f.length;
      majBandeau();
+     return true;
    }
    
    async function empiler(op, cle, valeur) {
@@ -602,39 +637,140 @@
       ========================================================================== */
    function toast(msg, type) {
      const t = $('#toast');
+     /* Une erreur reste plus longtemps, se distingue visuellement et est
+        annoncée tout de suite par VoiceOver (role="alert"). */
+     const erreur = (type === 'erreur');
      t.textContent = msg;
+     t.classList.toggle('erreur', erreur);
+     t.setAttribute('role', erreur ? 'alert' : 'status');
      t.classList.add('on');
-     vibrer(type === 'erreur' ? UI.vibration.erreur : UI.vibration.ok);
+     vibrer(erreur ? UI.vibration.erreur : UI.vibration.ok);
      clearTimeout(t._t);
-     t._t = setTimeout(() => t.classList.remove('on'), UI.dureeToastMs);
+     t._t = setTimeout(() => t.classList.remove('on'), erreur ? 5000 : UI.dureeToastMs);
    }
-   
+
+   /* -----------------------------------------------------------------------------
+      HISTORIQUE DE LA FEUILLE
+      showSheet ajoute UNE entrée d'historique ; closeSheet la retire par
+      history.back(). Ce retour est différé d'un tour : si une autre feuille
+      s'ouvre aussitôt (confirmer après fermeture) elle reprend l'entrée au lieu
+      d'en empiler une nouvelle, et si une vue se dessine, elle la remplace.
+      Le popstate provoqué par notre propre retour est ignoré : pas de boucle.
+      -------------------------------------------------------------------------- */
+   let _feuilleHisto = false;     // la feuille ouverte a son entrée d'historique
+   let _retourPrevu = null;       // history.back() différé, encore annulable
+   let _ignorerPop = false;       // le prochain popstate vient de closeSheet
+   let _feuilleModifiee = false;  // un champ de la feuille a été touché
+
+   /* Pousse une entrée d'historique, ou remplace celle d'une feuille qu'on
+      vient de fermer : la consommer puis en pousser une autre ferait un aller-
+      retour inutile — et le retour différé effacerait l'entrée de la vue. */
+   function pousserHistorique(etat) {
+     try {
+       if (_retourPrevu) {
+         clearTimeout(_retourPrevu); _retourPrevu = null;
+         history.replaceState(etat, '', location.pathname);
+       } else {
+         history.pushState(etat, '', location.pathname);
+       }
+     } catch (e) {}
+   }
+
    function showSheet(html) {
+     const sheet = $('#sheet');
+     const dejaOuverte = !sheet.hidden;
      $('#sheet-corps').innerHTML = html;
-     $('#sheet').hidden = false;
+     sheet.hidden = false;
+     /* Contenu neuf : ni modifié, ni obligatoire tant que l'appelant ne le dit pas. */
+     delete sheet.dataset.obligatoire;
+     /* Toute nouvelle feuille retire le marqueur d'un minuteur en cours. */
+     delete sheet.dataset.minuteur;
+     _feuilleModifiee = false;
      document.body.style.overflow = 'hidden';
      /* Une entrée d'historique pour la feuille : le bouton retour du téléphone
-        la referme au lieu de quitter l'écran, voire l'application. */
-     try { history.pushState({ vue:STATE.view, feuille:true }, '', location.pathname); } catch (e) {}
-     $$('[data-fermer]').forEach(b => b.onclick = closeSheet);
+        la referme au lieu de quitter l'écran, voire l'application. Une seule
+        par feuille, même si son contenu est remplacé. */
+     if (_retourPrevu) {
+       clearTimeout(_retourPrevu); _retourPrevu = null;
+       _feuilleHisto = true;
+     } else if (!dejaOuverte || !_feuilleHisto) {
+       try {
+         history.pushState({ vue:STATE.view, feuille:true }, '', location.pathname);
+         _feuilleHisto = true;
+       } catch (e) { _feuilleHisto = false; }
+     }
+     $$('[data-fermer]').forEach(b => b.onclick = b.classList.contains('voile') ? toucherVoile : closeSheet);
      const p = $('#sheet-corps input, #sheet-corps textarea');
      if (p && p.dataset.autofocus !== undefined) setTimeout(() => p.focus(), 120);
    }
    function closeSheet() {
      $('#sheet').hidden = true;
+     delete $('#sheet').dataset.obligatoire;
+     delete $('#sheet').dataset.minuteur;
      document.body.style.overflow = '';
+     if (_feuilleHisto) {
+       _feuilleHisto = false;
+       clearTimeout(_retourPrevu);
+       _retourPrevu = setTimeout(() => {
+         _retourPrevu = null;
+         _ignorerPop = true;
+         try { history.back(); } catch (e) { _ignorerPop = false; }
+       }, 0);
+     }
    }
-   document.addEventListener('keydown', e => { if (e.key === 'Escape' && !$('#sheet').hidden) closeSheet(); });
-   
-   /* Confirmation destructive — jamais de suppression sur simple appui */
-   function confirmer(titre, texte, libelle, onOui) {
+
+   /* Tout champ touché par l'utilisateur marque la feuille comme modifiée.
+      Une valeur posée par le code ne déclenche pas « input » : seul un vrai
+      geste compte. */
+   (function () {
+     const corps = document.getElementById('sheet-corps');
+     if (!corps) return;
+     const marquer = e => {
+       if (e.target && /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName)) _feuilleModifiee = true;
+     };
+     corps.addEventListener('input', marquer);
+     corps.addEventListener('change', marquer);
+   })();
+
+   /* Toucher le voile : une feuille obligatoire reste ouverte, et une saisie
+      commencée n'est pas jetée sans confirmation. « Continuer la saisie »
+      remet la feuille telle quelle — mêmes nœuds, mêmes valeurs, mêmes
+      gestionnaires. */
+   function toucherVoile() {
+     const sheet = $('#sheet');
+     if (sheet.dataset.obligatoire) return toast('Faites un choix pour continuer', 'erreur');
+     if (!_feuilleModifiee) return closeSheet();
+     const corps = $('#sheet-corps');
+     const garde = document.createDocumentFragment();
+     while (corps.firstChild) garde.appendChild(corps.firstChild);
+     confirmer('Abandonner la saisie ?',
+       'Ce que vous avez saisi dans cette fenêtre sera perdu.',
+       'Abandonner', () => {},
+       () => {
+         corps.innerHTML = '';
+         corps.appendChild(garde);
+         _feuilleModifiee = true;
+       }, 'Continuer la saisie');
+   }
+
+   document.addEventListener('keydown', e => {
+     if (e.key === 'Escape' && !$('#sheet').hidden && !$('#sheet').dataset.obligatoire) closeSheet();
+   });
+
+   /* Confirmation destructive — jamais de suppression sur simple appui.
+      onNon (facultatif) remplace la fermeture simple sur « Annuler ». */
+   function confirmer(titre, texte, libelle, onOui, onNon, libelleNon) {
      showSheet(
        '<h2 id="sheet-titre">' + esc(titre) + '</h2>' +
        '<p class="sub">' + esc(texte) + '</p>' +
-       '<div class="actions"><button class="btn clair" data-fermer>Annuler</button>' +
+       '<div class="actions"><button class="btn clair" data-fermer>' + esc(libelleNon || 'Annuler') + '</button>' +
        '<button class="btn corail" id="cf-oui">' + esc(libelle) + '</button></div>'
      );
      $('#cf-oui').onclick = () => { closeSheet(); onOui(); };
+     if (typeof onNon === 'function') {
+       const non = $('#sheet-corps [data-fermer]');
+       if (non) non.onclick = onNon;
+     }
    }
    
    function majBandeau() {
@@ -743,6 +879,17 @@
    const pastille = (cls, txt) => '<span class="pill ' + cls + '">' + esc(txt) + '</span>';
    const avatar = (e, cls) =>
      '<span class="' + (cls || 'av') + '" style="background:' + esc(e.couleur) + '">' + esc(e.initiales) + '</span>';
+
+   /* Prénom du premier manager de l'équipe, « le manager » à défaut. Le prénom
+      était écrit en dur : une autre boutique, ou un changement de manager,
+      faisait appeler quelqu'un qui n'y travaille pas. Texte brut : à passer
+      par esc() avant tout innerHTML. */
+   function nomManager() {
+     const m = (typeof EQUIPE !== 'undefined' ? EQUIPE : []).filter(e => e && e.role === 'manager')[0];
+     return (m && m.prenom) || 'le manager';
+   }
+   /* Même chose en début de phrase. */
+   const NomManager = () => { const n = nomManager(); return n.charAt(0).toUpperCase() + n.slice(1); };
    
    /* =============================================================================
       4. CONNEXION TACTILE
@@ -792,6 +939,7 @@
      $('#login-qui').hidden = true;
      $('#login-pin').hidden = false;
      majPoints();
+     if (pinBloqueMs()) afficherBlocagePin();
    }
    
    function retourQui() {
@@ -810,6 +958,8 @@
    function toucheP(k) {
      if (k === 'annuler') return retourQui();
      if (k === 'effacer') { STATE._pin = STATE._pin.slice(0, -1); return majPoints(); }
+     /* Saisie bloquée après trop d'échecs : on n'accepte aucun chiffre. */
+     if (pinBloqueMs()) { STATE._pin = ''; majPoints(); afficherBlocagePin(); return; }
      if (STATE._pin.length >= 4) return;
      STATE._pin += k;
      vibrer(UI.vibration.ok);
@@ -817,19 +967,82 @@
      if (STATE._pin.length === 4) setTimeout(verifierPin, 140);
    }
    
+   /* -----------------------------------------------------------------------------
+      ANTI-ESSAIS DU CODE PIN
+      Quatre chiffres, c'est 10 000 combinaisons : sans frein, un après-midi
+      suffit. Après 5 échecs de suite, la saisie est bloquée 30 s, puis 60 s,
+      120 s… à chaque nouvelle série, sans dépasser 15 min. Le compteur survit au rechargement
+      (clé locale « pinEchecs », jamais envoyée au serveur).
+      -------------------------------------------------------------------------- */
+   const PIN_ESSAIS = 5, PIN_BLOCAGE_MS = 30000;
+   /* Plafond du blocage : 15 min. Sans lui, le doublement à chaque série
+      finissait par bloquer la tablette des heures, voire des jours, pour
+      toute l'équipe (le compteur est commun). */
+   const PIN_BLOCAGE_MAX_MS = 900000;
+   const PIN_CLE = 'pinEchecs';      // stockée sous « pilotshop.v3:pinEchecs »
+   let pinEchecs = (function () {
+     try {
+       const v = JSON.parse(DB._lire(PIN_CLE) || 'null');
+       if (v && typeof v === 'object') {
+         const o = { n:+v.n || 0, series:+v.series || 0, jusqua:+v.jusqua || 0 };
+         /* Horloge reculée (ou ancien blocage non plafonné) : la fin du blocage
+            ne peut pas être plus loin que maintenant + plafond. */
+         const borne = Date.now() + PIN_BLOCAGE_MAX_MS;
+         if (o.jusqua > borne) o.jusqua = borne;
+         return o;
+       }
+     } catch (e) {}
+     return { n:0, series:0, jusqua:0 };
+   })();
+   function sauverPinEchecs() {
+     try { DB._ecrire(PIN_CLE, JSON.stringify(pinEchecs)); } catch (e) {}
+   }
+   /* Millisecondes de blocage restantes, 0 si la saisie est libre. */
+   const pinBloqueMs = () => Math.max(0, pinEchecs.jusqua - Date.now());
+
+   function afficherBlocagePin() {
+     clearTimeout(afficherBlocagePin._t);
+     const reste = pinBloqueMs();
+     const aide = $('#pin-aide');
+     if (!reste) { if (aide) aide.textContent = 'Composez votre code à 4 chiffres'; return; }
+     if (aide) aide.textContent = 'Trop d’essais — réessayez dans ' + Math.ceil(reste / 1000) + ' s';
+     afficherBlocagePin._t = setTimeout(afficherBlocagePin, 1000);
+   }
+
    async function verifierPin() {
      const e = STATE._candidat;
      if (!e) return retourQui();
-   
+
+     if (pinBloqueMs()) {
+       STATE._pin = '';
+       majPoints(false);
+       afficherBlocagePin();
+       return;
+     }
+
      if (STATE._pin !== e.pin) {
        majPoints(true);
        vibrer(UI.vibration.erreur);
-       $('#pin-aide').textContent = 'Code incorrect, réessayez';
        STATE._pin = '';
+       pinEchecs.n++;
+       if (pinEchecs.n >= PIN_ESSAIS) {
+         /* 30 s, puis le double à chaque nouvelle série de 5 échecs, plafonné à 15 min. */
+         pinEchecs.jusqua = Date.now() + Math.min(PIN_BLOCAGE_MAX_MS,
+           PIN_BLOCAGE_MS * Math.pow(2, Math.min(pinEchecs.series, 10)));
+         pinEchecs.series++;
+         pinEchecs.n = 0;
+       }
+       sauverPinEchecs();
+       if (pinBloqueMs()) afficherBlocagePin();
+       else $('#pin-aide').textContent = 'Code incorrect, réessayez';
        setTimeout(() => majPoints(false), 420);
        return;
      }
-   
+
+     /* Code juste : on repart de zéro. */
+     pinEchecs = { n:0, series:0, jusqua:0 };
+     sauverPinEchecs();
+
      STATE.user = { id:e.id, prenom:e.prenom, role:e.role, couleur:e.couleur, initiales:e.initiales };
      STATE._pin = '';
      await DB.set('session', STATE.user);
@@ -850,40 +1063,43 @@
    }
    
    async function chargerService() {
-     /* La veille aussi : un service commencé avant minuit est rangé sous le
-        jour de l'arrivée, et serait sinon oublié au rechargement. */
-     let ouverte = null;
-     for (const d of [today(), addD(today(), -1)]) {
-       const l = await DB.get('pointage:' + d, []);
-       /* Hier : seulement un service récent. Un oubli de la veille rouvert le
-          lendemain enregistrerait 24 heures de travail. */
-       ouverte = l.filter(s => s.employe === STATE.user.id && !s.fin &&
-         (d === today() || Date.now() - new Date(s.debut) < 16 * 3600e3))[0];
-       if (ouverte) break;
+     const l = await DB.get('pointage:' + today(), []);
+     let ouverte = l.filter(s => s.employe === STATE.user.id && !s.fin)[0];
+     /* Le jour de début est gardé avec la session : c'est sous lui qu'elle
+        sera clôturée, même si la fin tombe après minuit. */
+     if (ouverte && !ouverte.jour) ouverte.jour = today();
+     /* Service de nuit : commencé hier soir, pas encore clos après minuit.
+        Il est rangé sous la veille ; on l'y retrouve avec son jour de début. */
+     if (!ouverte) {
+       const veille = addD(today(), -1);
+       const lv = await DB.get('pointage:' + veille, []);
+       /* Au-delà de 14 h, c'est un oubli de pointage de sortie, pas un service en cours. */
+       ouverte = (Array.isArray(lv) ? lv : []).filter(s => s.employe === STATE.user.id && !s.fin &&
+         Date.now() - new Date(s.debut).getTime() < 14 * 3600000)[0];
+       if (ouverte && !ouverte.jour) ouverte.jour = veille;
      }
      STATE.service = ouverte || null;
    }
    
    async function pointer(entree) {
-     const cle = 'pointage:' + today();
+     /* La clôture se range sous le jour de DÉBUT du service. Avec today(), un
+        service commencé à 22 h et terminé à 0 h 30 cherchait sa session dans
+        le mauvais jour : la fin n'était jamais enregistrée. */
+     const jour = (!entree && STATE.service && STATE.service.jour) || today();
+     const cle = 'pointage:' + jour;
      const l = await DB.get(cle, []);
      if (entree) {
-       const s = { id:uid(), employe:STATE.user.id, prenom:STATE.user.prenom, debut:nowISO(), fin:null };
+       const s = { id:uid(), employe:STATE.user.id, prenom:STATE.user.prenom, debut:nowISO(), fin:null, jour:jour };
        l.push(s);
        STATE.service = s;
        await DB.set(cle, l);
        await feed('ok', STATE.user.prenom + ' a pris son service');
        toast('Bon service, ' + STATE.user.prenom);
      } else {
-       /* Le service est rangé sous le jour de l'ARRIVÉE : partir après minuit
-          le cherchait sous le lendemain, et il restait ouvert à jamais. */
-       const cleS = STATE.service && STATE.service.debut
-         ? 'pointage:' + isoOf(new Date(STATE.service.debut)) : cle;
-       const lS = cleS === cle ? l : await DB.get(cleS, []);
-       const s = lS.filter(x => x.id === (STATE.service && STATE.service.id))[0];
+       const s = l.filter(x => x.id === (STATE.service && STATE.service.id))[0];
        if (s) { s.fin = nowISO(); s.minutes = Math.round((new Date(s.fin) - new Date(s.debut)) / 60000); }
        STATE.service = null;
-       await DB.set(cleS, lS);
+       await DB.set(cle, l);
        await feed('ok', STATE.user.prenom + ' a terminé son service');
        toast('Service terminé');
      }
@@ -1003,8 +1219,19 @@ function renderNav() {
 /* Vues dont le contenu n'a aucun sens sans période définie */
    const VUES_PERIODE = ['ecarts', 'periodes', 'inv'];
 
+   /* Jour calendaire du dernier rendu : un iPad laissé ouvert passe minuit. */
+   let _jourDernierRendu = today();
+
    async function rendre(id, viaHistorique) {
    if (!V[id]) { toast('Vue indisponible'); return; }
+   /* Minuit est passé depuis le dernier rendu : on réaligne la date de
+      travail sur aujourd'hui. Sans ça, l'équipe du matin saisissait ses
+      relevés sous la date de la veille — et en « consultation seule ». */
+   if (today() !== _jourDernierRendu) {
+     _jourDernierRendu = today();
+     STATE.jour = today();
+     if (V.temp && V.temp._d !== undefined) V.temp._d = STATE.jour;
+   }
    /* On quitte les réglages : on arrête le rafraîchissement de l'indicateur */
    if (V.reglages && V.reglages._t) { clearInterval(V.reglages._t); V.reglages._t = null; }
    /* Redessiner la vue courante ne doit pas renvoyer l'équipe en haut de page :
@@ -1031,7 +1258,7 @@ function renderNav() {
          $('#page').innerHTML = carte(
            entete('⏸️', 'En attente du manager',
              'Aucune période de calcul n’est ouverte pour la boutique.') +
-           '<p class="mini">Eve doit d’abord fixer la date de départ et le type de période. ' +
+           '<p class="mini">' + esc(NomManager()) + ' doit d’abord fixer la date de départ et le type de période. ' +
            'D’ici là, cet écran serait faux : les écarts se calculeraient sur une fenêtre de temps ' +
            'arbitraire. Les autres pages restent utilisables normalement.</p>' +
            '<button class="btn clair bloc" data-go="accueil" style="margin-top:14px">Revenir à ma journée</button>',
@@ -1053,9 +1280,9 @@ function renderNav() {
      /* Chaque vue laisse une trace dans l'historique du navigateur : sans cela,
         le bouton « retour » du téléphone quittait purement et simplement
         l'application au lieu de revenir à l'écran précédent. */
-     if (!viaHistorique) {
-       try { history.pushState({ vue:id }, '', location.pathname); } catch (e) {}
-     }
+     /* Pas pour un simple redessin de la même vue : chaque case cochée
+        empilait une entrée, et « retour » restait sur place autant de fois. */
+     if (!viaHistorique && !memeVue) pousserHistorique({ vue:id });
 
      if (memeVue) {
     /* Deux passages : après peinture, puis après les images éventuelles. */
@@ -1146,6 +1373,49 @@ function renderNav() {
    /* =============================================================================
       8. ÉTAT D'UNE JOURNÉE
       ========================================================================== */
+   /* Résumé d'une feuille de caisse : { ca, cb, esp, ecart, par }.
+      La caisse a changé de nommage (modules.js) : m_fond, s_cb, s_esp, s_tpe,
+      s_retrait, s_fond, signatures m_valide / s_valide. Les écrans de synthèse
+      lisaient encore k.ecart, k.cb, k.esp : 0 € d'écart partout, toujours.
+      L'écart reproduit EXACTEMENT les deux contrôles affichés à la fermeture :
+        carte   = TPE − CB saisi en caisse            (si les deux sont saisis)
+        espèces = fond final − (fond initial + espèces − retrait)
+      où le fond initial est m_fond, sinon le fond laissé la veille au soir
+      (veille, facultatif). Leur somme est l'équilibre global de l'ancienne
+      feuille : TPE + retrait + fond final − fond initial − CB − espèces.
+      Feuilles antérieures : repli sur ecart, cb, esp, par. */
+   function caisseResume(k, veille) {
+     if (!k || typeof k !== 'object') return { ca:0, cb:0, esp:0, ecart:0, par:'' };
+     const rempli = x => x !== undefined && x !== null && x !== '';
+     const nouveau = ['m_fond', 's_cb', 's_esp', 's_tpe', 's_retrait', 's_fond'].some(c => rempli(k[c]));
+     if (!nouveau) {
+       const cb = num(k.cb), esp = num(k.esp);
+       /* Anciennes feuilles sans « ecart » enregistré : on le recalcule avec
+          l'équilibre de modules.js plutôt que d'afficher 0 €. */
+       let ecart = num(k.ecart);
+       /* Seulement sur une soirée complète : une feuille partielle (matin seul,
+          TPE absent) donnerait un faux écart. */
+       if (!rempli(k.ecart) && typeof equilibreCaisse === 'function' &&
+           ['fi', 'ff', 'cb', 'esp', 'tpe'].every(c => rempli(k[c]))) {
+         ecart = equilibreCaisse(k).ecart;
+       }
+       return { ca:cb + esp, cb:cb, esp:esp, ecart:ecart, par:k.par || '' };
+     }
+     const cb = num(k.s_cb), esp = num(k.s_esp);
+     let ecart = 0;
+     if (rempli(k.s_cb) && rempli(k.s_tpe)) ecart += +(num(k.s_tpe) - num(k.s_cb)).toFixed(2);
+     const fondVeille = veille
+       ? (rempli(veille.s_fond) ? num(veille.s_fond) : (rempli(veille.ff) ? num(veille.ff) : null))
+       : null;
+     const fondOuv = rempli(k.m_fond) ? num(k.m_fond) : fondVeille;
+     if (fondOuv !== null && rempli(k.s_esp) && rempli(k.s_fond) && rempli(k.s_retrait)) {
+       const attendu = +(fondOuv + num(k.s_esp) - num(k.s_retrait)).toFixed(2);
+       ecart += +(num(k.s_fond) - attendu).toFixed(2);
+     }
+     const par = (k.s_valide && k.s_valide.par) || (k.m_valide && k.m_valide.par) || k.par || '';
+     return { ca:cb + esp, cb:cb, esp:esp, ecart:+ecart.toFixed(2), par:par };
+   }
+
    async function etatJour(jour) {
      const t   = await DB.get('temp:' + jour, {});
      const net = await etatNettoyage(jour);
@@ -1164,7 +1434,11 @@ function renderNav() {
        tempM:complet('m'), tempS:complet('s'), tempCrit:crit,
        net:net.faits, netTotal:net.total,
        /* Une fiche ouverte n'est pas une caisse faite : il faut la fermeture validée. */
-       caisse:!!(k && (k.s_valide || (k.s_valide === undefined && k.ecart !== undefined))), caisseEcart: k ? num(k.ecart) : 0,
+       caisse:!!(k && (k.s_valide || (k.s_valide === undefined && (k.ecart !== undefined ||
+         /* Ancienne feuille complète sans écart enregistré : caisseResume le recalcule. */
+         ['fi', 'ff', 'cb', 'esp', 'tpe'].every(c => k[c] !== undefined && k[c] !== null && k[c] !== ''))))),
+       /* La veille fournit le fond initial quand le matin n'a pas été saisi. */
+       caisseEcart: k ? caisseResume(k, await DB.get('caisse:' + addD(jour, -1), null)).ecart : 0,
        reassort:Object.keys(r).filter(k2 => r[k2] && r[k2].ok).length,
        reassortTotal:REASSORT.length, ruptures:rupt
      };
@@ -1223,7 +1497,7 @@ function renderNav() {
        '<h2 id="sheet-titre">' + esc(e.nom) + ' à ' + v + ' °C</h2>' +
        '<p class="sub">Limite critique dépassée — cible ' + esc(e.cible) + '.</p>' +
        '<div class="alerte bad" style="margin-top:14px"><span class="ai">•</span>' +
-       '<div><b>Appelez Eve</b><p>En attendant, transférez les produits dans une ' +
+       '<div><b>Appelez ' + esc(nomManager()) + '</b><p>En attendant, transférez les produits dans une ' +
        'enceinte conforme et notez l’action corrective en bas de l’écran.</p></div></div>' +
        '<div class="actions"><button class="btn corail bloc" data-fermer>J’ai compris</button></div>'
      );
@@ -1239,153 +1513,42 @@ function exigePhoto(tache) {
   return ['hebdo', 'mensuel', 'annuel', 'async'].indexOf(tache.recurrence) >= 0;
 }
 
-/* Purge des photos de preuve au-delà de PREUVE.purgeJours.
+/* Purge LOCALE des photos de preuve de plus de PREUVE_LOCAL_JOURS jours.
    Sans elle, le quota du navigateur tombe en pleine saison : 12 photos par
-   jour à 40 Ko saturent les 5 Mo de l'iPad en trois semaines. */
+   jour à 40 Ko saturent les 5 Mo de l'iPad en trois semaines.
+   Seule la copie de l'iPad est effacée : le serveur garde tout (registre
+   sanitaire). L'ancienne version passait par DB.del, qui envoyait un DELETE
+   au serveur et détruisait la preuve pour tous les appareils. */
+const PREUVE_LOCAL_JOURS = 7;
 async function purgerPreuves() {
-  if (!PREUVE.actif || !PREUVE.purgeJours) return 0;
-  const limite = addD(today(), -PREUVE.purgeJours);
+  if (!PREUVE.actif) return 0;
+  const limite = addD(today(), -PREUVE_LOCAL_JOURS);
   let effaces = 0;
   try {
-    for (const cle of await DB.list('preuves:')) {
+    const enFileAttente = new Set(fileLire().map(x => x.cle));
+    for (const cle of DB._clesLocales().filter(k => k.indexOf('preuves:') === 0)) {
       const jour = cle.replace('preuves:', '');
       if (jour >= limite) continue;
-      const l = await DB.get(cle, []);
+      /* Encore en file d'attente : pas encore sur le serveur, on garde. */
+      if (enFileAttente.has(cle)) continue;
+      const brut = DB._lire(cle);
+      /* Trop lourde pour la base : elle n'a jamais été envoyée, la copie
+         locale est la seule qui existe. */
+      if (brut && brut.length > OFFLINE.tailleMaxOctets) continue;
+      let l = [];
+      try { l = JSON.parse(brut || '[]'); } catch (e) {}
       effaces += Array.isArray(l) ? l.length : 0;
-      await DB.del(cle);
+      DB._oter(cle);
     }
   } catch (e) { /* purge sans conséquence si elle échoue */ }
-  if (effaces) console.info('Purge : ' + effaces + ' photo(s) de plus de ' + PREUVE.purgeJours + ' jours');
+  if (effaces) console.info('Purge locale : ' + effaces + ' photo(s) de plus de ' + PREUVE_LOCAL_JOURS + ' jours (copie serveur conservée)');
   return effaces;
 }
 
 /* =============================================================================
-   11. VUE — NETTOYAGE (validation en un clic)
+   11. VUE — NETTOYAGE
    ========================================================================== */
-   V.clean = async function () {
-   const j = STATE.jour;
-   const rec = await DB.get('clean:' + j, {});
-   const preuves = await DB.get('preuves:' + j, []);
-  const liste = tachesDuJour(j);
-     const asy = await asyncDuJour(j);
-     const faits = liste.filter(t => rec[t.id] && rec[t.id].ok).length;
-     const pct = liste.length ? Math.round(faits / liste.length * 100) : 0;
-   
-     const parZone = {};
-     liste.forEach(t => { (parZone[t.zoneId] = parZone[t.zoneId] || { nom:t.zone, icone:t.icone, t:[] }).t.push(t); });
-   
-     const ligne = t => {
-     const v = rec[t.id] || {};
-     const photo = exigePhoto(t);
-     /* Toutes les photos de cette tâche, pas seulement la première : on peut
-        vouloir montrer l'avant, l'après et un détail. Les autres écrans le
-        permettaient déjà, celui-ci s'arrêtait à un cliché. */
-     const clichés = preuves.filter(p => p.tache === t.id);
-     const prise = clichés[0];
-     return '<div class="tache' + (v.ok ? ' on' : '') + '">' +
-     '<button class="box" data-c="' + t.id + '">✓</button>' +
-     '<span class="tx"><span class="tn">' + esc(t.nom) + '</span>' +
-     '<span class="tm">' + (v.ok ? esc(v.par) + ' · ' + heure(v.at)
-           : (t.recurrence === 'quotidien' ? 'Tous les jours' :
-           t.recurrence === 'hebdo' ? 'Le ' + nomJour(j).toLowerCase() :
-           t.recurrence === 'mensuel' ? 'Une fois par mois' : 'Une fois par an')) +
-      (photo ? ' · photo requise' : '') + '</span></span>' +
-      (photo ? '<button class="btn ' + (prise ? 'menthe' : 'clair') + ' sm" data-photo="' + t.id +
-        '" data-lib="' + esc(t.nom) + '">' +
-        (clichés.length ? '✓ ' + clichés.length : 'Photo') + '</button>' : '') +
-      '</div>' +
-      (clichés.length
-        ? '<div class="rang vignettes">' + clichés.map(p =>
-            '<button type="button" class="vign" data-vign="' + esc(p.id) + '" ' +
-            'data-vjour="' + esc(j) + '" aria-label="Voir la photo">' +
-            '<img src="' + esc(p.img) + '" alt=""></button>').join('') + '</div>'
-        : '');
-  };
-   
-     $('#page').innerHTML =
-       carte(entete('🧽', nomJour(j) + ' ' + fmtD(j), 'Un appui suffit : la tâche est signée à votre nom.') +
-         '<div class="rang"><b class="num" style="font-size:26px">' + faits + '</b>' +
-         '<span class="mini">sur ' + liste.length + ' tâches</span>' +
-         '<span class="pousse">' + pastille(pct === 100 ? 'ok' : pct > 0 ? 'warn' : 'n', pct + ' %') + '</span></div>' +
-         '<div class="jauge" style="margin-top:10px"><i class="' + (pct === 100 ? '' : pct ? 'warn' : 'bad') +
-         '" style="width:' + pct + '%"></i></div>', 'solide') +
-   
-       (asy.length ? '<div class="entete"><h3>À faire aujourd’hui en plus</h3></div><div class="stack">' +
-         asy.map(a => {
-           const v = rec['async_' + a.id] || {};
-           const cle = 'async_' + a.id;
-           /* Ces tâches ont la récurrence « async » : exigePhoto() les inclut,
-              mais le bouton pour prendre la photo n'était pas affiché — on
-              demandait donc une preuve impossible à fournir. */
-           const photo = exigePhoto({ id:cle, recurrence:'async' });
-           const clichesA = preuves.filter(p => p.tache === cle);
-           const prise = clichesA[0];
-           return carte('<div class="tache' + (v.ok ? ' on' : '') + '">' +
-             '<button class="box" data-c="' + cle + '">✓</button>' +
-             '<span class="tx"><span class="tn">' + esc(a.nom) + '</span>' +
-             '<span class="tm">' + (v.ok ? esc(v.par) + ' · ' + heure(v.at)
-               : a.jamais ? 'Jamais enregistrée — tous les ' + a.intervalleJours + ' jours'
-               : a.type === 'jours-fixes' ? 'Chaque ' + a.jours.map(x => JOURS_SEMAINE[x].toLowerCase()).join(', ')
-               : 'Tous les ' + a.intervalleJours + ' jours') +
-             (a.retard ? ' · en retard de ' + a.retard + ' j' : '') +
-             (photo ? ' · photo requise' : '') + '</span></span>' +
-             (photo ? '<button class="btn ' + (prise ? 'menthe' : 'clair') + ' sm" data-photo="' + cle +
-               '" data-lib="' + esc(a.nom) + '">' +
-               (clichesA.length ? '✓ ' + clichesA.length : 'Photo') + '</button>' : '') +
-             '</div>' +
-             (clichesA.length
-               ? '<div class="rang vignettes">' + clichesA.map(p =>
-                   '<button type="button" class="vign" data-vign="' + esc(p.id) + '" ' +
-                   'data-vjour="' + esc(j) + '" aria-label="Voir la photo">' +
-                   '<img src="' + esc(p.img) + '" alt=""></button>').join('') + '</div>'
-               : '') +
-             '<p class="mini" style="margin-top:8px">' + esc(a.consigne) + '</p>',
-             a.retard ? 'corail' : 'ambre');
-         }).join('') + '</div>' : '') +
-   
-       Object.keys(parZone).map(z => {
-         const g = parZone[z];
-         return '<div class="entete"><h3>' + esc(g.nom) + '</h3></div>' +
-                carte('<div class="stack">' + g.t.map(ligne).join('') + '</div>');
-       }).join('');
-   
-     $$('[data-c]').forEach(b => b.onclick = async () => {
-     const cle = b.dataset.c, actif = !b.parentElement.classList.contains('on');
-     const tache = liste.filter(t => t.id === cle)[0] ||
-                   { id:cle, recurrence: cle.indexOf('async_') === 0 ? 'async' : 'quotidien' };
-
-     /* Une tâche non quotidienne ne se valide pas sans preuve : c'est justement
-        celle que personne ne peut confirmer de mémoire trois semaines plus tard. */
-     if (actif && exigePhoto(tache) && !preuves.filter(p => p.tache === cle)[0]) {
-      toast('Photographiez d’abord le résultat', 'erreur');
-       const ph = $('[data-photo="' + cle + '"]');
-     if (ph) ph.click();
-     return;
-     }
-
-     b.parentElement.classList.toggle('on', actif);
-     rec[cle] = actif ? { ok:1, par:STATE.user.prenom, id:STATE.user.id, at:nowISO() } : { ok:0 };
-     const tm = $('.tm', b.parentElement);
-       if (tm) tm.textContent = actif ? STATE.user.prenom + ' · ' + heure(nowISO()) : 'À faire';
-    vibrer(UI.vibration.ok);
-    await DB.set('clean:' + j, rec);
-
-    if (cle.indexOf('async_') === 0) {
-      const a = NETTOYAGE.asynchrones.filter(x => 'async_' + x.id === cle)[0];
-      if (actif && a) { await DB.set('async:' + a.id, { jour:j, par:STATE.user.prenom, at:nowISO() }); }
-    }
-    if (actif) {
-      const nom = ($('.tn', b.parentElement) ? $('.tn', b.parentElement).textContent : cle);
-      await feed('ok', STATE.user.prenom + ' a nettoyé ' + nom.replace(/^[^\p{L}\p{N}]+/u, '').toLowerCase());
-    }
-  });
-
-  if (typeof brancherVignettes === 'function') brancherVignettes(() => rendre('clean'));
-  $$('[data-photo]').forEach(b => b.onclick = async () => {
-    const p = await attacherPreuve(j, b.dataset.photo, b.dataset.lib);
-    if (p) { toast('Photo enregistrée (' + p.poids + ' Ko)'); rendre('clean'); }
-  });
-   };
+/* V.clean : version retirée — modules.js la redéfinit (tableau hebdomadaire). */
    
    /* =============================================================================
       12. VUE — PERTES (dictée vocale)
@@ -1410,14 +1573,14 @@ async function purgerPreuves() {
          '<input type="text" id="pp" placeholder="Ex. Bac pistache 5 L"></div>' +
          '<div class="grid g2" style="margin-top:14px">' +
          '<div class="champ"><label class="f">Nombre</label><input type="number" id="pn" min="0" step="1" value="1"></div>' +
-         '<div class="champ"><label class="f">Litrage (L)</label><input type="number" id="pl" min="0" step="0.5" placeholder="0"></div></div>' +
+         '<div class="champ"><label class="f">Litrage par unité (L)</label><input type="number" id="pl" min="0" step="0.5" placeholder="0"></div></div>' +
          '<div style="margin-top:14px"><label class="f">Motif</label><div class="chips" id="pm">' +
          MOTIFS_PERTE.map((m, i) => '<button type="button" class="chip corail' + (i === 0 ? ' on' : '') +
            '" data-m="' + m.id + '">' + m.icone + ' ' + esc(m.label) + '</button>').join('') + '</div></div>' +
          '<button class="btn menthe bloc" id="pa" style="margin-top:18px">Enregistrer la perte</button>') +
    
        '<div class="entete"><h3>Jetés aujourd’hui</h3>' +
-       '<span class="pousse mini num">' + n1(liste.reduce((s, w) => s + num(w.litrage), 0)) + ' L</span></div>' +
+       '<span class="pousse mini num">' + n1(liste.reduce((s, w) => s + litresPerte(w), 0)) + ' L</span></div>' +
    
        (liste.length ? '<div class="stack">' + liste.map((w, i) => {
          const m = MOTIFS_PERTE.filter(x => x.id === w.motif)[0] || MOTIFS_PERTE[0];
@@ -1470,7 +1633,11 @@ async function purgerPreuves() {
      $('#pa').onclick = async () => {
        const p = $('#pp').value.trim();
        if (!p) { toast('Indiquez le produit', 'erreur'); return $('#pp').focus(); }
+       /* parUnite : le litrage est saisi par unité (saisie manuelle comme
+          dictée, qui remplit ce même formulaire). Les anciennes lignes, sans
+          ce marqueur, gardent leur calcul d'origine. */
        liste.push({ id:uid(), produit:p, nombre:num($('#pn').value) || 1, litrage:num($('#pl').value),
+                    parUnite:true,
                     motif:motif, par:STATE.user.prenom, employe:STATE.user.id, at:nowISO() });
        await DB.set('pertes:' + j, liste);
        await cumulerPertesMois(j);
@@ -1489,6 +1656,16 @@ async function purgerPreuves() {
      });
    };
    
+   /* Litres réellement jetés sur une ligne de perte : le litrage est saisi PAR
+      UNITÉ (« 2 bacs de 5 L » → nombre 2, litrage 5, comme la dictée). Les
+      totaux ignoraient le nombre : deux bacs jetés comptaient pour un. */
+   /* Seules les lignes marquées « parUnite » sont multipliées : les anciennes
+      saisies étaient peut-être en litres totaux, on ne les recalcule pas
+      rétroactivement. */
+   const litresPerte = w => (w && w.parUnite)
+     ? num(w.nombre || 1) * num(w.litrage)
+     : num(w && w.litrage);
+
    /* Reporte le litrage détruit dans la période d'écart en cours. L'écart est
       rangé sous l'identifiant de la période (ecart:<id>), pas sous le mois :
       écrit sous « ecart:2026-09 », le jeté n'était jamais lu par calculEcart. */
@@ -1504,7 +1681,7 @@ async function purgerPreuves() {
        /* Pas de borne de fin : une période échue reste la période en cours
           jusqu'à sa clôture, et la suivante part de son propre début. */
        if (d < per.debut) continue;
-       (await DB.get(c, [])).forEach(w => total += num(w.litrage));
+       (await DB.get(c, [])).forEach(w => total += litresPerte(w));
      }
      await DB.patch('ecart:' + per.id, { jeteL:total, jeteKg:+(total * FOURNISSEUR.poidsMoyenLitre).toFixed(2) });
    }
@@ -1624,13 +1801,13 @@ async function purgerPreuves() {
                  : esc(r.detail || ('en ' + r.unite))) + '</div></div>' +
 
                (dc.length
-                 ? '<button type="button" class="chev" data-deplier="' + r.id + '" ' +
+                 ? '<button type="button" class="chev" data-deplier="' + esc(r.id) + '" ' +
                    'aria-label="Voir les déclinaisons">' + (ouvert ? '−' : '+') + '</button>'
                  : '<div class="duo compact">' +
                    '<button type="button" class="btn ok' + (v.ok ? ' on' : '') +
-                   '" data-ok="' + r.id + '" aria-label="Fait">' + ic('valide', 17) + '</button>' +
+                   '" data-ok="' + esc(r.id) + '" aria-label="Fait">' + ic('valide', 17) + '</button>' +
                    '<button type="button" class="btn ko' + (v.rupture ? ' on' : '') +
-                   '" data-ko="' + r.id + '" aria-label="Rupture">!</button></div>') +
+                   '" data-ko="' + esc(r.id) + '" aria-label="Rupture">!</button></div>') +
                '</div>' +
 
                (dc.length && ouvert
@@ -1643,9 +1820,9 @@ async function purgerPreuves() {
                         : vd.rupture ? '<small>en rupture</small>' : '') + '</span>' +
                        '<div class="duo compact">' +
                        '<button type="button" class="btn ok' + (vd.ok ? ' on' : '') +
-                       '" data-ok="' + k + '" aria-label="Fait">' + ic('valide', 16) + '</button>' +
+                       '" data-ok="' + esc(k) + '" aria-label="Fait">' + ic('valide', 16) + '</button>' +
                        '<button type="button" class="btn ko' + (vd.rupture ? ' on' : '') +
-                       '" data-ko="' + k + '" aria-label="Rupture">!</button></div></div>';
+                       '" data-ko="' + esc(k) + '" aria-label="Rupture">!</button></div></div>';
                    }).join('') + '</div>'
                  : ''),
                enRupture ? 'corail' : fait ? 'menthe' : c.couleur);
@@ -1666,19 +1843,28 @@ async function purgerPreuves() {
      });
    
      $$('[data-ko]').forEach(b => b.onclick = () => {
-       const art = REASSORT.filter(r => r.id === b.dataset.ko)[0];
-       if (rec[art.id] && rec[art.id].rupture) {
-         rec[art.id] = { ok:0, rupture:0 };
+       /* Une déclinaison porte « r01|Petit » : l'article se retrouve par la
+          partie avant « | », la rupture s'enregistre sous la clé complète —
+          celle que lit l'affichage des déclinaisons. Chercher la clé complète
+          dans REASSORT ne trouvait rien et le bouton plantait. */
+       const cle = b.dataset.ko;
+       const decl = cle.indexOf('|') >= 0 ? cle.slice(cle.indexOf('|') + 1) : '';
+       const art = REASSORT.filter(r => r.id === cle.split('|')[0])[0];
+       if (!art) return toast('Article introuvable', 'erreur');
+       if (rec[cle] && rec[cle].rupture) {
+         rec[cle] = { ok:0, rupture:0 };
          DB.set('reassort:' + j, rec).then(() => rendre('reas'));
          return;
        }
-       demanderQuantite(art);
+       demanderQuantite(art, cle, decl);
      });
    
-     function demanderQuantite(art) {
+     function demanderQuantite(art, cle, decl) {
+       cle = cle || art.id;
+       const nomComplet = art.nom + (decl ? ' — ' + decl : '');
        showSheet(
-         '<h2 id="sheet-titre">' + esc(art.nom) + '</h2>' +
-         '<p class="sub">Combien en reste-t-il ? Eve reçoit l’alerte immédiatement.</p>' +
+         '<h2 id="sheet-titre">' + esc(nomComplet) + '</h2>' +
+         '<p class="sub">Combien en reste-t-il ? ' + esc(NomManager()) + ' reçoit l’alerte immédiatement.</p>' +
          '<div class="chips" id="qt">' + RUPTURE.unitesRapides.map(q =>
            '<button type="button" class="chip corail" data-q="' + q + '">' +
            (q === 0 ? 'Plus rien' : q + ' ' + art.unite) + '</button>').join('') + '</div>' +
@@ -1687,7 +1873,7 @@ async function purgerPreuves() {
          '<div class="champ" style="margin-top:14px"><label class="f">Précision (facultatif)</label>' +
          '<input type="text" id="qn" placeholder="Ex. commande passée mardi"></div>' +
          '<div class="actions"><button class="btn clair" data-fermer>Annuler</button>' +
-         '<button class="btn corail" id="qv">Signaler à Eve</button></div>');
+         '<button class="btn corail" id="qv">Signaler à ' + esc(nomManager()) + '</button></div>');
    
        let reste = null;
        $$('#qt [data-q]').forEach(b => b.onclick = () => {
@@ -1699,16 +1885,16 @@ async function purgerPreuves() {
        $('#qv').onclick = async () => {
          if (reste === null) return toast('Indiquez ce qu’il reste', 'erreur');
          const niveau = RUPTURE.niveaux.filter(n => reste <= n.max)[0];
-         rec[art.id] = { ok:0, rupture:1, reste:reste, niveau:niveau.id, note:$('#qn').value.trim(),
-                         par:STATE.user.prenom, employe:STATE.user.id, at:nowISO() };
+         rec[cle] = { ok:0, rupture:1, reste:reste, niveau:niveau.id, note:$('#qn').value.trim(),
+                      par:STATE.user.prenom, employe:STATE.user.id, at:nowISO() };
          await DB.set('reassort:' + j, rec);
-         await DB.push('ruptures', { id:uid(), jour:j, article:art.nom, cat:art.cat, unite:art.unite,
-                                     reste:reste, niveau:niveau.id, note:rec[art.id].note,
+         await DB.push('ruptures', { id:uid(), jour:j, article:nomComplet, cat:art.cat, unite:art.unite,
+                                     reste:reste, niveau:niveau.id, note:rec[cle].note,
                                      par:STATE.user.prenom, at:nowISO(), traite:false });
-         await feed('bad', STATE.user.prenom + ' signale une rupture : ' + art.nom +
+         await feed('bad', STATE.user.prenom + ' signale une rupture : ' + nomComplet +
                     (reste === 0 ? ' (plus rien)' : ' (reste ' + reste + ' ' + art.unite + ')'));
          closeSheet();
-         toast('Eve est prévenue');
+         toast('Alerte transmise à ' + nomManager());
          rendre('reas');
        };
      }
@@ -1741,7 +1927,7 @@ async function purgerPreuves() {
            (m.luPar && m.luPar.length ? ' · lu par ' + esc(m.luPar.join(', ')) : '') + '</div></div>' +
            (m.epingle ? '<span class="pill ambre">Épinglé</span>' : '') +
            (m.luPar && m.luPar.indexOf(STATE.user.prenom) >= 0 ? ''
-             : '<button class="btn clair sm" data-lu="' + m.id + '">J’ai lu</button>') + '</div>',
+             : '<button class="btn clair sm" data-lu="' + esc(m.id) + '">J’ai lu</button>') + '</div>',
            m.epingle ? 'ambre' : c.couleur);
        }).join('') + '</div>' : vide('💬', 'Aucun message pour l’instant.'));
    
@@ -1854,7 +2040,7 @@ async function purgerPreuves() {
          ['Ça ne marche pas', 'Un chiffre est faux', 'Une idée', 'Autre'].map((t, i) =>
            '<button type="button" class="chip' + (i === 0 ? ' on' : '') + '" data-t="' + esc(t) + '">' + esc(t) + '</button>').join('') +
          '</div><div class="champ" style="margin-top:14px">' +
-         '<textarea id="fbx" data-autofocus placeholder="Ex. quand je valide le nettoyage, la ligne ne se coche pas."></textarea></div>' +
+         '<textarea id="fbx" data-autofocus aria-label="Décrivez le souci" placeholder="Ex. quand je valide le nettoyage, la ligne ne se coche pas."></textarea></div>' +
          '<div class="actions"><button class="btn clair" data-fermer>Annuler</button>' +
          '<button class="btn menthe" id="fbv">Envoyer</button></div>');
    
@@ -1870,7 +2056,7 @@ async function purgerPreuves() {
                                      par:STATE.user.prenom, at:nowISO(), version:APP.version });
          await feed('warn', STATE.user.prenom + ' a signalé un souci sur « ' + (PAGES[STATE.view] || {}).titre + ' »');
          closeSheet();
-         toast('Merci, c’est transmis à Eve');
+         toast('Merci, c’est transmis à ' + nomManager());
        };
      };
    }
@@ -1888,6 +2074,9 @@ async function viderAppareil() {
     const p = OFFLINE.storeLocal + ':';
     Object.keys(localStorage).filter(k => k.indexOf(p) === 0)
       .forEach(k => { localStorage.removeItem(k); cles++; });
+    /* Le compteur d'échecs du PIN survit à la remise à zéro : sinon elle
+       servirait à lever le blocage anti-essais. */
+    if (typeof sauverPinEchecs === 'function') sauverPinEchecs();
   } catch (e) {}
   try {
     if (navigator.serviceWorker) {
@@ -1945,12 +2134,23 @@ function ecranRemiseAZero(auto) {
   };
 }
 
+/* Session mémorisée → utilisateur. Le rôle et le nom viennent d'EQUIPE, la
+   source de vérité, jamais de la session : celle-ci vit dans le localStorage
+   et un « role:'manager' » écrit à la main ouvrait l'espace manager. Un rôle
+   retiré depuis la dernière connexion est aussi pris en compte. */
+function utilisateurDeSession(s) {
+  if (!s || !s.id) return null;
+  const e = EQUIPE.filter(x => x.id === s.id)[0];
+  if (!e) return null;
+  return { id:e.id, prenom:e.prenom, role:e.role, couleur:e.couleur, initiales:e.initiales };
+}
+
 /* Reprend le parcours de connexion normal après un passage par …/?reset */
 async function demarrerConnexion() {
   try {
-    const s = await DB.get('session', null);
-    if (s && s.id && EQUIPE.filter(e => e.id === s.id)[0]) {
-      STATE.user = s;
+    const u = utilisateurDeSession(await DB.get('session', null));
+    if (u) {
+      STATE.user = u;
       await chargerService();
       demarrer();
     }
@@ -1969,10 +2169,22 @@ function vueAccueil() {
 }
 
 window.addEventListener('popstate', function (ev) {
+  /* 0. Retour provoqué par closeSheet lui-même : l'entrée de la feuille est
+     retirée, il n'y a rien d'autre à faire (sinon : boucle, ou vue changée). */
+  if (_ignorerPop) { _ignorerPop = false; return; }
+
   /* 1. Une feuille est ouverte : le retour la ferme, comme on l'attend.
-     showSheet a empilé une entrée d'historique, donc rien à rempiler ici. */
+     L'entrée d'historique de la feuille vient d'être consommée : closeSheet
+     ne doit pas en retirer une seconde. Une feuille obligatoire, elle, ne se
+     ferme pas : on remet l'entrée consommée. */
   const sheet = document.getElementById('sheet');
   if (sheet && !sheet.hidden) {
+    if (sheet.dataset.obligatoire) {
+      try { history.pushState({ vue:STATE.view, feuille:true }, '', location.pathname); } catch (e) {}
+      _feuilleHisto = true;
+      return;
+    }
+    _feuilleHisto = false;
     closeSheet();
     return;
   }
@@ -1989,7 +2201,7 @@ window.addEventListener('popstate', function (ev) {
   const accueil = vueAccueil();
   if (STATE.view !== accueil) {
     rendre(accueil, true);
-    try { history.pushState({ vue:accueil }, '', location.pathname); } catch (e) {}
+    pousserHistorique({ vue:accueil });
   }
 });
 
@@ -2080,19 +2292,102 @@ async function chargerEquipe() {
         });
         if (r.status === 404) {
           try { localStorage.removeItem('pilotshop.v3:table-equipe'); } catch (e) {}
-        } else if (r.ok && garder(await r.json())) return;
+        } else if (r.ok && garder(await r.json())) return 'base';
       }
     } catch (e) { /* hors ligne : on continue */ }
   }
 
   /* 3. Repli : une ligne dans la table des réglages. Ne demande aucune
-     migration de schéma, donc fonctionne dès maintenant. */
-  try {
-    const l = await DB.get('equipe', null);
-    if (garder(l)) return;
-  } catch (e) { /* rien en base non plus */ }
+     migration de schéma, donc fonctionne dès maintenant.
+     Lecture dédiée plutôt que DB.get : DB.get rend null aussi bien quand la
+     base n'a pas de ligne que quand le réseau a échoué, et ce null-là
+     faisait proposer de « créer l'équipe » à un iPad simplement hors ligne. */
+  const lu = await lireEquipeBase();
+  if (lu.etat === 'base' && garder(lu.data)) return 'base';
 
-  /* 4. Toujours rien : l'écran d'amorçage prendra le relais. */
+  /* 4. Toujours rien : « vide » si la base a vraiment répondu sans équipe
+     (l'écran d'amorçage prendra le relais), « reseau » si on n'a pas pu la
+     joindre (il faudra réessayer, surtout pas recréer une équipe). */
+  return EQUIPE.length ? 'local' : (lu.etat === 'reseau' ? 'reseau' : 'vide');
+}
+
+/* Lecture de la ligne « equipe » en distinguant l'échec réseau d'une réponse
+   vide. Rend { etat:'base', data } quand la base a répondu (data null si
+   aucune ligne), { etat:'reseau' } quand elle n'a pas pu être jointe.
+   Sans base configurée, tout est local par choix : réponse « base » vide. */
+async function lireEquipeBase() {
+  if (!DB.configure || !DB._distant('equipe')) return { etat:'base', data:null };
+  /* Une équipe saisie hors ligne attend encore dans la file : la copie locale
+     est la plus récente, la base ne fait pas foi. */
+  if (fileLire().some(x => x.cle === 'equipe')) {
+    try { return { etat:'base', data:JSON.parse(DB._lire('equipe') || 'null') }; }
+    catch (e) { return { etat:'base', data:null }; }
+  }
+  if (!navigator.onLine) return { etat:'reseau' };
+  try {
+    const l = await DB._appel(DB._table('equipe') + '?id=eq.' + encodeURIComponent('equipe') +
+                              '&select=data&limit=1');
+    lireEquipeBase.refus = false;
+    return { etat:'base', data:(l && l.length) ? l[0].data : null };
+  } catch (e) {
+    /* 401/403 : la base répond mais refuse cet appareil. Ce n'est pas le
+       Wi-Fi ; l'écran d'attente le dira (e.http est posé par DB._appel). */
+    lireEquipeBase.refus = !!(e && (e.http === 401 || e.http === 403));
+    return { etat:'reseau', http:e && e.http };
+  }
+}
+
+/* -----------------------------------------------------------------------------
+   ÉQUIPE INJOIGNABLE
+   Pas d'équipe en local et la base ne répond pas : on ne propose PAS de créer
+   une équipe — elle existe sans doute déjà, et l'écraser couperait l'accès de
+   tous les autres appareils. On attend le réseau.
+   -------------------------------------------------------------------------- */
+function ecranEquipeInjoignable() {
+  if (document.getElementById('amorcage')) return;
+  const d = document.createElement('div');
+  d.id = 'amorcage';
+  document.body.appendChild(d);
+  /* Refus du serveur (401/403) : le Wi-Fi n'y est pour rien. */
+  const motifRefus = 'L’appareil doit être rattaché à nouveau.';
+  const refus = !!lireEquipeBase.refus;
+  d.innerHTML =
+    '<div class="in">' +
+    '<div class="lg"><h1>Pilot-Shop</h1><p>' + esc(APP.site) + '</p></div>' +
+    '<div class="card solide">' +
+    '<h2>Connexion nécessaire pour charger l’équipe</h2>' +
+    '<div class="cs" id="eq-motif">La liste de l’équipe n’est pas encore sur cet appareil et la base ' +
+    (refus ? 'refuse l’accès. ' + motifRefus : 'ne répond pas. Vérifiez le Wi-Fi, puis réessayez.') + '</div>' +
+    '<button class="btn menthe bloc xl" id="eq-retry" style="margin-top:14px">Réessayer</button>' +
+    '<p class="mini" id="eq-etat" style="text-align:center;margin-top:12px"></p>' +
+    '</div></div>';
+  const essayer = async () => {
+    if (!d.isConnected) return;
+    const bouton = d.querySelector('#eq-retry');
+    if (bouton.disabled) return;
+    bouton.disabled = true;
+    d.querySelector('#eq-etat').textContent = 'Connexion…';
+    const etat = await chargerEquipe();
+    bouton.disabled = false;
+    if (etat === 'reseau') {
+      d.querySelector('#eq-etat').textContent = lireEquipeBase.refus
+        ? motifRefus
+        : 'Toujours pas de connexion. Réessayez dans un instant.';
+      return;
+    }
+    window.removeEventListener('online', auRetourReseau);
+    d.remove();
+    if (typeof initLogin === 'function') initLogin();
+    if (etat === 'vide') ecranAmorcage();
+  };
+  /* Nouvel essai automatique au retour du réseau ; l'écouteur est retiré
+     après usage (un seul essai par retour, le bouton reste disponible). */
+  function auRetourReseau() {
+    window.removeEventListener('online', auRetourReseau);
+    essayer().then(() => { if (d.isConnected) window.addEventListener('online', auRetourReseau); });
+  }
+  window.addEventListener('online', auRetourReseau);
+  d.querySelector('#eq-retry').onclick = essayer;
 }
 
 /* L'équipe change rarement, mais quand elle change il faut que ça suive :
@@ -2193,6 +2488,19 @@ function ecranAmorcage() {
       const codes = valides.map(l => l.pin);
       if (new Set(codes).size !== codes.length) return etat('Deux personnes ont le même code.');
 
+      /* Dernière vérification avant d'écrire : si une équipe est apparue en
+         base entre-temps (autre iPad, réseau revenu), on la reprend au lieu
+         de l'écraser. Base injoignable : on n'écrit rien. */
+      const lu = await lireEquipeBase();
+      if (lu.etat === 'reseau') return etat('Connexion nécessaire pour enregistrer l’équipe. Réessayez.');
+      if (Array.isArray(lu.data) && lu.data.length) {
+        await chargerEquipe();
+        d.remove();
+        if (typeof initLogin === 'function') initLogin();
+        toast('Une équipe existait déjà pour cette boutique : elle a été chargée');
+        return;
+      }
+
       const equipe = valides.map((l, i) => ({
         id: 'e' + (i + 1), prenom: l.prenom, pin: l.pin, role: l.role,
         couleur: COULEURS[i % COULEURS.length],
@@ -2249,6 +2557,9 @@ window.addEventListener('error', function (ev) {
                          msg: String(ev.message).slice(0, 240),
                          ligne: ev.lineno });
   if (STATE.incidents.length > 30) STATE.incidents.shift();
+  /* Une exception dans un gestionnaire de clic est aussi muette qu'un rejet :
+     on prévient, sinon l'appui semble simplement n'avoir rien fait. */
+  if (typeof toast === 'function') toast('L’action n’a pas abouti', 'erreur');
 });
 
 /* =============================================================================
@@ -2299,7 +2610,7 @@ window.addEventListener('error', function (ev) {
   STATE.erreurBase = null;
   majBandeau();
   initFeedback();
-  purgerPreuves();          // les photos de plus de trois mois s'effacent seules
+  purgerPreuves();          // copie locale des photos de plus de 7 jours (le serveur garde tout)
   /* Bouton de compte : le seul accès à « tout le reste » et à la déconnexion
      pour l'équipe, dont la barre du bas n'a plus d'onglet « Plus ». */
   const bc = $('#compte');
@@ -2338,7 +2649,7 @@ window.addEventListener('error', function (ev) {
          await ecranRattachement();
        }
      }
-     if (typeof chargerEquipe === 'function') await chargerEquipe();
+     const etatEquipe = (typeof chargerEquipe === 'function') ? await chargerEquipe() : 'vide';
      /* La liste des prénoms a été dessinée par initLogin alors qu'EQUIPE était
         encore vide : on la redessine une fois l'équipe chargée depuis la base. */
      if (typeof initLogin === 'function') initLogin();
@@ -2351,14 +2662,18 @@ window.addEventListener('error', function (ev) {
        if (SUPABASE.url && SUPABASE.anonKey && typeof appareilRattache === 'function' && !appareilRattache() &&
            typeof ecranRattachement === 'function') {
          await ecranRattachement();
+       } else if (etatEquipe === 'reseau') {
+         /* La base n'a pas répondu : ce n'est pas une boutique vide. */
+         ecranEquipeInjoignable();
        } else if (typeof ecranAmorcage === 'function') {
          ecranAmorcage();
        }
      }
 
      const s = await DB.get('session', null);
-     if (s && s.id && EQUIPE.filter(e => e.id === s.id)[0]) {
-       STATE.user = s;
+     const u = utilisateurDeSession(s);
+     if (u) {
+       STATE.user = u;
        await chargerService();
        demarrer();
      }
@@ -2481,7 +2796,9 @@ function ouvrirPremierePeriode() {
 
       '<div class="actions"><button class="btn menthe bloc" id="pp-ok">Ouvrir la période</button></div>');
 
-    /* Ni croix, ni voile cliquable, ni Échap : la décision est obligatoire. */
+    /* Ni croix, ni voile cliquable, ni Échap, ni bouton retour : la décision
+       est obligatoire. L'indicateur est lu par le voile, Échap et popstate. */
+    $('#sheet').dataset.obligatoire = '1';
     /* Les boutons de la feuille seulement : masquer aussi le voile (qui porte
        data-fermer) le laissait invisible pour toutes les feuilles suivantes. */
     $$('#sheet-corps [data-fermer]').forEach(b => b.style.display = 'none');
@@ -2538,6 +2855,7 @@ function ouvrirPremierePeriode() {
       oublierPeriode();
       await feed('ok', (STATE.user ? STATE.user.prenom : '—') +
                  ' a ouvert la première période : ' + libellePeriode(p));
+      delete $('#sheet').dataset.obligatoire;
       closeSheet();
       toast('Période ouverte · ' + libellePeriode(p));
       resolve(p);
@@ -2618,9 +2936,12 @@ function ouvrirPremierePeriode() {
      /* On retient QUELLES enceintes ont dépassé, pas seulement combien :
         une vitrine et une chambre froide n'appellent pas la même réaction. */
      const enceintesCrit = [];
+     /* La veille sert au fond initial quand le matin n'a pas été saisi. */
+     let caisseVeille = jours.length ? await DB.get('caisse:' + addD(jours[0], -1), null) : null;
      for (const d of jours) {
        const k = await DB.get('caisse:' + d, null);
-       if (k) cumulCaisse += num(k.ecart);
+       if (k) cumulCaisse += caisseResume(k, caisseVeille).ecart;
+       caisseVeille = k;
        const n = await etatNettoyage(d);
        if (n.total && n.faits === 0) sansNet++;
        const t = await DB.get('temp:' + d, {});
@@ -2713,7 +3034,7 @@ function ouvrirPremierePeriode() {
              '<div class="mini">' + (r.reste === 0 ? 'Plus rien en stock' : 'Reste ' + r.reste + ' ' + esc(r.unite)) +
              (r.note ? ' · ' + esc(r.note) : '') + ' · ' + esc(r.par) + ' le ' + fmtDC(r.jour) + ' ' + heure(r.at) + '</div></div>' +
              pastille(niv.couleur === 'rouge' ? 'bad' : 'warn', niv.label) +
-             '<button class="btn menthe sm" data-traite="' + r.id + '">Traité</button></div>', 'urgence corail');
+             '<button class="btn menthe sm" data-traite="' + esc(r.id) + '">Traité</button></div>', 'urgence corail');
          }).join('') + '</div>' : '') +
    
        '<div class="entete"><h3>En direct</h3><span class="pousse mini">3 derniers jours</span></div>' +
@@ -2766,12 +3087,33 @@ function ouvrirPremierePeriode() {
      return Math.max(parTiers, plancher);
    }
 
+   /* Mois précédent d'une clé « AAAA-MM ». */
+   const moisPrecedent = m => isoOf(new Date(+String(m).slice(0, 4), +String(m).slice(5, 7) - 2, 15)).slice(0, 7);
+
    async function calculFIFO(mois) {
-     const rec = await DB.get('lots:' + mois, {});
+     /* Le mois précédent est lu aussi : un produit ouvert le 30 périme le mois
+        suivant, et il disparaissait du frigo virtuel — et des alertes — dès le
+        1er. Pour une même clé, l'ouverture du mois le plus récent l'emporte,
+        comme à l'intérieur d'un mois. On garde le mois d'origine de chaque
+        lot : c'est sous lui qu'on le marque jeté. */
+     const prec = moisPrecedent(mois);
+     const recPrec = await DB.get('lots:' + prec, {});
+     const recMois = await DB.get('lots:' + mois, {});
+     const rec = {}, source = {};
+     [[prec, recPrec], [mois, recMois]].forEach(([m, r]) => Object.keys(r || {}).forEach(cle => {
+       if (!r[cle]) return;
+       rec[cle] = r[cle]; source[cle] = m;
+     }));
      const out = [];
      Object.keys(rec).forEach(cle => {
        const v = rec[cle];
        if (!v || !v.lot || !v.ouv) return;
+       /* Lot jeté : marqué, pas supprimé — une suppression était annulée par
+          la fusion avec la copie du serveur, et le lot revenait.
+          La fusion champ par champ garde aussi la marque quand un NOUVEAU bac
+          est ouvert sous la même clé : la marque ne vaut donc que pour le lot
+          jeté — même numéro, ouvert avant le jet. */
+       if (v.jete && (!v.jeteLot || v.jeteLot === v.lot) && (!v.at || v.at <= v.jete)) return;
        const type = cle.slice(0, 1);
        const nom = type === 'g' ? cle.slice(2) : (DLC_RULES[cle.slice(2)] || DLC_RULES.defaut).label;
        const regle = regleDLC(nom, type);
@@ -2783,7 +3125,8 @@ function ouvrirPremierePeriode() {
                : resteH <= seuilOrangeHeures(heures) ? 'orange' : 'vert';
        out.push({ cle:cle, nom:nom, type:type, lot:v.lot, ouv:v.ouv, par:v.par,
                   regle:regle, heures:heures, limite:isoOf(limite), limiteH:limite,
-                  resteH:resteH, c:c, zone:DLC_RULES[regle].zone });
+                  resteH:resteH, c:c, zone:DLC_RULES[regle].zone,
+                  mois:source[cle], famille:v.famille || null, taille:v.taille || null });
      });
      return out.sort((a, b) => a.resteH - b.resteH);
    }
@@ -2792,7 +3135,10 @@ function ouvrirPremierePeriode() {
      : h < 48 ? 'Encore ' + h + ' h' : 'Encore ' + Math.round(h / 24) + ' j';
    
    V.frigo = async function () {
-     const mois = monthKey(STATE.jour);
+     /* Mois propre au Frigo : le sélecteur ne déplace plus la date de travail
+        de toute l'application (STATE.jour), qui faisait ensuite saisir les
+        relevés au 15 du mois choisi. */
+     const mois = STATE.moisFrigo || monthKey(today());
      const fifo = await calculFIFO(mois);
      const r = fifo.filter(f => f.c === 'rouge'), o = fifo.filter(f => f.c === 'orange'), v = fifo.filter(f => f.c === 'vert');
    
@@ -2817,18 +3163,29 @@ function ouvrirPremierePeriode() {
              '</div>').join('') + '</div>').join('')
          : vide('🧊', 'Aucun lot ouvert ce mois. Les saisies de l’équipe apparaissent ici.'));
    
-     $('#mm').onchange = e => { STATE.jour = e.target.value + '-15'; rendre('frigo'); };
+     $('#mm').onchange = e => { STATE.moisFrigo = e.target.value || null; rendre('frigo'); };
    
      $$('[data-jeter]').forEach(b => b.onclick = () => {
        const f = fifo.filter(x => x.cle === b.dataset.jeter)[0];
        confirmer('Jeter ' + f.nom + ' ?',
          'Le lot ' + f.lot + ' sera enregistré en perte et retiré du frigo virtuel.', 'Jeter et déclarer', async () => {
+           /* Litrage réel du lot : sa taille de bac pour une glace (5 L par
+              défaut si elle n'a pas été saisie), 0 pour le reste — une
+              chantilly ou un coulis n'a pas de litrage de glace, et lui
+              compter 5 L faussait l'écart de stock. */
+           const glace = f.type === 'g' || f.famille === 'glace';
+           const litrage = glace ? (num(f.taille) || FOURNISSEUR.tailleParDefaut) : 0;
            await DB.push('pertes:' + today(), { id:uid(), produit:f.nom + ' (lot ' + f.lot + ')', nombre:1,
-             litrage:FOURNISSEUR.tailleParDefaut, motif:'perime', par:STATE.user.prenom, at:nowISO() });
+             litrage:litrage, parUnite:true, motif:'perime', par:STATE.user.prenom, employe:STATE.user.id, at:nowISO() });
            await cumulerPertesMois(today());
-           const rec = await DB.get('lots:' + mois, {});
-           delete rec[f.cle];
-           await DB.set('lots:' + mois, rec);
+           /* Marqué jeté plutôt que supprimé : « lots: » est fusionné avec la
+              copie du serveur, qui faisait revenir une clé supprimée. */
+           const moisLot = f.mois || mois;
+           const rec = await DB.get('lots:' + moisLot, {});
+           if (rec[f.cle]) {
+             rec[f.cle] = Object.assign({}, rec[f.cle], { jete:nowISO(), jeteLot:f.lot, jetePar:STATE.user.prenom });
+             await DB.set('lots:' + moisLot, rec);
+           }
            await feed('warn', STATE.user.prenom + ' a jeté ' + f.nom + ' (DLC dépassée)');
            toast('Perte enregistrée');
            rendre('frigo');
@@ -2902,110 +3259,8 @@ function ouvrirPremierePeriode() {
      onglet === 'glace' ? await invGlace(per) : await invSec(per);
    };
    
-   async function invGlace(per) {
-     const cle = 'invglace:' + per.id;
-     const rec = await DB.get(cle, { l:{}, valide:false });
-     if (!rec.l) rec.l = {};
-   
-     const calc = () => {
-       let bacs = 0, litres = 0;
-       PARFUMS.forEach((p, i) => {
-         const v = rec.l['p' + i] || {}, t = num(v.taille) || FOURNISSEUR.tailleParDefaut;
-         bacs += num(v.n); litres += num(v.n) * t + num(v.ent);
-       });
-       return { bacs:bacs, litres:litres, kg:litres * FOURNISSEUR.poidsMoyenLitre };
-     };
-     const c = calc();
-   
-     $('#page').innerHTML =
-       carte(entete('🍦', 'Inventaire glace · ' + libellePeriode(per),
-         'Comptez parfum par parfum. Le total des bacs devra être confirmé avant validation.') +
-         (rec.valide
-           ? '<div class="alerte ok"><span class="ai">•</span><div><b>Validé</b><p>' + esc(rec.par) + ' · ' +
-             fmtD(rec.jour) + ' ' + heure(rec.at) + ' — ' + rec.bacs + ' bacs, ' + n1(rec.kg) + ' kg</p></div>' +
-             '<span class="go"><button class="btn clair sm" id="rouvrir">Rouvrir</button></span></div>'
-           : '<div class="grid g3">' +
-             kpi('Bacs comptés', '<span id="tb">' + c.bacs + '</span>', '', 'Total saisi') +
-             kpi('Litres', '<span id="tl">' + n1(c.litres) + '</span>', '', 'Bacs + entamés') +
-             kpi('Poids', '<span id="tk">' + n1(c.kg) + '</span><span class="u">kg</span>', '', 'Stock réel') + '</div>'), 'solide') +
-   
-       '<div class="entete"><h3>Parfums</h3></div><div class="stack">' +
-       PARFUMS.map((p, i) => {
-         const v = rec.l['p' + i] || {}, t = num(v.taille) || FOURNISSEUR.tailleParDefaut;
-         return carte('<div class="rang"><b style="flex:1">' + esc(p) + '</b>' +
-           '<span class="mini num" data-lg="p' + i + '">' + n1(num(v.n) * t + num(v.ent)) + ' L</span></div>' +
-           '<div class="grid g3" style="margin-top:12px">' +
-           '<div class="champ"><label class="f">Taille</label><select data-g="p' + i + '.taille"' + (rec.valide ? ' disabled' : '') + '>' +
-           TAILLES_BAC.map(x => '<option value="' + x + '"' + (t === x ? ' selected' : '') + '>' + x + ' L</option>').join('') + '</select></div>' +
-           '<div class="champ"><label class="f">Bacs entiers</label>' +
-           '<input type="number" min="0" step="1" data-g="p' + i + '.n" value="' + (v.n === undefined ? '' : v.n) + '"' + (rec.valide ? ' disabled' : '') + '></div>' +
-           '<div class="champ"><label class="f">Entamé (L)</label>' +
-           '<input type="number" min="0" step="0.5" data-g="p' + i + '.ent" value="' + (v.ent === undefined ? '' : v.ent) + '"' + (rec.valide ? ' disabled' : '') + '></div></div>',
-           num(v.n) ? 'menthe' : '');
-       }).join('') + '</div>' +
-   
-       (rec.valide ? '' : carte(entete('✅', 'Confirmation du comptage',
-         'Recomptez les bacs présents toutes chambres confondues. La validation exige que les deux nombres correspondent.') +
-         '<div class="grid g2"><div class="champ"><label class="f">Total recompté</label>' +
-         '<input type="number" min="0" id="cf" placeholder="Ex. 120"></div>' +
-         '<div class="champ"><label class="f">Total calculé</label>' +
-         '<input type="text" id="cc" value="' + c.bacs + '" readonly></div></div>' +
-         '<button class="btn menthe bloc xl" id="val" style="margin-top:16px">Valider l’inventaire</button>' +
-         '<div id="vm" style="margin-top:14px"></div>', 'ambre'));
-   
-     const refresh = () => {
-       $$('[data-g]').forEach(i => {
-         const a = i.dataset.g.split('.');
-         if (!rec.l[a[0]]) rec.l[a[0]] = {};
-         rec.l[a[0]][a[1]] = i.value;
-       });
-       PARFUMS.forEach((p, i) => {
-         const v = rec.l['p' + i] || {}, t = num(v.taille) || FOURNISSEUR.tailleParDefaut;
-         const el = $('[data-lg="p' + i + '"]');
-         if (el) el.textContent = n1(num(v.n) * t + num(v.ent)) + ' L';
-       });
-       const c2 = calc();
-       if ($('#tb')) { $('#tb').textContent = c2.bacs; $('#tl').textContent = n1(c2.litres); $('#tk').textContent = n1(c2.kg); }
-       if ($('#cc')) $('#cc').value = c2.bacs;
-       DB.set(cle, rec);
-     };
-     $$('[data-g]').forEach(i => { i.oninput = refresh; i.onchange = refresh; });
-   
-     const rv = $('#rouvrir');
-     if (rv) rv.onclick = () => confirmer('Rouvrir l’inventaire ?',
-       'Les chiffres redeviennent modifiables. La clôture de période sera bloquée jusqu’à une nouvelle validation.',
-       'Rouvrir', async () => { rec.valide = false; await DB.set(cle, rec); rendre('inv'); });
-   
-     const vb = $('#val');
-     if (vb) vb.onclick = async () => {
-       const c2 = calc(), saisi = num($('#cf').value);
-       if ($('#cf').value === '') {
-         $('#vm').innerHTML = '<div class="alerte warn"><span class="ai">●</span><div><b>Confirmation manquante</b>' +
-           '<p>Saisissez le nombre total de bacs que vous avez recomptés.</p></div></div>';
-         return;
-       }
-       if (saisi !== c2.bacs) {
-         $('#vm').innerHTML = '<div class="alerte bad"><span class="ai">▲</span><div><b>Les comptages ne correspondent pas</b>' +
-           '<p>Vous avez compté ' + saisi + ' bacs, l’application en totalise ' + c2.bacs +
-           '. Recomptez ou corrigez les lignes avant de valider.</p></div></div>';
-         vibrer(UI.vibration.erreur);
-         return;
-       }
-       Object.assign(rec, { valide:true, par:STATE.user.prenom, jour:today(), at:nowISO(),
-                            bacs:c2.bacs, litres:c2.litres, kg:c2.kg });
-       await DB.set(cle, rec);
-       const par = { }; TAILLES_BAC.forEach(t => par[t] = 0);
-       let ent = 0;
-       PARFUMS.forEach((p, i) => {
-         const v = rec.l['p' + i] || {}, t = num(v.taille) || FOURNISSEUR.tailleParDefaut;
-         par[t] = (par[t] || 0) + num(v.n); ent += num(v.ent);
-       });
-       await DB.patch('ecart:' + per.id, { fin:{ bacs:par, entames:ent, kg:c2.kg } });
-       await feed('ok', STATE.user.prenom + ' a validé l’inventaire glace (' + c2.bacs + ' bacs, ' + n1(c2.kg) + ' kg)');
-       toast('Inventaire validé et reporté dans les écarts');
-       rendre('inv');
-     };
-   }
+   /* invGlace : version retirée — modules.js la redéfinit (plusieurs tailles
+      de bac par parfum). V.inv ci-dessus appelle donc toujours celle-là. */
    
    async function invSec(per) {
      const cle = 'invsec:' + per.id;
@@ -3063,11 +3318,44 @@ function ouvrirPremierePeriode() {
    /* =============================================================================
       27. ÉCARTS GLACE + DÉTECTEUR DE TENDANCES
       ========================================================================== */
+   /* Poids d'un comptage fait dans « Faire l'inventaire » (stock.js,
+      enregistrerInventaire), recopié sous invglace:<période>.debut / .fin :
+        { parfums: { 'Vanille': { '5': 3, '3': 1 } }, par, at }
+      soit des bacs entiers par taille en litres. Même conversion que
+      totauxStock et que l'ancien écran : litres × poids moyen au litre.
+      Rend null s'il n'y a pas de comptage. */
+   function kgInventaireParfums(x) {
+     if (!x || !x.parfums || typeof x.parfums !== 'object') return null;
+     let litres = 0;
+     Object.keys(x.parfums).forEach(p => {
+       const t = x.parfums[p] || {};
+       Object.keys(t).forEach(taille => { litres += num(t[taille]) * num(taille); });
+     });
+     return litres * FOURNISSEUR.poidsMoyenLitre;
+   }
+
    async function calculEcart(per) {
      const e = await DB.get('ecart:' + per.id, {});
-     const invD = await DB.get('invglace:' + (per.precedente || '') , null);
-     const debutKg = e.debut && e.debut.kg !== undefined ? num(e.debut.kg) : (invD && invD.valide ? num(invD.kg) : num(e.debutKg));
-     const finKg = e.fin && e.fin.kg !== undefined ? num(e.fin.kg) : 0;
+     /* Les deux écrans d'inventaire écrivent sous invglace:<période> : l'ancien
+        (rec.valide, rec.kg, recopié dans ecart:<période>.fin.kg) et le nouveau
+        (debut / fin par parfum). Seul l'ancien était lu : avec le nouveau, le
+        stock de fin restait à 0 et la clôture enregistrait stockFin = 0 —
+        qui devenait le stock de départ de la période suivante. */
+     const inv  = await DB.get('invglace:' + per.id, null);
+     const invD = per.precedente ? await DB.get('invglace:' + per.precedente, null) : null;
+     const kgDebutInv = kgInventaireParfums(inv && inv.debut);
+     /* Stock de fin de la période précédente : ancien écran, sinon nouveau. */
+     const kgPrec = (invD && invD.valide) ? num(invD.kg) : kgInventaireParfums(invD && invD.fin);
+     let debutKg;
+     if (kgDebutInv !== null) debutKg = kgDebutInv;          // compté le jour du départ
+     /* debut.kg vient de la clôture précédente ; un 0 y a été écrit tant que
+        le nouvel inventaire n'était pas lu — on lui préfère alors le comptage. */
+     else if (e.debut && e.debut.kg !== undefined && (num(e.debut.kg) > 0 || kgPrec === null)) debutKg = num(e.debut.kg);
+     else if (kgPrec !== null) debutKg = kgPrec;
+     else debutKg = num(e.debutKg);
+     const kgFinInv = kgInventaireParfums(inv && inv.fin);
+     const finAncien = !!(e.fin && e.fin.kg !== undefined);
+     const finKg = finAncien ? num(e.fin.kg) : (kgFinInv !== null ? kgFinInv : 0);
      const achats = num(e.litrageBL) * FOURNISSEUR.poidsMoyenLitre;
      const jete = num(e.jeteKg);
    
@@ -3079,7 +3367,7 @@ function ouvrirPremierePeriode() {
      const ecart = finKg - theo;
      const pct = theo ? ((theo - finKg) / theo) * 100 : 0;
      return { debutKg, finKg, achats, jete, vendu, theo, reel:finKg, ecart:ecart,
-              pct:pct, valeur:ecart * FOURNISSEUR.prixMoyenKg, invValide:!!(e.fin && e.fin.kg !== undefined) };
+              pct:pct, valeur:ecart * FOURNISSEUR.prixMoyenKg, invValide:finAncien || kgFinInv !== null };
    }
    const etatEcart = p => {
      const a = Math.abs(p);
@@ -3197,18 +3485,22 @@ function ouvrirPremierePeriode() {
      const parJour = {}, parPersonne = {};
      let annulations = 0, pertesTotal = 0;
    
+     let caisseVeille = null;
      for (const d of joursEntre(debut, fin)) {
        const k = await DB.get('caisse:' + d, null);
+       const veille = caisseVeille;
+       caisseVeille = k;
        if (k) {
-         const ec = num(k.ecart);
+         const rk = caisseResume(k, veille);
+         const ec = rk.ecart;
          if (Math.abs(ec) > SEUILS.caisseJourEur) {
            const jn = JOURS_SEMAINE[jourISO(d)];
            parJour[jn] = (parJour[jn] || 0) + 1;
-           if (k.par) parPersonne[k.par] = (parPersonne[k.par] || 0) + 1;
+           if (rk.par) parPersonne[rk.par] = (parPersonne[rk.par] || 0) + 1;
          }
          if (k.ann && String(k.ann).trim()) annulations++;
        }
-       (await DB.get('pertes:' + d, [])).forEach(p => pertesTotal += num(p.litrage));
+       (await DB.get('pertes:' + d, [])).forEach(p => pertesTotal += litresPerte(p));
      }
    
      Object.keys(parJour).forEach(j => {
@@ -3507,10 +3799,12 @@ function modifierPeriode(per) {
      for (const c of cles) {
        const j = c.replace(defs[onglet].p, ''), v = await DB.get(c);
        if (!v) continue;
-       if (onglet === 'caisse')
-         lignes.push([fmtD(j), eur(num(v.s_cb !== undefined ? v.s_cb : v.cb) + num(v.s_esp !== undefined ? v.s_esp : v.esp)),
-                      eur(num(v.ecart)), v.par || (v.s_valide && v.s_valide.par) || '—',
-                      Math.abs(num(v.ecart)) > SEUILS.caisseJourEur ? 'bad' : 'ok']);
+       if (onglet === 'caisse') {
+         /* Même calcul qu'ailleurs : la veille donne le fond initial manquant. */
+         const rk = caisseResume(v, await DB.get('caisse:' + addD(j, -1), null));
+         lignes.push([fmtD(j), eur(rk.ca), eur(rk.ecart), rk.par || '—',
+                      Math.abs(rk.ecart) > SEUILS.caisseJourEur ? 'bad' : 'ok']);
+       }
        else if (onglet === 'temp') {
          const n = ENCEINTES.reduce((s, e) => s + (v['m_' + e.id] ? 1 : 0) + (v['s_' + e.id] ? 1 : 0), 0);
          const cr = ENCEINTES.filter(e => ['m','s'].some(m => etatTemp(e, v[m + '_' + e.id]) === 'crit')).length;
@@ -3527,7 +3821,7 @@ function modifierPeriode(per) {
        }
        else if (onglet === 'pertes') {
          if (!v.length) continue;
-         lignes.push([fmtD(j), v.length + ' ligne(s)', n1(v.reduce((s, w) => s + num(w.litrage), 0)) + ' L', v[0].par || '—', 'warn']);
+         lignes.push([fmtD(j), v.length + ' ligne(s)', n1(v.reduce((s, w) => s + litresPerte(w), 0)) + ' L', v[0].par || '—', 'warn']);
        }
        else if (onglet === 'pointage') {
          if (!v.length) continue;

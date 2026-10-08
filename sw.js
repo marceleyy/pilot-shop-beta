@@ -8,8 +8,11 @@
    elle qui déclenche le re-téléchargement. Un appareil déjà installé garderait
    sinon l'ancien cache, et n'irait jamais chercher les fichiers ajoutés — le
    scan hors ligne ne marcherait que sur les appareils neufs. */
-const CACHE   = 'pilotshop-cache-v7';
-const RUNTIME = 'pilotshop-runtime-v7';
+const CACHE   = 'pilotshop-cache-v9';
+/* Nom FIXE, sans numéro de version : polices et bibliothèques du CDN ne
+   changent pas avec l'application. Le renommer à chaque version les faisait
+   purger à l'activation, donc re-télécharger — impossible en chambre froide. */
+const RUNTIME = 'pilotshop-runtime';
 
 const PRECACHE = [
   '/',
@@ -33,7 +36,11 @@ const PRECACHE = [
   '/manifest.webmanifest',
   '/icons/icon-192.png',
   '/icons/icon-512.png',
-  '/icons/icon-180.png'
+  '/icons/icon-180.png',
+  /* Icônes « maskable » déclarées dans le manifest : sans elles hors ligne,
+     l'icône installée sur Android peut retomber sur une version par défaut. */
+  '/icons/icon-192-maskable.png',
+  '/icons/icon-512-maskable.png'
 ];
 
 /* Ressources externes : mises en cache à la volée, jamais bloquantes */
@@ -73,6 +80,8 @@ self.addEventListener('install', event => {
 self.addEventListener('activate', event => {
   event.waitUntil((async () => {
     const noms = await caches.keys();
+    /* Le cache runtime (nom fixe) est conservé ; les anciens caches
+       « pilotshop-runtime-vN » numérotés, eux, sont purgés. */
     await Promise.all(noms.map(n => (n !== CACHE && n !== RUNTIME) ? caches.delete(n) : null));
     if (self.registration.navigationPreload) {
       try { await self.registration.navigationPreload.enable(); } catch (e) {}
@@ -84,7 +93,8 @@ self.addEventListener('activate', event => {
 /* -----------------------------------------------------------------------------
    RÉCUPÉRATION
    Navigation      → cache d'abord, réseau en arrière-plan (ouverture instantanée)
-   Fichiers du app → stale-while-revalidate
+   Fichiers du app → réseau d'abord, repli sur le cache
+   Modèle Tesseract → cache-first (mis en cache à la première réponse)
    Polices, CDN    → cache-first, mise en cache runtime
    Écritures / API → réseau seul, jamais de cache
    -------------------------------------------------------------------------- */
@@ -114,7 +124,9 @@ self.addEventListener('fetch', event => {
     event.respondWith((async () => {
       const cache = await caches.open(CACHE);
       try {
-        const preload = await event.preloadResponse;
+        /* Le préchargement de navigation peut lui aussi rester pendu sur un
+           Wi-Fi muet : même délai que le fetch, et repli sur le cache. */
+        const preload = await avecDelai(Promise.resolve(event.preloadResponse), 4000);
         const r = preload || await avecDelai(fetch(req), 4000);
         /* Une panne serveur (5xx) passe au secours du cache ; un 4xx (page
            absente, protection Vercel) est montré tel quel. Seule la page
@@ -131,6 +143,30 @@ self.addEventListener('fetch', event => {
           status: 200,
           headers: { 'Content-Type': 'text/html; charset=utf-8' }
         });
+      }
+    })());
+    return;
+  }
+
+  /* --- Modèle de lecture (vendor/*.traineddata*) : cache d'abord ---
+     ocr.js passe cacheMethod:'none' : Tesseract ne garde plus le modèle dans
+     IndexedDB, c'est donc ce cache qui l'évite à chaque scan. Plusieurs Mo,
+     qui ne changent pas d'une version à l'autre : pas de réseau d'abord. */
+  if (url.origin === self.location.origin &&
+      /^\/vendor\/[^/]*\.traineddata/.test(url.pathname)) {
+    event.respondWith((async () => {
+      const cache = await caches.open(CACHE);
+      const cachee = await cache.match(url.pathname) || await cache.match(req);
+      if (cachee) return cachee;
+      try {
+        const r = await fetch(req);
+        /* Première réponse réseau complète (200) : mise en cache. */
+        if (r && r.status === 200 && r.type === 'basic') {
+          event.waitUntil(cache.put(url.pathname, r.clone()).catch(() => {}));
+        }
+        return r;
+      } catch (e) {
+        return new Response('', { status: 504, statusText: 'Hors ligne' });
       }
     })());
     return;
@@ -165,7 +201,9 @@ self.addEventListener('fetch', event => {
       const cachee = await cache.match(req);
       if (cachee) return cachee;
       try {
-        const r = await fetch(req);
+        /* Délai maximum : sans lui, un CDN injoignable bloquait la requête
+           (et l'écran) sans fin. */
+        const r = await avecDelai(fetch(req), 4000);
         /* Jamais de réponse opaque : son statut est illisible, une erreur du
            CDN resterait en cache jusqu'à la prochaine version. */
         if (r && r.ok) event.waitUntil(cache.put(req, r.clone()).catch(() => {}));
