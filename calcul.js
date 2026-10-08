@@ -308,12 +308,19 @@ const CALCUL = {
              (await bacsArmoire()).forEach(x => { if (x && x.cle) armoire[x.cle] = (armoire[x.cle] || 0) + 1; });
            } catch (e) { armoire = null; }
          }
-         const froid = {};
+         /* Armoire plafonnée au stock tracé, article par article : une entrée
+            restée à l'armoire (bac jeté sans « Retirer ») ne crée pas de bac. */
+         const froid = {}, congel = {};
          Object.keys((sr && sr.articles) || {}).forEach(k => {
-           froid[k] = Math.max(0, num(sr.articles[k]) - ((armoire && armoire[k]) || 0));
+           const st = Math.max(0, num(sr.articles[k]));
+           congel[k] = Math.min((armoire && armoire[k]) || 0, st);
+           froid[k] = st - congel[k];
          });
-         const z = sr && parTaille(froid);
-         const zc = armoire && parTaille(armoire);
+         const zc = armoire && parTaille(congel);
+         /* Armoire vide (scan pas encore utilisé) : on ne sait pas où sont les
+            bacs, la proposition ne touche alors qu'à la chambre froide. */
+         if (!zc) armoire = null;
+         const z = sr && parTaille(armoire ? froid : sr.articles);
          if (z || zc) props.push({ libelle:'Stock tracé aujourd’hui' + (sr.depuis ? ' (inventaire du ' + fmtDC(sr.depuis) + ' + mouvements)' : ''),
                                    zones:Object.assign({}, z || {}, zc ? { congel:zc.froid } : {}),
                                    sansRangement:!armoire, rangement:!!armoire });
