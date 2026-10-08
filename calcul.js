@@ -314,7 +314,7 @@ const CALCUL = {
          '<h2 id="sheet-titre">Une livraison ?</h2>' +
          '<p class="sub">Étape 3 · Seulement une livraison arrivée après le comptage de départ</p>' +
          listeLivraisons(w.livraisons, true) +
-         formLivraison(w.debut) +
+         formLivraison(w.source === 'precedent' && !w.essai && w.debut < today() ? addD(w.debut, 1) : w.debut) +
          '<div id="lv-doublon"></div>' +
          '<div class="actions"><button class="btn clair" id="lv-ret">Retour</button>' +
          '<button class="btn menthe" id="lv-suiv">Suivant</button></div>');
@@ -666,7 +666,7 @@ const CALCUL = {
        if (frais.statut !== 'ouvert') { closeSheet(); toast('Ce calcul vient d’être clôturé ou supprimé', 'erreur'); rendre('calcul'); return; }
        const livs = livraisonsDe(frais);
        w.livraisons = livs.slice();
-       const horsPeriode = livs.filter(x => x.date && (x.date < c.debut || x.date > w.fin));
+       const horsPeriode = livs.filter(x => x.date && (x.date < debutFlux(c) || x.date > w.fin));
        const fini = Object.assign({}, frais, {
          statut:'clos', fin:w.fin, livraisonsArretees:livs.map(x => x.id),
          arrivee:{ zones:w.zones, kg:+kgZones(w.zones).toFixed(3) },
@@ -695,6 +695,13 @@ const CALCUL = {
          try {
            const actuel = await DB.get(c.id, null);
            if (actuel && actuel.statut !== 'ouvert') { closeSheet(); toast('Ce calcul vient d’être clôturé ou supprimé', 'erreur'); rendre('calcul'); return; }
+           /* Livraison ajoutée ou retirée sur un autre iPad depuis l'affichage
+              du résultat : on recalcule et on le remontre avant de clôturer. */
+           const ids = l => l.map(x => x.id).sort().join('|');
+           if (actuel && ids(livraisonsDe(actuel)) !== ids(livs)) {
+             toast('Les livraisons ont changé sur un autre iPad : résultat recalculé', 'erreur');
+             return eE();
+           }
            await DB.patch(c.id, {
              statut:'clos', fin:fini.fin, livraisonsArretees:fini.livraisonsArretees, arrivee:fini.arrivee,
              pertes:fini.pertes, ventes:fini.ventes,
