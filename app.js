@@ -3605,6 +3605,20 @@ function ouvrirPremierePeriode() {
          (quoi.length ? quoi.slice(0, 4).join(', ') + '. ' : '') +
          'À retirer de la vitrine immédiatement.', 'frigo']);
      }
+     /* Relevés du jour manquants : la carte verte « Rien à signaler » s'affichait
+        sous la pastille rouge « Frigos matin manquants ». Passé l'heure
+        d'ouverture, un relevé du matin absent est une alerte HACCP ; passé
+        l'heure de fermeture, celui du soir aussi. Horaires du back-office,
+        sinon ceux d'usine (HORAIRES n'est relu qu'à l'écran des horaires). */
+     const horaires = Object.assign({}, HORAIRES, (await DB.get('horaires', null)) || {});
+     const minutesDe = h => (/^\d{2}:\d{2}$/.test(h || '') ? +h.slice(0, 2) * 60 + +h.slice(3, 5) : null);
+     const maintenant = new Date().getHours() * 60 + new Date().getMinutes();
+     const passe = h => { const x = minutesDe(h); return x !== null && maintenant >= x; };
+     const matinDu = passe(horaires.ouverture), soirDu = passe(horaires.fermeture);
+     if (matinDu && !e.tempM) A.push(['bad', 'Frigos du matin non relevés',
+       'Relevé à faire dès l’ouverture (' + horaires.ouverture + '), avant la mise en vitrine.', 'temp']);
+     if (soirDu && !e.tempS) A.push(['warn', 'Frigos du soir non relevés',
+       'Relevé à faire avant la fermeture (' + horaires.fermeture + ').', 'temp']);
      if (tempCrit) A.push(['bad', tempCrit + ' relevé(s) en limite critique',
        (enceintesCrit.length ? enceintesCrit.slice(0, 3).join(', ') + '. ' : '') +
        'Chaque dépassement doit avoir une action corrective écrite.', 'temp']);
@@ -3627,7 +3641,8 @@ function ouvrirPremierePeriode() {
        '<div class="grid g2" id="ctl-meteo">' + widgetMeteo(m) +
        carte(entete('👥', enService.length ? enService.map(s => s.prenom).join(', ') : 'Personne en service',
          enService.length ? 'En poste depuis ' + enService.map(s => heure(s.debut)).join(', ') : 'Aucun pointage ouvert') +
-         '<div class="rang">' + pastille(e.tempM ? 'ok' : 'bad', e.tempM ? 'Frigos matin faits' : 'Frigos matin manquants') +
+         '<div class="rang">' + pastille(e.tempM ? 'ok' : (matinDu ? 'bad' : 'n'),
+           e.tempM ? 'Frigos matin faits' : (matinDu ? 'Frigos matin manquants' : 'Frigos matin à faire')) +
          pastille(e.net ? 'ok' : 'warn', e.net + '/' + e.netTotal + ' nettoyage') +
          pastille(e.caisse ? 'ok' : 'n', e.caisse ? 'Caisse faite' : 'Caisse ouverte') + '</div>', 'solide') + '</div>' +
    
@@ -3644,7 +3659,7 @@ function ouvrirPremierePeriode() {
          '<span class="go"><button class="btn clair sm" ' + (a[3].charAt(0) === '#'
            ? 'data-ancre="' + a[3].slice(1) + '"' : 'data-go="' + a[3] + '"') + '>Ouvrir</button></span></div>').join('') + '</div>'
          : carte('<div class="alerte ok"><span class="ai">•</span><div><b>Rien à signaler</b>' +
-           '<p>Caisse, frigos, nettoyage et stocks sont dans les clous.</p></div></div>', 'plat')) +
+           '<p>Aucune alerte sur la caisse, les frigos, le nettoyage et les stocks.</p></div></div>', 'plat')) +
    
        (ruptures.length ? '<div class="entete" id="urgences" style="scroll-margin-top:90px"><h3>Urgences</h3>' +
          '<button class="btn fantome sm pousse" id="tout-traite">Tout marquer traité</button></div>' +
@@ -4116,8 +4131,9 @@ function ouvrirPremierePeriode() {
        const st = etatEcart(c.pct);
        return kpi('Stock réel', n1(c.reel) + '<span class="u">kg</span>', '', c.invValide ? 'Inventaire validé' : 'Inventaire manquant') +
          kpi('Stock théorique', n1(c.theo) + '<span class="u">kg</span>', '', 'Calculé') +
-         kpi('Écart', (c.ecart > 0 ? '+' : '−') + n1(Math.abs(c.ecart)) + '<span class="u">kg</span>', st.c, st.t) +
-         kpi('Coût', eur(c.valeur), st.c, 'à ' + n2(FOURNISSEUR.prixMoyenKg) + ' €/kg');
+         /* Écart arrondi à zéro : ni + ni −. « −0,0 kg » laissait croire à un manque. */
+         kpi('Écart', (Math.abs(c.ecart) < 0.05 ? '' : c.ecart > 0 ? '+' : '−') + n1(Math.abs(c.ecart)) + '<span class="u">kg</span>', st.c, st.t) +
+         kpi('Coût', eur(c.valeur), st.c, 'à ' + eur(FOURNISSEUR.prixMoyenKg) + '/kg');
      };
      const aiguille = c => 50 + (Math.max(-25, Math.min(25, -c.pct)) / 25) * 50;
      const achatsTxt = (c, e) => n1(c.achats) + ' kg · ' + ((e.bl || []).length) + ' bon(s) scanné(s)';
@@ -5155,7 +5171,7 @@ function modifierPeriode(per) {
    
        '<div class="grid g2" style="margin:14px 0">' +
        kpi('Poids vendu', n1(r.kg) + '<span class="u">kg</span>', r.fiable ? 'ok' : 'warn', r.lignes + ' ligne(s)') +
-       kpi('Valeur', eur(r.kg * FOURNISSEUR.prixMoyenKg), '', 'à ' + n2(FOURNISSEUR.prixMoyenKg) + ' €/kg') + '</div>' +
+       kpi('Valeur', eur(r.kg * FOURNISSEUR.prixMoyenKg), '', 'à ' + eur(FOURNISSEUR.prixMoyenKg) + '/kg') + '</div>' +
    
        (r.detail.length
          ? '<div class="dense"><div class="dense-h"><span class="c1">Détail</span><span class="c w">Poids</span></div>' +
