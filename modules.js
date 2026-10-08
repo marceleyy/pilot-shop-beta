@@ -1285,13 +1285,18 @@ V.caisse = async function () {
       /* L'écran d'abord, puis le contrôle des champs vides : une fiche à
          anciennes clés (fi, cb, tpe…) s'affiche remplie sans que r le soit, et
          sauver ne recopie plus l'écran. « Renseignez… » arrêtait alors une
-         validation dont tous les montants étaient à l'écran. */
-      champsSaisie().forEach(i => { r[i.dataset.k] = i.value; });
+         validation dont tous les montants étaient à l'écran. Avant le
+         contrôle, seuls les champs remplis : un champ vide recopié ('') partait
+         avec la frappe suivante et effaçait, à la fusion, le montant saisi
+         entre-temps sur un autre iPad (vérifié : CB 300 de Lucas effacé par un
+         commentaire de Marie après « Renseignez… »). */
+      champsSaisie().forEach(i => { if (i.value !== '') r[i.dataset.k] = i.value; });
       const requis = (mo === 'm') ? ['m_fond'] : ['s_cb', 's_esp', 's_tpe', 's_retrait', 's_fond'];
       const vides = requis.filter(k => r[k] === undefined || r[k] === '');
       if (vides.length) return toast(mo === 'm'
         ? 'Renseignez le fond de caisse initial'
         : 'Renseignez tous les montants du soir', 'erreur');
+      champsSaisie().forEach(i => { r[i.dataset.k] = i.value; });
       /* Bouton désactivé dès le clic, pour tous : un double appui du manager
          validait deux fois, et la seconde validation, prenant la première pour
          un comptage à corriger, journalisait une correction fictive (« Marie →
