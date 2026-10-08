@@ -1099,6 +1099,80 @@ V.catalogue = async function () {
   $$('[data-ajout]').forEach(b => b.onclick = () => editer(null, b.dataset.ajout));
 };
 
+/* Un inventaire passé, en entier : TOUS les produits du catalogue, comptés
+   ou non. Un produit absent de la saisie s'affiche à 0, en grisé — l'écran
+   ne montrait que les totaux, impossible de retrouver ce qui avait été
+   compté pour un parfum donné. */
+function voirInventaire(h, partie) {
+  const l = h.lignes || {};
+  const ecarts = h.ecarts || {};
+  const groupes = [];          // [{ titre, lignes:[{ nom, q, saisi, ecart, unite }] }]
+  const vus = new Set();
+  const ligne = (cle, nom, unite) => {
+    vus.add(cle);
+    return { nom: nom, q: num(l[cle] || 0), saisi: l[cle] !== undefined,
+             ecart: ecarts[cle] || 0, unite: unite || '' };
+  };
+
+  if (partie === 'froid') {
+    const tailles = (FOURNISSEUR.taillesCourantes || TAILLES_BAC || []).map(String);
+    /* Les tailles réellement comptées s'ajoutent aux tailles courantes : un
+       7 L saisi ce jour-là doit apparaître. */
+    Object.keys(l).forEach(c => {
+      const a = litArticle(c);
+      if (a.famille === 'glace' && a.taille && tailles.indexOf(a.taille) < 0) tailles.push(a.taille);
+    });
+    tailles.sort((x, y) => num(x) - num(y));
+    /* Une ligne par parfum, tailles côte à côte, comme à la saisie. */
+    groupes.push({ titre: 'Glaces', lignes: PARFUMS.map(p => {
+      const parT = tailles.map(t => ligne(cleArticle('glace', p, t), '', ''));
+      return { nom: p, saisi: parT.some(x => x.saisi),
+               ecart: parT.reduce((s2, x) => s2 + num(x.ecart), 0),
+               texte: tailles.map((t, k) => t + ' L : ' + parT[k].q).join(' · ') };
+    }) });
+    const autres = {};
+    Object.keys(l).filter(c => !vus.has(c)).sort().forEach(c => {
+      const f = FAMILLES_PRODUIT.filter(x => x.id === litArticle(c).famille)[0];
+      const t = f ? f.libelle : 'Autres';
+      (autres[t] = autres[t] || []).push(ligne(c, litArticle(c).parfum || (f ? f.libelle : c),
+        f ? f.unite : ''));
+    });
+    Object.keys(autres).forEach(t => groupes.push({ titre: t, lignes: autres[t] }));
+  } else {
+    const parSection = {};
+    catalogueSec().forEach(r => {
+      const sec = r.sec || 'Autres';
+      const lst = parSection[sec] = parSection[sec] || [];
+      (r.variantes && r.variantes.length ? r.variantes : ['']).forEach(v =>
+        lst.push(ligne('sec|' + r.id + '|' + v, r.nom + (v ? ' · ' + v : ''), r.unite)));
+    });
+    /* Références retirées du catalogue depuis : on les montre quand même. */
+    const retirees = Object.keys(l).filter(c => !vus.has(c)).sort()
+      .map(c => ligne(c, c.split('|').slice(1).filter(Boolean).join(' · '), ''));
+    Object.keys(parSection).forEach(t => groupes.push({ titre: t, lignes: parSection[t] }));
+    if (retirees.length) groupes.push({ titre: 'Retirées du catalogue', lignes: retirees });
+  }
+
+  const nb = v => Number.isInteger(num(v)) ? String(num(v)) : n1(v);
+  const nbSaisis = Object.keys(l).length;
+  showSheet(
+    '<h2 id="sheet-titre">Inventaire ' + (partie === 'froid' ? 'chambre froide' : 'sec') +
+    ' du ' + esc(fmtD(h.jour)) + '</h2>' +
+    '<p class="cs">' + esc(h.par || '—') + (h.at ? ' · ' + heure(h.at) : '') + ' · ' +
+    nbSaisis + ' produit(s) saisi(s). Les produits non saisis sont à 0, en grisé.</p>' +
+    (h.note ? '<div class="rappel" style="margin-top:10px">' + esc(h.note) + '</div>' : '') +
+    groupes.filter(g => g.lignes.length).map(g =>
+      '<div class="entete" style="margin-top:16px"><h3>' + esc(g.titre) + '</h3></div>' +
+      '<div class="stack">' + g.lignes.map(x =>
+        '<div class="invl"' + (x.saisi ? '' : ' style="opacity:.45"') + '>' +
+        '<span class="invn">' + esc(x.nom) +
+        (x.ecart ? '<small>écart ' + (x.ecart > 0 ? '+' : '') + n1(x.ecart) + '</small>' : '') + '</span>' +
+        '<span class="invc">' + (x.texte !== undefined ? esc(x.texte)
+          : nb(x.q) + (x.unite ? ' ' + esc(x.unite) : '')) + '</span></div>').join('') +
+      '</div>').join('') +
+    '<div class="actions"><button class="btn clair" data-fermer>Fermer</button></div>');
+}
+
 V.inventaire = async function () {
   await chargerCatalogueSec();
   const { articles } = await stockReel();
@@ -1430,31 +1504,38 @@ V.inventaire = async function () {
       (partie === 'froid'
         ? (historique.length
           ? '<div class="entete" style="margin-top:22px"><h3>Inventaires précédents — chambre froide</h3></div>' +
-            '<div class="stack">' + historique.slice().reverse().slice(0, 12).map(h => {
+            '<div class="stack">' + historique.slice().reverse().map((h, i) => {
               const t = totauxStock(h.lignes || {});
               return '<div class="invl">' +
-                '<span class="invn">' + fmtD(h.jour) +
+                '<span class="invn">' + esc(fmtD(h.jour)) +
                 '<small>' + esc(h.par || '—') + ' · ' + heure(h.at) +
                 (h.manquants ? ' · ' + h.manquants + ' manquant(s)' : '') + '</small></span>' +
-                '<span class="invc">' + t.bacs + ' bacs · ' + n1(t.kg) + ' kg</span></div>';
+                '<span class="invc">' + t.bacs + ' bacs · ' + n1(t.kg) + ' kg<br>' +
+                '<button type="button" class="btn clair sm" data-hist="froid|' + i + '">Voir tout</button></span></div>';
             }).join('') + '</div>'
           : '')
         : (historiqueSec.length
           ? '<div class="entete" style="margin-top:22px"><h3>Inventaires précédents — sec</h3></div>' +
-            '<div class="stack">' + historiqueSec.slice().reverse().slice(0, 12).map(h => {
+            '<div class="stack">' + historiqueSec.slice().reverse().map((h, i) => {
               const l = h.lignes || {};
               const refs = Object.keys(l).length;
               const tot = Object.keys(l).reduce((s, k) => s + num(l[k]), 0);
               return '<div class="invl">' +
-                '<span class="invn">' + fmtD(h.jour) +
+                '<span class="invn">' + esc(fmtD(h.jour)) +
                 '<small>' + esc(h.par || '—') + ' · ' + heure(h.at) + '</small></span>' +
-                '<span class="invc">' + refs + ' réf. · ' + n1(tot) + ' unités</span></div>';
+                '<span class="invc">' + refs + ' réf. · ' + n1(tot) + ' unités<br>' +
+                '<button type="button" class="btn clair sm" data-hist="sec|' + i + '">Voir tout</button></span></div>';
             }).join('') + '</div>'
           : ''));
 
     $$('[data-deplier]').forEach(b => b.onclick = () => {
       deplies[b.dataset.deplier] = !deplies[b.dataset.deplier];
       dessiner();
+    });
+    $$('[data-hist]').forEach(b => b.onclick = () => {
+      const [p, i] = b.dataset.hist.split('|');
+      const liste = (p === 'froid' ? historique : historiqueSec).slice().reverse();
+      if (liste[+i]) voirInventaire(liste[+i], p);
     });
 
     const bRouvrir = $('#inv-rouvrir');
