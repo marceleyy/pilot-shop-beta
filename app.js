@@ -4232,11 +4232,13 @@ function ouvrirPremierePeriode() {
        const f = ev.target.files && ev.target.files[0];
        ev.target.value = '';
        if (!f) return;
-       if (typeof XLSX === 'undefined') return toast('Librairie de lecture indisponible hors ligne', 'erreur');
-   
        showSheet('<h2 id="sheet-titre">Lecture de l’export</h2>' +
          '<p class="sub">' + esc(f.name) + '</p>' +
          '<div class="vide">Analyse du fichier…</div>');
+       if (!(await chargerXLSX())) {
+         closeSheet();
+         return toast('Lecture des fichiers de caisse indisponible : réessayez avec le réseau', 'erreur');
+       }
    
        let r;
        try { r = await lireExportCaisse(f); }
@@ -5001,6 +5003,24 @@ function modifierPeriode(per) {
      '71111':50
    };
    
+   /* XLSX n'est chargé qu'au premier import de caisse : exécuté à chaque
+      démarrage, il retardait la liste des prénoms d'environ 600 ms sur iPad.
+      Le service worker le garde en cache : le chargement marche hors ligne.
+      Un seul chargement à la fois ; un échec permet un nouvel essai. */
+   let _xlsx = null;
+   function chargerXLSX() {
+     if (typeof XLSX !== 'undefined') return Promise.resolve(true);
+     if (!_xlsx) _xlsx = new Promise(resolve => {
+       const s = document.createElement('script');
+       s.src = 'vendor/xlsx.full.min.js';
+       const echec = () => { _xlsx = null; s.remove(); resolve(false); };
+       s.onload = () => (typeof XLSX !== 'undefined' ? resolve(true) : echec());
+       s.onerror = echec;
+       document.head.appendChild(s);
+     });
+     return _xlsx;
+   }
+
    /* Ouvre l'export quel que soit son format. Avant, tout passait par XLSX.read
       en binaire : un CSV enregistré en UTF-8 y était lu en Latin-1 (« QtÃ© »,
       d'où « Aucune colonne de quantité »), ses décimales à virgule devenaient

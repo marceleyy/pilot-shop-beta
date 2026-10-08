@@ -155,13 +155,12 @@
 
 
 <!-- ===================== SCRIPTS ===================== -->
-<!-- async et non defer : XLSX ne sert qu'à l'import de caisse, au clic.
-     Servi par l'application (vendor/, copie vérifiée de la 0.18.5) et non plus
-     par un CDN tiers : un script d'un autre domaine, sans contrôle
-     d'intégrité, pouvait lire et modifier toutes les données de la page.
+<!-- XLSX (vendor/, copie vérifiée de la 0.18.5, plus de CDN tiers) n'est plus
+     chargé ici : il ne sert qu'à l'import de caisse, et ses 860 Ko exécutés à
+     chaque démarrage retardaient la liste des prénoms. app.js le charge au
+     premier import (chargerXLSX), depuis le cache hors ligne au besoin.
      Plus d'attribut onerror sur env.js : la politique de sécurité (vercel.json)
      refuse tout code en ligne ; son absence signifie simplement le mode local. -->
-<script src="vendor/xlsx.full.min.js" async></script>
 <script src="env.js" defer></script>
 <script src="config.js" defer></script>
 <script src="auth.js" defer></script>
