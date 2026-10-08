@@ -1457,16 +1457,28 @@
    /* =============================================================================
       5. JOURNAL D'ACTIVITÉ
       ========================================================================== */
+   /* Lignes du fil écrites depuis cet écran dans la dernière minute (voir feed). */
+   let filRecent = [];
    async function feed(niveau, texte) {
      try {
        const cle = 'feed:' + today();
        const l = await DB.get(cle, []);
-       /* Un double appui sur iPad ne doit pas produire deux lignes identiques. */
-       const dernier = l[l.length - 1];
+       /* Un double appui sur iPad ne doit pas produire deux lignes identiques.
+          La relecture ne montre pas la ligne du premier appui tant qu'elle est
+          en route vers la base, et le fil réunit les lignes des iPads : la
+          seconde s'ajoutait à la première. Les lignes récentes de cet écran
+          sont donc remises à leur place avant de regarder la dernière. Pas la
+          copie locale seule : elle ignore les lignes écrites depuis sur les
+          autres iPads, et une même phrase une minute plus tard (une autre
+          journée validée) disparaissait. */
+       const vues = unirFil(Array.isArray(l) ? l : [], filRecent);
+       const dernier = vues[vues.length - 1];
        if (dernier && dernier.x === texte &&
            (Date.now() - new Date(dernier.at)) < 60000) return;
-       l.push({ n:niveau, x:texte, par:STATE.user ? STATE.user.prenom : '—',
-                id:STATE.user ? STATE.user.id : null, at:nowISO() });
+       const ligne = { n:niveau, x:texte, par:STATE.user ? STATE.user.prenom : '—',
+                       id:STATE.user ? STATE.user.id : null, at:nowISO() };
+       filRecent = filRecent.filter(x => Date.now() - new Date(x.at) < 60000).concat([ligne]);
+       l.push(ligne);
        await DB.set(cle, l.slice(-400));
      } catch (e) {}
    }
