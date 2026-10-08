@@ -992,8 +992,11 @@ V.caisse = async function () {
         : '') +
 
       (verrou
-        ? '<p class="lecture">Comptage validé par ' + esc(valide.par) + ' à ' + heure(valide.at) +
-          '. Seul le manager peut le corriger.</p>'
+        ? (valide
+          ? '<p class="lecture">Comptage validé par ' + esc(valide.par) + ' à ' + heure(valide.at) +
+            '. Seul le manager peut le corriger.</p>'
+          : '<p class="lecture">Comptage en cours de correction par le manager. ' +
+            'Il sera de nouveau lisible une fois revalidé.</p>')
         : '') +
 
       carte(
@@ -1216,7 +1219,11 @@ V.caisse = async function () {
      réécrivait sans trace : signature et montants d'origine perdus, journal
      muet. L'équipe corrige librement un comptage tant qu'il n'est pas validé. */
   function verrouille() {
-    return !!r[mom + '_valide'] && STATE.user.role !== 'manager';
+    /* Pendant une correction du manager, la signature vaut null mais
+       <moment>_avant garde l'ancienne : le comptage reste fermé à l'équipe.
+       Sinon, un équipier qui ouvrait l'écran à ce moment saisissait des
+       montants qui écrasaient ensuite la nouvelle signature. */
+    return !!(r[mom + '_valide'] || r[mom + '_avant']) && STATE.user.role !== 'manager';
   }
   const LIBELLES_CAISSE = { m_fond:'fond initial', s_cb:'recettes CB', s_esp:'recettes espèces',
     s_tpe:'TPE', s_retrait:'retrait', s_fond:'fond final' };

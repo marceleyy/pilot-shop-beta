@@ -265,12 +265,22 @@
       Le moment validé garde donc les champs du serveur. Une correction du
       manager, elle, connaît la validation : sa copie porte <moment>_valide
       (null pendant la correction, puis la nouvelle signature) et passe comme
-      avant. Un moment non validé sur la base reste au local. */
+      avant. Un moment non validé sur la base reste au local.
+      Une signature à null ne prouve rien à elle seule : une copie lue pendant
+      une correction la porte aussi. Elle ne passe que si son <moment>_avant
+      date de la signature encore en base ; sinon la base a été revalidée
+      depuis, et la copie est périmée. */
    const CHAMPS_CAISSE_SOIR = ['ecart', 'ecartCB', 'ecartEsp', 'par'];
    function garderComptagesValides(out, distant, local) {
      const a = (o, k) => Object.prototype.hasOwnProperty.call(o, k);
+     const auCourant = mom => {
+       if (!a(local, mom + '_valide')) return false;
+       if (local[mom + '_valide']) return true;              // (re)validation : elle passe
+       const av = local[mom + '_avant'], sig = distant[mom + '_valide'];
+       return !!(av && sig && av.at && av.at === sig.at);   // correction de la signature en base
+     };
      ['m', 's'].forEach(mom => {
-       if (!distant[mom + '_valide'] || a(local, mom + '_valide')) return;
+       if (!distant[mom + '_valide'] || auCourant(mom)) return;
        Object.keys(local).forEach(k => {
          if (k.indexOf(mom + '_') !== 0 && !(mom === 's' && CHAMPS_CAISSE_SOIR.indexOf(k) >= 0)) return;
          if (a(distant, k)) out[k] = distant[k]; else delete out[k];
