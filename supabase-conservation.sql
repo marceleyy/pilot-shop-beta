@@ -4,8 +4,11 @@
 -- Aujourd'hui, rien n'est jamais effacé de la base : heures pointées, journal
 -- d'activité, retours libres, photos de preuve restent indéfiniment. Le RGPD
 -- demande une durée limitée et connue. Ce script efface automatiquement, chaque
--- nuit, ce qui dépasse la durée choisie, dans la BASE. Les copies locales des
--- iPads ne sont pas purgées : une « Remise à zéro de l'appareil » les efface.
+-- nuit, ce qui dépasse la durée choisie, dans la BASE. Côté iPads (aucun bloc
+-- à lancer pour cela, c'est l'application) : la copie locale d'une journée de
+-- plus de 120 jours est effacée dès que la base confirme avoir la ligne ; en
+-- mode local, sans base, l'application applique au journal et aux heures
+-- pointées les durées ci-dessous.
 --
 -- DURÉES PROPOSÉES, À VALIDER AVEC LA BOUTIQUE (c'est elle qui décide) :
 --   pointage (sessions)            3 ans  (salaires prescrits par 3 ans ; 1 an minimum pour l'inspection du travail)

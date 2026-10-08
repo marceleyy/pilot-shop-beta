@@ -209,36 +209,75 @@ async function ajouterMouvement(type, cle, qte, extra) {
     return null;
   }
 
-  const cm = cleMois();
-  let l = await lireMois(cm);
-
-  /* Garde-fou contre le double appui : deux mouvements identiques à moins de
-     quinze secondes d'intervalle sont presque toujours une erreur de manipulation,
-     et ils fausseraient le stock de façon invisible. */
-  const dernier = l[l.length - 1];
-  if (dernier && dernier.t === type && dernier.c === cle &&
-      dernier.e === (STATE.user ? STATE.user.id : null) &&   // pas le scan d'un autre iPad
-      num(dernier.q) === num(qte) &&
-      ((extra && extra.lot) ? dernier.l === extra.lot : true) &&
-      (Date.now() - new Date(dernier.a)) < 15000) {
-    toast('Déjà enregistré il y a quelques secondes', 'erreur');
-    return dernier;
+  /* Garde-fou contre le double appui : un mouvement identique déjà EN COURS
+     d'écriture est ignoré. L'ancienne garde comparait à la dernière ligne sur
+     quinze secondes : elle rejetait aussi un second bac réel du même lot —
+     même après la confirmation « Ce bac n'est plus au stock » — et la seconde
+     ligne identique d'une même réception. Les écrans protègent en plus leur
+     bouton pendant l'enregistrement. */
+  const sig = [type, cle, num(qte), (extra && extra.lot) || '', STATE.user ? STATE.user.id : ''].join('|');
+  if (_mouvementsEnCours.has(sig)) {
+    toast('Déjà en cours d’enregistrement', 'erreur');
+    return null;
   }
+  _mouvementsEnCours.add(sig);
+  try {
+    const cm = cleMois();
+    let l = await lireMois(cm);
 
-  /* Champs courts : t=type, c=clé, q=quantité, a=horodatage, e=employé, l=lot */
-  const m = { t:type, c:cle, q:q, a:nowISO(),
-              e: STATE.user ? STATE.user.id : null };
-  if (extra && extra.lot) m.l = extra.lot;
-  if (extra && extra.bl)  m.b = extra.bl;
-  if (extra && extra.motif) m.mo = extra.motif;
-  l.push(m);
+    /* Champs courts : t=type, c=clé, q=quantité, a=horodatage, e=employé, l=lot,
+       d=DLC du produit fermé (réception) */
+    const m = { t:type, c:cle, q:q, a:nowISO(),
+                e: STATE.user ? STATE.user.id : null };
+    if (extra && extra.lot) m.l = extra.lot;
+    if (extra && extra.bl)  m.b = extra.bl;
+    if (extra && extra.motif) m.mo = extra.motif;
+    if (extra && extra.dlc && /^\d{4}-\d{2}-\d{2}$/.test(extra.dlc)) m.d = extra.dlc;
+    l.push(m);
 
-  l = await purgerJournal(l);
-  _moisCache = { cle: cm, lignes: l, at: Date.now() };
-  invaliderStock();
-  await DB.set(cm, l);
-  await noterMois(cm);
-  return m;
+    l = await purgerJournal(l);
+    _moisCache = { cle: cm, lignes: l, at: Date.now() };
+    invaliderStock();
+    await DB.set(cm, l);
+    await noterMois(cm);
+    return m;
+  } finally {
+    _mouvementsEnCours.delete(sig);
+  }
+}
+const _mouvementsEnCours = new Set();
+
+/* Stock fermé et DLC. La réception n'écrit plus « stock:ferme » mais le
+   journal du stock, DLC comprise (champ d) : l'écran Réception affichait
+   « 0 article(s) » en stock fermé et les alertes DLC de Ma journée ne
+   partaient jamais. Ce qui reste fermé se déduit du stock réel : les
+   ouvertures prennent d'abord les bacs les plus anciens, ce sont donc les
+   réceptions les plus récentes qui restent en réserve. Une unité comptée à
+   l'inventaire sans réception tracée n'a pas de DLC connue : elle n'apparaît
+   pas ici. */
+async function stockFermeJournal() {
+  const s = await stockReel();
+  const mouv = await tousMouvements(null);
+  const parCle = {};
+  mouv.forEach(m => {
+    if ((m.t || m.type) !== 'reception' || !m.d) return;
+    const c = m.c || m.cle;
+    (parCle[c] = parCle[c] || []).push(m);
+  });
+  const out = [];
+  Object.keys(parCle).forEach(c => {
+    let reste = num(s.articles[c]);
+    parCle[c].sort((x, y) => String(y.a || y.at).localeCompare(String(x.a || x.at)))
+      .forEach(m => {
+        if (reste <= 0) return;
+        const q = Math.min(reste, num(m.q !== undefined ? m.q : m.qte));
+        reste -= q;
+        out.push({ id: c + '|' + (m.a || m.at), cle: c, produit: libelleArticle(c), qte: q,
+                   unite: litArticle(c).taille ? 'bac' : '', lot: m.l || '', dlc: m.d,
+                   recuLe: isoOf(new Date(m.a || m.at)) });
+      });
+  });
+  return out;
 }
 
 /* Tous les mois utiles : depuis le dernier inventaire, ou les douze derniers. */
@@ -603,7 +642,10 @@ async function recomptageDemande() {
     return !(fam && (fam.lieu === 'sec' || fam.stock === 'sec'));
   });
   if (!negatifs.length) return null;
-  const froid = negatifs.filter(c => litArticle(c).famille === 'glace');
+  /* Tout ce qui reste ici se compte en chambre froide (l'onglet y range toutes
+     les familles hors sec) : un macaron négatif n'est pas « au sec ». Seul ce
+     qui vient de l'inventaire du sec y renvoie. */
+  const froid = negatifs.filter(c => litArticle(c).famille !== 'sec');
 
   /* Un recomptage ne solde la demande que s'il a eu lieu APRÈS le négatif.
      La version précédente vérifiait seulement que l'article figurait dans
@@ -932,7 +974,16 @@ async function chargerCatalogueSec() {
     if ((m.masques || []).indexOf(r.id) >= 0) x.masque = true;
     return x;
   });
-  (m.ajouts || []).forEach(a => { if (a && a.id && !out.some(r => r.id === a.id)) out.push(a); });
+  /* Une référence ajoutée se modifie et se retire comme une référence
+     d'usine : modifs et masques ne s'appliquaient qu'à celles-ci, si bien que
+     ✎ › Enregistrer et − restaient sans effet sur une référence ajoutée. */
+  (m.ajouts || []).forEach(a => {
+    if (!a || !a.id || out.some(r => r.id === a.id)) return;
+    const mod = (m.modifs || {})[a.id];
+    const x = Object.assign({}, a, mod || {});
+    if ((m.masques || []).indexOf(a.id) >= 0) x.masque = true;
+    out.push(x);
+  });
   _catalogueSec = out;
   return out;
 }
@@ -1110,6 +1161,22 @@ V.inventaire = async function () {
       }));
     } catch (e) {}
   };
+  /* Valider une partie n'efface que SA part du brouillon commun. Valider la
+     chambre froide effaçait tout : la saisie du sec en cours, pas encore
+     validée, était perdue (et inversement). */
+  const oublierBrouillon = quoi => {
+    try {
+      const b = JSON.parse(localStorage.getItem(CLE_BROUILLON) || 'null');
+      if (b && b.jour === today()) {
+        if (quoi === 'froid') b.lignes = {}; else b.sec = {};
+        if (Object.keys(b.lignes || {}).length || Object.keys(b.sec || {}).length) {
+          localStorage.setItem(CLE_BROUILLON, JSON.stringify(b));
+          return;
+        }
+      }
+      localStorage.removeItem(CLE_BROUILLON);
+    } catch (e) {}
+  };
 
   const COURANTES = FOURNISSEUR.taillesCourantes || TAILLES_BAC;
   const RARES     = FOURNISSEUR.taillesRares || [];
@@ -1182,6 +1249,7 @@ V.inventaire = async function () {
           const c = cleArticle('glace', p, t);
           return '<label><span>' + t + ' L</span>' +
             '<input type="number" inputmode="numeric" min="0" step="1" data-inv="' + esc(c) + '" ' +
+            'aria-label="' + esc(p + ', bacs de ' + t + ' L') + '" ' +
             'value="' + (saisie[c] !== undefined ? esc(saisie[c]) : '') + '" placeholder="0"></label>';
         }).join('') + '</div></div>';
     }).join('') + '</div>' +
@@ -1203,6 +1271,7 @@ V.inventaire = async function () {
                 '<span class="invn">' + esc(sv) + '</span>' +
                 (q ? '<span class="invc">' + q + '</span>' : '') +
                 '<input type="number" inputmode="numeric" min="0" step="1" data-inv="' + esc(c) + '" ' +
+                'aria-label="' + esc(f.libelle + ', ' + sv) + '" ' +
                 'value="' + (saisie[c] !== undefined ? esc(saisie[c]) : '') + '" placeholder="0"></div>';
             }).join('') + '</div></div>';
         }
@@ -1213,6 +1282,7 @@ V.inventaire = async function () {
           '<small>en ' + esc(f.unites) + '</small></span>' +
           (q ? '<span class="invc">' + q + ' en stock</span>' : '') +
           '<input type="number" inputmode="numeric" min="0" step="1" data-inv="' + esc(c) + '" ' +
+          'aria-label="' + esc(f.libelle + ' (en ' + f.unites + ')') + '" ' +
           'value="' + (saisie[c] !== undefined ? esc(saisie[c]) : '') + '" placeholder="0"></div>';
     }).join('') + '</div>';
 
@@ -1224,11 +1294,13 @@ V.inventaire = async function () {
   let deplies = {};
   const cleSec = (r, v) => 'sec|' + r.id + '|' + (v || '');
 
-  const champSec = (r, c) => {
+  /* nom : ce qu'un lecteur d'écran annonce, la ligne n'ayant pas d'étiquette. */
+  const champSec = (r, c, nom) => {
     const pas = r.decimal === false ? '1' : '0.5';
     const mode = r.decimal === false ? 'numeric' : 'decimal';
     return '<div class="saisie-u">' +
       '<input type="number" inputmode="' + mode + '" min="0" step="' + pas + '" ' +
+      'aria-label="' + esc(nom + ' (' + r.unite + ')') + '" ' +
       'data-sec="' + esc(c) + '" value="' + (saisieSec[c] !== undefined ? esc(saisieSec[c]) : '') + '" ' +
       'placeholder="0">' +
       '<span class="su">' + esc(r.unite) + '</span></div>';
@@ -1262,7 +1334,7 @@ V.inventaire = async function () {
             return '<div class="invl">' +
               '<span class="invn">' + esc(r.nom) + '</span>' +
               (anc[c] !== undefined ? '<span class="invc faible">préc. ' + anc[c] + '</span>' : '') +
-              champSec(r, c) + '</div>';
+              champSec(r, c, r.nom) + '</div>';
           }
 
           const ouvert = deplies[r.id];
@@ -1282,7 +1354,7 @@ V.inventaire = async function () {
                   return '<div class="invl">' +
                     '<span class="invn">' + esc(v) + '</span>' +
                     (anc[c] !== undefined ? '<span class="invc faible">préc. ' + anc[c] + '</span>' : '') +
-                    champSec(r, c) + '</div>';
+                    champSec(r, c, r.nom + ', ' + v) + '</div>';
                 }).join('') + '</div>'
               : '') +
             '</div>';
@@ -1460,10 +1532,10 @@ V.inventaire = async function () {
       'Valider', async () => {
         const inv = await enregistrerInventaire(lignes,
           $('#inv-note') ? $('#inv-note').value : '', avant);
-        /* Le brouillon est effacé — il n'a plus lieu d'être puisque c'est
-           validé — mais PAS la saisie : revenir sur l'écran doit montrer les
-           quantités enregistrées, pas un formulaire vide. */
-        try { localStorage.removeItem(CLE_BROUILLON); } catch (e) {}
+        /* Le brouillon de la chambre froide est effacé — il n'a plus lieu
+           d'être puisque c'est validé — mais PAS la saisie : revenir sur
+           l'écran doit montrer les quantités enregistrées. Celui du sec reste. */
+        oublierBrouillon('froid');
         await feed(inv.manquants ? 'warn' : 'ok',
           STATE.user.prenom + ' a compté la chambre froide — ' + t.bacs + ' bacs, ' + n1(t.kg) + ' kg' +
           (inv.manquants ? ' · ' + inv.manquants + ' bac(s) manquant(s)' : ''));
@@ -1494,7 +1566,7 @@ V.inventaire = async function () {
         const i = hist.findIndex(h => h.jour === inv.jour);
         if (i >= 0) hist[i] = inv; else hist.push(inv);
         await DB.set('stock:secs', hist.slice(-36));
-        try { localStorage.removeItem(CLE_BROUILLON); } catch (e) {}
+        oublierBrouillon('sec');
         await feed('ok', STATE.user.prenom + ' a compté le sec — ' + cptes.length + ' références');
         toast('Inventaire du sec enregistré');
         rendre('stock');
@@ -1548,11 +1620,21 @@ V.lots = async function () {
         }).join('') + '</div>'
       : vide('', 'Aucune ouverture enregistrée.'));
 
-  $('#lo-scan').onclick = async () => {
-    const r = await scannerPhoto('etiquette');
-    if (!r) return;
+  /* « Valider et scanner le suivant » : la prise de vue repart après chaque
+     ouverture confirmée. Le drapeau enchainer n'était lu par personne : le
+     bouton faisait la même chose que « Valider ». */
+  /* dejaOuvert vaut true (et seulement true : au premier appel, c'est
+     l'événement du clic) quand une ouverture de la chaîne est enregistrée.
+     La fin de chaîne — prise de vue ou confirmation annulée — redessine
+     alors la liste : elle affichait encore « Aucune ouverture enregistrée »
+     avec deux ouvertures en base, de quoi faire rescanner et doubler la
+     traçabilité. */
+  $('#lo-scan').onclick = async function scanner(dejaOuvert) {
+    const r = await scannerPhoto('etiquette', { enchainer: true });
+    if (!r) { if (dejaOuvert === true) rendre('lots'); return; }
     const ok = await confirmerOuverture(r);
-    if (ok) rendre('lots');
+    if (ok && r.enchainer && STATE.view === 'lots') return scanner(true);
+    if (ok || dejaOuvert === true) rendre('lots');
   };
   /* Saisie manuelle : on demande d'abord la famille. Un coulis ou un topping
      n'a pas d'étiquette lisible — l'équipe le saisit à la main, et on ne veut
@@ -1585,6 +1667,10 @@ function confirmerOuverture(r) {
     const garder = () => {
       const l = $('#co-lot'); if (l) r.lot = l.value.trim().toUpperCase();
     };
+    /* Annuler : la feuille est redessinée par dessiner() sans passer par
+       showSheet, qui seul branche [data-fermer] — le bouton ne faisait rien. */
+    const annuler = () => { closeSheet(); resolve(false); };
+    let enCours = false;
 
     const dessiner = () => {
       const fam = FAMILLES_PRODUIT.filter(f => f.id === famille)[0];
@@ -1636,7 +1722,13 @@ function confirmerOuverture(r) {
       });
       const sp = $('#co-parfum');
       if (sp) sp.onchange = () => { parfum = sp.value; };
-      $('#co-ok').onclick = enregistrer;
+      $$('#sheet-corps [data-fermer]').forEach(b => b.onclick = annuler);
+      $('#co-ok').onclick = async () => {
+        /* Double appui : un seul enregistrement à la fois. */
+        if (enCours) return;
+        enCours = true;
+        try { await enregistrer(); } finally { enCours = false; }
+      };
     };
 
     async function enregistrer() {
@@ -1670,7 +1762,7 @@ function confirmerOuverture(r) {
           ' Soit une ouverture précédente n’a pas été scannée, soit une livraison ' +
           'n’a pas été saisie. Confirmez si le bac est bien là : un recomptage ' +
           'sera proposé pour remettre les compteurs à plat.',
-          'Confirmer l’ouverture', () => { poser(fam, lot); });
+          'Confirmer l’ouverture', () => { poser(fam, lot); }, annuler);
       }
       await poser(fam, lot);
     }
@@ -1696,7 +1788,11 @@ function confirmerOuverture(r) {
       const cleFifo = (fam.id === 'glace' && parfum)
         ? 'g_' + parfum
         : 'a_' + (fam.dlc || 'defaut');
-      lots[cleFifo] = { lot: lot, ouv: today(), par: STATE.user.prenom, at: nowISO(),
+      /* « Ouvert le » de la lecture fait foi (bac ouvert la veille, scanné ce
+         matin) : il était ignoré et la DLC après ouverture partait d'aujourd'hui.
+         Une date future ou illisible retombe sur aujourd'hui. */
+      const ouv = (r.ouv && /^\d{4}-\d{2}-\d{2}$/.test(r.ouv) && r.ouv <= today()) ? r.ouv : today();
+      lots[cleFifo] = { lot: lot, ouv: ouv, par: STATE.user.prenom, at: nowISO(),
                         famille: fam.id, taille: fam.parfums ? taille : null };
       await DB.set('lots:' + m, lots);
 

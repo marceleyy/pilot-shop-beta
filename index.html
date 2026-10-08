@@ -18,8 +18,8 @@
 <link rel="icon" href="icons/icon-192.png" sizes="192x192">
 <link rel="manifest" href="manifest.webmanifest">
 
-<link rel="preconnect" href="https://cdnjs.cloudflare.com" crossorigin>
 <link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="premium.css">
 </head>
 
 <body>
@@ -113,10 +113,6 @@
 
 
 <!-- ===================== OUTILS ===================== -->
-<button type="button" id="fb" class="noprint" hidden>
-  <span class="pt" aria-hidden="true"></span>Retour bêta
-</button>
-
 <div id="sheet" hidden role="dialog" aria-modal="true" aria-labelledby="sheet-titre">
   <div class="voile" data-fermer></div>
   <div class="box">
@@ -155,10 +151,13 @@
 
 
 <!-- ===================== SCRIPTS ===================== -->
-<!-- async et non defer : en premier dans la file des scripts différés, un CDN
-     muet bloquait app.js. XLSX ne sert qu'à l'import de caisse, au clic. -->
-<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js" crossorigin="anonymous" async></script>
-<script src="env.js" defer onerror="console.info(&quot;env.js absent : mode local&quot;)"></script>
+<!-- XLSX (vendor/, copie vérifiée de la 0.18.5, plus de CDN tiers) n'est plus
+     chargé ici : il ne sert qu'à l'import de caisse, et ses 860 Ko exécutés à
+     chaque démarrage retardaient la liste des prénoms. app.js le charge au
+     premier import (chargerXLSX), depuis le cache hors ligne au besoin.
+     Plus d'attribut onerror sur env.js : la politique de sécurité (vercel.json)
+     refuse tout code en ligne ; son absence signifie simplement le mode local. -->
+<script src="env.js" defer></script>
 <script src="config.js" defer></script>
 <script src="auth.js" defer></script>
 <script src="vendor/tesseract.min.js" defer></script>

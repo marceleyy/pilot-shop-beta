@@ -106,7 +106,7 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
       ou le fond du bac. Et une photo ratée — floue, dans le vide, prise par
       erreur — restait dans le registre sans moyen de la retirer.
       -------------------------------------------------------------------------- */
-   function voirPreuve(jour, idPreuve, apresSuppression) {
+   function voirPreuve(jour, idPreuve, apresSuppression, lectureSeule) {
      (async function () {
        const cle = 'preuves:' + jour;
        const l = await DB.get(cle, []);
@@ -120,8 +120,10 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
          '<img src="' + esc(p.img) + '" alt="" class="preuve-plein">' +
          '<div class="actions">' +
          '<button class="btn clair" data-fermer>Fermer</button>' +
-         '<button class="btn corail" id="pv-suppr">Supprimer</button></div>');
+         /* Jour en consultation seule : on regarde, on ne supprime pas. */
+         (lectureSeule ? '' : '<button class="btn corail" id="pv-suppr">Supprimer</button>') + '</div>');
 
+       if (lectureSeule) return;
        $('#pv-suppr').onclick = () => {
          confirmer('Supprimer cette photo ?',
            'Elle ne servira plus de preuve pour « ' + (p.libelle || 'cette tâche') + ' ». ' +
@@ -155,9 +157,9 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
    }
 
    /* À appeler après chaque rendu qui contient des vignettes. */
-   function brancherVignettes(revenir) {
+   function brancherVignettes(revenir, lectureSeule) {
      $$('[data-vign]').forEach(b => b.onclick = () =>
-       voirPreuve(b.dataset.vjour, b.dataset.vign, revenir));
+       voirPreuve(b.dataset.vjour, b.dataset.vign, revenir, lectureSeule));
    }
    
    /* =============================================================================
@@ -166,6 +168,12 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
       produits ouverts. Le croisement des deux donne les alertes DLC.
       ========================================================================== */
    async function stockFerme() {
+     /* La réception n'écrit plus « stock:ferme » mais le journal du stock : la
+        liste restait à « 0 article(s) » et les alertes DLC ne partaient jamais.
+        Ce qui reste fermé se déduit maintenant du journal (stock.js). */
+     if (typeof stockFermeJournal === 'function') {
+       try { return await stockFermeJournal(); } catch (e) { return []; }
+     }
      const l = await DB.get('stock:ferme', []);
      return l.filter(x => !x.ouvert && !x.jete);
    }
@@ -311,8 +319,11 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
        }));
        if (!lignes.length) lignes.push({ produit:'', qte:1, unite:'bac', lot:'', dlc:'' });
    
+       /* showSheet et non #sheet-corps : le scan d'une DLC remplace la feuille
+          par celle du cadrage puis la ferme. Réécrite dans une feuille fermée,
+          la réception en cours (bon, conformités, lignes) disparaissait. */
        const rendre2 = () => {
-         $('#sheet-corps').innerHTML =
+         showSheet(
            '<h2 id="sheet-titre">Produits entrants</h2>' +
            '<p class="sub">' + esc(bl.fournisseur) + ' · ' + esc(bl.numero) +
            (bl.refuse ? ' · <b style="color:var(--corail-d)">livraison refusée</b>' : '') + '</p>' +
@@ -330,9 +341,13 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
              '</div>').join('') + '</div>' +
            '<button class="btn clair bloc" id="rl-plus" style="margin-top:12px">+ Ajouter un produit</button>' +
            '<div class="actions"><button class="btn clair" data-fermer>Annuler</button>' +
-           '<button class="btn menthe" id="rl-ok">Enregistrer la réception</button></div>';
-   
-         $$('#sheet-corps [data-fermer]').forEach(b => b.onclick = closeSheet);
+           '<button class="btn menthe" id="rl-ok">Enregistrer la réception</button></div>');
+         /* showSheet tient tout contenu pour neuf : sans cette ligne, un
+            toucher du voile jetait sans confirmation le bon, la température,
+            les conformités et les lignes déjà saisis. À cette étape, il y a
+            toujours une saisie à perdre : celle de l'étape 1. */
+         _feuilleModifiee = true;
+
          $$('[data-r]').forEach(inp => inp.oninput = () => {
            const [i, k] = inp.dataset.r.split('.');
            lignes[+i][k] = inp.value;
@@ -340,22 +355,31 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
          $$('[data-scandlc]').forEach(b => b.onclick = async () => {
            const i = +b.dataset.scandlc;
            const r = await scannerPhoto('etiquette');
-           if (!r) return;
-           const d = (r.texte || '').match(/(\d{2})[\/.\-](\d{2})[\/.\-](\d{2,4})/);
-           if (d) {
-             const an = d[3].length === 2 ? '20' + d[3] : d[3];
-             lignes[i].dlc = an + '-' + d[2] + '-' + d[1];
-           }
+           if (!r) return rendre2();          // scan annulé : la réception revient telle quelle
+           /* La lecture « code » ne garde que chiffres et majuscules : « 15/11/2026 »
+              revient « 15112026 », et l'expression jj/mm/aaaa ne trouvait jamais
+              rien. extraireCarton lit les deux formes et retient l'expiration. */
+           const c = (typeof extraireCarton === 'function') ? extraireCarton(r.texte || '') : null;
+           const dlc = (c && c.expiration) || r.dluo || '';
+           if (dlc) lignes[i].dlc = dlc;
            if (r.lot) lignes[i].lot = r.lot;
            if (r.parfum && !lignes[i].produit) lignes[i].produit = r.parfum;
-           if (!d) toast('Aucune date lisible — saisissez-la à la main', 'erreur');
+           if (dlc) toast('DLC lue : ' + fmtD(dlc) + ' — vérifiez-la sur l’étiquette');
+           else toast('Aucune date lisible — saisissez-la à la main', 'erreur');
            rendre2();
          });
          $('#rl-plus').onclick = () => { lignes.push({ produit:'', qte:1, unite:'bac', lot:'', dlc:'' }); rendre2(); };
          $('#rl-ok').onclick = enregistrer;
        };
    
+       let enCours = false;
        async function enregistrer() {
+         /* Double appui : une seule réception à la fois. */
+         if (enCours) return;
+         enCours = true;
+         try { await enregistrer1(); } finally { enCours = false; }
+       }
+       async function enregistrer1() {
          const valides = lignes.filter(l => l.produit.trim());
          if (!valides.length) return toast('Saisissez au moins un produit', 'erreur');
          const sansDlc = valides.filter(l => !l.dlc).length;
@@ -397,7 +421,7 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
            STATE.user.prenom + (bl.refuse ? ' a REFUSÉ la livraison ' : ' a réceptionné ') + bl.numero +
            ' (' + valides.length + ' réf.)');
          closeSheet();
-         toast(bl.refuse ? 'Réception refusée et tracée' : valides.length + ' article(s) en stock fermé');
+         toast(bl.refuse ? 'Réception refusée et tracée' : valides.length + ' produit(s) ajouté(s) au stock, DLC suivie');
          rendre('reception');
        }
    
@@ -516,7 +540,8 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
     if (t.lien === 'temp') {
       const mom = (phase === 'fermeture') ? 's' : 'm';
       const v = tempJour.valide && tempJour.valide[mom];
-      return { fait: !!v, ou: 'temp',
+      /* Signé sans aucune mesure : pas fait (voir releveMesure). */
+      return { fait: !!v && releveMesure(tempJour, mom), ou: 'temp',
                quoi: 'le relevé des températures du ' + (mom === 'm' ? 'matin' : 'soir'),
                par: v ? v.par : null, at: v ? v.at : null };
     }
@@ -616,14 +641,23 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
        (clichés.length ? '✓ ' + clichés.length : 'Photo') + '</button>' : '') +
      (t.lien ? '<button class="btn ' + (lie && !lie.fait ? 'menthe' : urgente ? 'corail' : 'clair') + ' sm" data-go="' + t.lien + '"' +
        (t.partie ? ' data-partie="' + esc(t.partie) + '"' : '') + '>' +
-       (lie && !lie.fait ? 'Y aller' : '→') + '</button>' : '') +
+       /* Même mot que la consigne « puis « Y aller » » de la tâche urgente. */
+       ((lie && !lie.fait) || urgente ? 'Y aller' : '→') + '</button>' : '') +
          '</div>' +
          /* Vignettes sous la tâche : plusieurs clichés possibles, avant et après.
             Cliquables pour voir en grand et supprimer. */
          vignettes(clichés, j);
   };
    
-     const m = (typeof meteo === 'function') ? await meteo().catch(() => null) : null;
+     /* Sans attendre open-meteo (#49) : voir meteoRapide. */
+     const mt = (typeof meteoRapide === 'function') ? await meteoRapide() : { m:null, suite:null };
+     const m = mt.m;
+     const meteoMini = m => {
+       const c = METEO.codes[m.code] || METEO.codes[3];
+       return '<div class="meteo-mini"><span class="mm-t">' + m.t + '°</span>' +
+              '<span class="mm-d">' + esc(c.l) + '</span>' +
+              '<span class="mm-p">max ' + m.max + '° · pluie ' + m.pluie + ' %</span></div>';
+     };
 
   $('#page').innerHTML =
      /* Salutation et météo sur une seule bande : le prénom parce qu'on tient
@@ -635,12 +669,7 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
      '<span>' + nomJour(j) + ' ' + fmtD(j) + ' · ' +
      (STATE.service ? 'en service depuis ' + heure(STATE.service.debut) : 'pas encore pointé') +
      '</span></div>' +
-     (m ? (function () {
-       const c = METEO.codes[m.code] || METEO.codes[3];
-       return '<div class="meteo-mini"><span class="mm-t">' + m.t + '°</span>' +
-              '<span class="mm-d">' + esc(c.l) + '</span>' +
-              '<span class="mm-p">max ' + m.max + '° · pluie ' + m.pluie + ' %</span></div>';
-     })() : '') +
+     (m ? meteoMini(m) : '') +
      '</div>' +
 
        (R.length
@@ -738,15 +767,24 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
     if (tm) tm.textContent = actif ? STATE.user.prenom + ' · ' + heure(nowISO()) : '';
     vibrer(UI.vibration.ok);
 
-    /* Compteur et barre d'avancement, recalculés sans tout reconstruire */
-    const total2 = $$('#page .tache [data-t]').length;
-    const faits2 = $$('#page .tache.on [data-t]').length;
+    /* Compteur et barre d'avancement, recalculés sans tout reconstruire — avec
+       la MÊME règle que l'affichage initial. Compter les cases du DOM oubliait
+       les tâches liées et urgentes (« 0 sur 10 » devenait « 1 sur 8 »), et le
+       libellé « Valider la procédure (N restantes) » ne bougeait jamais. */
+    const toutes2 = blocs.reduce((a, bl) => a.concat(bl.taches), []);
+    const total2 = toutes2.length;
+    const faits2 = toutes2.filter(estFaite).length;
     const cs = $('#page .card .cs');
     if (cs && /sur \d+ tâches/.test(cs.textContent)) {
       cs.textContent = cs.textContent.replace(/^\d+ sur \d+/, faits2 + ' sur ' + total2);
     }
     const barre = $('#page .jauge i');
     if (barre && total2) barre.style.width = Math.round(faits2 / total2 * 100) + '%';
+    const vpb = $('#valproc');
+    if (vpb && !rec['_valide_' + phase]) {
+      const reste2 = total2 - faits2;
+      vpb.textContent = 'Valider la procédure' + (reste2 > 0 ? ' (' + reste2 + ' restante' + (reste2 > 1 ? 's' : '') + ')' : '');
+    }
 
     await DB.set('checklist:' + j, rec);
     if (actif) await feed('ok', STATE.user.prenom + ' : ' + ligne2.querySelector('.tn').textContent);
@@ -821,6 +859,16 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
     }
     finir();
   };
+
+  /* Météo arrivée après le dessin (meteoRapide) : la bande du haut se
+     complète, sans redessiner la page ni toucher une case en cours. */
+  if (mt.suite) mt.suite.then(mm => {
+    const h = document.querySelector('#page .accueil-haut');
+    if (!mm || !h || STATE.view !== 'accueil') return;
+    const ancien = h.querySelector('.meteo-mini');
+    if (ancien) ancien.outerHTML = meteoMini(mm);
+    else h.insertAdjacentHTML('beforeend', meteoMini(mm));
+  });
 };
    
    /* Minuteur des 10 minutes de contact du Bactalim */
@@ -926,6 +974,7 @@ V.caisse = async function () {
   const dessiner = () => {
     const p = mom + '_';
     const valide = r[mom + '_valide'];
+    const verrou = verrouille();
 
     $('#page').innerHTML =
       navJour(j) +
@@ -940,6 +989,14 @@ V.caisse = async function () {
       (mom === 'm' && fondVeille !== null
         ? '<p class="rappel">Fond de caisse final d’hier soir : <b>' + eur(fondVeille) + '</b>' +
           (veille.s_valide ? ' · ' + esc(veille.s_valide.par) : '') + '</p>'
+        : '') +
+
+      (verrou
+        ? (valide
+          ? '<p class="lecture">Comptage validé par ' + esc(valide.par) + ' à ' + heure(valide.at) +
+            '. Seul le manager peut le corriger.</p>'
+          : '<p class="lecture">Comptage en cours de correction par le manager. ' +
+            'Il sera de nouveau lisible une fois revalidé.</p>')
         : '') +
 
       carte(
@@ -969,9 +1026,10 @@ V.caisse = async function () {
         '<textarea data-k="' + p + 'com" placeholder="Toute explication utile.">' +
         esc(r[p + 'com'] || '') + '</textarea></div>', 'plat') +
 
+      (verrou ? '' :
       '<button class="btn ' + (valide ? 'clair' : 'menthe') + ' bloc xl" id="cv" style="margin-top:16px">' +
       (valide ? '✓ Déjà validé — revalider'
-              : 'Valider le comptage ' + (mom === 'm' ? 'd’ouverture' : 'de fermeture')) + '</button>' +
+              : 'Valider le comptage ' + (mom === 'm' ? 'd’ouverture' : 'de fermeture')) + '</button>') +
 
       /* Le manager voit le détail du calcul, pas seulement le verdict.
          Un équipier a besoin de savoir si ça tombe juste ; un manager a besoin
@@ -1082,8 +1140,10 @@ V.caisse = async function () {
             ', ' + eur(num(compte)) + ' comptés ce matin.',
           jour:today(), par:STATE.user.prenom, employe:STATE.user.id, at:nowISO(), resolue:false });
         r.m_ecartSignale = { par:STATE.user.prenom, at:nowISO(), montant:d };
-        await sauver();
-        toast('Signalement transmis au manager');
+        /* Le seul champ du signalement : la fiche entière, lue avant une
+           correction du manager, serait refusée avec lui (garderComptagesValides). */
+        await DB.patch('caisse:' + j, { m_ecartSignale:r.m_ecartSignale });
+        toast(messageEnvoi('anomalies', 'Signalement transmis au manager'));
         dessiner();
       };
       if (r.m_ecartSignale) {
@@ -1157,6 +1217,25 @@ V.caisse = async function () {
     await DB.set('caisse:' + j, r);
   }, 400);
 
+  /* Un comptage déjà validé ne se corrige que par le manager. Un équipier le
+     réécrivait sans trace : signature et montants d'origine perdus, journal
+     muet. L'équipe corrige librement un comptage tant qu'il n'est pas validé. */
+  function verrouille() {
+    /* Pendant une correction du manager, la signature vaut null mais
+       <moment>_avant garde l'ancienne : le comptage reste fermé à l'équipe.
+       Sinon, un équipier qui ouvrait l'écran à ce moment saisissait des
+       montants qui écrasaient ensuite la nouvelle signature. */
+    return !!(r[mom + '_valide'] || r[mom + '_avant']) && STATE.user.role !== 'manager';
+  }
+  const LIBELLES_CAISSE = { m_fond:'fond initial', s_cb:'recettes CB', s_esp:'recettes espèces',
+    s_tpe:'TPE', s_retrait:'retrait', s_fond:'fond final' };
+  const champsMoment = m => (m === 'm' ? ['m_fond'] : ['s_cb', 's_esp', 's_tpe', 's_retrait', 's_fond']).concat([m + '_com']);
+  const instantane = m => {
+    const v = {};
+    champsMoment(m).forEach(k => { v[k] = String(lire(k)); });
+    return v;
+  };
+
   function brancher() {
     brancherNavJour('caisse');
     if (!peutModifier(j)) return;
@@ -1164,7 +1243,13 @@ V.caisse = async function () {
       if (b.dataset.mom === mom) return;
       mom = b.dataset.mom; V.caisse._m = mom; dessiner();
     });
-    champsSaisie().forEach(i => i.oninput = () => {
+    if (verrouille()) champsSaisie().forEach(i => { i.disabled = true; });
+    else champsSaisie().forEach(i => i.oninput = () => {
+      /* Correction d'un comptage validé : la signature et les montants
+         d'origine sont gardés jusqu'à la revalidation, qui les journalise. */
+      if (r[mom + '_valide'] && !r[mom + '_avant']) {
+        r[mom + '_avant'] = Object.assign({ valeurs:instantane(mom) }, r[mom + '_valide']);
+      }
       r[i.dataset.k] = i.value;
       /* null et non delete : la fusion avec la copie du serveur ferait revenir
          une clé supprimée, et l'ancienne signature avec elle. */
@@ -1175,15 +1260,34 @@ V.caisse = async function () {
       sauver();
       verdict();
     });
-    $('#cv').onclick = async () => {
+    if ($('#cv')) $('#cv').onclick = async () => {
       const p = mom + '_';
       const requis = (mom === 'm') ? ['m_fond'] : ['s_cb', 's_esp', 's_tpe', 's_retrait', 's_fond'];
       const vides = requis.filter(k => r[k] === undefined || r[k] === '');
       if (vides.length) return toast(mom === 'm'
         ? 'Renseignez le fond de caisse initial'
         : 'Renseignez tous les montants du soir', 'erreur');
+      /* Revalidation d'un comptage déjà signé, corrigé ou non : l'ancienne
+         signature et les anciens montants vont au journal et restent dans la
+         fiche (p_corrections), au lieu d'être écrasés sans trace. */
+      const avant = r[p + 'avant'] ||
+        (r[p + 'valide'] ? Object.assign({ valeurs:instantane(mom) }, r[p + 'valide']) : null);
       r[mom + '_valide'] = { par:STATE.user.prenom, id:STATE.user.id, at:nowISO() };
       champsSaisie().forEach(i => { r[i.dataset.k] = i.value; });
+      let correction = '';
+      if (avant) {
+        const apres = instantane(mom), av = avant.valeurs || {};
+        const change = k => k === p + 'com' ? (av[k] || '') !== (apres[k] || '') : num(av[k]) !== num(apres[k]);
+        const diffs = champsMoment(mom).filter(change).map(k =>
+          k === p + 'com' ? 'commentaire modifié'
+            : LIBELLES_CAISSE[k] + ' ' + eur(num(av[k])) + ' → ' + eur(num(apres[k])));
+        correction = ' — déjà validé par ' + (avant.par || '?') + (avant.at ? ' à ' + heure(avant.at) : '') +
+          ' : ' + (diffs.length ? diffs.join(', ') : 'montants inchangés');
+        r[p + 'corrections'] = (Array.isArray(r[p + 'corrections']) ? r[p + 'corrections'] : []).concat([{
+          par:avant.par || null, id:avant.id || null, at:avant.at || null, valeurs:avant.valeurs || {},
+          corrigePar:STATE.user.prenom, le:nowISO() }]);
+        r[p + 'avant'] = null;
+      }
       /* Le tableau de bord, l'historique et les tendances lisent encore
          ecart / par : sans eux, chaque soir s'affichait à 0 €, sans écart. */
       if (mom === 's') {
@@ -1198,10 +1302,11 @@ V.caisse = async function () {
         r.par = STATE.user.prenom;
       }
       await DB.set('caisse:' + j, r);
-      await feed('ok', STATE.user.prenom + ' a validé le comptage ' +
-        (mom === 'm' ? 'd’ouverture' : 'de fermeture'));
+      await feed(avant ? 'warn' : 'ok', STATE.user.prenom + (avant ? ' a revalidé' : ' a validé') + ' le comptage ' +
+        (mom === 'm' ? 'd’ouverture' : 'de fermeture') + correction);
       toast('Comptage validé');
-      rendre('accueil');
+      /* Le manager revient à sa Tour de contrôle, pas à la vue équipier. */
+      rendre(vueAccueil());
     };
   }
 
@@ -1255,8 +1360,12 @@ async function planHebdo() {
   return TACHES_HEBDO.map(t => {
     const p = perso && perso[t.id];
     const f = Object.assign({}, t, p || {});
-    /* Compatibilité avec l'ancien format à jour unique */
-    if (!Array.isArray(f.jours)) f.jours = (f.jour ? [+f.jour] : []);
+    /* Compatibilité avec l'ancien format à jour unique. Les jours sont
+       COPIÉS : l'éditeur de la semaine les modifie sur place, et ces tableaux
+       étaient ceux de TACHES_HEBDO_DEF (copie superficielle). « Annuler »
+       laissait donc la bascule appliquée, et « Rétablir le tableau
+       d'origine » repartait d'une référence d'usine déjà altérée. */
+    f.jours = Array.isArray(f.jours) ? f.jours.slice() : (f.jour ? [+f.jour] : []);
     return f;
   }).filter(t => !t.retiree);
 }
@@ -1306,11 +1415,9 @@ V.hebdo = async function () {
             ' · ' + ph.length + '/' + HEBDO.photosMax + ' photo(s)</div></div>' +
             (v.ok ? pastille('ok', 'Fait') : pastille('n', 'À faire')) + '</div>' +
 
-            (ph.length
-              ? '<div class="rang" style="margin-top:12px;gap:8px">' + ph.map(p =>
-                  '<img src="' + esc(p.img) + '" alt="Preuve" style="width:74px;height:74px;' +
-                  'object-fit:cover;border-radius:10px;border:1px solid var(--line)">').join('') + '</div>'
-              : '') +
+            /* Vignettes communes : un appui agrandit la photo et permet de
+               retirer une photo ratée. Ici, de simples images ne s'ouvraient pas. */
+            vignettes(ph, j) +
 
             '<div class="btn-row" style="margin-top:12px">' +
             '<button class="btn ' + (ph.length ? 'clair' : 'ciel') + '" data-ph="' + t.id + '"' +
@@ -1332,6 +1439,7 @@ V.hebdo = async function () {
     }).join('') + '</div>';
 
   brancherNavJour('hebdo');
+  brancherVignettes(() => rendre('hebdo'), !peutModifier(j));
   if (!peutModifier(j)) return;
 
   $$('[data-ph]').forEach(b => b.onclick = async () => {
@@ -1500,7 +1608,13 @@ V.temp = async function () {
          quelle (affichée « — » jusque-là) ; les appuis suivants font ±1. */
       const nv = !saisi(e) ? defautEnceinte(e)
                : (actuel === 'HS' ? defautEnceinte(e) : actuel) + (+b.dataset.pas);
-      if (nv < e.lo - 5 || nv > e.hi + 5) return;
+      /* Hors de la plage des flèches (ex. 20 °C tapé au lieu de −20), elles
+         restaient muettes. On laisse revenir vers la plage ; s'éloigner encore
+         est refusé, mais en le disant et en indiquant la saisie libre. */
+      const bas = e.lo - 5, haut = e.hi + 5;
+      if ((nv < bas && nv < actuel) || (nv > haut && nv > actuel)) {
+        return toast('Valeur hors de la plage des flèches : touchez la température pour la saisir', 'erreur');
+      }
       rec[cle(e)] = nv;
       invalider();
       vibrer(UI.vibration.ok);
@@ -1511,7 +1625,22 @@ V.temp = async function () {
 
     $$('[data-hs]').forEach(b => b.onclick = async () => {
       const e = ENCEINTES.filter(x => x.id === b.dataset.hs)[0];
-      rec[cle(e)] = (rec[cle(e)] === 'HS') ? '' : 'HS';
+      /* HS puis HS de nouveau effaçait la température déjà relevée : on garde
+         la valeur d'avant pour la remettre si l'on revient sur le HS.
+         Gardée dans le relevé du jour (rec.avantHS), plus en mémoire vive :
+         un rechargement de l'application la perdait (B5). null plutôt que
+         delete : la fusion de « temp: » garderait sinon la valeur de la base.
+         « avantHS » ne commence ni par m_ ni par s_ : il ne compte pas comme
+         une mesure (releveMesure). */
+      const memo = rec.avantHS || (rec.avantHS = {});
+      const k = cle(e);
+      if (rec[k] === 'HS') {
+        rec[k] = (memo[k] !== undefined && memo[k] !== null) ? memo[k] : '';
+        memo[k] = null;
+      } else {
+        memo[k] = saisi(e) ? rec[k] : null;
+        rec[k] = 'HS';
+      }
       invalider();
       await sauver();
       dessiner();
@@ -1549,6 +1678,11 @@ V.temp = async function () {
         if ($('#obs')) $('#obs').focus();
         return;
       }
+      /* Aucune enceinte relevée : « Valider quand même » signait un registre
+         vide, que Ma journée et la Tour de contrôle comptaient comme fait. */
+      if (ENCEINTES.length && reste.length === ENCEINTES.length) {
+        return toast('Aucune température relevée : relevez au moins une enceinte (ou marquez-la HS)', 'erreur');
+      }
       if (reste.length) {
         confirmer('Valider avec ' + reste.length + ' enceinte(s) non relevée(s) ?',
           'Manquantes : ' + reste.map(e => e.nom).join(', ') + '. Un registre incomplet ' +
@@ -1564,7 +1698,8 @@ V.temp = async function () {
       await sauver();
       await feed('ok', STATE.user.prenom + ' a validé les températures du ' + mom.label.toLowerCase());
       toast('Relevé du ' + mom.label.toLowerCase() + ' validé');
-      rendre('accueil');
+      /* Le manager revient à sa Tour de contrôle, pas à la vue équipier. */
+      rendre(vueAccueil());
     }
   }
 
@@ -1615,25 +1750,37 @@ V.parametres = async function () {
          '<button class="btn clair bloc" id="ea" style="margin-top:12px">+ Ajouter une unité</button>' +
          '<button class="btn menthe bloc" id="ev" style="margin-top:8px">Enregistrer les unités</button>') +
    
-       carte(entete('🗓️', 'Tâches hebdomadaires', 'Jour de passage de chaque tâche récurrente.') +
-         '<div class="stack">' + NETTOYAGE.zones.map(z =>
-           '<div><div class="entete"><h3>' + z.icone + ' ' + esc(z.nom) + '</h3></div>' +
-           z.taches.filter(t => t.jours).map(t =>
-             '<div class="tache"><span class="tx"><span class="tn">' + esc(t.nom) + '</span>' +
-             '<span class="tm">' + t.jours.map(x => JOURS_SEMAINE[x]).join(', ') + '</span></span>' +
-             '<select data-h="' + esc(t.id) + '" style="width:auto;min-width:130px">' +
-             JOURS_SEMAINE.slice(1).map((jn, k) =>
-               '<option value="' + (k + 1) + '"' + (t.jours[0] === k + 1 ? ' selected' : '') + '>' + jn + '</option>').join('') +
-             '</select></div>').join('') + '</div>').join('') + '</div>' +
-         '<div class="entete"><h3>Tâches asynchrones</h3></div>' +
+       /* Une seconde carte « Tâches hebdomadaires » proposait ici un jour pour
+          les tâches du plan de nettoyage et répondait « Jours enregistrés » :
+          aucun écran ne lit ces jours (Tâches du jour et Nettoyage suivent
+          « Organiser la semaine », ci-dessus). On ne garde que le rappel, en
+          lecture, des tâches qui ont leur propre rythme. */
+       carte(entete('🔁', 'Tâches à rythme propre', 'Hors tableau de la semaine : jours fixes ou intervalle.') +
          NETTOYAGE.asynchrones.map(a =>
            '<div class="tache"><span class="tx"><span class="tn">' + a.icone + ' ' + esc(a.nom) + '</span>' +
            '<span class="tm">' + (a.type === 'jours-fixes'
              ? a.jours.map(x => JOURS_SEMAINE[x]).join(', ')
-             : 'tous les ' + a.intervalleJours + ' jours') + '</span></span></div>').join('') +
-         '<button class="btn menthe bloc" id="hbv" style="margin-top:14px">Enregistrer les jours</button>');
+             : 'tous les ' + a.intervalleJours + ' jours') + '</span></span></div>').join(''));
    
      $('#hv').onclick = async () => {
+     /* Contrôle de cohérence avant d'enregistrer : un début de phase à 18:00
+        et une fin à 09:00 étaient acceptés, et Ma journée ne trouvait plus la
+        phase en cours. Les heures « HH:MM » se comparent comme du texte. */
+     /* Une fin après minuit (09:30 → 00:30) est refusée, et c'est voulu : Ma
+        journée (phaseCourante) et la date des saisies coupent la journée à
+        minuit. Le message le dit et donne la parade, au lieu de laisser
+        croire à une faute de frappe (B3). */
+     const h = ['#h1', '#h2', '#h3', '#h4', '#h5', '#h6'].map(x => $(x).value);
+     const apresMinuit = (de, a) => a < de && a <= '06:00';    // 22:00 → 00:30, pas 18:00 → 17:00
+     if (h.some(x => !/^\d\d:\d\d$/.test(x))) return toast('Renseignez les six horaires', 'erreur');
+     if (!(h[0] < h[1])) return toast(apresMinuit(h[0], h[1])
+       ? 'Fermeture après minuit non prise en charge (' + h[0] + ' → ' + h[1] + ') : indiquez 23:59 au plus tard'
+       : 'La boutique doit fermer après son ouverture (' + h[0] + ' → ' + h[1] + ')', 'erreur');
+     if (!(h[2] < h[3])) return toast('La phase d’ouverture doit finir après son début (' + h[2] + ' → ' + h[3] + ')', 'erreur');
+     if (!(h[3] <= h[4])) return toast('La phase de fermeture doit commencer après la fin de l’ouverture (' + h[3] + ')', 'erreur');
+     if (!(h[4] < h[5])) return toast(apresMinuit(h[4], h[5])
+       ? 'La phase de fermeture ne peut pas finir après minuit (' + h[4] + ' → ' + h[5] + ') : indiquez 23:59 au plus tard'
+       : 'La phase de fermeture doit finir après son début (' + h[4] + ' → ' + h[5] + ')', 'erreur');
      Object.assign(HORAIRES, { ouverture:$('#h1').value, fermeture:$('#h2').value,
      debutOuverture:$('#h3').value, finOuverture:$('#h4').value,
      debutFermeture:$('#h5').value, finFermeture:$('#h6').value });
@@ -1658,10 +1805,16 @@ V.parametres = async function () {
          });
      });
      $('#ea').onclick = async () => {
+       /* Le redessin effaçait sans prévenir un nom ou une plage modifiés mais
+          pas encore enregistrés : on les remet dans leurs champs, toujours à
+          enregistrer avec « Enregistrer les unités ». */
+       const enCours = {};
+       $$('[data-e]').forEach(i => { enCours[i.dataset.e] = i.value; });
        ENCEINTES.push({ id:'u' + uid().slice(0, 4), nom:'Nouvelle unité', cible:'—',
                         lo:-24, hi:8, pas:1, vert:[-20, -17], crit:-15, zone:'boutique' });
        await DB.set('enceintes', ENCEINTES);
-       rendre('parametres');
+       await rendre('parametres');
+       $$('[data-e]').forEach(i => { if (enCours[i.dataset.e] !== undefined) i.value = enCours[i.dataset.e]; });
      };
      $('#ev').onclick = async () => {
        $$('[data-e]').forEach(i => {
@@ -1674,13 +1827,6 @@ V.parametres = async function () {
        });
        await DB.set('enceintes', ENCEINTES);
        toast('Unités enregistrées');
-     };
-     $('#hbv').onclick = async () => {
-       const map = {};
-       $$('[data-h]').forEach(s => map[s.dataset.h] = [+s.value]);
-       NETTOYAGE.zones.forEach(z => z.taches.forEach(t => { if (map[t.id]) t.jours = map[t.id]; }));
-       await DB.set('hebdo', map);
-       toast('Jours enregistrés');
      };
    };
    
@@ -1770,9 +1916,12 @@ async function organiserSemaine() {
       'affiché en boutique. Les tâches déjà validées ne sont pas touchées.',
       'Rétablir', async () => {
         await DB.del('hebdo:plan');
-        TACHES_HEBDO = TACHES_HEBDO_DEF.map(t => Object.assign({}, t));
+        TACHES_HEBDO = TACHES_HEBDO_DEF.map(t => Object.assign({}, t, { jours:(t.jours || []).slice() }));
         closeSheet(); toast('Tableau rétabli'); rendre('parametres');
-      });
+      },
+      /* La confirmation occupe la même feuille : « Annuler » fermait tout et
+         perdait l'organisation en cours. On y revient, bascules comprises. */
+      () => rendreEditeur());
   };
 
   showSheet('<div class="vide">Chargement…</div>');
@@ -1850,16 +1999,14 @@ V.clean = async function () {
             '<button class="btn ' + (ph.length ? 'menthe' : 'clair') + ' sm" data-hbp="' + esc(t.id) + '"' +
             (ph.length >= HEBDO.photosMax ? ' disabled' : '') + '>' +
             (ph.length ? '✓ Photo' : 'Photo') + '</button></div>' +
-            (ph.length
-              ? '<div class="rang" style="margin-top:10px;gap:8px">' + ph.map(p =>
-                '<img src="' + esc(p.img) + '" alt="" style="width:62px;height:62px;object-fit:cover;' +
-                'border-radius:9px;border:1px solid var(--line)">').join('') + '</div>'
-              : ''),
+            /* Vignettes communes, cliquables (voir en grand, supprimer). */
+            vignettes(ph, j),
             v.ok ? 'menthe' : '');
         }).join('') + '</div>'
       : vide('', 'Rien de prévu au tableau ce jour.'));
 
   brancherNavJour('clean');
+  brancherVignettes(() => rendre('clean'), !peutModifier(j));
   if (!peutModifier(j)) return;
 
   $$('[data-hbp]').forEach(b => b.onclick = async () => {
@@ -1947,15 +2094,32 @@ V.anomalie = async function () {
         });
     };
   });
-  $$('[data-res]').forEach(b => b.onclick = async () => {
-    const l = await DB.get('anomalies', []);
-    const a = l.filter(x => x.id === b.dataset.res)[0];
-    if (a) { a.resolue = true; a.resoluePar = STATE.user.prenom; a.resolueAt = nowISO(); }
-    await DB.set('anomalies', l);
-    if (a) await feed('ok', STATE.user.prenom + ' a traité : ' + a.titre);
-    rendre('anomalie');
+  /* Un seul appui, sans confirmation, et ouvert à toute l'équipe : un
+     signalement quittait « En cours » avant que le manager l'ait vu. On
+     confirme, et l'équipier ne clôt que ce qu'il a lui-même signalé. */
+  $$('[data-res]').forEach(b => b.onclick = () => {
+    const vue = liste.filter(x => x.id === b.dataset.res)[0];
+    if (!vue || !peutClore(vue)) return;
+    confirmer('Marquer comme traitée ?',
+      '« ' + (vue.titre || '') + ' » passera dans « Traitées »' +
+      (STATE.user.role === 'manager' ? '.' : ' et ne sera plus suivi par ' +
+        (typeof nomManager === 'function' ? nomManager() : 'le manager') + '.'),
+      'Marquer traitée', async () => {
+        const l = await DB.get('anomalies', []);
+        const a = l.filter(x => x.id === b.dataset.res)[0];
+        if (a) { a.resolue = true; a.resoluePar = STATE.user.prenom; a.resolueAt = nowISO(); }
+        await DB.set('anomalies', l);
+        if (a) await feed('ok', STATE.user.prenom + ' a traité : ' + a.titre);
+        rendre('anomalie');
+      });
   });
 };
+
+/* Le manager clôt tout signalement ; l'équipier, seulement les siens. */
+function peutClore(a) {
+  if (!STATE.user || !a) return false;
+  return STATE.user.role === 'manager' || (!!a.employe && a.employe === STATE.user.id);
+}
 
 function carteAnomalie(a) {
   const c = ANOMALIES.categories.filter(x => x.id === a.categorie)[0] || ANOMALIES.categories[6];
@@ -1974,7 +2138,7 @@ function carteAnomalie(a) {
     (a.photo ? '<img src="' + esc(a.photo) + '" alt="" data-anoph="' + esc(a.id) + '" ' +
       'style="width:100%;max-height:190px;object-fit:cover;border-radius:10px;' +
       'margin-top:10px;cursor:pointer">' : '') +
-    (a.resolue ? '' : '<button class="btn clair bloc sm" data-res="' + esc(a.id) +
+    (a.resolue || !peutClore(a) ? '' : '<button class="btn clair bloc sm" data-res="' + esc(a.id) +
       '" style="margin-top:10px">Marquer comme traitée</button>'),
     a.resolue ? 'plat' : (g.couleur === 'bad' ? 'corail' : g.couleur === 'warn' ? 'ambre' : ''));
 }
@@ -2063,7 +2227,7 @@ function formulaireAnomalie() {
       await feed(gravite === 'bloquant' ? 'bad' : 'warn',
         STATE.user.prenom + ' signale : ' + memo.titre);
       closeSheet();
-      toast('Signalement transmis');
+      toast(messageEnvoi('anomalies', 'Signalement transmis'));
       rendre('anomalie');
     };
   };
@@ -2177,11 +2341,11 @@ function formulaireAnomalie() {
            '<div class="grid g4" style="margin-top:12px;gap:8px">' +
            TAILLES_BAC.map(t =>
              '<div class="champ"><label class="f">' + t + ' L</label>' +
-             '<input type="number" min="0" step="1" data-g="p' + i + '.' + t + '" value="' +
+             '<input type="number" min="0" step="1" aria-label="' + esc(p) + ', bacs de ' + t + ' L" data-g="p' + i + '.' + t + '" value="' +
              (v.t[t] === undefined || v.t[t] === '' ? '' : v.t[t]) + '"' + (rec.valide ? ' disabled' : '') + '></div>').join('') +
            '</div>' +
            '<div class="champ" style="margin-top:10px"><label class="f">Entamé, tous formats confondus (L)</label>' +
-           '<input type="number" min="0" step="0.5" data-e="p' + i + '" value="' +
+           '<input type="number" min="0" step="0.5" aria-label="' + esc(p) + ', entamé, tous formats confondus (L)" data-e="p' + i + '" value="' +
            (v.ent === undefined ? '' : v.ent) + '"' + (rec.valide ? ' disabled' : '') + '></div>',
            tot ? 'menthe' : '');
        }).join('') + '</div>' +
@@ -2288,8 +2452,10 @@ function formulaireAnomalie() {
        'Ce que l’application a réellement envoyé et reçu.') +
        '<div class="dense"><div class="dl"><span class="c1">Projet</span>' +
        '<span class="c ww">' + esc(String(SUPABASE.url).replace('https://', '').split('.')[0] || 'non configuré') + '</span></div>' +
+       /* Présence seulement : le début de la clé n'aide pas au diagnostic et
+          s'affichait à quiconque regardait l'écran. */
        '<div class="dl"><span class="c1">Clé</span><span class="c ww">' +
-       (SUPABASE.anonKey ? esc(SUPABASE.anonKey.slice(0, 18)) + '…' : 'absente') + '</span></div>' +
+       (SUPABASE.anonKey ? 'présente (masquée)' : 'absente') + '</span></div>' +
        '<div class="dl"><span class="c1">File d’attente</span><span class="c ww num">' + STATE.fileAttente + '</span></div>' +
        '<div class="dl"><span class="c1">Dernière erreur</span><span class="c ww">' +
        (STATE.erreurBase ? esc(STATE.erreurBase) : 'aucune') + '</span></div>' +
@@ -2309,12 +2475,21 @@ function formulaireAnomalie() {
         'journées de photos, en pratique — restent sur cet appareil et ne remonteront pas. ' +
         'Le passage à Supabase Storage réglera ce point.</p></div></div>'
       : '') +
-       '<button class="btn clair bloc" id="dg-test" style="margin-top:14px">Tester lecture et écriture</button>' +
+       /* Mode local : aucune base, rien à tester — le test envoyait des
+          requêtes vers « /rest/v1/… » sur l'hôte de l'application. */
+       (DB.configure
+         ? '<button class="btn clair bloc" id="dg-test" style="margin-top:14px">Tester lecture et écriture</button>'
+         : '<p class="mini" style="margin-top:14px">Mode local : aucune base configurée, rien à tester.</p>') +
        '<div id="dg-res" style="margin-top:12px"></div>' +
        '<button class="btn fantome bloc" id="dg-purge" style="margin-top:8px">Vider la file d’attente</button>', 'plat');
      page.appendChild(bloc.firstChild);
    
-     $('#dg-test').onclick = async () => {
+     /* Le test écrit puis efface une ligne dans des tables du registre : on le
+        dit avant de le faire, au lieu de le découvrir après. */
+     if ($('#dg-test')) $('#dg-test').onclick = () => confirmer('Tester la base ?',
+       'Le test lit quatre tables, puis y écrit et efface aussitôt une ligne « diagnostic:test ».',
+       'Lancer le test', testerBase);
+     const testerBase = async () => {
        $('#dg-res').innerHTML = '<div class="vide">Test en cours…</div>';
        const lignes = [];
        for (const t of ['journal', 'taches_nettoyage', 'checklists', 'reglages']) {

@@ -88,9 +88,10 @@ button{cursor:pointer;border:0;background:none}
 #topbar h1{font-size:22px}
 #topbar .ts{font-size:13px;color:var(--brume);margin-top:1px}
 #topbar .ta{display:flex;gap:8px;flex:0 0 auto}
-/* Marge basse de 80 px : le bouton flottant « Retour bêta » (#fb, 48 px à
-   14 px au-dessus de la barre) ne doit pas recouvrir le dernier bouton. */
-#page{flex:1;padding:16px var(--pad-x) 80px;max-width:1100px;width:100%;margin:0 auto}
+/* Marge basse : de l'air entre le dernier bouton et la barre d'onglets.
+   Elle était de 80 px pour le bouton flottant « Retour bêta », passé depuis
+   dans le menu « Tout le reste ». */
+#page{flex:1;padding:16px var(--pad-x) 40px;max-width:1100px;width:100%;margin:0 auto}
 .stack{display:flex;flex-direction:column;gap:var(--gap)}
 .grid{display:grid;gap:var(--gap)}
 .g2{grid-template-columns:repeat(2,minmax(0,1fr))}
@@ -183,7 +184,7 @@ button{cursor:pointer;border:0;background:none}
 
 /* --- 7. Formulaires ----------------------------------------------------- */
 label.f{display:block;font-size:12px;font-weight:700;letter-spacing:.02em;text-transform:uppercase;color:var(--brume);margin-bottom:7px}
-input[type=text],input[type=number],input[type=date],input[type=month],input[type=password],input[type=search],select,textarea{
+input[type=text],input[type=number],input[type=date],input[type=month],input[type=password],input[type=email],input[type=search],select,textarea{
   width:100%;min-height:var(--tap);padding:12px 14px;font-size:16px;
   background:rgba(255,255,255,.92);border:1px solid rgba(15,32,39,.12);border-radius:var(--r-btn);
   transition:var(--tr);appearance:none;-webkit-appearance:none;
@@ -364,7 +365,11 @@ select{background-image:linear-gradient(45deg,transparent 50%,var(--brume) 50%),
 .dense-scroll{max-height:62vh;overflow-y:auto;-webkit-overflow-scrolling:touch}
 
 /* --- 15. Feuille modale ------------------------------------------------- */
-#sheet{position:fixed;inset:0;z-index:200;display:flex;align-items:flex-end;justify-content:center}
+/* 255 : au-dessus de l'écran de connexion (#login, 250). À 200, la feuille de
+   remise à zéro s'ouvrait DESSOUS : le bouton semblait ne rien faire, puis la
+   feuille réapparaissait par-dessus l'application à la connexion. Reste sous
+   #amorcage et #rattach (260 et plus), le toast (300) et le viseur (400). */
+#sheet{position:fixed;inset:0;z-index:255;display:flex;align-items:flex-end;justify-content:center}
 #sheet[hidden]{display:none!important}
 #sheet .voile{position:absolute;inset:0;background:rgba(15,32,39,.42);backdrop-filter:blur(6px);animation:fade .2s ease}
 #sheet .box{
@@ -410,15 +415,6 @@ select{background-image:linear-gradient(45deg,transparent 50%,var(--brume) 50%),
 #offline.on ~ #app{padding-top:var(--offline-h)}
 #offline.on ~ #app #topbar{top:var(--offline-h);padding-top:10px}
 #offline .sync{opacity:.82;font-weight:500}
-#fb{
-  position:fixed;right:16px;bottom:calc(var(--barre-h) + 14px);z-index:110;
-  min-height:48px;padding:0 17px;border-radius:var(--r-pill);
-  background:var(--voile-nuit);backdrop-filter:var(--flou-barre);color:#fff;
-  font-size:14px;font-weight:600;display:inline-flex;align-items:center;gap:8px;
-  box-shadow:var(--ombre-lev);transition:var(--tr);
-}
-#fb:active{transform:scale(.94)}
-#fb .pt{width:8px;height:8px;border-radius:50%;background:var(--ambre)}
 
 /* --- 17. Écran de connexion --------------------------------------------- */
 #login{position:fixed;inset:0;z-index:250;display:flex;flex-direction:column;justify-content:center;
@@ -676,7 +672,7 @@ select{background-image:linear-gradient(45deg,transparent 50%,var(--brume) 50%),
 
 /* --- Champs ------------------------------------------------------------- */
 input[type=text],input[type=number],input[type=date],input[type=month],
-input[type=password],input[type=search],input[type=time],select,textarea{
+input[type=password],input[type=email],input[type=search],input[type=time],select,textarea{
   background:var(--blanc);border:1px solid var(--line-fort);border-radius:11px;
 }
 .f{font-size:12px;font-weight:600;letter-spacing:.01em;color:var(--brume);text-transform:none}
@@ -994,7 +990,7 @@ body{background:var(--fond);color:var(--encre);
 
 /* --- Champs ------------------------------------------------------------- */
 input[type=text],input[type=number],input[type=date],input[type=month],
-input[type=password],input[type=search],input[type=time],select,textarea{
+input[type=password],input[type=email],input[type=search],input[type=time],select,textarea{
   background:var(--blanc);border:1px solid var(--line-fort);border-radius:var(--r-btn)}
 
 /* --- Barres ------------------------------------------------------------- */
@@ -1310,7 +1306,7 @@ input[type="time"]:focus, input[type="date"]:focus{
   body *{visibility:hidden!important}
   #printview,#printview *{visibility:visible!important}
   #printview{display:block!important;position:absolute;left:0;top:0;width:100%;padding:0;background:#fff}
-  #app,#tabbar,#fb,#toast,#offline,.noprint{display:none!important}
+  #app,#tabbar,#toast,#offline,.noprint{display:none!important}
   @page{margin:14mm}
 }
 #printview{font-family:-apple-system,Inter,sans-serif;color:#000}

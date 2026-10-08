@@ -292,7 +292,7 @@ async function obtenirWorker() {
     cacheMethod: 'none'
   };
 
-  let w;
+  let w, v4 = false;
   try {
     w = await Tesseract.createWorker(OCR.langues, 1, chemins);   // API v5
   } catch (e) {
@@ -301,9 +301,13 @@ async function obtenirWorker() {
       w = await Tesseract.createWorker(OCR.langues, 1);
     } catch (e2) {
       w = await Tesseract.createWorker(chemins);                 // API v4
+      v4 = true;
     }
   }
-  if (typeof w.loadLanguage === 'function') {                // v4 : chargement manuel
+  /* Chargement manuel pour la v4 SEULEMENT. La v5 embarquée garde ces
+     fonctions pour compatibilité mais les déclare dépréciées : chaque premier
+     scan affichait trois avertissements « is depreciated » en console. */
+  if (v4 && typeof w.loadLanguage === 'function') {          // v4 : chargement manuel
     await w.load();
     await w.loadLanguage(OCR.langues);
     await w.initialize(OCR.langues);
@@ -800,7 +804,12 @@ async function analyserCanvas(type, canvas, nom, resolve) {
   }
 }
 
-function scannerPhoto(type) {
+/* options.enchainer : propose « … et scanner le suivant ». Seul l'écran
+   Traçabilité sait relancer la prise de vue ; ailleurs (bon de livraison,
+   DLC à réception), le bouton faisait exactement la même chose que
+   « Valider » et laissait croire à un mode chaîne inexistant. */
+function scannerPhoto(type, options) {
+  OCR._chaine = !!(options && options.enchainer);
   return new Promise(async resolve => {
     const aide = type === 'bl'
       ? 'Alignez le bon de livraison dans le cadre'
@@ -821,6 +830,9 @@ function scannerPhoto(type) {
     /* 2. Repli : appareil photo natif ou galerie */
     const cam = document.getElementById('cam');
     cam.value = '';
+    /* Sélecteur refermé sans photo : sans cet écouteur la promesse restait en
+       suspens et l'écran appelant (réception en cours) ne revenait jamais. */
+    cam.oncancel = () => resolve(null);
     cam.onchange = async () => {
       const file = cam.files && cam.files[0];
       if (!file) return resolve(null);
@@ -1177,8 +1189,8 @@ function confirmerLecture(type, r, apercu, resolve) {
 
     '<div class="actions"><button class="btn clair" id="oc-x">Reprendre la photo</button>' +
     '<button class="btn menthe" id="oc-ok">Valider</button></div>' +
-    '<button class="btn ciel bloc" id="oc-suite" style="margin-top:10px">' +
-    '✅ Valider et scanner le suivant</button>');
+    (OCR._chaine ? '<button class="btn ciel bloc" id="oc-suite" style="margin-top:10px">' +
+    '✅ Valider et scanner le suivant</button>' : ''));
 
   const recolter = () => {
     const lot = document.getElementById('oc-lot').value.trim().toUpperCase();
@@ -1193,7 +1205,13 @@ function confirmerLecture(type, r, apercu, resolve) {
     });
   };
 
-  document.getElementById('oc-x').onclick  = () => { closeSheet(); resolve(null); };
+  /* « Reprendre la photo » relance la prise de vue au lieu de tout fermer :
+     il fallait retoucher « Scanner une étiquette ». La nouvelle lecture
+     répond à l'appelant d'origine. */
+  document.getElementById('oc-x').onclick  = () => {
+    closeSheet();
+    scannerPhoto(type, { enchainer: OCR._chaine }).then(resolve, () => resolve(null));
+  };
   document.getElementById('oc-ok').onclick = () => {
     const v = recolter(); if (!v) return;
     closeSheet(); resolve(v);
@@ -1201,7 +1219,8 @@ function confirmerLecture(type, r, apercu, resolve) {
   /* Mode chaîne : on enregistre et l'appareil photo repart immédiatement.
      Une livraison, c'est cinquante étiquettes — refermer la fiche et rouvrir
      le menu à chaque fois n'est pas tenable un jour de rush. */
-  document.getElementById('oc-suite').onclick = () => {
+  const suite = document.getElementById('oc-suite');
+  if (suite) suite.onclick = () => {
     const v = recolter(); if (!v) return;
     closeSheet(); resolve(Object.assign(v, { enchainer: true }));
   };
@@ -1223,8 +1242,8 @@ function saisieManuelle(type, raison, resolve) {
       : '') +
     '<div class="actions"><button class="btn clair" id="sm-x">Annuler</button>' +
     '<button class="btn menthe" id="sm-ok">Enregistrer</button></div>' +
-    '<button class="btn ciel bloc" id="sm-suite" style="margin-top:10px">' +
-    '✅ Enregistrer et scanner le suivant</button>');
+    (OCR._chaine ? '<button class="btn ciel bloc" id="sm-suite" style="margin-top:10px">' +
+    '✅ Enregistrer et scanner le suivant</button>' : ''));
 
   document.getElementById('sm-x').onclick  = () => { closeSheet(); resolve(null); };
   const valider = enchainer => {
@@ -1238,5 +1257,6 @@ function saisieManuelle(type, raison, resolve) {
               confiance: 1, saisieManuelle: true, texte: '', enchainer: !!enchainer });
   };
   document.getElementById('sm-ok').onclick    = () => valider(false);
-  document.getElementById('sm-suite').onclick = () => valider(true);
+  const suite = document.getElementById('sm-suite');
+  if (suite) suite.onclick = () => valider(true);
 }

@@ -12,12 +12,12 @@
 const APP = {
   nom:        'Pilot-Shop',
   site:       'Paccard',
-  version:    '3.1.0-beta',
-  build:      '2026-09-12',
+  version:    '3.2.0-beta',
+  build:      '2026-10-08',
   locale:     'fr-FR',
   fuseau:     'Europe/Paris',
   devise:     'EUR',
-  beta:       true          // affiche le bouton de retour flottant
+  beta:       true          // « Signaler un souci » dans le menu Tout le reste
 };
 
 /* -----------------------------------------------------------------------------
@@ -926,7 +926,7 @@ const PAGES = {
   ecarts:   { titre: 'Écarts glace',      sous: 'Rendement de la période' },
   frigo:    { titre: 'Frigo virtuel',     sous: 'Produits ouverts, du plus urgent' },
   periodes: { titre: 'Périodes',          sous: 'Clôture et fenêtre de calcul' },
-  histo:    { titre: 'Historique',        sous: 'Tout est conservé' },
+  histo:    { titre: 'Historique',        sous: 'Registres et retours, jour par jour' },
   equipe:   { titre: 'Équipe',            sous: 'Heures et activité' },
   pointage: { titre: 'Pointeuse',         sous: 'Début et fin de service' },
   reglages: { titre: 'Réglages',          sous: 'Paramètres et catalogue' }

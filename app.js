@@ -34,7 +34,13 @@
    const n1  = v => (Number(v) || 0).toLocaleString('fr-FR',
      { minimumFractionDigits: 1, maximumFractionDigits: 1 });
    const n2  = v => (Number(v) || 0).toFixed(2);
-   const eur = v => (Number(v) || 0).toLocaleString(APP.locale, { style:'currency', currency:APP.devise });
+   /* Signal qui coupe une requête au bout du délai réseau. Sans lui, un Wi-Fi
+      connecté mais sans Internet laisse la requête pendue sans fin. */
+   const signalDelai = () => { const c = new AbortController();
+     setTimeout(() => c.abort(), OFFLINE.timeoutReseauMs); return c.signal; };
+   /* Moins d'un demi-centime : 0, sans signe (« -0,00 € » sur un stock juste). */
+   const eur = v => { const n = Number(v) || 0;
+     return (Math.abs(n) < 0.005 ? 0 : n).toLocaleString(APP.locale, { style:'currency', currency:APP.devise }); };
    
    const MOIS  = ['janvier','février','mars','avril','mai','juin','juillet','août','septembre','octobre','novembre','décembre'];
    const isoOf = d => {
@@ -138,9 +144,14 @@
       que l'autre venait de saisir — vérifié : deux tâches cochées en même
       temps, une seule survit.
       Pour ces clés, on relit la base juste avant d'écrire et on fusionne. */
+   /* « ecart: » : ventes importées, bons de livraison, jeté cumulé et
+      inventaire de fin d'une même période s'y écrivent depuis des écrans et
+      des iPads différents. Sans fusion, un iPad revenu en ligne rejouait sa
+      copie entière, périmée : les ventes importées entre-temps sur l'autre
+      iPad disparaissaient (vérifié : ventes et imports effacés). */
    const FUSIONNER = ['checklist:', 'hebdo:', 'temp:', 'caisse:', 'reassort:',
                       'preuves:', 'ruptures', 'releve', 'lots:', 'clean:',
-                      'anomalies', 'reception:', 'stock:mv:', 'pointage:'];
+                      'anomalies', 'reception:', 'stock:mv:', 'pointage:', 'ecart:'];
    const aFusionner = cle => FUSIONNER.some(p => cle.indexOf(p) === 0);
 
    /* Fusion superficielle, champ par champ. Suffisante : chaque personne
@@ -214,11 +225,32 @@
      return rognerAncien(cle, out.every(x => ts(x)) ? out.sort((p, q) => ts(p) < ts(q) ? -1 : ts(p) > ts(q) ? 1 : 0) : out);
    }
 
+   /* Listes d'un écart de période qui ne font que grandir : chaque import de
+      caisse, chaque bon de livraison y ajoute sa ligne. On les réunit par id
+      (les lignes anciennes, sans id, par leur contenu). */
+   const LISTES_ECART = ['imports', 'bl'];
+   const identite = x => (x && x.id) || JSON.stringify(x);
+   function unirParId(a, b) {
+     const vus = new Set(a.map(identite));
+     const out = a.concat(b.filter(x => !vus.has(identite(x))));
+     return out.every(x => x && x.at) ? out.sort((p, q) => p.at < q.at ? -1 : p.at > q.at ? 1 : 0) : out;
+   }
+
    function fusionner(distant, local, cle) {
      if (Array.isArray(distant) && Array.isArray(local) && cle &&
          UNIR.some(p => cle.indexOf(p) === 0)) return unirListes(distant, local, cle);
      if (!distant || typeof distant !== 'object' || Array.isArray(distant)) return local;
      if (!local   || typeof local   !== 'object' || Array.isArray(local))   return local;
+     /* Écart de période : un objet imbriqué y forme un tout (ventes = { total },
+        fin = { bacs, kg }) et se remplace d'un bloc — mélangés, une saisie
+        manuelle des ventes s'ajouterait à l'import au lieu de le corriger. */
+     if (cle && cle.indexOf('ecart:') === 0) {
+       const e = Object.assign({}, distant, local);
+       LISTES_ECART.forEach(k => {
+         if (Array.isArray(distant[k]) && Array.isArray(local[k])) e[k] = unirParId(distant[k], local[k]);
+       });
+       return e;
+     }
      const out = Object.assign({}, distant);
      Object.keys(local).forEach(k => {
        const a = distant[k], b = local[k];
@@ -227,7 +259,67 @@
          ? Object.assign({}, a, b)
          : b;
      });
+     if (cle && cle.indexOf('caisse:') === 0) garderComptagesValides(out, distant, local);
      return out;
+   }
+
+   /* Caisse : un comptage validé sur la base ne se réécrit pas avec une
+      saisie faite sans connaître cette validation (iPad hors ligne, écran
+      ouvert avant la signature). Le local gagnait champ par champ : le
+      brouillon d'un équipier, rejoué au retour du réseau, vidait les montants
+      de Marie sous sa signature (s_cb '', s_esp '480'… « validé par Marie »).
+      Le moment validé garde donc les champs du serveur. Une correction du
+      manager, elle, connaît la validation : sa copie porte <moment>_valide
+      (null pendant la correction, puis la nouvelle signature) et passe comme
+      avant. Un moment non validé sur la base reste au local.
+      Une signature à null ne prouve rien à elle seule : une copie lue pendant
+      une correction la porte aussi. Elle ne passe que si son <moment>_avant
+      date de la signature encore en base ; sinon la base a été revalidée
+      depuis, et la copie est périmée.
+      Une signature non nulle non plus : une copie lue avant une correction
+      porte l'ancienne, que la correction a rangée dans <moment>_corrections.
+      Elle ne passe pas : sinon la saisie du soir d'un équipier, écran ouvert
+      depuis le matin, remettait 150 € à la place des 200 € corrigés. */
+   const CHAMPS_CAISSE_SOIR = ['ecart', 'ecartCB', 'ecartEsp', 'par'];
+   function garderComptagesValides(out, distant, local) {
+     const a = (o, k) => Object.prototype.hasOwnProperty.call(o, k);
+     const auCourant = mom => {
+       if (!a(local, mom + '_valide')) return false;
+       const sl = local[mom + '_valide'];
+       /* (Re)validation : elle passe, sauf si cette signature a déjà été corrigée. */
+       if (sl) return !(Array.isArray(distant[mom + '_corrections']) &&
+                        distant[mom + '_corrections'].some(c => c && c.at && c.at === sl.at));
+       const av = local[mom + '_avant'], sig = distant[mom + '_valide'];
+       return !!(av && sig && av.at && av.at === sig.at);   // correction de la signature en base
+     };
+     ['m', 's'].forEach(mom => {
+       if (!distant[mom + '_valide'] || auCourant(mom)) return;
+       Object.keys(local).forEach(k => {
+         if (k.indexOf(mom + '_') !== 0 && !(mom === 's' && CHAMPS_CAISSE_SOIR.indexOf(k) >= 0)) return;
+         if (a(distant, k)) out[k] = distant[k]; else delete out[k];
+       });
+     });
+   }
+
+   /* Écriture partielle (DB.patch) appliquée à une copie de la clé, locale ou
+      serveur : « champs » remplace des champs entiers, « ajouts » ajoute des
+      lignes à des listes sans doublon (par id), « plus » incrémente des
+      nombres — une seule fois, et seulement si une ligne nouvelle est entrée :
+      un envoi rejoué après une réponse perdue ne compte pas deux fois le même
+      bon de livraison. */
+   function appliquerPatch(doc, op) {
+     const o = (doc && typeof doc === 'object' && !Array.isArray(doc)) ? Object.assign({}, doc) : {};
+     Object.assign(o, op.champs || {});
+     let nouveau = false;
+     Object.keys(op.ajouts || {}).forEach(k => {
+       const avant = Array.isArray(o[k]) ? o[k] : [];
+       const vus = new Set(avant.map(identite));
+       const neufs = (op.ajouts[k] || []).filter(x => !vus.has(identite(x)));
+       if (neufs.length) nouveau = true;
+       o[k] = avant.concat(neufs);
+     });
+     if (nouveau) Object.keys(op.plus || {}).forEach(k => { o[k] = +(num(o[k]) + num(op.plus[k])).toFixed(3); });
+     return o;
    }
 
    /* Une clé partagée ne s'écrit qu'UNE à LA FOIS. Sans cette file par clé,
@@ -277,6 +369,15 @@
      const distant = cle => configuré() && !estLocale(cle) && !!table(cle);
    
      async function appel(chemin, options, secondeChance) {
+       /* Base qui refuse un appareil non rattaché : inutile d'insister. Chaque
+          lecture retentait le réseau — une rafale de 401 (52 en 25 s) sans
+          aucune chance d'aboutir. On se tait 30 s, ou jusqu'au rattachement ;
+          les saisies restent locales et en file d'attente, comme hors ligne. */
+       if (STATE.refusJusqua && Date.now() < STATE.refusJusqua &&
+           typeof appareilRattache === 'function' && !appareilRattache()) {
+         const e = new Error('HTTP 401'); e.http = 401; e.motif = 'Appareil non rattaché';
+         throw e;
+       }
        const ctrl = new AbortController();
        const to = setTimeout(() => ctrl.abort(), OFFLINE.timeoutReseauMs);
        try {
@@ -334,6 +435,7 @@
              STATE.erreurBase = rattache
                ? 'Session expirée — rattachez cet appareil'
                : 'Appareil non rattaché';
+             if (!rattache) STATE.refusJusqua = Date.now() + 30000;
            }
            else if (r.status === 404) {
              /* Une table manquante ne réapparaîtra pas d'elle-même : inutile de
@@ -427,14 +529,18 @@
            try {
              let aEcrire = valeur;
              if (aFusionner(cle)) {
-               try {
-                 const l = await appel(table(cle) + '?id=eq.' + encodeURIComponent(cle) +
-                                       '&select=data&limit=1');
-                 if (l && l.length && l[0].data) {
-                   aEcrire = fusionner(l[0].data, valeur, cle);
-                   try { ecrire(cle, JSON.stringify(aEcrire)); } catch (x) {}
-                 }
-               } catch (x) { /* relecture impossible : on écrit ce qu'on a */ }
+               /* Pas d'envoi sans relecture : la copie de l'iPad, envoyée telle
+                  quelle, effaçait ce que les autres appareils avaient écrit
+                  entre-temps (une correction de caisse du manager, par exemple).
+                  Relecture impossible : l'écriture est traitée comme hors ligne
+                  (catch ci-dessous) : mise en file et fusionnée au rejeu, ou
+                  alerte « Mémoire pleine » si la file ne peut pas la garder. */
+               const l = await appel(table(cle) + '?id=eq.' + encodeURIComponent(cle) +
+                                     '&select=data&limit=1');
+               if (l && l.length && l[0].data) {
+                 aEcrire = fusionner(l[0].data, valeur, cle);
+                 try { ecrire(cle, JSON.stringify(aEcrire)); } catch (x) {}
+               }
              }
              await appel(table(cle), {
                method: 'POST',
@@ -462,11 +568,49 @@
          return l;
        },
    
-       async patch(cle, modif) {
-         const o = await this.get(cle, {});
-         Object.assign(o, modif);
-         await this.set(cle, o);
-         return o;
+       /* N'envoie QUE les champs modifiés, appliqués sur la copie du serveur
+          relue juste avant (sous le verrou de la clé). Avant, l'objet entier
+          partait — copie locale comprise : un iPad resté hors ligne rejouait à
+          son retour des ventes et des imports périmés par-dessus ceux saisis
+          entre-temps sur l'autre iPad. Hors ligne, l'écriture partielle entre
+          en file telle quelle et sera rejouée de la même façon, dans l'ordre. */
+       async patch(cle, champs, ajouts, plus) {
+         const op = { champs:champs || {}, ajouts:ajouts || {}, plus:plus || {} };
+         const o = appliquerPatch(await this.get(cle, {}), op);
+         let horsMemoire = false;
+         try { ecrire(cle, JSON.stringify(o)); }
+         catch (e) { horsMemoire = true; }
+         const memoirePleine = () => { toast('Mémoire pleine — libérez de l’espace sur l’iPad', 'erreur'); return o; };
+         if (!distant(cle)) return horsMemoire ? memoirePleine() : o;
+         if (!STATE.enLigne) {
+           if (horsMemoire) return memoirePleine();
+           await empiler('patch', cle, op); return o;
+         }
+         return enFile(cle, async () => {
+           /* Des écritures plus anciennes de cette clé attendent encore : la
+              nouvelle passe derrière elles, sinon leur rejeu l'écraserait. */
+           if (fileLire().some(x => x.cle === cle)) {
+             await empiler('patch', cle, op);
+             setTimeout(journaliserSync, 0);
+             return o;
+           }
+           try {
+             /* Pas d'envoi sans relecture : la ligne entière serait remplacée
+                par les seuls champs modifiés. */
+             const l = await appel(table(cle) + '?id=eq.' + encodeURIComponent(cle) + '&select=data&limit=1');
+             const data = appliquerPatch(l && l.length ? l[0].data : null, op);
+             await appel(table(cle), {
+               method: 'POST',
+               headers: { 'Prefer': 'resolution=merge-duplicates,return=minimal' },
+               body: JSON.stringify({ id:cle, site:APP.site, data:data })
+             });
+             try { ecrire(cle, JSON.stringify(data)); } catch (x) {}
+             return data;
+           } catch (e) {
+             if (horsMemoire) return memoirePleine();
+             await empiler('patch', cle, op); return o;
+           }
+         });
        },
    
        async list(prefixe) {
@@ -513,6 +657,16 @@
       et rejouée dans l'ordre au retour du réseau. La dernière écriture d'une même
       clé écrase les précédentes, inutile de rejouer dix fois la même saisie.
       -------------------------------------------------------------------------- */
+   /* « Transmis » seulement si c'est vrai : hors ligne, l'envoi attend dans la
+      file de l'iPad (bandeau « saisies en attente ») et le manager ne le voit
+      pas encore. */
+   function messageEnvoi(cle, envoye) {
+     try {
+       if (fileLire().some(x => x.cle === cle)) return 'Enregistré sur l’iPad — envoi dès le retour du réseau';
+     } catch (e) {}
+     return envoye;
+   }
+
    function fileLire() {
      try {
        const v = DB._lire(OFFLINE.fileAttente);
@@ -548,8 +702,10 @@
    }
    
    async function empiler(op, cle, valeur) {
-     const f = fileLire().filter(x => !(x.cle === cle && x.op === op));
-     f.push({ op:op, cle:cle, valeur:valeur, at:nowISO(), essais:0 });
+     /* Une écriture partielle ne remplace pas la précédente : chacune ne porte
+        que ses propres champs, toutes sont rejouées dans l'ordre. */
+     const f = op === 'patch' ? fileLire() : fileLire().filter(x => !(x.cle === cle && x.op === op));
+     f.push({ op:op, cle:cle, valeur:valeur, at:nowISO(), n:uid(), essais:0 });
      fileEcrire(f);
    }
    
@@ -564,13 +720,19 @@
      if (!f.length) return;
    
      syncEnCours = true;
-     const id = x => x.op + '|' + x.cle + '|' + x.at;
+     /* « n » distingue deux écritures partielles de la même milliseconde. */
+     const id = x => x.op + '|' + x.cle + '|' + x.at + '|' + (x.n || '');
      const restants = [];
+     /* Clés dont une écriture vient d'échouer : les suivantes de la même clé
+        attendent leur tour. Rejouées avant elle, des écritures partielles
+        plus récentes seraient écrasées par la plus ancienne. */
+     const bloquees = new Set();
      let envoyes = 0;
      for (const item of f) {
        /* Remplacée ou déjà envoyée pendant la synchro : on ne rejoue pas une
           valeur périmée par-dessus une plus récente. */
        if (!fileLire().some(x => id(x) === id(item))) continue;
+       if (bloquees.has(item.cle)) { restants.push(item); continue; }
        /* Une clé sans table ne peut pas partir : on l'abandonne au lieu
           d'appeler /rest/v1/undefined en boucle. La donnée reste en local. */
        if (!DB._table(item.cle)) {
@@ -580,6 +742,26 @@
        try {
          if (item.op === 'del') {
            await DB._appel(DB._table(item.cle) + '?id=eq.' + encodeURIComponent(item.cle), { method:'DELETE' });
+         } else if (item.op === 'patch') {
+           /* Écriture partielle : appliquée sur la copie du serveur relue sous
+              le verrou de la clé. Relecture impossible : on n'envoie rien (les
+              seuls champs modifiés remplaceraient la ligne entière) et l'on
+              réessaiera. Retirée de la file dès qu'elle est passée, pour qu'une
+              écriture lancée juste après ne la rejoue pas une seconde fois. */
+           const parti = await enFile(item.cle, async () => {
+             if (!fileLire().some(x => id(x) === id(item))) return false;
+             const t = DB._table(item.cle);
+             const l = await DB._appel(t + '?id=eq.' + encodeURIComponent(item.cle) + '&select=data&limit=1');
+             await DB._appel(t, {
+               method: 'POST',
+               headers: { 'Prefer': 'resolution=merge-duplicates,return=minimal' },
+               body: JSON.stringify({ id:item.cle, site:APP.site,
+                                      data:appliquerPatch(l && l.length ? l[0].data : null, item.valeur || {}) })
+             });
+             fileEcrire(fileLire().filter(x => id(x) !== id(item)));
+             return true;
+           });
+           if (!parti) continue;
          } else if (!aFusionner(item.cle)) {
            await DB._appel(DB._table(item.cle), {
              method: 'POST',
@@ -594,11 +776,13 @@
            const parti = await enFile(item.cle, async () => {
              if (!fileLire().some(x => id(x) === id(item))) return false;
              let data = item.valeur;
-             try {
-               const l = await DB._appel(DB._table(item.cle) + '?id=eq.' + encodeURIComponent(item.cle) +
-                                         '&select=data&limit=1');
-               if (l && l.length && l[0].data) data = fusionner(l[0].data, item.valeur, item.cle);
-             } catch (x) { /* relecture impossible : l'envoi dira si le réseau est là */ }
+             /* Relecture impossible : on n'envoie rien, comme pour une écriture
+                partielle. La copie rejouée sans fusion effaçait les saisies des
+                autres iPads. L'erreur suit le sort d'un envoi raté (ci-dessous) :
+                gardée en file, sauf table absente ou refus répétés. */
+             const l = await DB._appel(DB._table(item.cle) + '?id=eq.' + encodeURIComponent(item.cle) +
+                                       '&select=data&limit=1');
+             if (l && l.length && l[0].data) data = fusionner(l[0].data, item.valeur, item.cle);
              await DB._appel(DB._table(item.cle), {
                method: 'POST',
                headers: { 'Prefer': 'resolution=merge-duplicates,return=minimal' },
@@ -624,7 +808,7 @@
          const refus = e && e.http >= 400 && e.http < 500 &&
                        [401, 403, 408, 429].indexOf(e.http) < 0;
          if (refus) item.essais = (item.essais || 0) + 1;
-         if (!refus || item.essais < OFFLINE.tentatives) restants.push(item);
+         if (!refus || item.essais < OFFLINE.tentatives) { restants.push(item); bloquees.add(item.cle); }
          else console.warn('Écriture abandonnée après ' + item.essais + ' refus :', item.cle);
        }
      }
@@ -735,6 +919,10 @@
          try { history.back(); } catch (e) { _ignorerPop = false; }
        }, 0);
      }
+     /* Rôle changé pendant que cette feuille était ouverte (revaliderSession) :
+        on redessinait seulement à la relecture suivante de l'équipe, cinq
+        minutes plus tard, et l'ancien manager gardait ses onglets d'ici là. */
+     if (_roleARedessiner) setTimeout(appliquerNouveauRole, 0);
    }
 
    /* Tout champ touché par l'utilisateur marque la feuille comme modifiée.
@@ -748,6 +936,28 @@
      };
      corps.addEventListener('input', marquer);
      corps.addEventListener('change', marquer);
+   })();
+
+   /* Étiquettes reliées aux champs. Les gabarits posent <label class="f">
+      sans « for » à côté du champ : un lecteur d'écran annonçait près de
+      150 champs sans nom, et toucher l'étiquette ne plaçait pas le curseur.
+      Plutôt que reprendre chaque gabarit, chaque étiquette est reliée au
+      champ de son bloc .champ, à chaque changement de la page ou de la
+      feuille. Seuls les nœuds ajoutés sont observés : poser « for » ou un
+      id ne relance pas l'observateur. */
+   (function () {
+     let n = 0;
+     const relier = racine => $$('.champ > label.f:not([for])', racine).forEach(l => {
+       const c = l.parentNode.querySelector('input:not([type=hidden]), select, textarea');
+       if (!c) return;
+       if (!c.id) c.id = 'champ-' + (++n);
+       l.htmlFor = c.id;
+     });
+     if (typeof MutationObserver === 'undefined') return;
+     ['page', 'sheet-corps'].forEach(id => {
+       const r = document.getElementById(id);
+       if (r) new MutationObserver(() => relier(r)).observe(r, { childList:true, subtree:true });
+     });
    })();
 
    /* Toucher le voile : une feuille obligatoire reste ouverte, et une saisie
@@ -913,7 +1123,7 @@
       4. CONNEXION TACTILE
       ========================================================================== */
    function initLogin() {
-     $('#login-site').textContent = APP.site + ' · ' + APP.version;
+     $('#login-site').textContent = APP.site;
    
      $('#qui-liste').innerHTML = EQUIPE.map(e =>
        '<button type="button" data-qui="' + esc(e.id) + '">' +
@@ -938,6 +1148,9 @@
        initLogin._clavier = true;
        document.addEventListener('keydown', e => {
          if ($('#login').hidden || $('#login-pin').hidden) return;
+         /* Une feuille est ouverte par-dessus (remise à zéro) : la frappe est à
+            elle, pas au pavé caché dessous. */
+         if (!$('#sheet').hidden || /^(INPUT|TEXTAREA|SELECT)$/.test((e.target && e.target.tagName) || '')) return;
          if (/^[0-9]$/.test(e.key)) toucheP(e.key);
          else if (e.key === 'Backspace') toucheP('effacer');
          else if (e.key === 'Escape') retourQui();
@@ -1030,6 +1243,10 @@
    async function verifierPin() {
      const e = STATE._candidat;
      if (!e) return retourQui();
+     /* Vérification lancée 140 ms après le 4e chiffre : si la personne a
+        effacé entre-temps, on ne juge pas trois chiffres (« Code incorrect »
+        et un essai compté pour le blocage alors qu'elle corrigeait). */
+     if (STATE._pin.length !== 4) return;
 
      if (pinBloqueMs()) {
        STATE._pin = '';
@@ -1063,8 +1280,13 @@
 
      STATE.user = { id:e.id, prenom:e.prenom, role:e.role, couleur:e.couleur, initiales:e.initiales };
      STATE._pin = '';
-     await DB.set('session', STATE.user);
+     await DB.set('session', Object.assign({}, STATE.user, { vu:Date.now() }));
+     _sessionTouchee = Date.now();
      await chargerService();
+     /* Comme pour la reprise de session : les prénoms s'affichent dès
+        qu'app.js s'exécute, avant modules.js et stock.js, et demarrer() sans
+        eux ouvrait des vues indisponibles. */
+     await documentPret;
      /* Un échec de démarrage ne doit plus laisser l'équipière devant un écran
         de connexion muet alors que sa session est ouverte. */
      try {
@@ -1076,7 +1298,9 @@
        $('#page').innerHTML = carte(
          entete('⚠️', 'L’application n’a pas pu s’ouvrir',
            String(err && err.message || err)) +
-         '<button class="btn clair bloc" onclick="location.reload()">Recharger</button>');
+         '<button class="btn clair bloc" id="demarrage-recharger">Recharger</button>');
+       /* Pas d'onclick en ligne : la politique de sécurité le bloquerait. */
+       $('#demarrage-recharger').onclick = () => location.reload();
      }
    }
    
@@ -1226,11 +1450,22 @@ function renderNav() {
        '<span class="mi-tx"><span class="mi-t">' + esc(PAGES[id].titre) + '</span>' +
        '<span class="mi-s">' + esc(PAGES[id].sous) + '</span></span>' +
        '<span class="mi-fl">›</span>' +
-       '</button>').join('') + '</div>' +
+       '</button>').join('') +
+       /* Le retour bêta vit ici et non plus en bouton flottant : posé sur
+          le contenu, il couvrait « HS » et « + » des frigos sur téléphone. */
+       (APP.beta ? '<button type="button" class="menu-item" id="mp-retour">' +
+         '<span class="mi-tx"><span class="mi-t">Signaler un souci</span>' +
+         '<span class="mi-s">Un bug, un chiffre faux, une idée : c’est transmis à ' + esc(nomManager()) + '</span></span>' +
+         '<span class="mi-fl">›</span></button>' : '') +
+       '</div>' +
        '<div class="actions"><button class="btn clair" data-fermer>Fermer</button>' +
-       '<button class="btn fantome" id="mp-out">Déconnexion</button></div>'
+       '<button class="btn fantome" id="mp-out">Déconnexion</button></div>' +
+       /* La version, utile au dépannage, quitte l'écran de connexion. */
+       '<p class="mini" style="text-align:center;margin-top:14px">' + esc(APP.nom + ' ' + APP.version + ' · ' + APP.site) + '</p>'
      );
      $$('[data-plus]').forEach(b => b.onclick = () => { closeSheet(); rendre(b.dataset.plus); });
+     const rb = $('#mp-retour');
+     if (rb) rb.onclick = ouvrirRetour;
      $('#mp-out').onclick = () => { closeSheet(); deconnexion(); };
    }
    
@@ -1242,6 +1477,12 @@ function renderNav() {
 
    async function rendre(id, viaHistorique) {
    if (!V[id]) { toast('Vue indisponible'); return; }
+   if (!vueAutorisee(id)) id = vueAccueil();
+   /* Rôle changé pendant qu'une feuille était ouverte, et la feuille se ferme
+      sur un lien (« Équipe » du menu, « Ouvrir »…) : on ne dessine pas la vue
+      de l'ancien rôle, qui pouvait finir après l'accueil et le recouvrir. Le
+      nouveau rôle s'applique tout de suite (voir revaliderSession). */
+   if (_roleARedessiner && $('#sheet').hidden) { appliquerNouveauRole(); return; }
    /* Minuit est passé depuis le dernier rendu : on réaligne la date de
       travail sur aujourd'hui. Sans ça, l'équipe du matin saisissait ses
       relevés sous la date de la veille — et en « consultation seule ». */
@@ -1256,11 +1497,17 @@ function renderNav() {
      cocher la 18e tâche de la check-liste faisait perdre la position à chaque fois. */
   const memeVue = (STATE.view === id);
   const scrollAvant = window.scrollY || document.documentElement.scrollTop || 0;
+  /* Changer d'écran ramène au jour en cours. La date restait sinon sur la
+     veille consultée dans Nettoyage ou Caisse, et Ma journée, Réassort,
+     Pertes — sans barre de dates ni verrou — écrivaient sous la veille
+     (« checklist:<hier> » cochée par un équipier). Le redessin d'un même
+     écran, lui, garde la date : c'est ainsi que la navigation jour par jour
+     fonctionne (le clic change la date, puis redessine la même vue). */
+  if (!memeVue && STATE.jour !== today()) {
+    STATE.jour = today();
+    if (V.temp && V.temp._d !== undefined) V.temp._d = STATE.jour;
+  }
   STATE.view = id;
-     /* La date n'est PAS remise à aujourd'hui ici : c'était la raison pour
-        laquelle la navigation entre les jours restait sans effet — le clic
-        changeait bien la date, puis le redessin l'écrasait aussitôt.
-        Elle repart à aujourd'hui à la connexion et sur demande explicite. */
      const p = PAGES[id] || { titre:id, sous:'' };
      $('#vue-titre').textContent = p.titre;
      $('#vue-sous').textContent  = p.sous;
@@ -1286,6 +1533,25 @@ function renderNav() {
          return;
        }
      }
+     /* Côté manager, une période illisible (hors ligne sans copie, base
+        injoignable) revient sous la forme de l'objet « attente ». Affiché comme
+        une vraie période, il faisait saisir les écarts sous « ecart:attente »,
+        ou « corriger » des dates qui remplaçaient, au retour du réseau, la
+        période de toute la boutique. */
+     if (VUES_PERIODE.indexOf(id) >= 0 && STATE.user.role === 'manager') {
+       const per = await periodeCourante();
+       if (STATE.view !== id) return;          // un autre écran a été demandé entre-temps
+       if (per && per.id === 'attente') {
+         $('#page').innerHTML = carte(
+           entete('⏸️', 'Période indisponible', 'La période de la boutique n’a pas pu être lue.') +
+           '<p class="mini">L’iPad est hors ligne, ou la base ne répond pas. Une saisie ici serait rangée ' +
+           'hors de la période : reconnectez l’iPad, puis réessayez.</p>' +
+           '<button class="btn clair bloc" id="per-rt" style="margin-top:14px">Réessayer</button>', 'ambre');
+         $('#per-rt').onclick = () => rendre(id);
+         window.scrollTo(0, 0);
+         return;
+       }
+     }
      try { await V[id](); }
      catch (err) {
        $('#page').innerHTML = carte(
@@ -1293,7 +1559,13 @@ function renderNav() {
          '<button class="btn clair bloc" id="rt">Réessayer</button>');
        $('#rt').onclick = () => rendre(id);
      }
-     $$('#page [data-go]').forEach(b => b.onclick = () => rendre(b.dataset.go));
+     /* data-partie suit le lien : cette liaison générique passait APRÈS celle
+        de la vue et l'écrasait — la tâche de recomptage ouvrait l'inventaire
+        sur le mauvais onglet. */
+     $$('#page [data-go]').forEach(b => b.onclick = () => {
+       if (b.dataset.partie) STATE.inventairePartie = b.dataset.partie;
+       rendre(b.dataset.go);
+     });
 
      /* Chaque vue laisse une trace dans l'historique du navigateur : sans cela,
         le bouton « retour » du téléphone quittait purement et simplement
@@ -1443,7 +1715,7 @@ function renderNav() {
      /* Une enceinte marquée hors service compte comme relevée. Et c'est la
         validation explicite qui fait foi, pas le simple remplissage : une
         valeur saisie puis modifiée sans revalider ne compte pas. */
-     const complet = mom => !!(t.valide && t.valide[mom]);
+     const complet = mom => !!(t.valide && t.valide[mom]) && releveMesure(t, mom);
      const crit = ENCEINTES.filter(e => ['m','s'].some(m => etatTemp(e, t[m + '_' + e.id]) === 'crit')).length;
      const rupt = Object.keys(r).filter(k2 => r[k2] && r[k2].rupture).length;
    
@@ -1457,7 +1729,7 @@ function renderNav() {
          ['fi', 'ff', 'cb', 'esp', 'tpe'].every(c => k[c] !== undefined && k[c] !== null && k[c] !== ''))))),
        /* La veille fournit le fond initial quand le matin n'a pas été saisi. */
        caisseEcart: k ? caisseResume(k, await DB.get('caisse:' + addD(jour, -1), null)).ecart : 0,
-       reassort:Object.keys(r).filter(k2 => r[k2] && r[k2].ok).length,
+       reassort:REASSORT.filter(x => reassortFait(x, r)).length,
        reassortTotal:REASSORT.length, ruptures:rupt
      };
    }
@@ -1480,6 +1752,16 @@ function renderNav() {
      if (v >= e.crit) return 'crit';
      if (v >= e.vert[0] && v <= e.vert[1]) return 'vert';
      return 'rouge';
+   }
+
+   /* Une signature sans aucune mesure ne fait pas un relevé : il faut au moins
+      une valeur (ou « HS ») pour ce moment. Un registre validé vide comptait
+      comme fait dans Ma journée et la Tour de contrôle. On lit les clés du
+      document et non ENCEINTES, pour ne pas renier un relevé ancien dont les
+      unités ont été renommées depuis. */
+   function releveMesure(t, mom) {
+     return !!t && Object.keys(t).some(k => k.indexOf(mom + '_') === 0 &&
+       t[k] !== '' && t[k] !== null && t[k] !== undefined);
    }
    
    /* =============================================================================
@@ -1563,6 +1845,73 @@ async function purgerPreuves() {
   return effaces;
 }
 
+/* Rétention locale : OFFLINE.purgeLocaleJours était annoncé mais rien ne le
+   lisait. Les copies locales datées des données nominatives — journal
+   d'activité, heures pointées, caisses et leurs brouillons — s'accumulaient
+   sans limite sur l'iPad. Au-delà de purgeLocaleJours, la copie LOCALE est
+   effacée ; la base garde la sienne (durées de supabase-conservation.sql).
+   Jamais une clé encore en file d'attente ou trop lourde pour la base.
+   DON-05 : les registres datés — températures, check-listes, nettoyage,
+   pertes, réceptions, réassort — manquaient ; leur copie, nominative elle
+   aussi (« validé par », « déclaré par »), restait sans limite. La base les
+   garde (registres HACCP) : seule la copie de l'iPad part, et seulement si
+   la base a bien la ligne. Une saisie abandonnée par la file (refus
+   répétés, file vidée à la main) n'existe qu'ici : un registre sanitaire ne
+   doit pas disparaître pour autant. Base injoignable : rien n'est effacé.
+   En mode local, la copie de l'iPad est la seule : rien n'était purgé. On y
+   applique les durées de la base elle-même — journal 1 an, heures pointées
+   3 ans — et rien d'autre : registres et caisses n'y sont pas purgés, pas
+   plus que dans la base. */
+const PREFIXES_PURGE_LOCALE = ['feed:', 'pointage:', 'caisse:', 'brouillon:caisse:',
+                               'temp:', 'checklist:', 'clean:', 'hebdo:', 'pertes:', 'reception:', 'reassort:'];
+const CONSERVATION_MODE_LOCAL_ANS = { 'feed:': 1, 'pointage:': 3 };   // = supabase-conservation.sql
+async function purgerLocalAncien() {
+  const jours = OFFLINE.purgeLocaleJours;
+  const base = DB.configure;
+  if (base && !(jours > 0)) return 0;
+  const t = today();
+  /* « Il y a N ans », comme interval 'N years' de PostgreSQL (29/02 → 28/02). */
+  const ilYA = ans => (Number(t.slice(0, 4)) - ans) + (t.slice(4) === '-02-29' ? '-02-28' : t.slice(4));
+  const limite = p => base ? addD(t, -jours)
+                           : (CONSERVATION_MODE_LOCAL_ANS[p] ? ilYA(CONSERVATION_MODE_LOCAL_ANS[p]) : null);
+  let n = 0;
+  try {
+    const enFile = new Set(fileLire().map(x => x.cle));
+    const vieilles = DB._clesLocales().filter(cle => {
+      const p = PREFIXES_PURGE_LOCALE.filter(x => cle.indexOf(x) === 0)[0];
+      const l = p ? limite(p) : null;
+      if (!l) return false;
+      const jour = cle.slice(p.length);
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(jour) || jour >= l || enFile.has(cle)) return false;
+      /* Trop lourde pour la base : jamais envoyée, la copie locale est la seule. */
+      const brut = DB._lire(cle);
+      return !(brut && brut.length > OFFLINE.tailleMaxOctets);
+    });
+    /* Sans table (brouillons de caisse) : jamais envoyées, par nature. Les
+       autres : seulement celles que la base confirme, par lots de 40. */
+    const aEffacer = base ? vieilles.filter(c => !DB._table(c)) : vieilles;
+    const parTable = {};
+    if (base) vieilles.filter(c => DB._table(c)).forEach(c => (parTable[DB._table(c)] = parTable[DB._table(c)] || []).push(c));
+    for (const tb of Object.keys(parTable)) {
+      for (let i = 0; i < parTable[tb].length; i += 40) {
+        const lot = parTable[tb].slice(i, i + 40);
+        try {
+          const l = await DB._appel(tb + '?select=id&id=in.(' +
+                                    lot.map(c => encodeURIComponent('"' + c + '"')).join(',') + ')');
+          const enBase = new Set((l || []).map(r => r.id));
+          lot.filter(c => enBase.has(c)).forEach(c => aEffacer.push(c));
+        } catch (e) { /* base injoignable : on garde, la prochaine connexion réessaiera */ }
+      }
+    }
+    /* Remise en file entre-temps (saisie pendant la vérification) : on garde. */
+    const enFileMaintenant = new Set(fileLire().map(x => x.cle));
+    aEffacer.filter(c => !enFileMaintenant.has(c)).forEach(c => { DB._oter(c); n++; });
+  } catch (e) { /* purge sans conséquence si elle échoue */ }
+  if (n) console.info('Purge locale : ' + n + ' clé(s) ancienne(s) ' +
+                      (base ? 'de plus de ' + jours + ' jours (copie serveur conservée)' : '(durées de conservation)'));
+  return n;
+}
+
 /* =============================================================================
    11. VUE — NETTOYAGE
    ========================================================================== */
@@ -1579,7 +1928,8 @@ async function purgerPreuves() {
    
      $('#page').innerHTML =
        carte(entete('🎙️', 'Dicter la perte', SPEECH
-           ? 'Appuyez, parlez normalement : « J’ai jeté 2 bacs de vanille ».'
+           /* RGPD : la voix quitte l'iPad, il faut le dire avant le premier mot. */
+           ? 'Appuyez, parlez normalement : « J’ai jeté 2 bacs de vanille ». La voix est transcrite par le service de dictée de l’appareil (Apple ou Google).'
            : 'La dictée n’est pas disponible sur ce navigateur. Utilisez la saisie ci-dessous.') +
          '<button class="btn corail bloc xl mic" id="mic"' + (SPEECH ? '' : ' disabled') + '>' +
          'Dicter la perte</button>' +
@@ -1651,10 +2001,15 @@ async function purgerPreuves() {
      $('#pa').onclick = async () => {
        const p = $('#pp').value.trim();
        if (!p) { toast('Indiquez le produit', 'erreur'); return $('#pp').focus(); }
+       /* Nombre vide, nul ou négatif : « num(0) || 1 » enregistrait 1 sans
+          prévenir. On le dit au lieu de deviner. */
+       const nombre = num($('#pn').value);
+       if (!(nombre > 0)) { toast('Indiquez un nombre supérieur à 0', 'erreur'); return $('#pn').focus(); }
+       if (num($('#pl').value) < 0) { toast('Le litrage ne peut pas être négatif', 'erreur'); return $('#pl').focus(); }
        /* parUnite : le litrage est saisi par unité (saisie manuelle comme
           dictée, qui remplit ce même formulaire). Les anciennes lignes, sans
           ce marqueur, gardent leur calcul d'origine. */
-       liste.push({ id:uid(), produit:p, nombre:num($('#pn').value) || 1, litrage:num($('#pl').value),
+       liste.push({ id:uid(), produit:p, nombre:nombre, litrage:num($('#pl').value),
                     parUnite:true,
                     motif:motif, par:STATE.user.prenom, employe:STATE.user.id, at:nowISO() });
        await DB.set('pertes:' + j, liste);
@@ -1665,10 +2020,15 @@ async function purgerPreuves() {
      };
    
      $$('[data-del]').forEach(b => b.onclick = () => {
-       confirmer('Retirer cette ligne ?', 'La perte sera supprimée du registre du jour.', 'Retirer', async () => {
-         liste.splice(+b.dataset.del, 1);
+       confirmer('Retirer cette ligne ?', 'La perte sera supprimée du registre du jour. Le retrait est noté au journal.', 'Retirer', async () => {
+         const w = liste.splice(+b.dataset.del, 1)[0];
          await DB.set('pertes:' + j, liste);
          await cumulerPertesMois(j);
+         /* La création d'une perte est journalisée ; son retrait ne l'était pas :
+            une trace pouvait disparaître sans laisser de ligne (DON-06). */
+         if (w) await feed('warn', STATE.user.prenom + ' a retiré une perte : ' + w.produit + ' (' +
+           w.nombre + ' ×' + (w.litrage ? ', ' + n1(litresPerte(w)) + ' L' : '') + ', déclarée par ' +
+           (w.par || '?') + (w.at ? ' à ' + heure(w.at) : '') + ')');
          rendre('pertes');
        });
      });
@@ -1765,11 +2125,20 @@ async function purgerPreuves() {
      const ref = cat.filter(x => typeof x === 'object' && x.id === r.ref)[0];
      return ref && ref.variantes && ref.variantes.length ? ref.variantes : [];
    }
+   /* Une référence est faite quand elle est cochée, ou quand toutes ses
+      déclinaisons le sont. Une seule règle pour l'en-tête, les catégories et
+      l'état du jour : l'en-tête ne comptait que les cases simples et restait
+      à « 17 sur 41 » une fois tout vérifié. */
+   function reassortFait(r, rec) {
+     const dc = declinaisonsReassort(r);
+     if (!dc.length) return !!(rec[r.id] && rec[r.id].ok);
+     return dc.every(x => (rec[r.id + '|' + x] || {}).ok);
+   }
 
    V.reas = async function () {
      const j = STATE.jour;
      const rec = await DB.get('reassort:' + j, {});
-     const faits = REASSORT.filter(r => rec[r.id] && rec[r.id].ok).length;
+     const faits = REASSORT.filter(r => reassortFait(r, rec)).length;
      const rupt  = REASSORT.filter(r => rec[r.id] && rec[r.id].rupture);
    
      $('#page').innerHTML =
@@ -1784,11 +2153,7 @@ async function purgerPreuves() {
          const items = REASSORT.filter(r => r.cat === c.id);
          /* Une référence est faite quand elle est cochée, ou quand toutes ses
             déclinaisons le sont. */
-         const estFaite = r => {
-           const dc = declinaisonsReassort(r);
-           if (!dc.length) return !!(rec[r.id] && rec[r.id].ok);
-           return dc.every(x => (rec[r.id + '|' + x] || {}).ok);
-         };
+         const estFaite = r => reassortFait(r, rec);
          const ok = items.filter(estFaite).length;
 
          return '<div class="entete"><h3>' + esc(c.id) + '</h3>' +
@@ -1902,6 +2267,8 @@ async function purgerPreuves() {
    
        $('#qv').onclick = async () => {
          if (reste === null) return toast('Indiquez ce qu’il reste', 'erreur');
+         /* « −3 » était accepté et transmis comme rupture. */
+         if (!(reste >= 0)) return toast('La quantité restante ne peut pas être négative', 'erreur');
          const niveau = RUPTURE.niveaux.filter(n => reste <= n.max)[0];
          rec[cle] = { ok:0, rupture:1, reste:reste, niveau:niveau.id, note:$('#qn').value.trim(),
                       par:STATE.user.prenom, employe:STATE.user.id, at:nowISO() };
@@ -1912,7 +2279,7 @@ async function purgerPreuves() {
          await feed('bad', STATE.user.prenom + ' signale une rupture : ' + nomComplet +
                     (reste === 0 ? ' (plus rien)' : ' (reste ' + reste + ' ' + art.unite + ')'));
          closeSheet();
-         toast('Alerte transmise à ' + nomManager());
+         toast(messageEnvoi('ruptures', 'Alerte transmise à ' + nomManager()));
          rendre('reas');
        };
      }
@@ -1931,7 +2298,7 @@ async function purgerPreuves() {
            '<button type="button" class="chip' + (i === 3 ? ' on' : '') + '" data-rc="' + c.id + '">' +
            esc(c.label) + '</button>').join('') + '</div>' +
          '<div class="champ" style="margin-top:14px">' +
-         '<textarea id="rt" placeholder="' + esc(RELEVE.exemples[0]) + '"></textarea>' +
+         '<textarea id="rt" aria-label="Message pour la prochaine équipe" placeholder="' + esc(RELEVE.exemples[0]) + '"></textarea>' +
          '<p class="mini" style="margin-top:6px">' + esc(CONSIGNE_TEXTE_LIBRE) + '</p></div>' +
          '<div class="btn-row" style="margin-top:14px">' +
          '<button class="btn menthe" id="rv">Publier</button>' +
@@ -1955,7 +2322,15 @@ async function purgerPreuves() {
        $$('#rc .chip').forEach(x => x.classList.remove('on'));
        b.classList.add('on'); cat = b.dataset.rc;
      });
-     $('#rp').onclick = () => { epingle = !epingle; $('#rp').classList.toggle('ambre', epingle); toast(epingle ? 'Message épinglé' : 'Épingle retirée'); };
+     /* « Épingler » est une option du message à publier, pas une action : le
+        toast « Message épinglé » laissait croire que c'était fait. */
+     $('#rp').onclick = () => {
+       epingle = !epingle;
+       $('#rp').classList.toggle('ambre', epingle);
+       $('#rp').textContent = epingle ? 'Épinglé ✓' : 'Épingler';
+       $('#rp').setAttribute('aria-pressed', epingle ? 'true' : 'false');
+       toast(epingle ? 'Le message sera épinglé à sa publication' : 'Le message ne sera pas épinglé');
+     };
    
      $('#rv').onclick = async () => {
        const txt = $('#rt').value.trim();
@@ -1963,7 +2338,7 @@ async function purgerPreuves() {
        await DB.push('releve', { id:uid(), texte:txt, cat:cat, epingle:epingle, jour:today(),
                                  par:STATE.user.prenom, employe:STATE.user.id, at:nowISO(), luPar:[] });
        await feed('ok', STATE.user.prenom + ' a laissé un mot dans le carnet de relève');
-       toast('Message publié');
+       toast(epingle ? 'Message publié et épinglé' : 'Message publié');
        rendre('releve');
      };
    
@@ -2047,37 +2422,33 @@ async function purgerPreuves() {
    /* =============================================================================
       18. RETOUR BÊTA
       ========================================================================== */
-   function initFeedback() {
-     if (!APP.beta) return;
-     const b = $('#fb');
-     b.hidden = false;
-     b.onclick = () => {
-       showSheet(
-         '<h2 id="sheet-titre">Signaler un souci</h2>' +
-         '<p class="sub">L’application est en bêta. La page et l’heure sont ajoutées automatiquement.</p>' +
-         '<div class="chips" id="fbt">' +
-         ['Ça ne marche pas', 'Un chiffre est faux', 'Une idée', 'Autre'].map((t, i) =>
-           '<button type="button" class="chip' + (i === 0 ? ' on' : '') + '" data-t="' + esc(t) + '">' + esc(t) + '</button>').join('') +
-         '</div><div class="champ" style="margin-top:14px">' +
-         '<textarea id="fbx" data-autofocus aria-label="Décrivez le souci" placeholder="Ex. quand je valide le nettoyage, la ligne ne se coche pas."></textarea>' +
-         '<p class="mini" style="margin-top:6px">' + esc(CONSIGNE_TEXTE_LIBRE) + '</p></div>' +
-         '<div class="actions"><button class="btn clair" data-fermer>Annuler</button>' +
-         '<button class="btn menthe" id="fbv">Envoyer</button></div>');
+   /* Ouvert depuis le menu « Tout le reste » (ouvrirPlus). */
+   function ouvrirRetour() {
+     showSheet(
+       '<h2 id="sheet-titre">Signaler un souci</h2>' +
+       '<p class="sub">L’application est en bêta. La page et l’heure sont ajoutées automatiquement.</p>' +
+       '<div class="chips" id="fbt">' +
+       ['Ça ne marche pas', 'Un chiffre est faux', 'Une idée', 'Autre'].map((t, i) =>
+         '<button type="button" class="chip' + (i === 0 ? ' on' : '') + '" data-t="' + esc(t) + '">' + esc(t) + '</button>').join('') +
+       '</div><div class="champ" style="margin-top:14px">' +
+       '<textarea id="fbx" data-autofocus aria-label="Décrivez le souci" placeholder="Ex. quand je valide le nettoyage, la ligne ne se coche pas."></textarea>' +
+       '<p class="mini" style="margin-top:6px">' + esc(CONSIGNE_TEXTE_LIBRE) + '</p></div>' +
+       '<div class="actions"><button class="btn clair" data-fermer>Annuler</button>' +
+       '<button class="btn menthe" id="fbv">Envoyer</button></div>');
    
-       let type = 'Ça ne marche pas';
-       $$('#fbt [data-t]').forEach(x => x.onclick = () => {
-         $$('#fbt .chip').forEach(y => y.classList.remove('on'));
-         x.classList.add('on'); type = x.dataset.t;
-       });
-       $('#fbv').onclick = async () => {
-         const t = $('#fbx').value.trim();
-         if (!t) return toast('Décrivez le souci en une phrase', 'erreur');
-         await DB.push('feedback', { id:uid(), type:type, texte:t, vue:STATE.view,
-                                     par:STATE.user.prenom, at:nowISO(), version:APP.version });
-         await feed('warn', STATE.user.prenom + ' a signalé un souci sur « ' + (PAGES[STATE.view] || {}).titre + ' »');
-         closeSheet();
-         toast('Merci, c’est transmis à ' + nomManager());
-       };
+     let type = 'Ça ne marche pas';
+     $$('#fbt [data-t]').forEach(x => x.onclick = () => {
+       $$('#fbt .chip').forEach(y => y.classList.remove('on'));
+       x.classList.add('on'); type = x.dataset.t;
+     });
+     $('#fbv').onclick = async () => {
+       const t = $('#fbx').value.trim();
+       if (!t) return toast('Décrivez le souci en une phrase', 'erreur');
+       await DB.push('feedback', { id:uid(), type:type, texte:t, vue:STATE.view,
+                                   par:STATE.user.prenom, at:nowISO(), version:APP.version });
+       await feed('warn', STATE.user.prenom + ' a signalé un souci sur « ' + (PAGES[STATE.view] || {}).titre + ' »');
+       closeSheet();
+       toast(messageEnvoi('feedback', 'Merci, c’est transmis à ' + nomManager()));
      };
    }
    
@@ -2088,11 +2459,26 @@ async function purgerPreuves() {
      • le lien discret en bas de l'écran des prénoms
      • l'adresse https://…/?reset tapée directement dans le navigateur
    ========================================================================== */
-async function viderAppareil() {
+/* garderRattachement : « vider les saisies » ne détache plus l'appareil. Le
+   jeton du compte de la boutique (AUTH.cle) partait avec le reste : il
+   fallait ressortir les identifiants de la boutique pour repartir.
+   La file d'attente reste avec lui : ces saisies n'existent nulle part
+   ailleurs, et l'appareil, toujours rattaché, les enverra au retour de la
+   base. Elle partait aussi, base injoignable ou non (DON-07). Seul le
+   détachement l'efface, après l'avertissement de la feuille.
+   La copie locale des clés encore en file reste aussi : sans elle, une
+   nouvelle saisie hors ligne sur la même fiche repartait de zéro et
+   remplaçait, dans la file, celle qu'on venait de garder. */
+async function viderAppareil(garderRattachement) {
   let cles = 0, cachesEff = 0, sw = 0;
   try {
     const p = OFFLINE.storeLocal + ':';
+    const jeton = (typeof AUTH !== 'undefined') ? AUTH.cle : null;
+    const gardees = garderRattachement
+      ? [jeton, p + OFFLINE.fileAttente].concat(fileLire().map(x => p + x.cle))
+      : [];
     Object.keys(localStorage).filter(k => k.indexOf(p) === 0)
+      .filter(k => gardees.indexOf(k) < 0)
       .forEach(k => { localStorage.removeItem(k); cles++; });
     /* Le compteur d'échecs du PIN survit à la remise à zéro : sinon elle
        servirait à lever le blocage anti-essais. */
@@ -2117,7 +2503,11 @@ function ecranRemiseAZero(auto) {
   const p = OFFLINE.storeLocal + ':';
   let n = 0;
   try { n = Object.keys(localStorage).filter(k => k.indexOf(p) === 0).length; } catch (e) {}
+  const rattache = (typeof appareilRattache === 'function') && appareilRattache();
 
+  /* Confirmation forte : le bouton reste inactif tant que le mot n'est pas
+     tapé. Un appui (ou un lien …/?reset reçu par message) ne suffit plus à
+     tout effacer sans code. */
   showSheet(
     '<h2 id="sheet-titre">Réinitialiser cet appareil</h2>' +
     '<p class="sub">' + n + ' élément(s) enregistré(s) sur cet appareil</p>' +
@@ -2127,27 +2517,81 @@ function ecranRemiseAZero(auto) {
     'l’application. Ce qui est déjà remonté dans la base n’est pas touché et reviendra ' +
     'tout seul à la reconnexion.</p></div></div>' +
 
-    (n > 0 ? '<div class="alerte bad" style="margin-top:10px"><span class="ai">▲</span><div>' +
-      '<b>Les saisies non synchronisées seront perdues</b><p>Si cet appareil a travaillé ' +
-      'hors ligne sans jamais se reconnecter, ces données n’existent nulle part ailleurs.</p></div></div>' : '') +
+    (DB.configure ? '' : '<div class="alerte bad" style="margin-top:10px"><span class="ai">▲</span><div>' +
+      '<b>Aucune base configurée</b><p>Rien de ce qui a été saisi ici n’existe ailleurs : ' +
+      'tout sera définitivement perdu.</p></div></div>') +
+    '<div id="rz-file"></div>' +
+
+    (rattache ? '<label class="rang" style="margin-top:14px;gap:12px;align-items:flex-start;flex-wrap:nowrap">' +
+      '<input type="checkbox" id="rz-detacher" style="width:22px;height:22px;flex:0 0 auto;margin-top:1px">' +
+      '<span style="flex:1;min-width:0"><b>Détacher aussi l’appareil</b><span class="mini" style="display:block">Il faudra ' +
+      'le rattacher avec les identifiants de la boutique. Sans cette case, il reste rattaché.</span></span></label>' : '') +
+
+    '<div class="champ" style="margin-top:14px"><label class="f" for="rz-mot">Pour confirmer, tapez EFFACER</label>' +
+    '<input type="text" id="rz-mot" autocomplete="off" autocapitalize="characters" spellcheck="false"></div>' +
 
     '<div class="actions"><button class="btn clair" id="rz-x">Annuler</button>' +
-    '<button class="btn corail" id="rz-ok">Tout effacer</button></div>');
+    '<button class="btn corail" id="rz-ok" disabled>Tout effacer</button></div>');
+
+  /* Arrivée par …/?reset : le démarrage s'est arrêté avant de charger l'équipe.
+     Fermer la feuille (Échap, voile, Retour) laissait un écran des prénoms vide
+     et la session ouverte jamais reprise : seule « Annuler » sort, par un
+     redémarrage complet sur l'adresse déjà nettoyée. */
+  if (auto) $('#sheet').dataset.obligatoire = '1';
+
+  /* Saisies encore en file d'attente : leur nombre exact, et une dernière
+     tentative d'envoi avant le nettoyage.
+     Sans détachement, la file est gardée (viderAppareil) : on le dit, au
+     lieu d'annoncer une perte qui n'aura pas lieu. Cocher « Détacher »
+     change l'annonce : là, elles seraient vraiment perdues. */
+  const majFile = () => {
+    const zone = $('#rz-file');
+    if (!zone) return;
+    const nb = fileLire().length;
+    const perdues = !!($('#rz-detacher') && $('#rz-detacher').checked);
+    zone.innerHTML = nb
+      ? (perdues
+        ? '<div class="alerte bad" style="margin-top:10px"><span class="ai">▲</span><div>' +
+          '<b>' + nb + ' saisie(s) jamais envoyée(s) à la base</b><p>Détacher l’appareil les efface : elles n’existent que sur cet ' +
+          'appareil et seront perdues.' + (DB.configure ? ' Reconnectez-le au réseau puis touchez « Envoyer d’abord ».' : '') +
+          '</p></div></div>'
+        : '<div class="alerte warn" style="margin-top:10px"><span class="ai">●</span><div>' +
+          '<b>' + nb + ' saisie(s) pas encore envoyée(s) à la base</b><p>Elles restent sur l’appareil : ' +
+          'il les enverra de lui-même dès que la base répondra.</p></div></div>') +
+        (DB.configure ? '<button class="btn clair bloc" id="rz-sync" style="margin-top:10px">Envoyer d’abord</button>' : '')
+      : '';
+    const b = $('#rz-sync');
+    if (b) b.onclick = async () => {
+      b.disabled = true; b.textContent = 'Envoi…';
+      try { await journaliserSync(); } catch (e) {}
+      majFile();
+      if (fileLire().length) toast('Envoi impossible pour l’instant — réseau ou base injoignable', 'erreur');
+    };
+  };
+  majFile();
+  if (fileLire().length && DB.configure) journaliserSync().then(majFile, majFile);
+  if ($('#rz-detacher')) $('#rz-detacher').onchange = majFile;
+
+  const ok = $('#rz-ok');
+  $('#rz-mot').oninput = () => { ok.disabled = $('#rz-mot').value.trim().toUpperCase() !== 'EFFACER'; };
 
   $('#rz-x').onclick = function () {
+    if (auto) { location.replace(location.pathname); return; }
     closeSheet();
-    /* L'adresse est déjà propre : on reprend simplement la connexion normale,
-       sans rechargement, donc sans risque de rouvrir cet écran. */
-    if (auto) demarrerConnexion();
   };
-  $('#rz-ok').onclick = async function () {
+  ok.onclick = async function () {
+    if ($('#rz-mot').value.trim().toUpperCase() !== 'EFFACER') return;
+    const detacher = !!($('#rz-detacher') && $('#rz-detacher').checked);
+    $('#sheet').dataset.obligatoire = '1';      // plus de fermeture pendant le nettoyage
     $('#sheet-corps').innerHTML =
       '<h2>Nettoyage en cours…</h2><div class="vide">Un instant</div>';
-    const r = await viderAppareil();
+    const r = await viderAppareil(!detacher);
+    const gardees = detacher ? 0 : fileLire().length;
     $('#sheet-corps').innerHTML =
       '<h2>Appareil remis à zéro</h2>' +
       '<p class="sub">' + r.cles + ' saisie(s), ' + r.sw + ' service worker, ' +
-      r.caches + ' cache(s) effacés.</p>' +
+      r.caches + ' cache(s) effacés' + (rattache && !detacher ? ' · appareil toujours rattaché' : '') +
+      (gardees ? ' · ' + gardees + ' envoi(s) en attente gardé(s)' : '') + '.</p>' +
       '<div class="alerte ok" style="margin-top:12px"><span class="ai">•</span><div>' +
       '<b>Redémarrage…</b><p>L’application va se recharger sur sa dernière version.</p></div></div>';
     setTimeout(function () { location.replace(location.pathname); }, 1500);
@@ -2158,23 +2602,28 @@ function ecranRemiseAZero(auto) {
    source de vérité, jamais de la session : celle-ci vit dans le localStorage
    et un « role:'manager' » écrit à la main ouvrait l'espace manager. Un rôle
    retiré depuis la dernière connexion est aussi pris en compte. */
+/* La session reprise sans code (rechargement, relance de la PWA) ne vaut que
+   tant que l'appareil sert : après 8 h sans activité — une nuit, un jour de
+   fermeture — le code PIN est redemandé. Un iPad laissé ouvert sur le compte
+   du manager ne donne plus tout, à n'importe qui, le lendemain. Une session
+   sans date d'activité (ancienne, ou fabriquée à la main) n'est pas reprise.
+   Ce n'est qu'un frein local : la vraie barrière est côté base (ACC-03/08). */
+const SESSION_INACTIVITE_MS = 8 * 3600 * 1000;
+let _sessionTouchee = 0;
+function toucherSession() {
+  if (!STATE.user || Date.now() - _sessionTouchee < 60000) return;
+  _sessionTouchee = Date.now();
+  try { DB.set('session', Object.assign({}, STATE.user, { vu:Date.now() })); } catch (e) {}
+}
+document.addEventListener('pointerdown', toucherSession, { passive:true });
+document.addEventListener('keydown', toucherSession, { passive:true });
+
 function utilisateurDeSession(s) {
   if (!s || !s.id) return null;
+  if (!(s.vu > 0) || Date.now() - s.vu > SESSION_INACTIVITE_MS || s.vu > Date.now() + 60000) return null;
   const e = EQUIPE.filter(x => x.id === s.id)[0];
   if (!e) return null;
   return { id:e.id, prenom:e.prenom, role:e.role, couleur:e.couleur, initiales:e.initiales };
-}
-
-/* Reprend le parcours de connexion normal après un passage par …/?reset */
-async function demarrerConnexion() {
-  try {
-    const u = utilisateurDeSession(await DB.get('session', null));
-    if (u) {
-      STATE.user = u;
-      await chargerService();
-      demarrer();
-    }
-  } catch (e) { /* on reste sur l'écran des prénoms */ }
 }
 
 /* -----------------------------------------------------------------------------
@@ -2186,6 +2635,17 @@ async function demarrerConnexion() {
    -------------------------------------------------------------------------- */
 function vueAccueil() {
   return (STATE.user && STATE.user.role === 'manager') ? 'controle' : 'accueil';
+}
+
+/* Vue réservée au manager demandée sans le rôle : bouton retour (historique
+   d'un manager rétrogradé, ou d'une autre personne sur un iPad partagé), action
+   lancée avant une rétrogradation (« Tout traiter »). rendre() sert l'accueil.
+   Les menus sont lus à l'appel : les vues ajoutées par modules.js comptent. */
+function vueAutorisee(id) {
+  const role = STATE.user && STATE.user.role;
+  if (!role || role === 'manager') return true;
+  const de = r => (TABS[r] || []).map(t => t.id).concat(MENU_PLUS[r] || []);
+  return de('manager').indexOf(id) < 0 || de(role).indexOf(id) >= 0;
 }
 
 window.addEventListener('popstate', function (ev) {
@@ -2234,6 +2694,9 @@ window.addEventListener('popstate', function (ev) {
    -------------------------------------------------------------------------- */
 function peutModifier(jour) {
   if (jour === today()) return true;
+  /* Un jour futur n'a rien à valider : le manager pouvait signer d'avance
+     les tâches ou la caisse de demain. Le passé reste corrigible par lui. */
+  if (jour > today()) return false;
   return !!(STATE.user && STATE.user.role === 'manager');
 }
 
@@ -2249,7 +2712,8 @@ function navJour(jour) {
       '<button type="button" class="btn clair bloc sm" data-nj="' + today() + '" ' +
       'style="margin:-4px 0 12px">Revenir à aujourd’hui</button>') +
     (peutModifier(jour) ? '' :
-      '<div class="lecture">Consultation seule — seul le jour en cours est modifiable.</div>');
+      '<div class="lecture">Consultation seule — ' + (jour > today()
+        ? 'un jour à venir ne se remplit pas d’avance.' : 'seul le jour en cours est modifiable.') + '</div>');
 }
 
 /* À appeler après avoir injecté navJour dans la page. */
@@ -2262,7 +2726,9 @@ function brancherNavJour(vue) {
   /* En consultation, on neutralise tout ce qui modifie. */
   if (!peutModifier(STATE.jour)) {
     $$('#page button').forEach(b => {
-      if (b.dataset.nj !== undefined) return;
+      /* Les vignettes restent ouvrables : en consultation, on regarde une
+         photo sans pouvoir la supprimer (voirPreuve en lecture seule). */
+      if (b.dataset.nj !== undefined || b.dataset.vign !== undefined) return;
       b.disabled = true;
       b.classList.add('fige');
     });
@@ -2327,7 +2793,9 @@ async function pinCorrect(e, saisi) {
 }
 
 async function chargerEquipe() {
-  /* 1. Ce qu'on a déjà en local : la connexion doit marcher hors ligne. */
+  /* 1. Ce qu'on a déjà en local : la connexion doit marcher hors ligne.
+     Étape synchrone, avant tout await : le démarrage lit EQUIPE dès le retour
+     de l'appel, pour afficher les prénoms sans attendre la base. */
   const local = (() => {
     try { return JSON.parse(localStorage.getItem('pilotshop.v3:equipe') || 'null'); }
     catch (e) { return null; }
@@ -2363,7 +2831,8 @@ async function chargerEquipe() {
       const jeton = (typeof jetonValide === 'function') ? await jetonValide() : null;
       if (jeton) {
         const r = await fetch(SUPABASE.url + '/rest/v1/equipe?select=*&actif=eq.true&order=prenom', {
-          headers: { 'apikey': SUPABASE.anonKey, 'Authorization': 'Bearer ' + jeton }
+          headers: { 'apikey': SUPABASE.anonKey, 'Authorization': 'Bearer ' + jeton },
+          signal: signalDelai()
         });
         if (r.status === 404) {
           try { localStorage.removeItem('pilotshop.v3:table-equipe'); } catch (e) {}
@@ -2488,8 +2957,52 @@ function ecranEquipeInjoignable() {
    un code modifié ou une personne ajoutée sur un autre appareil ne remontait
    jamais, la liste locale étant relue indéfiniment. */
 setInterval(function () {
-  if (typeof chargerEquipe === 'function' && STATE.enLigne) chargerEquipe();
+  if (typeof chargerEquipe === 'function' && STATE.enLigne) chargerEquipe().then(revaliderSession, function () {});
 }, 300000);
+
+/* Bouton de compte : initiales et couleur de la personne connectée. Le nom
+   lu par un lecteur d'écran commence par les initiales affichées : « Mon
+   compte » seul ne correspondait pas à ce qu'on voit (WCAG 2.5.3). */
+function majBoutonCompte() {
+  const bc = $('#compte');
+  if (!bc || !STATE.user) return bc;
+  const ini = STATE.user.initiales || '';
+  bc.textContent = ini;
+  bc.style.background = STATE.user.couleur || 'var(--encre)';
+  bc.setAttribute('aria-label', (ini ? ini + ', ' : '') + 'compte de ' + STATE.user.prenom);
+  return bc;
+}
+
+/* L'équipe relue, la session ouverte suit. Une personne retirée sur un autre
+   iPad gardait sa session jusqu'au prochain rechargement, et un rôle changé
+   restait l'ancien. Retirée : retour immédiat à l'écran des prénoms. Rôle
+   changé : la session prend le nouveau rôle tout de suite (les contrôles
+   lisent STATE.user.role), puis onglets et accueil sont redessinés dès
+   qu'aucune feuille n'est ouverte, pour ne pas couper une saisie.
+   Redessiner et non recharger : un rechargement interrompait l'envoi en
+   cours, et une saisie partie mais pas encore arrivée n'était ni en base
+   ni dans la file d'attente. */
+let _roleARedessiner = false;
+function appliquerNouveauRole() {
+  if (!_roleARedessiner || !STATE.user || !$('#sheet').hidden) return;
+  _roleARedessiner = false;
+  renderNav();
+  rendre(vueAccueil());
+}
+function revaliderSession() {
+  if (!STATE.user) return;
+  const e = EQUIPE.filter(x => x.id === STATE.user.id)[0];
+  if (!e) {
+    DB.del('session').then(() => location.reload(), () => location.reload());
+    return;
+  }
+  if (e.role !== STATE.user.role) _roleARedessiner = true;
+  Object.assign(STATE.user, { prenom:e.prenom, role:e.role, couleur:e.couleur, initiales:e.initiales });
+  majBoutonCompte();
+  if (!_roleARedessiner) return;
+  if ($('#sheet').hidden) appliquerNouveauRole();
+  else toast('Votre rôle a changé : l’écran s’adapte dès la fermeture de cette fenêtre');
+}
 
 /* -----------------------------------------------------------------------------
    LA SÉCURITÉ EST-ELLE ACTIVE ?
@@ -2500,6 +3013,10 @@ setInterval(function () {
    seconde près — ce qui nous a déjà coûté une boutique bloquée.
    -------------------------------------------------------------------------- */
 async function securiteActive() {
+  /* Sans base configurée (mode local), la sonde partait en relatif vers
+     « /rest/v1/reglages » sur l'hôte de l'application : un 404 en console à
+     chaque démarrage, pour une question qui ne se pose pas. */
+  if (!SUPABASE.url || !SUPABASE.anonKey) return false;
   try {
     const ctrl = new AbortController();
     setTimeout(() => ctrl.abort(), 5000);
@@ -2526,9 +3043,12 @@ async function securiteActive() {
    lancement d'un site, ou après une remise à zéro. Plutôt qu'un écran vide sans
    explication, on permet de créer l'équipe sur place.
    -------------------------------------------------------------------------- */
+/* Couleurs d'avatar, partagées avec l'ajout d'une personne (V.equipe). */
+const COULEURS_EQUIPE = ['#7FA6A0','#C4907A','#9AA87F','#8FB4CE','#0F2027','#C9A227'];
+
 function ecranAmorcage() {
   if (document.getElementById('amorcage')) return;
-  const COULEURS = ['#7FA6A0','#C4907A','#9AA87F','#8FB4CE','#0F2027','#C9A227'];
+  const COULEURS = COULEURS_EQUIPE;
   let lignes = [{ prenom:'', pin:'', role:'manager' }];
 
   const d = document.createElement('div');
@@ -2546,13 +3066,13 @@ function ecranAmorcage() {
       lignes.map((l, i) =>
         '<div class="card plat" style="margin-top:14px">' +
         '<div class="grid g2">' +
-        '<div class="champ"><label class="f">Prénom</label>' +
-        '<input type="text" data-p="' + i + '" value="' + esc(l.prenom) + '" autocapitalize="words"></div>' +
-        '<div class="champ"><label class="f">Code à 4 chiffres</label>' +
-        '<input type="text" inputmode="numeric" maxlength="4" data-c="' + i + '" value="' + esc(l.pin) + '"></div>' +
+        '<div class="champ"><label class="f" for="am-p' + i + '">Prénom</label>' +
+        '<input type="text" id="am-p' + i + '" data-p="' + i + '" value="' + esc(l.prenom) + '" autocapitalize="words"></div>' +
+        '<div class="champ"><label class="f" for="am-c' + i + '">Code à 4 chiffres</label>' +
+        '<input type="text" id="am-c' + i + '" inputmode="numeric" maxlength="4" data-c="' + i + '" value="' + esc(l.pin) + '"></div>' +
         '</div>' +
-        '<div class="champ" style="margin-top:10px"><label class="f">Rôle</label>' +
-        '<select data-r="' + i + '">' +
+        '<div class="champ" style="margin-top:10px"><label class="f" for="am-r' + i + '">Rôle</label>' +
+        '<select id="am-r' + i + '" data-r="' + i + '">' +
         '<option value="equipe"' + (l.role === 'equipe' ? ' selected' : '') + '>Équipier</option>' +
         '<option value="manager"' + (l.role === 'manager' ? ' selected' : '') + '>Manager</option>' +
         '</select></div></div>').join('') +
@@ -2576,9 +3096,20 @@ function ecranAmorcage() {
     d.querySelector('#am-ok').onclick = async () => {
       lire();
       const etat = m => { d.querySelector('#am-etat').textContent = m; };
-      const valides = lignes.filter(l => l.prenom && l.pin.length === 4);
+      /* Une ligne commencée mais incomplète n'est plus écartée en silence :
+         « Nina » sans code disparaissait et le message annonçait les autres
+         comme si de rien n'était. Seules les lignes vides sont ignorées. */
+      const valides = lignes.filter(l => l.prenom || l.pin);
+      const incomplete = valides.filter(l => !l.prenom || l.pin.length !== 4)[0];
+      if (incomplete) return etat(incomplete.prenom
+        ? incomplete.prenom + ' : le code doit faire 4 chiffres.'
+        : 'Un code est saisi sans prénom : complétez la ligne ou videz-la.');
       if (!valides.length) return etat('Renseignez au moins un prénom et un code à 4 chiffres.');
       if (!valides.some(l => l.role === 'manager')) return etat('Il faut au moins un manager.');
+      /* Deux prénoms identiques donnaient deux tuiles indiscernables. */
+      const noms = valides.map(l => l.prenom.toLowerCase());
+      const double = valides.filter((l, i) => noms.indexOf(noms[i]) !== i)[0];
+      if (double) return etat('Deux personnes s’appellent « ' + double.prenom + ' » : ajoutez une initiale (ex. ' + double.prenom + ' B.).');
       const codes = valides.map(l => l.pin);
       if (new Set(codes).size !== codes.length) return etat('Deux personnes ont le même code.');
 
@@ -2595,8 +3126,12 @@ function ecranAmorcage() {
         return;
       }
 
+      /* Identifiants uniques, comme pour un ajout (V.equipe) : une équipe
+         recréée ne doit pas redonner « e1 » à une autre personne, sinon une
+         session restée ouverte sur un autre iPad passe à cette personne. Le
+         suffixe garde distincts deux uid() tirés dans la même milliseconde. */
       let equipe = valides.map((l, i) => ({
-        id: 'e' + (i + 1), prenom: l.prenom, pin: l.pin, role: l.role,
+        id: 'e' + uid() + i, prenom: l.prenom, pin: l.pin, role: l.role,
         couleur: COULEURS[i % COULEURS.length],
         initiales: l.prenom.slice(0, 2).toUpperCase()
       }));
@@ -2693,6 +3228,9 @@ window.addEventListener('error', function (ev) {
   const bt = $('#bt');
   if (bt) bt.textContent = 'Boutique ' + APP.site;
 
+  /* Une feuille ouverte sur l'écran de connexion (remise à zéro) ne doit pas
+     reparaître par-dessus l'application, avec son bouton « Tout effacer ». */
+  if (!$('#sheet').hidden) closeSheet();
   $('#login').hidden = true;
   $('#app').hidden = false;
   document.title = APP.nom + ' — ' + APP.site;
@@ -2705,16 +3243,12 @@ window.addEventListener('error', function (ev) {
      qu'on ait vérifié qu'elle existe encore. */
   STATE.erreurBase = null;
   majBandeau();
-  initFeedback();
   purgerPreuves();          // copie locale des photos de plus de 7 jours (le serveur garde tout)
+  purgerLocalAncien();      // copies locales anciennes : journal, heures, caisses, registres (voir sa note)
   /* Bouton de compte : le seul accès à « tout le reste » et à la déconnexion
      pour l'équipe, dont la barre du bas n'a plus d'onglet « Plus ». */
-  const bc = $('#compte');
-  if (bc) {
-    bc.textContent = STATE.user.initiales || '';
-    bc.style.background = STATE.user.couleur || 'var(--encre)';
-    bc.onclick = ouvrirPlus;
-  }
+  const bc = majBoutonCompte();
+  if (bc) bc.onclick = ouvrirPlus;
   renderNav();
   /* Une première entrée d'historique, pour que le tout premier « retour »
      ramène à l'accueil au lieu de sortir de l'application. */
@@ -2722,6 +3256,45 @@ window.addEventListener('error', function (ev) {
   rendre(STATE.user.role === 'manager' ? 'controle' : 'accueil');
 }
    
+   /* Résolue quand modules.js, stock.js et ocr.js ont été exécutés : les
+      scripts différés passent tous avant DOMContentLoaded. */
+   const documentPret = new Promise(r => {
+     if (document.readyState === 'complete') return r();
+     document.addEventListener('DOMContentLoaded', () => r(), { once:true });
+     window.addEventListener('load', () => r(), { once:true });
+   });
+
+   /* Le service worker vient-il de servir une page depuis son cache (réseau
+      muet ou trop lent, serveur en panne) ? C'est son état des 20 dernières
+      secondes, pas celui de cette seule page. Réponse en quelques
+      millisecondes ; sans service worker, ou sans réponse sous 300 ms : non. */
+   function reseauMuetSelonSW() {
+     return new Promise(fin => {
+       const sw = navigator.serviceWorker && navigator.serviceWorker.controller;
+       if (!sw || typeof MessageChannel === 'undefined') return fin(false);
+       const canal = new MessageChannel();
+       const t = setTimeout(() => fin(false), 300);
+       canal.port1.onmessage = ev => { clearTimeout(t); fin(!!(ev.data && ev.data.muet)); };
+       try { sw.postMessage({ type:'RESEAU' }, [canal.port2]); }
+       catch (e) { clearTimeout(t); fin(false); }
+     });
+   }
+
+   /* La reprise de session attend que TOUS les scripts soient chargés. Le
+      démarrage n'enchaîne que des lectures locales, résolues aussitôt : il
+      appelait demarrer() avant l'exécution de modules.js et stock.js — page
+      vide et « Vue indisponible » pour l'équipe, Tour de contrôle sans son
+      complément de stock pour le manager, après tout rechargement hors ligne. */
+   async function reprendreSession() {
+     await documentPret;
+     if (STATE.user) return;
+     const u = utilisateurDeSession(await DB.get('session', null));
+     if (!u || STATE.user) return;
+     STATE.user = u;
+     await chargerService();
+     demarrer();
+   }
+
    (async function () {
      initLogin();
      majBandeau();
@@ -2737,6 +3310,14 @@ window.addEventListener('error', function (ev) {
        return;
      }
 
+     /* Wi-Fi connecté mais sans Internet, ou trop lent : le service worker
+        vient de servir la page depuis son cache. L'application démarre donc
+        hors ligne, au lieu de découvrir la panne lecture après lecture (8 s
+        chacune : session rouverte au bout de 32 s). La première lecture qui
+        aboutit, ou la sonde des 15 s, la remet en ligne. Sans base configurée,
+        il n'y a rien à joindre ni à sonder. */
+     if (DB.configure && await reseauMuetSelonSW() && STATE.enLigne) { STATE.enLigne = false; majBandeau(); }
+
      /* Rattachement de l'appareil, mais SEULEMENT si la base l'exige. Tant que
         la sécurité n'est pas activée côté base, on n'impose rien : l'application
         doit rester utilisable pendant la migration, pas après. */
@@ -2745,10 +3326,18 @@ window.addEventListener('error', function (ev) {
          await ecranRattachement();
        }
      }
-     const etatEquipe = (typeof chargerEquipe === 'function') ? await chargerEquipe() : 'vide';
-     /* La liste des prénoms a été dessinée par initLogin alors qu'EQUIPE était
-        encore vide : on la redessine une fois l'équipe chargée depuis la base. */
+     /* chargerEquipe pose d'abord l'équipe gardée sur l'iPad, avant toute
+        lecture réseau : les prénoms s'affichent et la session reprend sans
+        attendre la base (16 s et 32 s avec un Wi-Fi muet). */
+     const lecture = (typeof chargerEquipe === 'function') ? chargerEquipe() : Promise.resolve('vide');
+     const equipeLocale = EQUIPE.length > 0;
+     let reprise = null;
+     if (equipeLocale) { initLogin(); reprise = reprendreSession(); }
+     const etatEquipe = await lecture;
+     /* L'équipe relue en base : prénoms redessinés, et la session ouverte suit
+        (personne retirée, rôle changé) une fois l'application affichée. */
      if (typeof initLogin === 'function') initLogin();
+     if (reprise) reprise.then(() => { if (STATE.user) revaliderSession(); });
      /* Toujours aucune équipe : soit l'appareil n'est pas rattaché — et c'est
         le rattachement qu'il faut proposer, pas la création d'une équipe qui
         existe déjà — soit la boutique démarre vraiment de zéro. */
@@ -2758,6 +3347,16 @@ window.addEventListener('error', function (ev) {
        if (SUPABASE.url && SUPABASE.anonKey && typeof appareilRattache === 'function' && !appareilRattache() &&
            typeof ecranRattachement === 'function') {
          await ecranRattachement();
+         /* Rattachée, la boutique peut n'avoir encore aucune équipe : l'écran
+            des prénoms restait vide jusqu'au rechargement. Nouvelle lecture
+            pour distinguer la base vide (on crée l'équipe) de la base
+            injoignable (on réessaie, surtout pas de nouvelle équipe). */
+         if (!EQUIPE.length) {
+           const apres = await chargerEquipe();
+           if (EQUIPE.length) initLogin();
+           else if (apres === 'reseau') ecranEquipeInjoignable();
+           else if (typeof ecranAmorcage === 'function') ecranAmorcage();
+         }
        } else if (etatEquipe === 'reseau') {
          /* La base n'a pas répondu : ce n'est pas une boutique vide. */
          ecranEquipeInjoignable();
@@ -2766,13 +3365,9 @@ window.addEventListener('error', function (ev) {
        }
      }
 
-     const s = await DB.get('session', null);
-     const u = utilisateurDeSession(s);
-     if (u) {
-       STATE.user = u;
-       await chargerService();
-       demarrer();
-     }
+     /* Sans équipe sur l'iPad, la session ne peut reprendre qu'après la
+        lecture de la base. */
+     if (!equipeLocale) await reprendreSession();
    })();
    /* =============================================================================
       PILOT-SHOP — app.js  ·  PARTIE 2 / 2
@@ -2803,6 +3398,15 @@ window.addEventListener('error', function (ev) {
         période, on vérifie qu'on a bien pu joindre la base : sinon on attend
         plutôt que de faire recréer une période qui existe déjà — ce qui
         créerait deux lignes de départ concurrentes. */
+     /* Hors ligne, cette vérification est impossible : on attend aussi. En
+        Wi-Fi sans Internet, l'application démarre hors ligne ; un manager sur
+        un iPad sans copie de la période devait en définir une nouvelle, qui
+        remplaçait au retour du réseau celle de toute la boutique (les écarts
+        déjà saisis n'étaient plus lus). */
+     if (!p && !STATE.enLigne && DB.configure) {
+       return { id:'attente', type:PERIODES.parDefaut, debut:today(), fin:today(),
+                ouverte:false, nonInitialisee:true, indisponible:true };
+     }
      if (!p && STATE.enLigne && DB.configure) {
        try {
          const jeton = (typeof jetonValide === 'function') ? await jetonValide() : null;
@@ -2810,7 +3414,7 @@ window.addEventListener('error', function (ev) {
            const r = await fetch(SUPABASE.url + '/rest/v1/' +
              SUPABASE.tables.periodes + '?id=eq.' + encodeURIComponent('periode:courante') +
              '&select=data&limit=1',
-             { headers: { apikey: SUPABASE.anonKey, Authorization: 'Bearer ' + jeton } });
+             { headers: { apikey: SUPABASE.anonKey, Authorization: 'Bearer ' + jeton }, signal: signalDelai() });
            if (r.ok) {
              const l = await r.json();
              if (l && l.length && l[0].data) {
@@ -2971,11 +3575,17 @@ function ouvrirPremierePeriode() {
    /* =============================================================================
       21. MÉTÉO
       ========================================================================== */
+   let _meteoEchec = 0;   // dernier échec d'open-meteo (voir meteo)
    async function meteo() {
      if (!METEO.actif) return null;
      const cache = await DB.get('meteo', null);
      const frais = cache && (Date.now() - new Date(cache.at)) < METEO.cacheHeures * 3600e3;
      if (frais || !STATE.enLigne) return cache;
+     /* Échec récent : pas de nouvel essai avant 10 minutes. Sans ce frein,
+        chaque redessin de Ma journée (phase, onglet, retour après une photo
+        ou une validation) attendait de nouveau 8 s qu'open-meteo réponde. */
+     const repli = () => cache || { t:'—', code:3, max:'—', pluie:'—', at:nowISO(), source:'indisponible' };
+     if (Date.now() - _meteoEchec < 10 * 60e3) return repli();
      try {
        const u = METEO.endpoint + '?latitude=' + METEO.lat + '&longitude=' + METEO.lon +
          '&current=' + METEO.parametres.current + '&daily=' + METEO.parametres.daily +
@@ -2991,8 +3601,29 @@ function ouvrirPremierePeriode() {
        await DB.set('meteo', o);
        return o;
      } catch (e) {
-       return cache || { t:'—', code:3, max:'—', pluie:'—', at:nowISO(), source:'indisponible' };
+       _meteoEchec = Date.now();
+       return repli();
      }
+   }
+   /* La météo ne retient plus le premier écran (#49). Même avec l'échec
+      retenu 10 minutes, Ma journée et la Tour de contrôle attendaient
+      jusqu'à 8 s qu'open-meteo réponde au premier rendu, puis de nouveau
+      toutes les 10 minutes. On dessine avec ce qui est là : la réponse si
+      elle arrive en moins de 300 ms, sinon la dernière météo gardée sur
+      l'iPad (ou rien) ; `suite` livre la réponse quand elle arrive, et la
+      vue complète son bloc météo sans se redessiner. */
+   let _meteoEnCours = null;
+   async function meteoRapide() {
+     if (typeof meteo !== 'function') return { m:null, suite:null };
+     /* Une requête encore en route est partagée, sans nouvelle attente :
+        chaque redessin relançait sinon sa propre requête et attendait de
+        nouveau 300 ms tant qu'open-meteo traînait. */
+     if (_meteoEnCours) return { m:await DB.get('meteo', null), suite:_meteoEnCours };
+     const p = _meteoEnCours = meteo().catch(() => null);
+     p.then(() => { if (_meteoEnCours === p) _meteoEnCours = null; });
+     const vite = await Promise.race([p, new Promise(r => setTimeout(() => r(undefined), 300))]);
+     if (vite !== undefined) return { m:vite, suite:null };
+     return { m:await DB.get('meteo', null), suite:p };
    }
    function widgetMeteo(m) {
      if (!m) return '';
@@ -3012,7 +3643,8 @@ function ouvrirPremierePeriode() {
    V.controle = async function () {
      const j = today();
      const per = await periodeCourante();
-     const m = await meteo();
+     const mt = await meteoRapide();
+     const m = mt.m;
      const e = await etatJour(j);
    
      const ruptures = (await DB.get('ruptures', [])).filter(r => !r.traite);
@@ -3072,7 +3704,7 @@ function ouvrirPremierePeriode() {
          noms.length
            ? noms.slice(0, 4).join(', ') + (noms.length > 4 ? ' et ' + (noms.length - 4) + ' autre(s)' : '') + '.'
            : 'Signalées par l’équipe lors du réassort.',
-         'controle']);
+         '#urgences']);   // « Ouvrir » renvoyait vers cette même vue : on descend à la liste
      }
      if (perimes) {
        const quoi = [...new Set((fifo || []).filter(x => x.c === 'rouge')
@@ -3081,6 +3713,20 @@ function ouvrirPremierePeriode() {
          (quoi.length ? quoi.slice(0, 4).join(', ') + '. ' : '') +
          'À retirer de la vitrine immédiatement.', 'frigo']);
      }
+     /* Relevés du jour manquants : la carte verte « Rien à signaler » s'affichait
+        sous la pastille rouge « Frigos matin manquants ». Passé l'heure
+        d'ouverture, un relevé du matin absent est une alerte HACCP ; passé
+        l'heure de fermeture, celui du soir aussi. Horaires du back-office,
+        sinon ceux d'usine (HORAIRES n'est relu qu'à l'écran des horaires). */
+     const horaires = Object.assign({}, HORAIRES, (await DB.get('horaires', null)) || {});
+     const minutesDe = h => (/^\d{2}:\d{2}$/.test(h || '') ? +h.slice(0, 2) * 60 + +h.slice(3, 5) : null);
+     const maintenant = new Date().getHours() * 60 + new Date().getMinutes();
+     const passe = h => { const x = minutesDe(h); return x !== null && maintenant >= x; };
+     const matinDu = passe(horaires.ouverture), soirDu = passe(horaires.fermeture);
+     if (matinDu && !e.tempM) A.push(['bad', 'Frigos du matin non relevés',
+       'Relevé à faire dès l’ouverture (' + horaires.ouverture + '), avant la mise en vitrine.', 'temp']);
+     if (soirDu && !e.tempS) A.push(['warn', 'Frigos du soir non relevés',
+       'Relevé à faire avant la fermeture (' + horaires.fermeture + ').', 'temp']);
      if (tempCrit) A.push(['bad', tempCrit + ' relevé(s) en limite critique',
        (enceintesCrit.length ? enceintesCrit.slice(0, 3).join(', ') + '. ' : '') +
        'Chaque dépassement doit avoir une action corrective écrite.', 'temp']);
@@ -3100,10 +3746,11 @@ function ouvrirPremierePeriode() {
        '<button class="btn sm" id="pdf">Registre</button>';
    
      $('#page').innerHTML =
-       '<div class="grid g2">' + widgetMeteo(m) +
+       '<div class="grid g2" id="ctl-meteo">' + widgetMeteo(m) +
        carte(entete('👥', enService.length ? enService.map(s => s.prenom).join(', ') : 'Personne en service',
          enService.length ? 'En poste depuis ' + enService.map(s => heure(s.debut)).join(', ') : 'Aucun pointage ouvert') +
-         '<div class="rang">' + pastille(e.tempM ? 'ok' : 'bad', e.tempM ? 'Frigos matin faits' : 'Frigos matin manquants') +
+         '<div class="rang">' + pastille(e.tempM ? 'ok' : (matinDu ? 'bad' : 'n'),
+           e.tempM ? 'Frigos matin faits' : (matinDu ? 'Frigos matin manquants' : 'Frigos matin à faire')) +
          pastille(e.net ? 'ok' : 'warn', e.net + '/' + e.netTotal + ' nettoyage') +
          pastille(e.caisse ? 'ok' : 'n', e.caisse ? 'Caisse faite' : 'Caisse ouverte') + '</div>', 'solide') + '</div>' +
    
@@ -3117,11 +3764,12 @@ function ouvrirPremierePeriode() {
        (A.length ? '<div class="entete"><h3>Alertes</h3></div><div class="stack">' + A.map(a =>
          '<div class="alerte ' + a[0] + '"><span class="ai">' + (a[0] === 'bad' ? '▲' : '●') + '</span>' +
          '<div><b>' + esc(a[1]) + '</b><p>' + esc(a[2]) + '</p></div>' +
-         '<span class="go"><button class="btn clair sm" data-go="' + a[3] + '">Ouvrir</button></span></div>').join('') + '</div>'
+         '<span class="go"><button class="btn clair sm" ' + (a[3].charAt(0) === '#'
+           ? 'data-ancre="' + a[3].slice(1) + '"' : 'data-go="' + a[3] + '"') + '>Ouvrir</button></span></div>').join('') + '</div>'
          : carte('<div class="alerte ok"><span class="ai">•</span><div><b>Rien à signaler</b>' +
-           '<p>Caisse, frigos, nettoyage et stocks sont dans les clous.</p></div></div>', 'plat')) +
+           '<p>Aucune alerte sur la caisse, les frigos, le nettoyage et les stocks.</p></div></div>', 'plat')) +
    
-       (ruptures.length ? '<div class="entete"><h3>Urgences</h3>' +
+       (ruptures.length ? '<div class="entete" id="urgences" style="scroll-margin-top:90px"><h3>Urgences</h3>' +
          '<button class="btn fantome sm pousse" id="tout-traite">Tout marquer traité</button></div>' +
          '<div class="stack">' + ruptures.slice().reverse().map(r => {
            const niv = RUPTURE.niveaux.filter(n => n.id === r.niveau)[0] || RUPTURE.niveaux[0];
@@ -3153,18 +3801,42 @@ function ouvrirPremierePeriode() {
        rendre('controle');
      });
    
+     $$('#page [data-ancre]').forEach(b => b.onclick = () => {
+       const c = document.getElementById(b.dataset.ancre);
+       if (c) c.scrollIntoView({ behavior:'smooth', block:'start' });
+     });
+
      const tt = $('#tout-traite');
      if (tt) tt.onclick = () => confirmer('Tout marquer traité ?',
        ruptures.length + ' rupture(s) seront classées. L’historique est conservé.', 'Tout traiter', async () => {
          const l = await DB.get('ruptures', []);
-         l.forEach(r => { if (!r.traite) { r.traite = true; r.traitePar = STATE.user.prenom; r.traiteAt = nowISO(); } });
+         const classees = l.filter(r => !r.traite);
+         classees.forEach(r => { r.traite = true; r.traitePar = STATE.user.prenom; r.traiteAt = nowISO(); });
          await DB.set('ruptures', l);
+         /* Comme « Traité » d'une seule rupture : une ligne au fil « En direct »,
+            sinon le classement en masse ne laissait aucune trace. */
+         if (classees.length) {
+           const noms = [...new Set(classees.map(r => r.article).filter(Boolean))];
+           await feed('ok', STATE.user.prenom + ' a traité ' + classees.length + ' rupture(s)' +
+             (noms.length ? ' : ' + noms.slice(0, 6).join(', ') + (noms.length > 6 ? '…' : '') : ''));
+         }
          toast('Urgences classées');
          rendre('controle');
        });
    
      $('#pdf').onclick = ouvrirBouclier;
      $('#scanbl').onclick = scannerBL;
+
+     /* Météo arrivée après le dessin (meteoRapide) : la carte est remplacée
+        ou ajoutée en tête de sa grille, sans redessiner la page. */
+     if (mt.suite) mt.suite.then(mm => {
+       const grille = document.getElementById('ctl-meteo');
+       if (!mm || !grille || STATE.view !== 'controle') return;
+       const w = grille.querySelector('.meteo');
+       const ancienne = w && w.closest('.card');
+       if (ancienne) ancienne.outerHTML = widgetMeteo(mm);
+       else grille.insertAdjacentHTML('afterbegin', widgetMeteo(mm));
+     });
    };
    
    const kpi = (k, v, cls, d) =>
@@ -3292,7 +3964,38 @@ function ouvrirPremierePeriode() {
    /* =============================================================================
       24. SCANNER BON DE LIVRAISON — Jetfreeze
       ========================================================================== */
+   /* Bon déjà compté dans les achats de la période : même numéro, casse
+      ignorée. Rend la ligne existante, sinon null. Un même bon saisi deux
+      fois doublait les achats, et l'écart lisait ensuite un manque de glace
+      qui n'existe pas. */
+   async function blDejaSaisi(per, numero) {
+     const e = await DB.get('ecart:' + per.id, {});
+     return ((e && Array.isArray(e.bl)) ? e.bl : [])
+       .filter(b => b && String(b.numero || '').trim().toUpperCase() === numero)[0] || null;
+   }
+   /* Le doublon est signalé dans la feuille, sans rien enregistrer ; un second
+      appui (« Ajouter quand même ») l'enregistre : deux bons distincts peuvent
+      porter le même numéro. */
+   function signalerDoublonBL(deja, numero, bouton) {
+     const quand = deja.date || String(deja.at || '').slice(0, 10);
+     $('#bl-doublon').innerHTML =
+       '<div class="alerte warn" style="margin-top:14px"><span class="ai">●</span><div>' +
+       '<b>Bon « ' + esc(numero) + ' » déjà compté</b><p>' + n1(num(deja.litres)) + ' L' +
+       (deja.par ? ', saisi par ' + esc(deja.par) : '') +
+       (/^\d{4}-\d{2}-\d{2}$/.test(quand) ? ' le ' + fmtD(quand) : '') +
+       '. S’il s’agit d’un autre bon, touchez « Ajouter quand même ».</p></div></div>';
+     $(bouton).textContent = 'Ajouter quand même';
+   }
+
    async function scannerBL() {
+     /* « Scanner BL » s'ouvre aussi depuis la Tour de contrôle, hors des vues
+        gardées par rendre() : période illisible, les litres partiraient sous
+        « ecart:attente », hors de la période de la boutique. */
+     const perLue = await periodeCourante();
+     if (perLue && perLue.id === 'attente') {
+       toast('Période indisponible : reconnectez l’iPad, puis réessayez', 'erreur');
+       return;
+     }
      const r = await scannerPhoto('bl');
      if (!r) return;
 
@@ -3300,16 +4003,56 @@ function ouvrirPremierePeriode() {
         ajouterait 0 litre aux achats : le stock théorique serait amputé de toute
         la livraison et l'écart accuserait l'équipe d'un manque qui n'existe pas. */
      if (!r.lignes || !r.lignes.length) {
+       /* Le scan lit le numéro du bon, pas son tableau : on demande le total
+          livré au lieu de s'arrêter. Avant, l'écran aboutissait toujours ici et
+          le bouton « Scanner BL » ne pouvait ajouter aucun achat. */
        showSheet(
-         '<h2 id="sheet-titre">Lignes non lisibles</h2>' +
-         '<p class="sub">' + esc(r.numero || 'Bon de livraison') + '</p>' +
-         '<div class="alerte bad"><span class="ai">▲</span><div><b>Aucune référence extraite</b>' +
-         '<p>Le scan sait lire un numéro, pas un tableau de références. Enregistrer ce bon ' +
-         'ajouterait 0 litre aux achats et créerait un écart fantôme de plusieurs centaines ' +
-         'd’euros, sans que rien ne le signale.</p></div></div>' +
+         '<h2 id="sheet-titre">Bon de livraison</h2>' +
+         '<p class="sub">Les lignes du bon ne se lisent pas automatiquement : indiquez le total livré.</p>' +
+         '<div class="grid g2">' +
+         '<div class="champ"><label class="f">N° de bon</label>' +
+         '<input type="text" id="bl-num" value="' + esc(r.numero || '') + '" autocapitalize="characters" spellcheck="false"></div>' +
+         '<div class="champ"><label class="f">Litres livrés (total du bon)</label>' +
+         '<input type="number" id="bl-litres" min="0" step="0.5" inputmode="decimal" placeholder="Ex. 120"></div></div>' +
+         '<div class="alerte info" style="margin-top:14px"><span class="ai">•</span><div><b>Ce que fait la validation</b>' +
+         '<p>Les litres s’ajoutent aux achats de la période en cours, base du calcul d’écart. ' +
+         'Un oubli ici se lit ensuite comme un manque de glace.</p></div></div>' +
+         '<div id="bl-doublon"></div>' +
          '<div class="actions"><button class="btn clair" data-fermer>Fermer</button>' +
-         '<button class="btn menthe" id="bl-manuel">Saisir la livraison</button></div>');
+         '<button class="btn menthe" id="bl-ajout">Ajouter aux achats</button></div>' +
+         '<button class="btn clair bloc" id="bl-manuel" style="margin-top:10px">Contrôle à réception</button>');
        $('#bl-manuel').onclick = () => { closeSheet(); rendre('reception'); };
+       let enCours = false, doublonVu = '';
+       /* Numéro modifié après l'alerte : le contrôle de doublon repart. */
+       $('#bl-num').oninput = () => {
+         doublonVu = '';
+         $('#bl-doublon').innerHTML = '';
+         $('#bl-ajout').textContent = 'Ajouter aux achats';
+       };
+       $('#bl-ajout').onclick = async () => {
+         const litres = num($('#bl-litres').value);
+         if (!(litres > 0)) { toast('Indiquez le nombre de litres livrés', 'erreur'); return $('#bl-litres').focus(); }
+         if (enCours) return;
+         enCours = true;
+         /* try / finally : une erreur (période, base) laissait enCours à true,
+            et « Ajouter aux achats » ne répondait plus jusqu'à la fermeture. */
+         try {
+           const numero = $('#bl-num').value.trim().toUpperCase() || 'sans numéro';
+           const per = await periodeCourante();
+           if (numero !== 'sans numéro' && doublonVu !== numero) {
+             const deja = await blDejaSaisi(per, numero);
+             if (deja) { doublonVu = numero; return signalerDoublonBL(deja, numero, '#bl-ajout'); }
+           }
+           await DB.patch('ecart:' + per.id, {},
+             { bl:[{ id:uid(), numero:numero, date:r.date || today(), bacs:null, litres:litres, lignes:[],
+                     saisie:'manuelle', par:STATE.user.prenom, at:nowISO() }] },
+             { litrageBL:litres });
+           await feed('ok', STATE.user.prenom + ' a saisi le BL ' + numero + ' (' + n1(litres) + ' L)');
+           closeSheet();
+           toast(n1(litres) + ' L ajoutés aux achats');
+           if (STATE.view === 'ecarts') rendre('ecarts');
+         } finally { enCours = false; }
+       };
        return;
      }
      const total = r.lignes.reduce((s, l) => s + l.bacs, 0);
@@ -3327,18 +4070,33 @@ function ouvrirPremierePeriode() {
          '<span class="c w num">' + (l.bacs * l.taille) + '</span></div>').join('') + '</div></div>' +
        '<div class="alerte info" style="margin-top:14px"><span class="ai">•</span><div><b>Ce que fait la validation</b>' +
        '<p>Les ' + n1(litres) + ' L s’ajoutent aux achats de la période en cours, base du calcul d’écart.</p></div></div>' +
+       '<div id="bl-doublon"></div>' +
        '<div class="actions"><button class="btn clair" data-fermer>Annuler</button>' +
        '<button class="btn menthe" id="bl-ok">Ajouter aux achats</button></div>');
    
+     let enCours = false, doublonVu = false;
      $('#bl-ok').onclick = async () => {
-       const per = await periodeCourante();
-       const e = await DB.get('ecart:' + per.id, {});
-       e.litrageBL = num(e.litrageBL) + litres;
-       e.bl = (e.bl || []).concat([{ numero:r.numero, date:r.date, bacs:total, litres:litres, lignes:r.lignes, par:STATE.user.prenom }]);
-       await DB.set('ecart:' + per.id, e);
-       await feed('ok', STATE.user.prenom + ' a saisi le BL ' + r.numero + ' (' + total + ' bacs)');
-       closeSheet();
-       toast(n1(litres) + ' L ajoutés aux achats');
+       /* Double appui, doublon et erreur : mêmes gardes que la saisie manuelle. */
+       if (enCours) return;
+       enCours = true;
+       try {
+         const per = await periodeCourante();
+         const numero = String(r.numero || '').trim().toUpperCase();
+         if (numero && !doublonVu) {
+           const deja = await blDejaSaisi(per, numero);
+           if (deja) { doublonVu = true; return signalerDoublonBL(deja, numero, '#bl-ok'); }
+         }
+         /* Écriture partielle : le bon s'ajoute à la liste (id unique) et son
+            litrage aux achats, sur la copie du serveur — pas d'objet entier qui
+            écraserait les ventes saisies entre-temps sur un autre iPad. */
+         await DB.patch('ecart:' + per.id, {},
+           { bl:[{ id:uid(), numero:r.numero, date:r.date, bacs:total, litres:litres, lignes:r.lignes,
+                   par:STATE.user.prenom, at:nowISO() }] },
+           { litrageBL:litres });
+         await feed('ok', STATE.user.prenom + ' a saisi le BL ' + r.numero + ' (' + total + ' bacs)');
+         closeSheet();
+         toast(n1(litres) + ' L ajoutés aux achats');
+       } finally { enCours = false; }
      };
    }
    
@@ -3393,7 +4151,11 @@ function ouvrirPremierePeriode() {
      $$('[data-s]').forEach(i => i.oninput = save);
    
      const ro = $('#ro');
-     if (ro) ro.onclick = async () => { rec.valide = false; await DB.set(cle, rec); rendre('inv'); };
+     /* Même confirmation que « Rouvrir » de l'onglet Glace : rouvrir rend les
+        chiffres modifiables et défait la validation signée. */
+     if (ro) ro.onclick = () => confirmer('Rouvrir l’inventaire sec ?',
+       'Les chiffres redeviennent modifiables jusqu’à une nouvelle validation.',
+       'Rouvrir', async () => { rec.valide = false; await DB.set(cle, rec); rendre('inv'); });
    
      const vs = $('#vs');
      if (vs) vs.onclick = async () => {
@@ -3475,50 +4237,59 @@ function ouvrirPremierePeriode() {
    V.ecarts = async function () {
      const per = await periodeCourante();
      const c = await calculEcart(per);
-     const st = etatEcart(c.pct);
      const inv = await DB.get('invglace:' + per.id, null);
      const e = await DB.get('ecart:' + per.id, {});
      const tendances = await analyserTendances(per);
    
-     const pos = Math.max(-25, Math.min(25, -c.pct));
-     const gauche = 50 + (pos / 25) * 50;
+     /* Synthèse et jauge en fonctions : la saisie d'un champ les met à jour
+        en place, sans redessiner la vue (voir plus bas). */
+     const kpis = c => {
+       const st = etatEcart(c.pct);
+       return kpi('Stock réel', n1(c.reel) + '<span class="u">kg</span>', '', c.invValide ? 'Inventaire validé' : 'Inventaire manquant') +
+         kpi('Stock théorique', n1(c.theo) + '<span class="u">kg</span>', '', 'Calculé') +
+         /* Écart arrondi à zéro : ni + ni −. « −0,0 kg » laissait croire à un manque. */
+         kpi('Écart', (Math.abs(c.ecart) < 0.05 ? '' : c.ecart > 0 ? '+' : '−') + n1(Math.abs(c.ecart)) + '<span class="u">kg</span>', st.c, st.t) +
+         kpi('Coût', eur(Math.abs(c.ecart) < 0.05 ? 0 : c.valeur), st.c, 'à ' + eur(FOURNISSEUR.prixMoyenKg) + '/kg');
+     };
+     const aiguille = c => 50 + (Math.max(-25, Math.min(25, -c.pct)) / 25) * 50;
+     const achatsTxt = (c, e) => n1(c.achats) + ' kg · ' + ((e.bl || []).length) + ' bon(s) scanné(s)';
+     const venduKpi = (c, e) => kpi('Poids vendu', n1(c.vendu) + '<span class="u">kg</span>',
+                                    c.vendu ? 'ok' : 'warn', e.venteSource || 'Aucun import');
    
      $('#vue-actions').innerHTML = '<button class="btn clair sm" id="sbl">Scanner BL</button>';
    
      $('#page').innerHTML =
        carte(entete('📊', libellePeriode(per), 'Stock théorique = début + achats − jeté − vendu.') +
-         '<div class="grid g4">' +
-         kpi('Stock réel', n1(c.reel) + '<span class="u">kg</span>', '', c.invValide ? 'Inventaire validé' : 'Inventaire manquant') +
-         kpi('Stock théorique', n1(c.theo) + '<span class="u">kg</span>', '', 'Calculé') +
-         kpi('Écart', (c.ecart > 0 ? '+' : '−') + n1(Math.abs(c.ecart)) + '<span class="u">kg</span>', st.c, st.t) +
-         kpi('Coût', eur(c.valeur), st.c, 'à ' + n2(FOURNISSEUR.prixMoyenKg) + ' €/kg') + '</div>' +
+         '<div class="grid g4" id="ec-kpi">' + kpis(c) + '</div>' +
          '<div class="ecart" style="margin-top:18px"><div class="piste">' +
          '<div class="cible" style="left:' + (50 - (SEUILS.ecartGlacePct / 25) * 50) + '%;width:' + ((SEUILS.ecartGlacePct * 2 / 25) * 50) + '%"></div>' +
-         '<div class="aig" style="left:' + gauche + '%"></div></div>' +
+         '<div class="aig" id="ec-aig" style="left:' + aiguille(c) + '%"></div></div>' +
          '<div class="lg"><span>−25 % manquant</span><span>objectif ±' + SEUILS.ecartGlacePct + ' %</span><span>+25 % surplus</span></div></div>', 'solide') +
    
        (c.invValide ? '' : '<div class="alerte bad" style="margin-top:12px"><span class="ai">▲</span>' +
          '<div><b>Inventaire glace non validé</b><p>Sans comptage réel, le stock de fin est inconnu et l’écart n’a aucune valeur. ' +
          'La période ne pourra pas être clôturée.</p></div>' +
-         '<span class="go"><button class="btn clair sm" data-go="inv">Compter</button></span></div>') +
+         /* « Compter » ouvrait l'ancien écran « Glace et sec », retiré du menu : il
+            alimentait l'écart mais pas les blocages de clôture, qui lisent
+            « Faire l'inventaire ». On envoie vers ce dernier, partie chambre
+            froide : son comptage sert aux deux. */
+         '<span class="go"><button class="btn clair sm" data-go="inventaire" data-partie="froid">Compter</button></span></div>') +
    
        '<div class="grid g2" style="margin-top:12px">' +
        carte(entete('📥', 'Achats de la période', 'Litrage cumulé des bons de livraison.') +
          '<div class="champ"><label class="f">Litrage total (L)</label>' +
          '<input type="number" step="0.1" id="bl" value="' + (e.litrageBL || '') + '"></div>' +
-         '<p class="mini" style="margin-top:10px">' + n1(c.achats) + ' kg · ' +
-         ((e.bl || []).length) + ' bon(s) scanné(s)</p>') +
+         '<p class="mini" id="ec-achats" style="margin-top:10px">' + achatsTxt(c, e) + '</p>') +
        carte(entete('🗑️', 'Pertes de la période', 'Reprises automatiquement du registre.') +
          '<div class="champ"><label class="f">Poids jeté (kg)</label>' +
          '<input type="number" step="0.01" id="jk" value="' + (e.jeteKg || '') + '"></div>' +
          '<p class="mini" style="margin-top:10px">' + n1(num(e.jeteL)) + ' L déclarés</p>') + '</div>' +
    
        carte(entete('🍦', 'Glace vendue', 'Poids sorti par la caisse sur la période. C’est la donnée qui pèse le plus dans l’écart.') +
-         '<button class="btn ciel bloc xl" id="imp-btn">Importer l’export de caisse (XLSX)</button>' +
-         '<input type="file" id="import-caisse" accept=".xlsx,.xls" hidden>' +
-         '<div class="grid g2" style="margin-top:16px">' +
-         kpi('Poids vendu', n1(c.vendu) + '<span class="u">kg</span>',
-             c.vendu ? 'ok' : 'warn', e.venteSource || 'Aucun import') +
+         '<button class="btn ciel bloc xl" id="imp-btn">Importer l’export de caisse (Excel ou CSV)</button>' +
+         /* .txt : l'export « Texte Unicode » (UTF-16) porte souvent cette extension. */
+         '<input type="file" id="import-caisse" accept=".xlsx,.xls,.csv,.txt,text/csv" hidden>' +
+         '<div class="grid g2" id="ec-vente" style="margin-top:16px">' + venduKpi(c, e) +
          '<div class="champ"><label class="f">Corriger à la main (kg)</label>' +
          '<input type="number" step="0.01" id="vd" value="' + (num(c.vendu) || '') + '" placeholder="0"></div></div>' +
          ((e.imports || []).length
@@ -3541,15 +4312,35 @@ function ouvrirPremierePeriode() {
              pastille(t.niveau, t.compte + '×') + '</div>', 'ambre')).join('') +
          '</div><p class="mini" style="margin-top:10px">' + esc(FRAUDE.avertissement) + '</p>' : '');
    
-     const sauver = debounce(async () => {
-       await DB.patch('ecart:' + per.id, {
-         litrageBL:$('#bl').value, jeteKg:$('#jk').value,
-         ventes:{ total:$('#vd').value },
-         venteSource:'Saisie manuelle · ' + STATE.user.prenom
-       });
-       rendre('ecarts');
-     }, 700);
-     ['#bl', '#jk', '#vd'].forEach(x => { const el = $(x); if (el) el.oninput = sauver; });
+     /* Chaque champ n'enregistre que SA valeur, et la vue n'est plus
+        redessinée pendant la frappe. Avant, une pause de 700 ms enregistrait
+        les trois champs puis redessinait tout l'écran : le champ perdait le
+        focus et la suite partait dans le vide (« 120 » tapé lentement était
+        enregistré « 1 ») ; et toucher au seul litrage réécrivait les ventes en
+        remplaçant la source « import de caisse » par « Saisie manuelle ». */
+     const majSynthese = async () => {
+       if (!$('#ec-kpi')) return;                       // vue quittée entre-temps
+       const c2 = await calculEcart(per);
+       const e2 = await DB.get('ecart:' + per.id, {});
+       if (!$('#ec-kpi')) return;
+       $('#ec-kpi').innerHTML = kpis(c2);
+       $('#ec-aig').style.left = aiguille(c2) + '%';
+       $('#ec-achats').textContent = achatsTxt(c2, e2);
+       const k = $('#ec-vente .kpi');
+       if (k) k.outerHTML = venduKpi(c2, e2);
+     };
+     const champs = {
+       '#bl': v => ({ litrageBL:v }),
+       '#jk': v => ({ jeteKg:v }),
+       '#vd': v => ({ ventes:{ total:v }, venteSource:'Saisie manuelle · ' + STATE.user.prenom })
+     };
+     Object.keys(champs).forEach(x => {
+       const el = $(x);
+       if (el) el.oninput = debounce(async () => {
+         await DB.patch('ecart:' + per.id, champs[x](el.value));
+         await majSynthese();
+       }, 700);
+     });
      $('#sbl').onclick = scannerBL;
    
      $('#imp-btn').onclick = () => $('#import-caisse').click();
@@ -3557,19 +4348,28 @@ function ouvrirPremierePeriode() {
        const f = ev.target.files && ev.target.files[0];
        ev.target.value = '';
        if (!f) return;
-       if (typeof XLSX === 'undefined') return toast('Librairie de lecture indisponible hors ligne', 'erreur');
-   
        showSheet('<h2 id="sheet-titre">Lecture de l’export</h2>' +
          '<p class="sub">' + esc(f.name) + '</p>' +
-         '<div class="vide">Analyse du fichier…</div>');
+         '<div class="vide" id="imp-analyse">Analyse du fichier…</div>');
+       /* XLSX peut mettre plusieurs secondes à arriver au premier import : la
+          personne a pu fermer cette fenêtre et en ouvrir une autre. On ne la
+          ferme pas, on ne la recouvre pas. On garde l'élément de CETTE
+          lecture : un second import lancé entre-temps pose le sien, du même id. */
+       const analyse = $('#imp-analyse');
+       const encoreLa = () => !$('#sheet').hidden && !!analyse && analyse.isConnected;
+       if (!(await chargerXLSX())) {
+         if (encoreLa()) closeSheet();
+         return toast('Lecture des fichiers de caisse indisponible : réessayez avec le réseau', 'erreur');
+       }
    
        let r;
        try { r = await lireExportCaisse(f); }
        catch (err) {
-         closeSheet();
+         if (encoreLa()) closeSheet();
          toast(err && err.message ? err.message : 'Fichier illisible', 'erreur');
          return;
        }
+       if (!encoreLa()) return;   // lecture abandonnée entre-temps
        confirmerImport(per, f.name, r);
      };
    };
@@ -3619,7 +4419,7 @@ function ouvrirPremierePeriode() {
        out.push({ icone:'', niveau:'n', compte:Math.round(pertesTotal),
                   titre:'Volume de pertes déclarées',
                   detail:n1(pertesTotal) + ' L jetés sur ' + FRAUDE.fenetreJours + ' jours, soit ' +
-                         n1(pertesTotal * FOURNISSEUR.poidsMoyenLitre * FOURNISSEUR.prixMoyenKg) + ' € de marchandise.' });
+                         eur(pertesTotal * FOURNISSEUR.poidsMoyenLitre * FOURNISSEUR.prixMoyenKg) + ' de marchandise.' });
      return out;
    }
    
@@ -3824,6 +4624,7 @@ function modifierPeriode(per) {
        '<div class="champ"><label class="f">Fin</label><input type="date" id="cl-f" value="' +
        finNaturelle(per.type, demain) + '"></div></div>' +
        '<p class="mini" id="cl-info" style="margin-top:10px"></p>' +
+       '<div id="cl-trou"></div>' +
    
        '<div class="actions"><button class="btn clair" data-fermer>Annuler</button>' +
        '<button class="btn menthe" id="cl-ok">Clôturer et ouvrir</button></div>');
@@ -3839,6 +4640,19 @@ function modifierPeriode(per) {
        $('#cl-info').textContent = 'La nouvelle fenêtre couvrira ' + n + ' jour(s). ' +
          'Tous les écarts et statistiques se recalculeront dessus.';
        $('#cl-dates').style.opacity = type === 'personnalise' ? '1' : '.85';
+       /* Un début choisi après demain laissait des jours hors de toute période,
+          sans rien dire : ni écart, ni statistiques pour eux, et l'écran
+          Périodes affichait ensuite « 0 jour(s) sur 7 ». On le signale et le
+          bouton le dit, sans l'interdire (fermeture saisonnière, congés). */
+       const debut = $('#cl-d').value;
+       const trou = debut > demain ? joursEntre(demain, addD(debut, -1)) : [];
+       $('#cl-trou').innerHTML = trou.length
+         ? '<div class="alerte warn" style="margin-top:10px"><span class="ai">●</span><div><b>' + trou.length +
+           ' jour(s) hors de toute période</b><p>Du ' + fmtD(trou[0]) + ' au ' + fmtD(trou[trou.length - 1]) +
+           ' : ces jours ne compteront dans aucun écart ni aucune statistique. ' +
+           'Pour enchaîner sans interruption, commencez le ' + fmtD(demain) + '.</p></div></div>'
+         : '';
+       $('#cl-ok').textContent = trou.length ? 'Clôturer malgré l’interruption' : 'Clôturer et ouvrir';
      };
      $$('#cl-type [data-t]').forEach(b => b.onclick = () => {
        $$('#cl-type .chip').forEach(x => x.classList.remove('on'));
@@ -4127,6 +4941,11 @@ function modifierPeriode(per) {
        });
      }
    
+     /* Le manager gère l'équipe ici : ajouter, corriger, changer un code,
+        retirer. L'écran n'affichait que des statistiques. */
+     const gere = !!(STATE.user && STATE.user.role === 'manager');
+     if (gere) $('#vue-actions').innerHTML = '<button class="btn menthe sm" id="eq-ajout">+ Ajouter</button>';
+
      $('#page').innerHTML =
        '<div class="stack">' + EQUIPE.map(e => {
          const p = parPersonne[e.id];
@@ -4137,14 +4956,145 @@ function modifierPeriode(per) {
            '<div class="mini">' + ROLES[e.role].label + ' · ' + p.jours + ' journée(s) sur 30' +
            (enCours ? ' · en service depuis ' + heure(enCours.debut) : '') + '</div></div>' +
            '<div style="text-align:right"><b class="num">' + h + '</b>' +
-           '<div class="mini">' + (feedTot[e.id] || 0) + ' action(s) / 14 j</div></div></div>',
+           '<div class="mini">' + (feedTot[e.id] || 0) + ' action(s) / 14 j</div></div></div>' +
+           (gere ? '<button class="btn clair bloc sm" data-eq="' + esc(e.id) + '" style="margin-top:12px">' +
+             'Modifier ' + esc(e.prenom) + '</button>' : ''),
            enCours ? 'menthe' : '');
        }).join('') + '</div>' +
    
        carte(entete('ℹ️', 'Ce que mesure cette page',
          'Le nombre d’actions compte les validations tracées, pas la qualité du travail. ' +
          'Une personne qui saisit peu peut travailler autant : à croiser avec le terrain avant d’en tirer une conclusion.'), 'plat');
+
+     if (gere) {
+       $('#eq-ajout').onclick = () => editerPersonne(null);
+       $$('[data-eq]').forEach(b => b.onclick = () => editerPersonne(EQUIPE.filter(e => e.id === b.dataset.eq)[0]));
+     }
    };
+
+   /* Écrit l'équipe après transformation. La liste est relue en base juste
+      avant, pour ne pas écraser une modification faite sur un autre iPad ;
+      sans base joignable, on n'écrit rien (comme à l'amorçage). */
+   async function modifierEquipe(transformer) {
+     const lu = await lireEquipeBase();
+     if (lu.etat === 'reseau') throw new Error('Connexion nécessaire pour modifier l’équipe. Réessayez.');
+     const source = (Array.isArray(lu.data) && lu.data.length) ? lu.data : EQUIPE;
+     const liste = await transformer(source.map(e => Object.assign({}, e)));
+     if (!liste.some(e => e.role === 'manager')) throw new Error('Il faut au moins un manager.');
+     await DB.set('equipe', liste);
+     EQUIPE.splice(0, EQUIPE.length, ...liste.filter(ficheValide));
+     return liste;
+   }
+
+   /* Pose un nouveau code sur une fiche, haché ou non selon PIN_HACHAGE —
+      la même règle qu'à l'amorçage ; l'ancien code (clair ou haché) disparaît. */
+   async function ficheAvecCode(fiche, pin) {
+     const f = Object.assign({}, fiche, { pin:pin });
+     delete f.pinH; delete f.sel;
+     return (PIN_HACHAGE && pinHachable()) ? fichePinHachee(f) : f;
+   }
+
+   function editerPersonne(e) {
+     if (!STATE.user || STATE.user.role !== 'manager') return;
+     const neuf = !e;
+     const moi = !neuf && e.id === STATE.user.id;
+     const champCode = (id, libelle) =>
+       '<div class="champ"><label class="f">' + libelle + '</label>' +
+       '<input type="password" id="' + id + '" inputmode="numeric" pattern="[0-9]*" maxlength="4" autocomplete="new-password"></div>';
+     showSheet(
+       '<h2 id="sheet-titre">' + (neuf ? 'Ajouter une personne' : 'Modifier ' + esc(e.prenom)) + '</h2>' +
+       '<p class="sub">' + (neuf ? 'Elle apparaîtra sur l’écran des prénoms de chaque iPad.'
+                                 : 'Laissez le code vide pour garder le code actuel.') + '</p>' +
+       '<div class="champ" style="margin-top:14px"><label class="f">Prénom</label>' +
+       '<input type="text" id="eq-prenom" maxlength="20" autocapitalize="words" value="' + esc(neuf ? '' : e.prenom) + '"></div>' +
+       '<div class="champ" style="margin-top:12px"><label class="f">Rôle</label>' +
+       '<select id="eq-role"' + (moi ? ' disabled' : '') + '>' +
+       '<option value="equipe"' + (!neuf && e.role === 'equipe' ? ' selected' : '') + '>Équipier</option>' +
+       '<option value="manager"' + (!neuf && e.role === 'manager' ? ' selected' : '') + '>Manager</option></select>' +
+       (moi ? '<p class="mini" style="margin-top:6px">Votre propre rôle se change depuis la session d’un autre manager.</p>' : '') +
+       '</div>' +
+       '<div class="grid g2" style="margin-top:12px">' +
+       champCode('eq-pin', neuf ? 'Code à 4 chiffres' : 'Nouveau code') + champCode('eq-pin2', 'Retaper le code') + '</div>' +
+       '<div class="actions"><button class="btn clair" data-fermer>Annuler</button>' +
+       '<button class="btn menthe" id="eq-ok">Enregistrer</button></div>' +
+       (neuf || moi ? '' : '<button class="btn fantome bloc" id="eq-retirer" style="margin-top:8px">Retirer de l’équipe</button>'));
+
+     $('#eq-ok').onclick = async () => {
+       const prenom = $('#eq-prenom').value.trim().replace(/\s+/g, ' ');
+       const role = moi ? e.role : $('#eq-role').value;
+       const pin = $('#eq-pin').value.trim(), pin2 = $('#eq-pin2').value.trim();
+       if (!prenom) return toast('Le prénom est obligatoire', 'erreur');
+       if (neuf || pin || pin2) {
+         if (!/^\d{4}$/.test(pin)) return toast('Le code doit faire 4 chiffres', 'erreur');
+         if (pin !== pin2) return toast('Les deux codes ne correspondent pas', 'erreur');
+       }
+       const changements = [];
+       if (!neuf) {
+         if (prenom !== e.prenom) changements.push('prénom ' + e.prenom + ' → ' + prenom);
+         if (role !== e.role) changements.push('rôle ' + ROLES[role].label);
+         if (pin) changements.push('nouveau code');
+         if (!changements.length) { closeSheet(); return toast('Aucun changement'); }
+       }
+       $('#eq-ok').disabled = true;
+       try {
+         await modifierEquipe(async liste => {
+           const autres = neuf ? liste : liste.filter(x => x.id !== e.id);
+           if (autres.some(x => String(x.prenom || '').trim().toLowerCase() === prenom.toLowerCase()))
+             throw new Error('« ' + prenom + ' » existe déjà : ajoutez une initiale (ex. ' + prenom + ' B.)');
+           /* Même règle qu'à l'amorçage : deux personnes, deux codes. */
+           if (pin) for (const x of autres) if (await pinCorrect(x, pin)) throw new Error('Ce code est déjà utilisé : choisissez-en un autre');
+           let fiche;
+           if (neuf) {
+             /* Identifiant jamais réutilisé. Le numéro suivait le plus grand id
+                restant : après le retrait de Nina (e3), Paul recevait e3, et
+                l'iPad où Nina était connectée se rouvrait sous le nom de Paul,
+                manager, sans code ; Paul héritait aussi de ses actions. */
+             let id = 'e' + uid();
+             while (liste.some(x => x.id === id)) id = 'e' + uid();
+             fiche = { id:id, prenom:prenom, role:role, couleur:COULEURS_EQUIPE[liste.length % COULEURS_EQUIPE.length],
+                       initiales:prenom.slice(0, 2).toUpperCase() };
+           } else {
+             const ancienne = liste.filter(x => x.id === e.id)[0];
+             if (!ancienne) throw new Error(e.prenom + ' a été retiré(e) de l’équipe sur un autre appareil');
+             fiche = Object.assign({}, ancienne, { prenom:prenom, role:role,
+               initiales:prenom === ancienne.prenom ? ancienne.initiales : prenom.slice(0, 2).toUpperCase() });
+           }
+           if (pin) fiche = await ficheAvecCode(fiche, pin);
+           return neuf ? liste.concat([fiche]) : liste.map(x => x.id === fiche.id ? fiche : x);
+         });
+       } catch (err) {
+         if ($('#eq-ok')) $('#eq-ok').disabled = false;
+         return toast(err && err.message ? err.message : 'Enregistrement impossible', 'erreur');
+       }
+       /* Jamais le code dans le journal : seulement le fait qu'il a changé. */
+       if (neuf) await feed('ok', STATE.user.prenom + ' a ajouté ' + prenom + ' à l’équipe (' + ROLES[role].label + ')');
+       else await feed(pin || role !== e.role ? 'warn' : 'ok',
+         STATE.user.prenom + ' a modifié la fiche de ' + prenom + ' : ' + changements.join(', '));
+       if (moi) {
+         STATE.user.prenom = prenom;
+         STATE.user.initiales = (EQUIPE.filter(x => x.id === e.id)[0] || {}).initiales || STATE.user.initiales;
+         majBoutonCompte();
+       }
+       closeSheet();
+       toast(neuf ? prenom + ' ajouté(e) à l’équipe' : 'Fiche de ' + prenom + ' enregistrée');
+       rendre('equipe');
+     };
+
+     const rt = $('#eq-retirer');
+     if (rt) rt.onclick = () => confirmer('Retirer ' + e.prenom + ' de l’équipe ?',
+       'Son prénom disparaît de l’écran de connexion et son code ne fonctionne plus. ' +
+       'Ce qu’elle ou il a déjà saisi reste dans les registres.',
+       'Retirer', async () => {
+         try {
+           await modifierEquipe(async liste => liste.filter(x => x.id !== e.id));
+         } catch (err) { return toast(err && err.message ? err.message : 'Retrait impossible', 'erreur'); }
+         await feed('warn', STATE.user.prenom + ' a retiré ' + e.prenom + ' de l’équipe');
+         toast(e.prenom + ' retiré(e) de l’équipe');
+         rendre('equipe');
+       },
+       /* « Annuler » revient à la fiche au lieu de tout fermer. */
+       () => editerPersonne(e));
+   }
    
    /* =============================================================================
       31. RÉGLAGES
@@ -4176,16 +5126,83 @@ function modifierPeriode(per) {
      '71111':50
    };
    
+   /* XLSX n'est chargé qu'au premier import de caisse : exécuté à chaque
+      démarrage, il retardait la liste des prénoms d'environ 600 ms sur iPad.
+      Le service worker le garde en cache : le chargement marche hors ligne.
+      Un seul chargement à la fois ; un échec permet un nouvel essai. */
+   let _xlsx = null;
+   function chargerXLSX() {
+     if (typeof XLSX !== 'undefined') return Promise.resolve(true);
+     if (!_xlsx) _xlsx = new Promise(resolve => {
+       const s = document.createElement('script');
+       s.src = 'vendor/xlsx.full.min.js';
+       const echec = () => { _xlsx = null; s.remove(); resolve(false); };
+       s.onload = () => (typeof XLSX !== 'undefined' ? resolve(true) : echec());
+       s.onerror = echec;
+       document.head.appendChild(s);
+     });
+     return _xlsx;
+   }
+
+   /* Ouvre l'export quel que soit son format. Avant, tout passait par XLSX.read
+      en binaire : un CSV enregistré en UTF-8 y était lu en Latin-1 (« QtÃ© »,
+      d'où « Aucune colonne de quantité »), ses décimales à virgule devenaient
+      des centaines (« 1,25 » → 125), et une photo ou un PDF choisi par erreur
+      finissait en « Aucune ligne de vente » au lieu de « fichier illisible ». */
+   const IMPORT_ILLISIBLE = 'Fichier illisible : choisissez l’export des ventes de la caisse (.xlsx, .xls ou .csv).';
+   function lireClasseur(o) {
+     const illisible = () => Object.assign(new Error(IMPORT_ILLISIBLE), { illisible:true });
+     const commencePar = (...sig) => sig.every((x, i) => o[i] === x);
+     /* Vrais classeurs : .xlsx (zip) et .xls (OLE), lecture binaire comme avant. */
+     if (commencePar(0x50, 0x4B, 0x03, 0x04) || commencePar(0xD0, 0xCF, 0x11, 0xE0))
+       return XLSX.read(o, { type:'array' });
+     if (!o.length || commencePar(0x25, 0x50, 0x44, 0x46)) throw illisible();          // vide, PDF
+     /* Sinon du texte : CSV, ou tableau HTML que certaines caisses nomment .xls.
+        UTF-8 d'abord, Windows-1252 (CSV d'Excel en français) à défaut.
+        « Texte Unicode » d'Excel et de certaines caisses : UTF-16 annoncé par
+        son BOM (FF FE, ou FE FF). Lu en Windows-1252, chaque caractère sortait
+        suivi d'un caractère nul et le contrôle ci-dessous refusait le fichier,
+        alors que l'ancienne lecture (XLSX.read) l'acceptait. */
+     let texte;
+     if (commencePar(0xFF, 0xFE) || commencePar(0xFE, 0xFF)) {
+       try { texte = new TextDecoder(o[0] === 0xFF ? 'utf-16le' : 'utf-16be').decode(o); }
+       catch (e) { throw illisible(); }
+     } else {
+       try { texte = new TextDecoder('utf-8', { fatal:true }).decode(o); }
+       catch (e) {
+         try { texte = new TextDecoder('windows-1252').decode(o); }
+         catch (e2) { texte = Array.from(o, c => String.fromCharCode(c)).join(''); }
+       }
+     }
+     texte = texte.replace(/^\ufeff/, '');
+     const echantillon = texte.slice(0, 4000);
+     const binaires = (echantillon.match(/[\u0000-\u0008\u000e-\u001f]/g) || []).length;
+     if (binaires > echantillon.length / 100) throw illisible();                        // photo, archive…
+     if (/^\s*</.test(texte)) return XLSX.read(texte, { type:'string', raw:true });
+     /* Séparateur : la ligne « sep=; » d'Excel, sinon celui qui domine la
+        première ligne ; point-virgule par défaut, pour ne pas couper « 12,5 ». */
+     let sep = null;
+     const m = /^sep=(.)\r?\n/i.exec(texte);
+     if (m) { sep = m[1]; texte = texte.slice(m[0].length); }
+     if (!sep) {
+       const ligne = texte.split(/\r?\n/).filter(l => l.trim())[0] || '';
+       const compte = c => ligne.split(c).length - 1;
+       sep = [';', '\t', ','].reduce((a, c) => compte(c) > compte(a) ? c : a, ';');
+     }
+     /* raw : les cellules restent du texte, que num() lit à la française. */
+     return XLSX.read(texte, { type:'string', raw:true, FS:sep });
+   }
+
    function lireExportCaisse(file) {
      return new Promise((resolve, reject) => {
        const fr = new FileReader();
    
-       fr.onerror = () => reject(new Error('Fichier illisible'));
+       fr.onerror = () => reject(new Error(IMPORT_ILLISIBLE));
    
        fr.onload = ev => {
          let wb;
-         try { wb = XLSX.read(new Uint8Array(ev.target.result), { type:'array' }); }
-         catch (e) { return reject(new Error('Ce fichier n’est pas un classeur Excel valide')); }
+         try { wb = lireClasseur(new Uint8Array(ev.target.result)); }
+         catch (e) { return reject(new Error(IMPORT_ILLISIBLE)); }
    
          const feuille = wb.Sheets[wb.SheetNames[0]];
          if (!feuille) return reject(new Error('Classeur vide'));
@@ -4297,7 +5314,7 @@ function modifierPeriode(per) {
    
        '<div class="grid g2" style="margin:14px 0">' +
        kpi('Poids vendu', n1(r.kg) + '<span class="u">kg</span>', r.fiable ? 'ok' : 'warn', r.lignes + ' ligne(s)') +
-       kpi('Valeur', eur(r.kg * FOURNISSEUR.prixMoyenKg), '', 'à ' + n2(FOURNISSEUR.prixMoyenKg) + ' €/kg') + '</div>' +
+       kpi('Valeur', eur(r.kg * FOURNISSEUR.prixMoyenKg), '', 'à ' + eur(FOURNISSEUR.prixMoyenKg) + '/kg') + '</div>' +
    
        (r.detail.length
          ? '<div class="dense"><div class="dense-h"><span class="c1">Détail</span><span class="c w">Poids</span></div>' +
@@ -4317,14 +5334,14 @@ function modifierPeriode(per) {
        '<button class="btn menthe" id="imp-ok">Enregistrer ' + n1(r.kg) + ' kg</button></div>');
    
      $('#imp-ok').onclick = async () => {
-       const e = await DB.get('ecart:' + per.id, {});
-       e.ventes = { total:+n2(r.kg) };
-       e.venteSource = r.methode + (r.fiable ? '' : ' · approximatif');
-       e.imports = (e.imports || []).concat([{
-         fichier:fichier, kg:+n2(r.kg), lignes:r.lignes, methode:r.methode,
-         fiable:r.fiable, inconnus:r.inconnus.length, par:STATE.user.prenom, at:nowISO()
-       }]);
-       await DB.set('ecart:' + per.id, e);
+       /* Écriture partielle : seules les ventes et la ligne d'import partent,
+          appliquées sur la copie du serveur (voir DB.patch). */
+       await DB.patch('ecart:' + per.id,
+         { ventes:{ total:+n2(r.kg) }, venteSource:r.methode + (r.fiable ? '' : ' · approximatif') },
+         { imports:[{
+           id:uid(), fichier:fichier, kg:+n2(r.kg), lignes:r.lignes, methode:r.methode,
+           fiable:r.fiable, inconnus:r.inconnus.length, par:STATE.user.prenom, at:nowISO()
+         }] });
        await feed('ok', STATE.user.prenom + ' a importé les ventes : ' + n1(r.kg) + ' kg (' + r.lignes + ' lignes)');
        closeSheet();
        toast(n1(r.kg) + ' kg enregistrés');

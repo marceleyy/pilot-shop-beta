@@ -51,26 +51,30 @@ function enregistrerSession(s) {
 
 /* --- Appels d'authentification -------------------------------------------- */
 async function appelAuth(chemin, corps) {
-  /* Délai borné : un renouvellement bloque tous les appels à la base, et le
-     Wi-Fi de la boutique peut traîner sans être coupé. */
+  /* Délai maximum. Sans lui, un Wi-Fi connecté mais sans Internet laissait le
+     renouvellement du jeton pendu, et avec lui toutes les lectures, qui
+     attendent ce jeton : après une nuit (jeton expiré), la liste des prénoms
+     restait vide et personne ne pouvait travailler hors ligne. */
   const ctrl = new AbortController();
   const to = setTimeout(() => ctrl.abort(), OFFLINE.timeoutReseauMs);
-  let r;
   try {
-    r = await fetch(SUPABASE.url + '/auth/v1' + chemin, {
+    const r = await fetch(SUPABASE.url + '/auth/v1' + chemin, {
       method: 'POST',
       headers: { 'apikey': SUPABASE.anonKey, 'Content-Type': 'application/json' },
       body: JSON.stringify(corps),
       signal: ctrl.signal
     });
+    /* Corps illisible, ou coupé par le délai : sur une réponse 200, c'est un
+       échec, pas une session vide. Mémorisée telle quelle, elle effaçait les
+       jetons, et l'appareil devait être rattaché à nouveau. */
+    const d = await r.json().catch(e => { if (r.ok) throw e; return {}; });
+    if (!r.ok) {
+      const e = new Error(d.error_description || d.msg || d.message || ('HTTP ' + r.status));
+      e.statut = r.status;
+      throw e;
+    }
+    return d;
   } finally { clearTimeout(to); }
-  const d = await r.json().catch(() => ({}));
-  if (!r.ok) {
-    const e = new Error(d.error_description || d.msg || d.message || ('HTTP ' + r.status));
-    e.statut = r.status;
-    throw e;
-  }
-  return d;
 }
 
 function memoriser(d) {
@@ -137,6 +141,12 @@ async function jetonValide() {
   if (_renouvellementEnCours) {
     const s = await _renouvellementEnCours;
     if (s) return s.access_token;
+    /* Raté : on n'en relance pas un autre aussitôt. Sinon chaque appel qui
+       attendait repartait pour 8 s de plus (hors ligne, jeton expiré :
+       renouvellements en chaîne) ; et après un refus (400/401), _session
+       est nul : la suite levait une TypeError, prise pour une panne réseau. */
+    return (_session && _session.expires_at - Date.now() > AUTH.margeRenouvellementSec * 1000)
+      ? _session.access_token : null;
   }
   const reste = _session.expires_at - Date.now();
   const encoreValide = reste > AUTH.margeRenouvellementSec * 1000;
@@ -173,13 +183,18 @@ function ecranRattachement() {
       '<h2>Rattacher cet appareil</h2>' +
       '<div class="cs">À faire une seule fois. Ensuite, l’équipe se connecte ' +
       'simplement avec son prénom et son code.</div>' +
-      '<div class="champ" style="margin-top:16px"><label class="f">Compte de la boutique</label>' +
+      /* Un vrai formulaire : la touche Entrée valide, comme partout ailleurs.
+         Le texte d'exemple ne montre plus le format réel de l'identifiant du
+         compte boutique : la page est publique. */
+      '<form id="rt-form" novalidate>' +
+      '<div class="champ" style="margin-top:16px"><label class="f" for="rt-mail">Compte de la boutique</label>' +
       '<input type="email" id="rt-mail" autocapitalize="none" autocomplete="username" ' +
-      'spellcheck="false" placeholder="paccard@pilot-shop.local"></div>' +
-      '<div class="champ" style="margin-top:14px"><label class="f">Mot de passe</label>' +
+      'spellcheck="false" placeholder="adresse e-mail du compte boutique"></div>' +
+      '<div class="champ" style="margin-top:14px"><label class="f" for="rt-mdp">Mot de passe</label>' +
       '<input type="password" id="rt-mdp" autocomplete="current-password"></div>' +
-      '<button class="btn menthe bloc xl" id="rt-ok" style="margin-top:18px">Rattacher</button>' +
-      '<p class="mini" id="rt-etat" style="text-align:center;margin-top:14px"></p>' +
+      '<button type="submit" class="btn menthe bloc xl" id="rt-ok" style="margin-top:18px">Rattacher</button>' +
+      '</form>' +
+      '<p class="mini" id="rt-etat" role="status" style="text-align:center;margin-top:14px"></p>' +
       '</div>' +
       '<p class="mini" style="text-align:center;margin-top:18px">Ces identifiants ' +
       'sont ceux de la boutique, pas les vôtres. Demandez-les à votre manager.</p>' +
@@ -189,7 +204,9 @@ function ecranRattachement() {
     const etat = m => { const e = d.querySelector('#rt-etat'); if (e) e.textContent = m; };
     const bouton = d.querySelector('#rt-ok');
 
-    bouton.onclick = async () => {
+    d.querySelector('#rt-form').onsubmit = ev => { ev.preventDefault(); if (!bouton.disabled) bouton.onclick(); };
+    bouton.onclick = async ev => {
+      if (ev) ev.preventDefault();
       const mail = d.querySelector('#rt-mail').value.trim();
       const mdp = d.querySelector('#rt-mdp').value;
       if (!mail || !mdp) return etat('Renseignez les deux champs.');
@@ -206,8 +223,11 @@ function ecranRattachement() {
         resolve(true);
       } catch (e) {
         bouton.disabled = false;
+        /* Messages en français : « Failed to fetch » ne disait rien à l'équipe. */
         etat(e.statut === 400 ? 'Identifiants refusés.'
-           : 'Échec : ' + e.message + '. Vérifiez la connexion.');
+           : e.statut === 429 ? 'Trop d’essais : patientez une minute avant de réessayer.'
+           : e.statut ? 'La base refuse le rattachement (erreur ' + e.statut + '). Réessayez plus tard.'
+           : 'Base injoignable. Vérifiez le Wi-Fi, puis réessayez.');
       }
     };
   });

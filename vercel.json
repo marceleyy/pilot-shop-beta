@@ -3,6 +3,9 @@
   "buildCommand": "node scripts/env.cjs",
   "outputDirectory": ".",
   "framework": null,
+  "redirects": [
+    { "source": "/scripts/:chemin*", "destination": "/", "permanent": false }
+  ],
   "headers": [
     {
       "source": "/(.*)",
@@ -10,6 +13,7 @@
         { "key": "X-Content-Type-Options", "value": "nosniff" },
         { "key": "Referrer-Policy", "value": "strict-origin-when-cross-origin" },
         { "key": "X-Frame-Options", "value": "DENY" },
+        { "key": "Content-Security-Policy", "value": "default-src 'self'; script-src 'self' 'wasm-unsafe-eval' 'unsafe-eval'; worker-src 'self' blob:; child-src 'self' blob:; connect-src 'self' https://*.supabase.co https://api.open-meteo.com; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; font-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'" },
         { "key": "Permissions-Policy", "value": "camera=(self), microphone=(self), geolocation=()" }
       ]
     },

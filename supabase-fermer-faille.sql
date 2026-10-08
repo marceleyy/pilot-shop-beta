@@ -1,4 +1,18 @@
 -- =============================================================================
+-- AVERTISSEMENT — À LIRE PAR LE PROPRIÉTAIRE AVANT TOUTE EXÉCUTION (ACC-08)
+-- Ce script est HISTORIQUE. Son bloc 2 pose la politique « p_appli » :
+-- « to authenticated using (true) » = tout compte connecté lit et écrit TOUT,
+-- sans isolation par boutique. Or l'inscription publique Supabase est ouverte :
+-- n'importe qui peut se créer un compte et obtenir cet accès.
+-- La correction est la politique par boutique (bloc 5 de
+-- supabase-multi-boutiques.sql, PR #1), qui remplace p_appli. NE RELANCEZ PAS
+-- le bloc 2 ci-dessous une fois ce bloc 5 appliqué : les politiques s'ajoutent
+-- (OU logique), p_appli rouvrirait l'accès à tout compte authentifié.
+-- Actions hors code, réservées au propriétaire : lancer le bloc 5, puis fermer
+-- l'inscription publique (réglage « Allow new users to sign up » de la partie
+-- Authentication du tableau de bord Supabase). Aucune requête n'a été exécutée
+-- depuis ce dépôt.
+-- =============================================================================
 -- PILOT-SHOP — fermer la faille
 --
 -- Trois blocs. Lancez-les UN PAR UN, dans l'ordre, en vérifiant le résultat de
