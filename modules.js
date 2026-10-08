@@ -1266,38 +1266,46 @@ V.caisse = async function () {
       verdict();
     });
     if ($('#cv')) $('#cv').onclick = async () => {
-      const p = mom + '_';
-      const requis = (mom === 'm') ? ['m_fond'] : ['s_cb', 's_esp', 's_tpe', 's_retrait', 's_fond'];
+      /* Moment et montants pris au clic : la relecture ci-dessous peut durer
+         8 s, et l'équipier peut entre-temps changer d'onglet, de jour ou
+         d'écran. Relus après, c'était l'autre onglet qui était signé, et les
+         montants affichés (ceux de la veille) partaient sous ce jour. */
+      const mo = mom, p = mo + '_';
+      const requis = (mo === 'm') ? ['m_fond'] : ['s_cb', 's_esp', 's_tpe', 's_retrait', 's_fond'];
       const vides = requis.filter(k => r[k] === undefined || r[k] === '');
-      if (vides.length) return toast(mom === 'm'
+      if (vides.length) return toast(mo === 'm'
         ? 'Renseignez le fond de caisse initial'
         : 'Renseignez tous les montants du soir', 'erreur');
+      champsSaisie().forEach(i => { r[i.dataset.k] = i.value; });
       /* Écran ouvert avant une validation ou une correction faite sur un autre
-         iPad : la fusion refuserait cette validation sans rien dire, et le fil
-         annoncerait quand même « a validé ». L'équipier relit d'abord la fiche. */
+         iPad : la fusion refuserait cette validation (correction en cours) ou la
+         laisserait remplacer celle du collègue (comptage validé), sans rien dire,
+         et le fil annoncerait « a validé ». L'équipier relit d'abord la fiche. */
       if (STATE.user.role !== 'manager') {
-        $('#cv').disabled = true;
+        const bouton = $('#cv');
+        bouton.disabled = true; bouton.textContent = 'Vérification…';
         const frais = await DB.get('caisse:' + j, null);
         const sig = frais && (frais[p + 'valide'] || frais[p + 'avant']);
         if (sig) {
           toast(frais[p + 'valide']
             ? 'Comptage déjà validé par ' + (sig.par || 'un collègue') + ' : seul le manager peut le modifier'
             : 'Comptage en cours de correction par le manager', 'erreur');
-          return rendre('caisse');
+          /* Parti entre-temps sur un autre onglet, un autre jour ou un autre
+             écran : le message suffit, on ne l'en arrache pas. */
+          return bouton.isConnected ? rendre('caisse') : undefined;
         }
       }
       /* Revalidation d'un comptage déjà signé, corrigé ou non : l'ancienne
          signature et les anciens montants vont au journal et restent dans la
          fiche (p_corrections), au lieu d'être écrasés sans trace. */
       const avant = r[p + 'avant'] ||
-        (r[p + 'valide'] ? Object.assign({ valeurs:instantane(mom) }, r[p + 'valide']) : null);
-      r[mom + '_valide'] = { par:STATE.user.prenom, id:STATE.user.id, at:nowISO() };
-      champsSaisie().forEach(i => { r[i.dataset.k] = i.value; });
+        (r[p + 'valide'] ? Object.assign({ valeurs:instantane(mo) }, r[p + 'valide']) : null);
+      r[mo + '_valide'] = { par:STATE.user.prenom, id:STATE.user.id, at:nowISO() };
       let correction = '';
       if (avant) {
-        const apres = instantane(mom), av = avant.valeurs || {};
+        const apres = instantane(mo), av = avant.valeurs || {};
         const change = k => k === p + 'com' ? (av[k] || '') !== (apres[k] || '') : num(av[k]) !== num(apres[k]);
-        const diffs = champsMoment(mom).filter(change).map(k =>
+        const diffs = champsMoment(mo).filter(change).map(k =>
           k === p + 'com' ? 'commentaire modifié'
             : LIBELLES_CAISSE[k] + ' ' + eur(num(av[k])) + ' → ' + eur(num(apres[k])));
         correction = ' — déjà validé par ' + (avant.par || '?') + (avant.at ? ' à ' + heure(avant.at) : '') +
@@ -1309,7 +1317,7 @@ V.caisse = async function () {
       }
       /* Le tableau de bord, l'historique et les tendances lisent encore
          ecart / par : sans eux, chaque soir s'affichait à 0 €, sans écart. */
-      if (mom === 's') {
+      if (mo === 's') {
         const fondOuv = (r.m_fond !== undefined && r.m_fond !== '') ? num(r.m_fond)
                       : (fondVeille !== null ? fondVeille : null);
         /* ecart garde son ancien sens : carte + espèces, comme les fiches
@@ -1322,7 +1330,7 @@ V.caisse = async function () {
       }
       await DB.set('caisse:' + j, r);
       await feed(avant ? 'warn' : 'ok', STATE.user.prenom + (avant ? ' a revalidé' : ' a validé') + ' le comptage ' +
-        (mom === 'm' ? 'd’ouverture' : 'de fermeture') + correction);
+        (mo === 'm' ? 'd’ouverture' : 'de fermeture') + correction);
       toast('Comptage validé');
       /* Le manager revient à sa Tour de contrôle, pas à la vue équipier. */
       rendre(vueAccueil());
