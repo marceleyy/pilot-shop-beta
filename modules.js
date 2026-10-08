@@ -943,7 +943,17 @@ V.caisse = async function () {
      une personne qui compte sa caisse ne doit pas tout retaper pour autant. */
   try {
     const brouillon = JSON.parse(localStorage.getItem('pilotshop.v3:brouillon:caisse:' + j) || 'null');
+    /* Le brouillon ne complète un moment que s'il a été tapé sous la même
+       signature. Arrêté par le pré-contrôle, le manager voyait sinon la
+       validation de Lucas avec son propre commentaire, repris du brouillon,
+       et sa correction l'archivait comme celui de Lucas. */
+    const signature = (o, m) => (o[m + '_valide'] && o[m + '_valide'].at) ||
+      (o[m + '_avant'] && 'avant ' + o[m + '_avant'].at) || '';
+    const momentDe = k => /^m_/.test(k) ? 'm'
+      : (/^s_/.test(k) || CHAMPS_CAISSE_SOIR.indexOf(k) >= 0) ? 's' : null;
     if (brouillon) Object.keys(brouillon).forEach(k => {
+      const m = momentDe(k);
+      if (m && signature(brouillon, m) !== signature(r, m)) return;
       if (r[k] === undefined || r[k] === '') r[k] = brouillon[k];
     });
   } catch (e) {}
@@ -1214,10 +1224,11 @@ V.caisse = async function () {
   const champsSaisie = () =>
     $$('#page input[data-k], #page textarea[data-k], #page select[data-k]');
 
-  const sauver = debounce(async () => {
-    champsSaisie().forEach(i => { r[i.dataset.k] = i.value; });
-    await DB.set('caisse:' + j, r);
-  }, 400);
+  /* r est tenu à jour par oninput : l'enregistrement différé ne relit plus
+     l'écran. 400 ms après la frappe, #page pouvait montrer un autre jour :
+     « Jour précédent » touché aussitôt, le fond de la veille (999 €) partait
+     sous aujourd'hui, prêt à être validé. */
+  const sauver = debounce(() => DB.set('caisse:' + j, r), 400);
 
   /* Un comptage déjà validé ne se corrige que par le manager. Un équipier le
      réécrivait sans trace : signature et montants d'origine perdus, journal
@@ -1271,29 +1282,75 @@ V.caisse = async function () {
          d'écran. Relus après, c'était l'autre onglet qui était signé, et les
          montants affichés (ceux de la veille) partaient sous ce jour. */
       const mo = mom, p = mo + '_';
+      /* L'écran d'abord, puis le contrôle des champs vides : une fiche à
+         anciennes clés (fi, cb, tpe…) s'affiche remplie sans que r le soit, et
+         sauver ne recopie plus l'écran. « Renseignez… » arrêtait alors une
+         validation dont tous les montants étaient à l'écran. Avant le
+         contrôle, seuls les champs remplis : un champ vide recopié ('') partait
+         avec la frappe suivante et effaçait, à la fusion, le montant saisi
+         entre-temps sur un autre iPad (vérifié : CB 300 de Lucas effacé par un
+         commentaire de Marie après « Renseignez… »). */
+      champsSaisie().forEach(i => { if (i.value !== '') r[i.dataset.k] = i.value; });
       const requis = (mo === 'm') ? ['m_fond'] : ['s_cb', 's_esp', 's_tpe', 's_retrait', 's_fond'];
       const vides = requis.filter(k => r[k] === undefined || r[k] === '');
       if (vides.length) return toast(mo === 'm'
         ? 'Renseignez le fond de caisse initial'
         : 'Renseignez tous les montants du soir', 'erreur');
       champsSaisie().forEach(i => { r[i.dataset.k] = i.value; });
+      /* Bouton désactivé dès le clic, pour tous : un double appui du manager
+         validait deux fois, et la seconde validation, prenant la première pour
+         un comptage à corriger, journalisait une correction fictive (« Marie →
+         Marie, montants inchangés »). */
+      const bouton = $('#cv');
+      bouton.disabled = true; bouton.textContent = 'Vérification…';
       /* Écran ouvert avant une validation ou une correction faite sur un autre
          iPad : la fusion refuserait cette validation (correction en cours) ou la
-         laisserait remplacer celle du collègue (comptage validé), sans rien dire,
-         et le fil annoncerait « a validé ». L'équipier relit d'abord la fiche. */
-      if (STATE.user.role !== 'manager') {
-        const bouton = $('#cv');
-        bouton.disabled = true; bouton.textContent = 'Vérification…';
-        const frais = await DB.get('caisse:' + j, null);
-        const sig = frais && (frais[p + 'valide'] || frais[p + 'avant']);
-        if (sig) {
-          toast(frais[p + 'valide']
+         laisserait remplacer celle du collègue (comptage validé), et le fil
+         annoncerait « a validé ». On relit d'abord la fiche. L'équipier s'arrête
+         devant toute signature. Le manager, qui peut corriger, devant une
+         signature que son écran ne connaît pas : il voit d'abord ce qui a été
+         validé, puis corrige s'il le faut (Lucas valide 150 €, Marie, écran
+         resté ouvert, validait 155 € par-dessus sans le savoir).
+         Une saisie de cette fiche encore en file d'attente (réponse perdue,
+         réseau tout juste revenu) : DB.get rendait la copie de l'iPad, qui
+         ignore la validation du collègue, et laissait tout passer (vérifié :
+         une réponse perdue sur la saisie de Marie, Lucas valide 150 €, Marie
+         valide 155 € sans arrêt). La file part d'abord, un délai réseau au
+         plus : la relecture lit alors le serveur, et l'écran rechargé après
+         un arrêt montre la validation. */
+      if (STATE.enLigne && fileLire().some(x => x.cle === 'caisse:' + j)) {
+        /* Une synchro déjà en cours, celle que lance le retour du réseau 800 ms
+           après : journaliserSync rendait la main aussitôt, et la fiche, encore
+           en file jusqu'à la fin de cette synchro, était relue sur l'iPad
+           (vérifié : réseau revenu, Wi-Fi lent, Marie validait 155 € par-dessus
+           Lucas sans arrêt). On attend qu'elle finisse, puis on vide la file
+           s'il le faut, le tout dans un seul délai réseau. */
+        const fin = Date.now() + OFFLINE.timeoutReseauMs;
+        const pause = ms => new Promise(ok => setTimeout(ok, ms));
+        try {
+          while (syncEnCours && Date.now() < fin) await pause(100);
+          if (!syncEnCours && fileLire().some(x => x.cle === 'caisse:' + j)) {
+            await Promise.race([journaliserSync(), pause(Math.max(0, fin - Date.now()))]);
+          }
+        } catch (e) {}
+      }
+      const frais = await DB.get('caisse:' + j, null);
+      const sig = frais && (frais[p + 'valide'] || frais[p + 'avant']);
+      const manager = STATE.user.role === 'manager';
+      const connue = s => [r[p + 'valide'], r[p + 'avant']]
+        .concat(Array.isArray(r[p + 'corrections']) ? r[p + 'corrections'] : [])
+        .some(x => x && x.at === s.at);
+      if (sig && (!manager || !connue(sig))) {
+        toast(manager
+          ? (frais[p + 'valide']
+            ? 'Comptage validé entre-temps par ' + (sig.par || 'un collègue') + ' : vérifiez-le avant de le corriger'
+            : 'Comptage en cours de correction sur un autre iPad')
+          : (frais[p + 'valide']
             ? 'Comptage déjà validé par ' + (sig.par || 'un collègue') + ' : seul le manager peut le modifier'
-            : 'Comptage en cours de correction par le manager', 'erreur');
-          /* Parti entre-temps sur un autre onglet, un autre jour ou un autre
-             écran : le message suffit, on ne l'en arrache pas. */
-          return bouton.isConnected ? rendre('caisse') : undefined;
-        }
+            : 'Comptage en cours de correction par le manager'), 'erreur');
+        /* Parti entre-temps sur un autre onglet, un autre jour ou un autre
+           écran : le message suffit, on ne l'en arrache pas. */
+        return bouton.isConnected ? rendre('caisse') : undefined;
       }
       /* Revalidation d'un comptage déjà signé, corrigé ou non : l'ancienne
          signature et les anciens montants vont au journal et restent dans la
@@ -1621,10 +1678,9 @@ V.temp = async function () {
     brancher();
   };
 
-  const sauver = async () => {
-    if ($('#obs')) rec.obs = $('#obs').value;
-    await DB.set('temp:' + j, rec);
-  };
+  /* rec.obs suit la frappe (voir #obs plus bas) : l'enregistrement ne relit
+     plus l'écran, qui peut être déjà celui d'un autre jour. */
+  const sauver = () => DB.set('temp:' + j, rec);
 
   /* Modifier une valeur après validation annule celle-ci : le registre doit
      porter la signature de la personne qui a vu la dernière valeur. */
@@ -1707,7 +1763,12 @@ V.temp = async function () {
       };
     });
 
-    if ($('#obs')) $('#obs').oninput = debounce(sauver, 600);
+    /* L'action corrective entre dans rec à chaque frappe ; seule l'écriture est
+       différée. Relue 600 ms plus tard, #obs pouvait être celui d'un autre jour
+       (« Jour précédent » touché aussitôt) : son texte partait sous ce jour. Et
+       « Valider » touché dans ce délai demandait une action déjà tapée. */
+    const ecrireObs = debounce(sauver, 600);
+    if ($('#obs')) $('#obs').oninput = ev => { rec.obs = ev.target.value; ecrireObs(); };
 
     $('#tvalider').onclick = async () => {
       const reste = manquants();
