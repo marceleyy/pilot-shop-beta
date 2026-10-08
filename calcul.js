@@ -269,6 +269,31 @@ const CALCUL = {
    /* Comptages que l'appli connaît pour un jour donné : clôture ou départ
       d'un autre calcul, inventaire du stock, stock du jour (dernier inventaire
       + réceptions − ouvertures − pertes tracées). */
+   /* Bacs notés à l'armoire −13 un jour donné, par article : entrés ce
+      jour-là ou avant, pas encore sortis à la fin de la journée. Lit le
+      journal du réassort (stock.js) ; null s'il n'existe pas ou est vide. */
+   async function armoireAu(jour) {
+     if (typeof cleArmoire !== 'function') return null;
+     try {
+       const d = new Date(jour + 'T12:00:00');
+       const mois = (typeof ARMOIRE !== 'undefined' && ARMOIRE.moisLus) || 3;
+       const cles = [];
+       for (let i = 0; i < mois; i++) cles.push(cleArmoire(isoOf(new Date(d.getFullYear(), d.getMonth() - i, 15))));
+       const ev = [];
+       (await Promise.all(cles.map(k => DB.get(k, []).catch(() => [])))).forEach(l => { if (Array.isArray(l)) ev.push.apply(ev, l); });
+       const jourDe = e => e.a ? isoOf(new Date(e.a)) : (e.j || '');
+       const sortis = new Set(ev.filter(e => e && e.t === 'sortie' && jourDe(e) && jourDe(e) <= jour).map(e => e.r));
+       const n = {};
+       ev.forEach(e => {
+         if (!e || e.t !== 'entree' || !e.id || !e.c || sortis.has(e.id)) return;
+         const j = /^\d{4}-\d{2}-\d{2}$/.test(e.j || '') ? e.j : jourDe(e);
+         if (!j || j > jour) return;
+         n[e.c] = (n[e.c] || 0) + 1;
+       });
+       return Object.keys(n).length ? n : null;
+     } catch (e) { return null; }
+   }
+
    async function stockAppli(jour, sauf) {
      const props = [];
      try {
@@ -280,7 +305,7 @@ const CALCUL = {
            props.push({ libelle:'Stock de départ du calcul du ' + fmtDC(c.debut), zones:c.depart.zones, kg:num(c.depart.kg) });
        });
      } catch (e) {}
-     /* Bacs fermés comptés sans leur rangement : repris en chambre froide. */
+     /* Bacs fermés par taille (glace seulement). */
      const parTaille = lignes => {
        const bacs = {};
        Object.keys(lignes || {}).forEach(k => {
@@ -289,41 +314,44 @@ const CALCUL = {
          const t = num(a.taille) || FOURNISSEUR.tailleParDefaut;
          bacs[t] = (bacs[t] || 0) + Math.max(0, num(lignes[k]));
        });
-       return Object.keys(bacs).some(t => bacs[t] > 0) ? { froid:{ bacs:bacs } } : null;
+       return Object.keys(bacs).some(t => bacs[t] > 0) ? bacs : null;
      };
+     /* Répartit un stock compté (chambre froide et armoire −13 ensemble, comme
+        l'inventaire les compte) : les bacs notés à l'armoire ce jour-là vont au
+        congélateur −13, plafonnés article par article au stock compté. Sans
+        armoire connue, tout est repris en chambre froide. */
+     const repartir = (lignes, armoire) => {
+       const froid = {}, congel = {};
+       Object.keys(lignes || {}).forEach(k => {
+         const st = Math.max(0, num(lignes[k]));
+         congel[k] = Math.min((armoire && armoire[k]) || 0, st);
+         froid[k] = st - congel[k];
+       });
+       const bc = armoire && parTaille(congel);
+       const bf = parTaille(bc ? froid : lignes);
+       if (!bf && !bc) return null;
+       const zones = {};
+       if (bf) zones.froid = { bacs:bf };
+       if (bc) zones.congel = { bacs:bc };
+       return { zones:zones, rangement:!!bc };
+     };
+     const armoire = await armoireAu(jour);
+     /* Inventaire de ce jour, sinon le dernier fait avant. */
      try {
-       const inv = ((await DB.get('stock:inventaires', [])) || []).filter(h => h && h.jour === jour).pop();
-       const z = inv && parTaille(inv.lignes);
-       if (z) props.push({ libelle:'Inventaire du ' + fmtDC(jour) + (inv.par ? ' par ' + inv.par : ''), zones:z, sansRangement:true });
+       const inv = ((await DB.get('stock:inventaires', [])) || [])
+         .filter(h => h && h.jour && h.jour <= jour)
+         .sort((x, y) => x.jour < y.jour ? -1 : x.jour > y.jour ? 1 : 0).pop();
+       const r = inv && repartir(inv.lignes, inv.jour === jour ? armoire : await armoireAu(inv.jour));
+       if (r) props.push({ libelle:'Inventaire du ' + fmtDC(inv.jour) + (inv.par ? ' par ' + inv.par : '') +
+                             (inv.jour < jour ? ' (dernier inventaire avant le ' + fmtDC(jour) + ')' : ''),
+                           zones:r.zones, sansRangement:!r.rangement, rangement:r.rangement });
      } catch (e) {}
      if (jour === today() && typeof stockReel === 'function') {
        try {
          const sr = await stockReel();
-         /* Bacs posés à l'armoire −13 (scan du réassort, si disponible) : sortis
-            du compte de la chambre froide et rangés au congélateur. */
-         let armoire = null;
-         if (sr && typeof bacsArmoire === 'function') {
-           try {
-             armoire = {};
-             (await bacsArmoire()).forEach(x => { if (x && x.cle) armoire[x.cle] = (armoire[x.cle] || 0) + 1; });
-           } catch (e) { armoire = null; }
-         }
-         /* Armoire plafonnée au stock tracé, article par article : une entrée
-            restée à l'armoire (bac jeté sans « Retirer ») ne crée pas de bac. */
-         const froid = {}, congel = {};
-         Object.keys((sr && sr.articles) || {}).forEach(k => {
-           const st = Math.max(0, num(sr.articles[k]));
-           congel[k] = Math.min((armoire && armoire[k]) || 0, st);
-           froid[k] = st - congel[k];
-         });
-         const zc = armoire && parTaille(congel);
-         /* Armoire vide (scan pas encore utilisé) : on ne sait pas où sont les
-            bacs, la proposition ne touche alors qu'à la chambre froide. */
-         if (!zc) armoire = null;
-         const z = sr && parTaille(armoire ? froid : sr.articles);
-         if (z || zc) props.push({ libelle:'Stock tracé aujourd’hui' + (sr.depuis ? ' (inventaire du ' + fmtDC(sr.depuis) + ' + mouvements)' : ''),
-                                   zones:Object.assign({}, z || {}, zc ? { congel:zc.froid } : {}),
-                                   sansRangement:!armoire, rangement:!!armoire });
+         const r = sr && repartir(sr.articles, armoire);
+         if (r) props.push({ libelle:'Stock tracé aujourd’hui' + (sr.depuis ? ' (inventaire du ' + fmtDC(sr.depuis) + ' + mouvements)' : ''),
+                             zones:r.zones, sansRangement:!r.rangement, rangement:r.rangement });
        } catch (e) {}
      }
      return props;
