@@ -102,11 +102,13 @@ const CALCUL = {
           ¼, ½ ou ¾ d'un bac de la taille choisie. */
        '<div class="chips" style="margin-top:8px" data-quarts="' + p + '-' + x.id + '">' +
          CALCUL.taillesBac.map(t => '<button type="button" class="chip' + (t === CALCUL.tailleQuarts ? ' on' : '') +
-           '" data-qt="' + t + '">' + t + ' L</button>').join('') + '</div>' +
+           '" data-qt="' + t + '" aria-pressed="' + (t === CALCUL.tailleQuarts) + '" aria-label="Bac de ' + t + ' L pour ' + esc(x.label) + '">' +
+           t + ' L</button>').join('') + '</div>' +
        '<div class="chips" style="margin-top:6px">' +
          [[0.25, '+ ¼'], [0.5, '+ ½'], [0.75, '+ ¾']].map(q =>
-           '<button type="button" class="chip" data-qa="' + p + '-' + x.id + '" data-qf="' + q[0] + '">' + q[1] + '</button>').join('') +
-         '<button type="button" class="chip" data-qz="' + p + '-' + x.id + '">0</button></div></div>').join('');
+           '<button type="button" class="chip" data-qa="' + p + '-' + x.id + '" data-qf="' + q[0] + '" aria-label="Ajouter ' +
+             q[1].slice(2) + ' de bac à ' + esc(x.label) + '">' + q[1] + '</button>').join('') +
+         '<button type="button" class="chip" data-qz="' + p + '-' + x.id + '" aria-label="Effacer les entamés de ' + esc(x.label) + '">Effacer</button></div></div>').join('');
      return '<div id="' + p + '-prop"></div>' + entiers +
        '<p class="f" style="margin:20px 0 6px"><b>Bacs déjà entamés</b></p>' +
        '<p class="mini">Estimez chaque bac entamé au quart : choisissez sa taille, puis touchez ¼, ½ ou ¾.</p>' +
@@ -138,18 +140,19 @@ const CALCUL = {
        taille[g.dataset.quarts] = CALCUL.tailleQuarts;
        $$('[data-qt]', g).forEach(b => b.onclick = () => {
          taille[g.dataset.quarts] = +b.dataset.qt;
-         $$('[data-qt]', g).forEach(x => x.classList.toggle('on', x === b));
+         $$('[data-qt]', g).forEach(x => { x.classList.toggle('on', x === b); x.setAttribute('aria-pressed', x === b); });
        });
      });
      $$('#sheet-corps [data-qa]').forEach(b => b.onclick = () => {
        const el = $('#' + b.dataset.qa + '-el');
        if (!el) return;
        el.value = +(Math.max(0, num(el.value)) + num(b.dataset.qf) * (taille[b.dataset.qa] || CALCUL.tailleQuarts)).toFixed(2);
-       maj();
+       /* Comme une frappe : total recalculé et feuille marquée modifiée. */
+       el.dispatchEvent(new Event('input', { bubbles:true }));
      });
      $$('#sheet-corps [data-qz]').forEach(b => b.onclick = () => {
        const el = $('#' + b.dataset.qz + '-el');
-       if (el) { el.value = ''; maj(); }
+       if (el) { el.value = ''; el.dispatchEvent(new Event('input', { bubbles:true })); }
      });
      maj();
    }
