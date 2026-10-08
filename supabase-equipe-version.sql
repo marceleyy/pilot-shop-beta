@@ -10,12 +10,24 @@
 --
 -- RIEN À LANCER SUR LA BASE ACTUELLE : la colonne et le déclencheur y sont
 -- déjà, comme sur les autres tables (vérifié le 08/10/2026). Ce fichier les
--- documente et les recrée sur une base neuve. Le relancer est sans danger.
+-- documente et les recrée sur une base neuve. Le relancer est sans danger :
+-- la fonction, partagée avec les déclencheurs des autres tables, n'est créée
+-- que si elle manque (« create or replace » effacerait un réglage ajouté
+-- depuis, comme search_path), et l'ALTER TABLE renonce au bout de 2 s au lieu
+-- de bloquer les lectures de reglages derrière une transaction en cours.
 -- =============================================================================
 
-create or replace function public.touch_updated_at()
-returns trigger language plpgsql as $$
-begin new.updated_at = now(); return new; end $$;
+begin;
+set local lock_timeout = '2s';
+
+do $$
+begin
+  if to_regprocedure('public.touch_updated_at()') is null then
+    create function public.touch_updated_at()
+    returns trigger language plpgsql as $f$
+begin new.updated_at = now(); return new; end $f$;
+  end if;
+end $$;
 
 alter table public.reglages
   add column if not exists updated_at timestamptz not null default now();
@@ -24,6 +36,8 @@ create or replace trigger trg_touch_reglages
   before update on public.reglages
   for each row execute function public.touch_updated_at();
 
--- Vérification : une ligne, tgenabled = O.
-select tgname, tgenabled from pg_trigger
+commit;
+
+-- Vérification : une ligne, tgenabled = O, « BEFORE UPDATE … FOR EACH ROW ».
+select tgname, tgenabled, pg_get_triggerdef(oid) as definition from pg_trigger
 where tgrelid = 'public.reglages'::regclass and not tgisinternal;
