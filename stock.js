@@ -2012,7 +2012,15 @@ function confirmerOuverture(r) {
         if (frais && !frais.some(b => b.id === bA.id)) {
           const autres = frais.filter(b => b.cle === bA.cle);
           bA = autres.filter(b => b.lot && b.lot === lot)[0] || autres[0] || null;
-          if (bA) toast('Ce bac était déjà sorti : le suivant de l’armoire est pris');
+          if (!bA) {
+            /* Plus aucun bac de ce parfum à l'armoire : on demande la date
+               plutôt que de partir d'aujourd'hui sans prévenir. */
+            armoire = frais; bacId = '';
+            dessiner();
+            return toast('Ce bac est déjà sorti de l’armoire : indiquez sa date de sortie du −20', 'erreur');
+          }
+          toast('Ce bac était déjà sorti : le suivant de l’armoire est pris');
+          if (!r.lot) lot = (bA.lot || lot).toUpperCase();
         }
       }
       /* La sortie d'armoire avant l'ouverture : si l'ouverture échoue, le
