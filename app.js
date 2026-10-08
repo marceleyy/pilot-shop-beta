@@ -5312,8 +5312,9 @@ function modifierPeriode(per) {
      /* Macarons et gianduiotto : hors du calcul d'écart. */
      '13111':0,   '13112':0,   '13113':0,   '13114':0,   '13116':0,   '13141':0,  '17010':0,
      '41171':80,  '41173':80,  '41175':80,  '41116':100,
-     '41121':50,  '41122':50,  '41123':50,  '41126':50,  '41133':50, '41134':50, '41137':50, '41313':50,
-     '31132':50,  '31134':50,  '31312':50,  '31313':50,  '31314':50,
+     /* Gaufres et crêpes : traditionnelle 50, délicieuse 100, parfaite 150. */
+     '41121':150, '41122':150, '41123':150, '41126':150, '41133':50, '41134':50, '41137':100, '41312':100, '41313':100,
+     '31123':150, '31128':50,  '31132':50,  '31133':50,  '31134':50,  '31312':100, '31313':100, '31314':100,
      '71111':50
    };
 
@@ -5336,8 +5337,9 @@ function modifierPeriode(per) {
      /* « x2 glace », « 2 glaces » : 50 g par boule, comme le classeur. */
      [/\b(X ?1 GLACE|1 GLACE)\b/, 50], [/\bX? ?2 GLACES?\b/, 100], [/\bX? ?3 GLACES?\b/, 150],
      [/^EXTRA GLACE X ?2/, 100], [/^EXTRA GLACE/, 50],
-     /* Gaufres et crêpes garnies : 1 boule (50 g) au catalogue. */
-     [/^(GAUFRE|CREPE) (PARFAITE|DELICIEUSE|TRADITIONNELLE)/, 50],
+     /* Gaufres et crêpes (manager) : traditionnelle 1 boule, délicieuse 2,
+        parfaite 3 — colonnes x1, x2, x3 glace du classeur. */
+     [/^(GAUFRE|CREPE) TRADITIONNELLE/, 50], [/^(GAUFRE|CREPE) DELICIEUSE/, 100], [/^(GAUFRE|CREPE) PARFAITE/, 150],
      /* Crêpe gianduja : vendue avec une boule (liste du manager). */
      [/^CREPE GIANDUJA\b/, 50],
      /* Autres crêpes ou gaufres nature (sucre, chocolat…) : sans glace. */
@@ -5492,7 +5494,12 @@ function modifierPeriode(per) {
              const sku = cSku ? String(r[cSku]).trim() : '';
              const n0 = nomCaisse(nom);
              if (HORS_ECART.test(n0)) return;
+             /* Gaufres et crêpes : le libellé dit le nombre de boules, il passe
+                devant le grammage du SKU ; s'il n'est pas reconnu, le SKU décide. */
+             const gNom = /^(GAUFRE|CREPE) /.test(n0) ? grammageNom(nom) : undefined;
+             const parNom = gNom > 0 ? gNom : undefined;
              let gr = (retenus && num(retenus[n0]) > 0) ? num(retenus[n0])
+               : parNom !== undefined ? parNom
                : (sku && GRAMMAGES[sku] !== undefined) ? GRAMMAGES[sku] : grammageNom(nom);
              if (gr === undefined && cCat && /GELATO|GLAC|COUPE/.test(nomCaisse(r[cCat]))) gr = null;
              if (gr === undefined || gr === 0) return;
