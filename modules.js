@@ -1319,7 +1319,20 @@ V.caisse = async function () {
          plus : la relecture lit alors le serveur, et l'écran rechargé après
          un arrêt montre la validation. */
       if (STATE.enLigne && fileLire().some(x => x.cle === 'caisse:' + j)) {
-        try { await Promise.race([journaliserSync(), new Promise(ok => setTimeout(ok, OFFLINE.timeoutReseauMs))]); } catch (e) {}
+        /* Une synchro déjà en cours, celle que lance le retour du réseau 800 ms
+           après : journaliserSync rendait la main aussitôt, et la fiche, encore
+           en file jusqu'à la fin de cette synchro, était relue sur l'iPad
+           (vérifié : réseau revenu, Wi-Fi lent, Marie validait 155 € par-dessus
+           Lucas sans arrêt). On attend qu'elle finisse, puis on vide la file
+           s'il le faut, le tout dans un seul délai réseau. */
+        const fin = Date.now() + OFFLINE.timeoutReseauMs;
+        const pause = ms => new Promise(ok => setTimeout(ok, ms));
+        try {
+          while (syncEnCours && Date.now() < fin) await pause(100);
+          if (!syncEnCours && fileLire().some(x => x.cle === 'caisse:' + j)) {
+            await Promise.race([journaliserSync(), pause(Math.max(0, fin - Date.now()))]);
+          }
+        } catch (e) {}
       }
       const frais = await DB.get('caisse:' + j, null);
       const sig = frais && (frais[p + 'valide'] || frais[p + 'avant']);
