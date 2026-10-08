@@ -900,6 +900,10 @@
          try { history.back(); } catch (e) { _ignorerPop = false; }
        }, 0);
      }
+     /* Rôle changé pendant que cette feuille était ouverte (revaliderSession) :
+        on redessinait seulement à la relecture suivante de l'équipe, cinq
+        minutes plus tard, et l'ancien manager gardait ses onglets d'ici là. */
+     if (_roleARedessiner) setTimeout(appliquerNouveauRole, 0);
    }
 
    /* Tout champ touché par l'utilisateur marque la feuille comme modifiée.
@@ -1439,6 +1443,11 @@ function renderNav() {
 
    async function rendre(id, viaHistorique) {
    if (!V[id]) { toast('Vue indisponible'); return; }
+   /* Rôle changé pendant qu'une feuille était ouverte, et la feuille se ferme
+      sur un lien (« Équipe » du menu, « Ouvrir »…) : on ne dessine pas la vue
+      de l'ancien rôle, qui pouvait finir après l'accueil et le recouvrir. Le
+      nouveau rôle s'applique tout de suite (voir revaliderSession). */
+   if (_roleARedessiner && $('#sheet').hidden) { appliquerNouveauRole(); return; }
    /* Minuit est passé depuis le dernier rendu : on réaligne la date de
       travail sur aujourd'hui. Sans ça, l'équipe du matin saisissait ses
       relevés sous la date de la veille — et en « consultation seule ». */
@@ -2915,10 +2924,18 @@ function majBoutonCompte() {
    iPad gardait sa session jusqu'au prochain rechargement, et un rôle changé
    restait l'ancien. Retirée : retour immédiat à l'écran des prénoms. Rôle
    changé : la session prend le nouveau rôle tout de suite (les contrôles
-   lisent STATE.user.role), et l'application se recharge dès qu'aucune
-   feuille n'est ouverte, pour redessiner onglets et accueil sans couper une
-   saisie. */
-let _rechargerApresRole = false;
+   lisent STATE.user.role), puis onglets et accueil sont redessinés dès
+   qu'aucune feuille n'est ouverte, pour ne pas couper une saisie.
+   Redessiner et non recharger : un rechargement interrompait l'envoi en
+   cours, et une saisie partie mais pas encore arrivée n'était ni en base
+   ni dans la file d'attente. */
+let _roleARedessiner = false;
+function appliquerNouveauRole() {
+  if (!_roleARedessiner || !STATE.user || !$('#sheet').hidden) return;
+  _roleARedessiner = false;
+  renderNav();
+  rendre(vueAccueil());
+}
 function revaliderSession() {
   if (!STATE.user) return;
   const e = EQUIPE.filter(x => x.id === STATE.user.id)[0];
@@ -2926,11 +2943,12 @@ function revaliderSession() {
     DB.del('session').then(() => location.reload(), () => location.reload());
     return;
   }
-  if (e.role !== STATE.user.role) _rechargerApresRole = true;
+  if (e.role !== STATE.user.role) _roleARedessiner = true;
   Object.assign(STATE.user, { prenom:e.prenom, role:e.role, couleur:e.couleur, initiales:e.initiales });
-  const bc = $('#compte');
-  if (bc) bc.textContent = STATE.user.initiales || '';
-  if (_rechargerApresRole && $('#sheet').hidden) location.reload();
+  majBoutonCompte();
+  if (!_roleARedessiner) return;
+  if ($('#sheet').hidden) appliquerNouveauRole();
+  else toast('Votre rôle a changé : l’écran s’adapte dès la fermeture de cette fenêtre');
 }
 
 /* -----------------------------------------------------------------------------
@@ -3486,9 +3504,15 @@ function ouvrirPremierePeriode() {
       elle arrive en moins de 300 ms, sinon la dernière météo gardée sur
       l'iPad (ou rien) ; `suite` livre la réponse quand elle arrive, et la
       vue complète son bloc météo sans se redessiner. */
+   let _meteoEnCours = null;
    async function meteoRapide() {
      if (typeof meteo !== 'function') return { m:null, suite:null };
-     const p = meteo().catch(() => null);
+     /* Une requête encore en route est partagée, sans nouvelle attente :
+        chaque redessin relançait sinon sa propre requête et attendait de
+        nouveau 300 ms tant qu'open-meteo traînait. */
+     if (_meteoEnCours) return { m:await DB.get('meteo', null), suite:_meteoEnCours };
+     const p = _meteoEnCours = meteo().catch(() => null);
+     p.then(() => { if (_meteoEnCours === p) _meteoEnCours = null; });
      const vite = await Promise.race([p, new Promise(r => setTimeout(() => r(undefined), 300))]);
      if (vite !== undefined) return { m:vite, suite:null };
      return { m:await DB.get('meteo', null), suite:p };
