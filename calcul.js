@@ -1017,7 +1017,7 @@ const CALCUL = {
              '<p class="mini" id="cv-lu" style="margin-top:10px">' +
                (v.fichier ? esc(v.fichier) + ' · ' + esc(v.methode || '') + ' · ' + kgTxt(v.kg) : 'Aucun fichier lu.') + '</p>' +
              '<p class="mini" style="margin-top:6px">Export Innovorder « ventes tous produits » sur les dates ci-dessus : ' +
-               'les SKU de glace sont convertis avec les grammages du catalogue.</p>' +
+               'chaque produit glacé est converti avec son grammage, à vérifier dans « Par produit ».</p>' +
              '<div id="cv-detail">' + detailVentes(v.detail) + '</div>') +
          '</div>' +
          '<p class="mini" id="cv-total" style="margin-top:12px"></p>' +
@@ -1058,9 +1058,24 @@ const CALCUL = {
            $('#cv-lu').textContent = 'Analyse du fichier…';
            if (!(await chargerXLSX())) { $('#cv-lu').textContent = 'Aucun fichier lu.'; return toast('Lecture des fichiers de caisse indisponible : réessayez avec le réseau', 'erreur'); }
            let r;
-           try { r = await lireExportCaisse(f); }
+           /* Grammages déjà saisis pour un libellé de caisse : repris à l'import. */
+           const retenus = {};
+           ((await DB.get(CALCUL.cleProduits, [])) || []).forEach(p => { if (p && p.nom) retenus[nomCaisse(p.nom)] = num(p.g); });
+           try { r = await lireExportCaisse(f, retenus); }
            catch (err) { $('#cv-lu').textContent = 'Aucun fichier lu.'; return toast(err && err.message ? err.message : 'Fichier illisible', 'erreur'); }
            if (!$('#cv-lu')) return;   // feuille fermée entre-temps
+           /* Export par libellés : chaque produit arrive dans « Par produit »,
+              où les grammages se vérifient et se complètent. */
+           if (r.produits) {
+             v.mode = 'produits';
+             v.lignes = r.produits.map(l => ({ nom:l.nom, g:l.g, q:l.q }));
+             v.fichierLu = f.name;
+             delete v.fichier; delete v.methode; delete v.detail;
+             eD();
+             toast(r.produits.length + ' produits glacés lus dans ' + f.name +
+               (r.inconnus.length ? ' : ' + r.inconnus.length + ' grammage(s) à compléter' : ''), r.inconnus.length ? 'erreur' : undefined);
+             return;
+           }
            v.kg = +num(r.kg).toFixed(3);
            v.fichier = f.name;
            v.methode = r.methode + (r.fiable ? '' : ' · approximatif') +
@@ -1186,7 +1201,8 @@ const CALCUL = {
      if (v.mode === 'produits') o.lignes = (v.lignes || []).filter(l => l.nom || num(l.q) > 0)
        .map(l => ({ nom:l.nom, g:num(l.g), q:num(l.q) }));
      if (v.mode === 'fichier') { o.fichier = v.fichier || ''; o.methode = v.methode || ''; o.detail = v.detail || []; }
-     o.source = v.mode === 'produits' ? 'Saisie par produit' : v.mode === 'total' ? 'Total saisi' : 'Fichier de caisse';
+     if (v.mode === 'produits' && v.fichierLu) o.fichier = v.fichierLu;
+     o.source = v.mode === 'produits' ? (v.fichierLu ? 'Fichier de caisse, par produit' : 'Saisie par produit') : v.mode === 'total' ? 'Total saisi' : 'Fichier de caisse';
      return o;
    }
 

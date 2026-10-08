@@ -5278,6 +5278,31 @@ function modifierPeriode(per) {
      '31132':50,  '31134':50,  '31312':50,  '31313':50,  '31314':50,
      '71111':50
    };
+
+   /* Export Innovorder sans SKU (« ventes tous produits » v2) : le libellé de
+      caisse donne le produit. Grammages du classeur Amorino ; null = glace dont
+      le grammage reste à saisir (macarons, gaufres et crêpes garnies). */
+   const GRAMMAGES_NOMS = [
+     [/CONE VIDE/, 0],
+     [/^POT ENFANT/, 81], [/^POT PETIT/, 133], [/^POT CLASSI/, 163], [/^POT GRAND/, 221],
+     [/^POT GEANT/, 275], [/^POT (A )?PARTAG/, 529],
+     [/^CHOCO ?CONE ENFANT/, 67], [/^CHOCO ?CONE PETIT/, 112], [/^CHOCO ?CONE CLASSI/, 149], [/^CHOCO ?CONE GRAND/, 208],
+     [/^CORNET ENFANT/, 69], [/^CORNET PETIT/, 114], [/^CORNET CLASSI/, 153], [/^CORNET GRAND/, 224],
+     [/^(BAC|COFFRET) .*\b550\b/, 470], [/^(BAC|COFFRET) .*\b1100\b/, 930],
+     [/SHAKE|SORBET DRINK/, 160], [/^AFFOGATO/, 160], [/^ESPRESSO FRAPPE/, 200], [/^INCONTOURNABLE/, 80],
+     [/^COUPE/, 160], [/^BRIOCHE GLACE/, 100], [/^EXTRA GLACE/, 50],
+     [/GELATO/, null], [/^(GAUFRE|CREPE) (PARFAITE|DELICIEUSE)/, null]
+   ];
+   const nomCaisse = s => String(s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+     .toUpperCase().replace(/[^A-Z0-9]+/g, ' ').trim();
+   /* undefined : pas de glace ; null : glace, grammage à saisir. Le grammage
+      déjà saisi pour ce libellé (catalogue du calcul d'écart) passe devant. */
+   function grammageNom(nom, retenus) {
+     const n = nomCaisse(nom);
+     if (retenus && num(retenus[n]) > 0) return num(retenus[n]);
+     const r = GRAMMAGES_NOMS.filter(x => x[0].test(n))[0];
+     return r ? r[1] : undefined;
+   }
    
    /* XLSX n'est chargé qu'au premier import de caisse : exécuté à chaque
       démarrage, il retardait la liste des prénoms d'environ 600 ms sur iPad.
@@ -5346,7 +5371,8 @@ function modifierPeriode(per) {
      return XLSX.read(texte, { type:'string', raw:true, FS:sep });
    }
 
-   function lireExportCaisse(file) {
+   /* retenus : grammages déjà saisis, par libellé de caisse (facultatif). */
+   function lireExportCaisse(file, retenus) {
      return new Promise((resolve, reject) => {
        const fr = new FileReader();
    
@@ -5428,6 +5454,30 @@ function modifierPeriode(per) {
            }
          }
    
+         /* Libellé de caisse + quantité → grammage du produit */
+         if (cNom) {
+           let g = 0, n = 0;
+           const lignes = [], aSaisir = [];
+           rows.forEach(r => {
+             const nom = String(r[cNom]).trim();
+             const q = num(r[cQte]) + (cOpt ? num(r[cOpt]) : 0);
+             if (!nom || q <= 0) return;
+             const gr = grammageNom(nom, retenus);
+             if (gr === undefined || gr === 0) return;
+             lignes.push({ nom:nom, g:gr || '', q:q });
+             if (gr === null) { aSaisir.push(nom + ' (' + q + ')'); return; }
+             g += gr * q; n++;
+           });
+           if (lignes.length) {
+             const top = lignes.filter(l => l.g).sort((a, b) => b.g * b.q - a.g * a.q).slice(0, 8)
+               .map(l => [l.nom, n1(l.g * l.q / 1000) + ' kg']);
+             return resolve({
+               kg:g / 1000, lignes:n, methode:'Libellés de caisse × grammage du classeur', fiable:true,
+               detail:top, inconnus:aSaisir, produits:lignes
+             });
+           }
+         }
+
          /* Libellé + quantité, rapprochement par nom de parfum */
          if (cNom) {
            let g = 0, n = 0;
