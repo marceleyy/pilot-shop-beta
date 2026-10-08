@@ -572,7 +572,9 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
    
      const R = [];
      if (!e.tempM) R.push(['bad', 'Frigos du matin non relevés', 'À faire dès l’ouverture, avant la mise en vitrine.', 'temp', 'm']);
-     if (e.tempCrit) R.push(['bad', e.tempCrit + ' frigo(s) en limite critique', 'Transférez les produits et prévenez ' + (typeof nomManager === 'function' ? nomManager() : 'le manager') + '.', 'temp']);
+     if (e.tempCrit) R.push(['bad', e.tempCrit + ' frigo(s) en limite critique', 'Transférez les produits et prévenez ' + (typeof nomManager === 'function' ? nomManager() : 'le manager') + '.', 'temp',
+       /* Le moment du dépassement (le soir s'il y en a un), pas celui de l'heure. */
+       ENCEINTES.some(en => etatTemp(en, tempJour['s_' + en.id]) === 'crit') ? 's' : 'm']);
      alertes.filter(a => a.niveau !== 'jaune').forEach(a => R.push(['bad',
        'DLC ' + (a.reste < 0 ? 'dépassée' : 'dans ' + a.reste + ' j') + ' : ' + a.produit,
        'Produit non ouvert reçu le ' + fmtDC(a.recuLe) + '. À écouler ou à jeter.', 'stock']));

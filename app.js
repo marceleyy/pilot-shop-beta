@@ -3726,6 +3726,9 @@ function ouvrirPremierePeriode() {
      /* On retient QUELLES enceintes ont dépassé, pas seulement combien :
         une vitrine et une chambre froide n'appellent pas la même réaction. */
      const enceintesCrit = [];
+     /* Et le dernier dépassement, jour et moment : « Ouvrir » y mène, au lieu
+        du relevé du jour choisi d'après l'heure. */
+     let dernierCrit = null;
      /* La veille sert au fond initial quand le matin n'a pas été saisi. */
      let caisseVeille = jours.length ? await DB.get('caisse:' + addD(jours[0], -1), null) : null;
      for (const d of jours) {
@@ -3740,6 +3743,7 @@ function ouvrirPremierePeriode() {
            if (etatTemp(en, t[mo + '_' + en.id]) === 'crit') {
              tempCrit++;
              if (enceintesCrit.indexOf(en.nom) < 0) enceintesCrit.push(en.nom);
+             if (!dernierCrit || dernierCrit.jour !== d || mo === 's') dernierCrit = { jour:d, moment:mo };
            }
          });
        });
@@ -3779,7 +3783,7 @@ function ouvrirPremierePeriode() {
         sous la pastille rouge « Frigos matin manquants ». Passé l'heure
         d'ouverture, un relevé du matin absent est une alerte HACCP ; passé
         l'heure de fermeture, celui du soir aussi. Horaires du back-office,
-        sinon ceux d'usine (HORAIRES n'est relu qu'à l'écran des horaires). */
+        sinon ceux d'usine (HORAIRES est aussi recalé par appliquerReglages). */
      const horaires = Object.assign({}, HORAIRES, (await DB.get('horaires', null)) || {});
      const minutesDe = h => (/^\d{2}:\d{2}$/.test(h || '') ? +h.slice(0, 2) * 60 + +h.slice(3, 5) : null);
      const maintenant = new Date().getHours() * 60 + new Date().getMinutes();
@@ -3791,7 +3795,8 @@ function ouvrirPremierePeriode() {
        'Relevé à faire avant la fermeture (' + horaires.fermeture + ').', 'temp', 's']);
      if (tempCrit) A.push(['bad', tempCrit + ' relevé(s) en limite critique',
        (enceintesCrit.length ? enceintesCrit.slice(0, 3).join(', ') + '. ' : '') +
-       'Chaque dépassement doit avoir une action corrective écrite.', 'temp']);
+       'Chaque dépassement doit avoir une action corrective écrite.', 'temp',
+       dernierCrit && dernierCrit.moment, dernierCrit && dernierCrit.jour]);
      if (Math.abs(cumulCaisse) > SEUILS.caisseCumulEur) A.push(['warn', 'Écart de caisse cumulé : ' + eur(cumulCaisse), 'Au-delà de ' + eur(SEUILS.caisseCumulEur) + ' sur la période.', 'caisse']);
      if (sansNet >= SEUILS.joursSansNettoyage) A.push(['warn', sansNet + ' jour(s) sans nettoyage validé', 'À reprendre avec l’équipe.', 'clean']);
      if (bientot) {
@@ -3828,7 +3833,8 @@ function ouvrirPremierePeriode() {
          '<div><b>' + esc(a[1]) + '</b><p>' + esc(a[2]) + '</p></div>' +
          '<span class="go"><button class="btn clair sm" ' + (a[3].charAt(0) === '#'
            ? 'data-ancre="' + a[3].slice(1) + '"' : 'data-go="' + a[3] + '"') +
-           (a[4] ? ' data-moment="' + a[4] + '"' : '') + '>Ouvrir</button></span></div>').join('') + '</div>'
+           (a[4] ? ' data-moment="' + a[4] + '"' : '') + (a[5] ? ' data-jour="' + a[5] + '"' : '') +
+           '>Ouvrir</button></span></div>').join('') + '</div>'
          : carte('<div class="alerte ok"><span class="ai">•</span><div><b>Rien à signaler</b>' +
            '<p>Aucune alerte sur la caisse, les frigos, le nettoyage et les stocks.</p></div></div>', 'plat')) +
    
