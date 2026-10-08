@@ -105,6 +105,8 @@
      ['invsec:',      SUPABASE.tables.inventaires],
      ['caisse:',      SUPABASE.tables.caisse],
      ['ecart:',       SUPABASE.tables.ventes],
+     /* Calcul d'écart guidé (calcul.js) : même table que les écarts de période. */
+     ['calcul:',      SUPABASE.tables.ventes],
      ['periode:',     SUPABASE.tables.periodes],
      ['periodes',     SUPABASE.tables.periodes],
      ['pointage:',    SUPABASE.tables.sessions],
@@ -3763,6 +3765,11 @@ function ouvrirPremierePeriode() {
          'La semaine du ' + fmtD(per.debut) + ' au ' + fmtD(per.fin) + ' attend sa clôture. ' +
          'Les saisies d’aujourd’hui s’y rattachent encore.', 'periodes']);
      }
+     /* Un calcul d'écart clôturé au moins une fois par mois (calcul.js). */
+     if (typeof alerteCalculMensuel === 'function') {
+       const ac = await alerteCalculMensuel();
+       if (ac) A.push(ac);
+     }
      /* Une alerte doit nommer le produit. « 2 ruptures non traitées » oblige le
         manager à ouvrir un autre écran pour savoir s'il s'agit de cornets ou
         de lait — et donc s'il doit appeler le fournisseur maintenant. */
@@ -5376,6 +5383,10 @@ function modifierPeriode(per) {
          const cQte   = trouve(/qte|qté|quantit|nombre|nb\.?$/i);
          const cSku   = trouve(/\bsku\b|code|référence|reference|\bref\b/i);
          const cNom   = trouve(/produit|libell|désignation|designation|article|nom/i);
+         /* Export Innovorder : « QteOption » compte les unités vendues en
+            option d'un autre produit (macaron glacé d'une formule…). Pour un
+            SKU de glace, elles sortent aussi de la vitrine. */
+         const cOpt   = cols.filter(c => c !== cQte && /qt[eé]\s*option/i.test(c))[0];
    
          /* Colonne de poids : la plus sûre */
          if (cPoids) {
@@ -5395,7 +5406,7 @@ function modifierPeriode(per) {
            const inconnus = {}, parProduit = {};
            rows.forEach(r => {
              const sku = String(r[cSku]).trim();
-             const q = num(r[cQte]);
+             const q = num(r[cQte]) + (cOpt ? num(r[cOpt]) : 0);
              if (!sku || q <= 0) return;
              const gr = GRAMMAGES[sku];
              if (gr === undefined) { inconnus[sku] = (inconnus[sku] || 0) + q; return; }
