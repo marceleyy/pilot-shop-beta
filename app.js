@@ -1553,6 +1553,9 @@ function renderNav() {
            '<button class="btn clair bloc" data-go="accueil" style="margin-top:14px">Revenir à ma journée</button>',
            'ambre');
          $$('#page [data-go]').forEach(b => b.onclick = () => rendre(b.dataset.go));
+         /* Une entrée d'historique, comme pour toute vue (voir plus bas) : sans
+            elle, « retour » sautait l'écran précédent. */
+         if (!viaHistorique && !memeVue) pousserHistorique({ vue:id });
          window.scrollTo(0, 0);
          return;
        }
@@ -1572,6 +1575,7 @@ function renderNav() {
            'hors de la période : reconnectez l’iPad, puis réessayez.</p>' +
            '<button class="btn clair bloc" id="per-rt" style="margin-top:14px">Réessayer</button>', 'ambre');
          $('#per-rt').onclick = () => rendre(id);
+         if (!viaHistorique && !memeVue) pousserHistorique({ vue:id });
          window.scrollTo(0, 0);
          return;
        }
