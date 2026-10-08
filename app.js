@@ -4785,6 +4785,9 @@ function modifierPeriode(per) {
      const lignes = [];
      const invs = [];
      if (onglet === 'inventaires') {
+       /* Catalogue du sec à jour (références ajoutées, renommées, masquées)
+          avant d'ouvrir un comptage du sec. */
+       if (typeof chargerCatalogueSec === 'function') await chargerCatalogueSec().catch(() => {});
        const [hf, hs] = await Promise.all([DB.get('stock:inventaires', []), DB.get('stock:secs', [])]);
        (hf || []).forEach(h => invs.push({ h: h, p: 'froid' }));
        (hs || []).forEach(h => invs.push({ h: h, p: 'sec' }));
@@ -4793,7 +4796,7 @@ function modifierPeriode(per) {
          const n = Object.keys(x.h.lignes || {}).length;
          lignes.push([fmtD(x.h.jour) + ' · ' + (x.p === 'froid' ? 'chambre froide' : 'sec'),
                       n + ' produit(s)',
-                      x.h.manquants ? x.h.manquants + ' manquant(s)' : 'Voir tout',
+                      x.h.manquants ? x.h.manquants + ' manquant(s)' : (x.p === 'froid' ? 'Sans manquant' : 'Compté'),
                       x.h.par || '—', x.h.manquants ? 'warn' : 'ok', i]);
        });
      }
