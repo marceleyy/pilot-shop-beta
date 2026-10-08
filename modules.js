@@ -1757,7 +1757,7 @@ V.parametres = async function () {
           lecture, des tâches qui ont leur propre rythme. */
        carte(entete('🔁', 'Tâches à rythme propre', 'Hors tableau de la semaine : jours fixes ou intervalle.') +
          NETTOYAGE.asynchrones.map(a =>
-           '<div class="tache"><span class="tx"><span class="tn">' + a.icone + ' ' + esc(a.nom) + '</span>' +
+           '<div class="tache"><span class="tx"><span class="tn">' + esc(a.nom) + '</span>' +
            '<span class="tm">' + (a.type === 'jours-fixes'
              ? a.jours.map(x => JOURS_SEMAINE[x]).join(', ')
              : 'tous les ' + a.intervalleJours + ' jours') + '</span></span></div>').join(''));

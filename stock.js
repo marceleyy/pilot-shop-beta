@@ -793,11 +793,36 @@ V.stock = async function () {
     const totalLignes = Object.keys(l).length;
     const totalUnites = Object.keys(l).reduce((s, k) => s + num(l[k]), 0);
 
+    /* Stock vivant du sec. Les familles tracées à l'ouverture (chantilly,
+       coulis, toppings) ont un compte qui bouge entre deux comptages :
+       stockReel le calcule déjà (comptage du sec − ouvertures depuis). On
+       l'affiche à la place du chiffre figé du dernier comptage. Le reste du
+       sec (cornets, gobelets…) n'a aucun mouvement : son stock est celui du
+       comptage. */
+    const norm = x => String(x || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+    const vivant = (refId, v) => {
+      const f = FAMILLES_PRODUIT.filter(x => (x.lieu === 'sec' || x.stock === 'sec') &&
+                                             (x.refSec || x.id) === refId)[0];
+      if (!f) return null;
+      let cle;
+      if (f.saveurs && f.saveurs.length) {
+        if (v === null) return null;
+        const sv = f.saveurs.filter(x => norm(x) === norm(v))[0];
+        if (!sv) return null;
+        cle = cleArticle(f.id, sv, '');
+      } else {
+        if (v !== null) return null;          // compté en bloc : seul le total vit
+        cle = cleArticle(f.id, '', '');
+      }
+      return articles[cle] !== undefined ? num(articles[cle]) : null;
+    };
+
     return carte('<div class="grid g2">' +
       kpi('Références', totalLignes, '', 'comptées') +
       kpi('Unités', n1(totalUnites), '', 'toutes confondues') + '</div>' +
       '<p class="rappel" style="margin-top:14px">Compté le ' + fmtD(sec.jour) +
-      (sec.par ? ' par ' + esc(sec.par) : '') + '.</p>', 'solide') +
+      (sec.par ? ' par ' + esc(sec.par) : '') + '. Chantilly, coulis et toppings ' +
+      'baissent à chaque ouverture tracée ; le reste suit le comptage.</p>', 'solide') +
       '<button class="btn menthe bloc xl" id="st-inv-sec" style="margin-top:16px">Recompter le sec</button>' +
 
       sections.map(s => {
@@ -806,10 +831,16 @@ V.stock = async function () {
         return '<div class="sec-bloc"' + (s.teinte ? ' style="--sec-teinte:' + s.teinte + '"' : '') + '>' +
           '<div class="entete sec-entete"><span class="sec-pastille"></span><h3>' + esc(s.id) + '</h3></div>' +
           '<div class="stack">' + refs.map(r => {
-            const lignes = parRef[r.id];
-            const total = lignes.reduce((a, x) => a + x.q, 0);
+            const lignes = parRef[r.id].map(x => {
+              const q = vivant(r.id, x.v || '');
+              return q === null ? x : Object.assign({}, x, { q: q, vif: true });
+            });
+            const enBloc = vivant(r.id, null);
+            const total = enBloc !== null ? enBloc : lignes.reduce((a, x) => a + x.q, 0);
+            const suivi = enBloc !== null || lignes.some(x => x.vif);
             const connues = new Set(r.variantes || []);
             return carte('<div class="rang"><div style="flex:1;min-width:0"><b>' + esc(r.nom) + '</b>' +
+              (suivi ? '<div class="mini">Suivi en direct : comptage moins ouvertures</div>' : '') +
               (r.variantes && r.variantes.length
                 ? '<div class="mini tailles">' + lignes
                     .sort((a, b) => (r.variantes.indexOf(a.v) + 99) - (r.variantes.indexOf(b.v) + 99))
