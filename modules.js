@@ -943,7 +943,17 @@ V.caisse = async function () {
      une personne qui compte sa caisse ne doit pas tout retaper pour autant. */
   try {
     const brouillon = JSON.parse(localStorage.getItem('pilotshop.v3:brouillon:caisse:' + j) || 'null');
+    /* Le brouillon ne complète un moment que s'il a été tapé sous la même
+       signature. Arrêté par le pré-contrôle, le manager voyait sinon la
+       validation de Lucas avec son propre commentaire, repris du brouillon,
+       et sa correction l'archivait comme celui de Lucas. */
+    const signature = (o, m) => (o[m + '_valide'] && o[m + '_valide'].at) ||
+      (o[m + '_avant'] && 'avant ' + o[m + '_avant'].at) || '';
+    const momentDe = k => /^m_/.test(k) ? 'm'
+      : (/^s_/.test(k) || CHAMPS_CAISSE_SOIR.indexOf(k) >= 0) ? 's' : null;
     if (brouillon) Object.keys(brouillon).forEach(k => {
+      const m = momentDe(k);
+      if (m && signature(brouillon, m) !== signature(r, m)) return;
       if (r[k] === undefined || r[k] === '') r[k] = brouillon[k];
     });
   } catch (e) {}
