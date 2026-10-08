@@ -5304,7 +5304,9 @@ function modifierPeriode(per) {
      [/\b(X ?1 GLACE|1 GLACE)\b/, 50], [/\bX? ?2 GLACES?\b/, 100], [/\bX? ?3 GLACES?\b/, 150],
      [/^EXTRA GLACE X ?2/, 100], [/^EXTRA GLACE/, 50],
      /* Gaufres et crêpes garnies : 1 boule (50 g) au catalogue. */
-     [/^(GAUFRE|CREPE) (PARFAITE|DELICIEUSE|TRADITIONNELLE)/, 50],
+     /* Gaufres et crêpes (manager) : traditionnelle 1 boule, délicieuse 2,
+        parfaite 3 — colonnes x1, x2, x3 glace du classeur. */
+     [/^(GAUFRE|CREPE) TRADITIONNELLE/, 50], [/^(GAUFRE|CREPE) DELICIEUSE/, 100], [/^(GAUFRE|CREPE) PARFAITE/, 150],
      /* Crêpe gianduja : vendue avec une boule (liste du manager). */
      [/^CREPE GIANDUJA\b/, 50],
      /* Autres crêpes ou gaufres nature (sucre, chocolat…) : sans glace. */
@@ -5459,7 +5461,11 @@ function modifierPeriode(per) {
              const sku = cSku ? String(r[cSku]).trim() : '';
              const n0 = nomCaisse(nom);
              if (HORS_ECART.test(n0)) return;
+             /* Gaufres et crêpes : le libellé dit le nombre de boules, il passe
+                devant le grammage du SKU (catalogue à 50 g pour toutes). */
+             const parNom = /^(GAUFRE|CREPE) /.test(n0) ? grammageNom(nom) : undefined;
              let gr = (retenus && num(retenus[n0]) > 0) ? num(retenus[n0])
+               : parNom !== undefined ? parNom
                : (sku && GRAMMAGES[sku] !== undefined) ? GRAMMAGES[sku] : grammageNom(nom);
              if (gr === undefined && cCat && /GELATO|GLAC|COUPE/.test(nomCaisse(r[cCat]))) gr = null;
              if (gr === undefined || gr === 0) return;

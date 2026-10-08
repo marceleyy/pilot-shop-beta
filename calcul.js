@@ -65,8 +65,8 @@ const CALCUL = {
     [/^SORBET DRINK/, 'Sorbet Drink'], [/^COUPE|^CG /, 'Coupe Gourmand'], [/SHAKE/, 'Milkshake'],
     [/^AFFOGATO CHOC/, 'Affogato al Chocolat'], [/^AFFOGATO/, 'Affogato al caffé'],
     [/^ESPRESSO FRAPPE/, 'Espresso Frappé'], [/^INCONTOURNABLE/, 'Incontour'],
-    [/^GAUFRE .*\b(X ?3|3) GLACES?\b/, 'Gaufre x3 glace'], [/^GAUFRE .*\b(X ?2|2) GLACES?\b/, 'Gaufre x2 glace'], [/^GAUFRE/, 'Gaufre x1 glace'],
-    [/^CREPE .*\b(X ?3|3) GLACES?\b/, 'Crêpe x3 glace'], [/^CREPE .*\b(X ?2|2) GLACES?\b/, 'Crêpe x2 glace'], [/^CREPE/, 'Crêpe x1 glace'],
+    [/^GAUFRE .*\b(X ?3|3) GLACES?\b/, 'Gaufre x3 glace'], [/^GAUFRE .*\b(X ?2|2) GLACES?\b/, 'Gaufre x2 glace'], [/^GAUFRE PARFAITE/, 'Gaufre x3 glace'], [/^GAUFRE DELICIEUSE/, 'Gaufre x2 glace'], [/^GAUFRE/, 'Gaufre x1 glace'],
+    [/^CREPE .*\b(X ?3|3) GLACES?\b/, 'Crêpe x3 glace'], [/^CREPE .*\b(X ?2|2) GLACES?\b/, 'Crêpe x2 glace'], [/^CREPE PARFAITE/, 'Crêpe x3 glace'], [/^CREPE DELICIEUSE/, 'Crêpe x2 glace'], [/^CREPE/, 'Crêpe x1 glace'],
     [/^EXTRA GLACE X ?2/, 'Extra glace x2'], [/^EXTRA GLACE/, 'Extra glace x1']
   ]
 };
