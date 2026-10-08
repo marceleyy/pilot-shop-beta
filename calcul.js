@@ -1089,9 +1089,12 @@ const CALCUL = {
               où les grammages se vérifient et se complètent. */
            if (r.produits) {
              v.mode = 'produits';
+             /* Base : les lignes du classeur, avec les grammages retenus au même nom. */
              const cat = await DB.get(CALCUL.cleProduits, []);
-             v.lignes = rangerClasseur(r.produits, (Array.isArray(cat) && cat.length) ? cat
-               : CALCUL.produitsDefaut.map(x => ({ nom:x[0], g:x[1] })));
+             if (!$('#cv-lu')) return;   // feuille fermée entre-temps
+             const retenu = {};
+             (Array.isArray(cat) ? cat : []).forEach(p => { if (p && p.nom && num(p.g) > 0) retenu[nomCaisse(p.nom)] = num(p.g); });
+             v.lignes = rangerClasseur(r.produits, CALCUL.produitsDefaut.map(x => ({ nom:x[0], g:retenu[nomCaisse(x[0])] || x[1] })));
              v.fichierLu = f.name;
              delete v.fichier; delete v.methode; delete v.detail;
              eD();
@@ -1218,8 +1221,7 @@ const CALCUL = {
      produits.forEach(p => {
        const n = nomCaisse(p.nom);
        const col = (CALCUL.colonnes.filter(c => c[0].test(n))[0] || [])[1];
-       let l = col ? parNom[nomCaisse(col)] : null;
-       if (!l) l = parNom[n];
+       let l = parNom[nomCaisse(col || p.nom)];
        if (!l) {
          l = { nom:col || p.nom, g:p.g, q:0, de:[] };
          lignes.push(l);
