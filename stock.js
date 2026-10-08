@@ -819,7 +819,7 @@ V.stock = async function () {
 
     return carte('<div class="grid g2">' +
       kpi('Références', totalLignes, '', 'comptées') +
-      kpi('Unités', n1(totalUnites), '', 'toutes confondues') + '</div>' +
+      kpi('Unités', n1(totalUnites), '', 'au dernier comptage') + '</div>' +
       '<p class="rappel" style="margin-top:14px">Compté le ' + fmtD(sec.jour) +
       (sec.par ? ' par ' + esc(sec.par) : '') + '. Chantilly, coulis et toppings ' +
       'baissent à chaque ouverture tracée ; le reste suit le comptage.</p>', 'solide') +
@@ -831,9 +831,14 @@ V.stock = async function () {
         return '<div class="sec-bloc"' + (s.teinte ? ' style="--sec-teinte:' + s.teinte + '"' : '') + '>' +
           '<div class="entete sec-entete"><span class="sec-pastille"></span><h3>' + esc(s.id) + '</h3></div>' +
           '<div class="stack">' + refs.map(r => {
+            /* Une saveur n'est servie qu'une fois : « Café » et un ancien
+               « cafe » recevraient sinon la même valeur, comptée deux fois. */
+            const servies = new Set();
             const lignes = parRef[r.id].map(x => {
               const q = vivant(r.id, x.v || '');
-              return q === null ? x : Object.assign({}, x, { q: q, vif: true });
+              if (q === null || servies.has(norm(x.v))) return x;
+              servies.add(norm(x.v));
+              return Object.assign({}, x, { q: q, vif: true });
             });
             const enBloc = vivant(r.id, null);
             const total = enBloc !== null ? enBloc : lignes.reduce((a, x) => a + x.q, 0);
@@ -1695,6 +1700,7 @@ V.inventaire = async function () {
           lignes: lignes
         };
         await DB.set('stock:sec', inv);
+        invaliderStock();
         /* Historique du sec : une correction du même jour remplace son entrée. */
         const hist = await DB.get('stock:secs', []);
         const i = hist.findIndex(h => h.jour === inv.jour);
