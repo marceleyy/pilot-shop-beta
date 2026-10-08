@@ -2,7 +2,10 @@
 <html lang="fr">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1, user-scalable=no, interactive-widget=resizes-content">
+<!-- Zoom à deux doigts permis : bloqué, il privait de loupe les yeux fatigués
+     (accessibilité). Le double appui reste neutre (touch-action, style.css), et
+     chaque champ fait au moins 16 px : en dessous, iOS zoome à la saisie. -->
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
 <title>Pilot-Shop — Paccard</title>
 
 <meta name="description" content="Registres et pilotage du point de vente">

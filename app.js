@@ -77,6 +77,7 @@
      enLigne: navigator.onLine,
      erreurBase: null,
      dernierEchec: null,
+     delaisDepasses: 0,   // délais dépassés de suite, sans réponse entre-temps (voir appel)
      fileAttente: 0,
      _pin: '',
      _candidat: null
@@ -281,21 +282,40 @@
       Une signature non nulle non plus : une copie lue avant une correction
       porte l'ancienne, que la correction a rangée dans <moment>_corrections.
       Elle ne passe pas : sinon la saisie du soir d'un équipier, écran ouvert
-      depuis le matin, remettait 150 € à la place des 200 € corrigés. */
+      depuis le matin, remettait 150 € à la place des 200 € corrigés.
+      Même chose pendant la correction elle-même (signature en base à null,
+      <moment>_avant gardé) : seules passent la copie du manager qui corrige
+      (même <moment>_avant, numéro de saisie n à jour : une copie lue en cours
+      de correction ne remet plus 180 € sur les 200 €) et sa revalidation
+      (signature nouvelle, correction connue dans <moment>_corrections). La copie
+      lue avant la correction porte encore la signature corrigée : écrite
+      pendant la correction, elle remettait 150 € et l'ancienne signature
+      jusqu'à ce que le manager revalide. */
    const CHAMPS_CAISSE_SOIR = ['ecart', 'ecartCB', 'ecartEsp', 'par'];
    function garderComptagesValides(out, distant, local) {
      const a = (o, k) => Object.prototype.hasOwnProperty.call(o, k);
+     const dejaCorrigee = (mom, sig) => Array.isArray(distant[mom + '_corrections']) &&
+       distant[mom + '_corrections'].some(c => c && c.at && c.at === sig.at);
      const auCourant = mom => {
        if (!a(local, mom + '_valide')) return false;
        const sl = local[mom + '_valide'];
        /* (Re)validation : elle passe, sauf si cette signature a déjà été corrigée. */
-       if (sl) return !(Array.isArray(distant[mom + '_corrections']) &&
-                        distant[mom + '_corrections'].some(c => c && c.at && c.at === sl.at));
+       if (sl) return !dejaCorrigee(mom, sl);
        const av = local[mom + '_avant'], sig = distant[mom + '_valide'];
        return !!(av && sig && av.at && av.at === sig.at);   // correction de la signature en base
      };
+     const auCourantCorrection = mom => {
+       const av = distant[mom + '_avant'], la = local[mom + '_avant'], sl = local[mom + '_valide'];
+       if (la && la.at === av.at) return (+la.n || 0) >= (+av.n || 0); // le manager qui corrige, copie à jour
+       const connue = Array.isArray(local[mom + '_corrections']) &&
+         local[mom + '_corrections'].some(c => c && c.at && c.at === av.at);
+       return !!(sl && sl.at !== av.at && connue && !dejaCorrigee(mom, sl));   // sa revalidation
+     };
      ['m', 's'].forEach(mom => {
-       if (!distant[mom + '_valide'] || auCourant(mom)) return;
+       const enCorrection = !distant[mom + '_valide'] &&
+         !!(distant[mom + '_avant'] && distant[mom + '_avant'].at);
+       if (!distant[mom + '_valide'] && !enCorrection) return;
+       if (enCorrection ? auCourantCorrection(mom) : auCourant(mom)) return;
        Object.keys(local).forEach(k => {
          if (k.indexOf(mom + '_') !== 0 && !(mom === 's' && CHAMPS_CAISSE_SOIR.indexOf(k) >= 0)) return;
          if (a(distant, k)) out[k] = distant[k]; else delete out[k];
@@ -381,13 +401,16 @@
          throw e;
        }
        const ctrl = new AbortController();
-       const to = setTimeout(() => ctrl.abort(), OFFLINE.timeoutReseauMs);
+       let to = setTimeout(() => ctrl.abort(), OFFLINE.timeoutReseauMs);
        try {
          /* Jeton de l'appareil plutôt que clé publique : depuis l'activation de
             la sécurité au niveau des lignes, la clé seule ne donne accès à rien.
             Sans rattachement, l'appel échoue et la saisie part en file d'attente,
             exactement comme hors ligne. */
          const jeton = (typeof jetonValide === 'function') ? await jetonValide() : null;
+         /* Jeton obtenu avant l'échéance (renouvellement abouti sur un réseau lent) : la requête
+            garde ses 8 s à elle. Renouvellement raté (réseau muet) : pas de jeton, rien ne change. */
+         if (jeton && !ctrl.signal.aborted) { clearTimeout(to); to = setTimeout(() => ctrl.abort(), OFFLINE.timeoutReseauMs); }
          /* Les en-têtes sont fusionnés D'ABORD, puis posés APRèS options.
             L'ordre inverse laissait options écraser l'objet headers entier :
             toute écriture qui passe ses propres en-têtes — « Prefer: merge-
@@ -408,6 +431,7 @@
            Object.assign({ signal: ctrl.signal }, options || {}, { headers: entetes }));
          clearTimeout(to);
          /* Le réseau a répondu : on est en ligne, même si le serveur refuse. */
+         STATE.delaisDepasses = 0;
          if (!STATE.enLigne) { STATE.enLigne = true; STATE.erreurBase = null; majBandeau(); }
          if (!r.ok) {
            const err = new Error('HTTP ' + r.status);
@@ -463,11 +487,20 @@
          clearTimeout(to);
          /* Seule une vraie panne réseau bascule l'application hors ligne.
             Un dépassement de délai sur UNE requête n'en est pas une : le Wi-Fi
-            d'une boutique peut traîner sans être coupé. On laisse la sonde
-            trancher plutôt que de déclarer la panne sur un seul incident. */
+            d'une boutique peut traîner sans être coupé. Deux de suite, sans
+            aucune réponse entre les deux, en sont une : la sonde ne tourne que
+            hors ligne, elle ne tranchait donc jamais, et un Wi-Fi devenu muet
+            en pleine journée faisait attendre 8 s chaque lecture (plus d'une
+            minute pour Ma journée). Hors ligne, l'iPad lit sa copie aussitôt,
+            et la sonde rétablit l'état en ligne dès que la base répond. */
          const estAbandon = e && (e.name === 'AbortError' ||
                                   /abort/i.test(String(e.message || '')));
-         if (!e.http && !estAbandon && STATE.enLigne) { STATE.enLigne = false; majBandeau(); }
+         const dejaCompte = !!(e && e._delaiCompte);
+         if (estAbandon && e && typeof e === 'object') e._delaiCompte = true;
+         const muet = estAbandon && !dejaCompte && STATE.enLigne && ++STATE.delaisDepasses >= 2;
+         if (STATE.enLigne && ((!e.http && !estAbandon) || muet)) {
+           STATE.enLigne = false; STATE.delaisDepasses = 0; majBandeau();
+         }
          throw e;
        }
      }
@@ -1093,8 +1126,8 @@
      sondeEnCours = false;
    }
    
-   window.addEventListener('online',  () => { STATE.enLigne = true; STATE.erreurBase = null; majBandeau(); sonderReseau(); });
-   window.addEventListener('offline', () => { STATE.enLigne = false; majBandeau(); });
+   window.addEventListener('online',  () => { STATE.enLigne = true; STATE.delaisDepasses = 0; STATE.erreurBase = null; majBandeau(); sonderReseau(); });
+   window.addEventListener('offline', () => { STATE.enLigne = false; STATE.delaisDepasses = 0; majBandeau(); });
    setInterval(sonderReseau, 15000);
    
    /* Fragments réutilisables */
@@ -1477,7 +1510,10 @@ function renderNav() {
    /* Jour calendaire du dernier rendu : un iPad laissé ouvert passe minuit. */
    let _jourDernierRendu = today();
 
-   async function rendre(id, viaHistorique) {
+   /* Écrans à barre de dates : un lien peut les ouvrir sur un jour donné. */
+   const VUES_DATEES = ['temp', 'clean', 'caisse', 'hebdo'];
+
+   async function rendre(id, viaHistorique, jour, moment) {
    if (!V[id]) { toast('Vue indisponible'); return; }
    if (!vueAutorisee(id)) id = vueAccueil();
    /* Rôle changé pendant qu'une feuille était ouverte, et la feuille se ferme
@@ -1509,6 +1545,21 @@ function renderNav() {
     STATE.jour = today();
     if (V.temp && V.temp._d !== undefined) V.temp._d = STATE.jour;
   }
+  /* Lien vers un jour précis (« Aucun nettoyage validé le 17/09 » des
+     Périodes) : l'écran s'ouvre sur ce jour, comme avec la barre des dates.
+     « Ouvrir » menait sinon au jour en cours, et il fallait remonter les
+     jours un par un. Jamais un jour futur, et seulement un écran daté. */
+  if (jour && VUES_DATEES.indexOf(id) >= 0 && /^\d{4}-\d{2}-\d{2}$/.test(jour) && jour <= today()) {
+    STATE.jour = jour;
+    if (V.temp) { V.temp._d = jour; V.temp._auj = today(); }
+  }
+  /* Moment demandé par le lien (« Frigos du matin non relevés ») : Températures
+     et Caisse le choisissaient seules d'après l'heure, et passé 15 h ce lien
+     ouvrait le relevé du soir. */
+  if (moment === 'm' || moment === 's') {
+    if (id === 'temp' && V.temp) V.temp._voulu = moment;
+    if (id === 'caisse' && V.caisse) V.caisse._m = moment;
+  }
   STATE.view = id;
      const p = PAGES[id] || { titre:id, sous:'' };
      $('#vue-titre').textContent = p.titre;
@@ -1521,6 +1572,7 @@ function renderNav() {
         sur une fenêtre de temps inventée. On l'arrête ici, avec l'explication. */
      if (VUES_PERIODE.indexOf(id) >= 0 && STATE.user.role !== 'manager') {
        const dejaOuverte = await DB.get('periode:courante', null);
+       if (STATE.view !== id) return;          // un autre écran a été demandé entre-temps
        if (!dejaOuverte) {
          $('#page').innerHTML = carte(
            entete('⏸️', 'En attente du manager',
@@ -1531,6 +1583,9 @@ function renderNav() {
            '<button class="btn clair bloc" data-go="accueil" style="margin-top:14px">Revenir à ma journée</button>',
            'ambre');
          $$('#page [data-go]').forEach(b => b.onclick = () => rendre(b.dataset.go));
+         /* Une entrée d'historique, comme pour toute vue (voir plus bas) : sans
+            elle, « retour » sautait l'écran précédent. */
+         if (!viaHistorique && !memeVue) pousserHistorique({ vue:id });
          window.scrollTo(0, 0);
          return;
        }
@@ -1549,7 +1604,14 @@ function renderNav() {
            '<p class="mini">L’iPad est hors ligne, ou la base ne répond pas. Une saisie ici serait rangée ' +
            'hors de la période : reconnectez l’iPad, puis réessayez.</p>' +
            '<button class="btn clair bloc" id="per-rt" style="margin-top:14px">Réessayer</button>', 'ambre');
-         $('#per-rt').onclick = () => rendre(id);
+         /* Hors ligne, DB.get ne lit que la copie : sans sonde, « Réessayer » ne changeait rien avant 15 s.
+            La sonde peut attendre 8 s : le bouton le dit, et on ne ramène pas ici qui est parti ailleurs. */
+         $('#per-rt').onclick = async () => {
+           const b = $('#per-rt'); if (b) { b.disabled = true; b.textContent = 'Connexion…'; }
+           await sonderReseau();
+           if (STATE.view === id) rendre(id);
+         };
+         if (!viaHistorique && !memeVue) pousserHistorique({ vue:id });
          window.scrollTo(0, 0);
          return;
        }
@@ -1566,7 +1628,7 @@ function renderNav() {
         sur le mauvais onglet. */
      $$('#page [data-go]').forEach(b => b.onclick = () => {
        if (b.dataset.partie) STATE.inventairePartie = b.dataset.partie;
-       rendre(b.dataset.go);
+       rendre(b.dataset.go, false, b.dataset.jour, b.dataset.moment);
      });
 
      /* Chaque vue laisse une trace dans l'historique du navigateur : sans cela,
@@ -3666,6 +3728,9 @@ function ouvrirPremierePeriode() {
      /* On retient QUELLES enceintes ont dépassé, pas seulement combien :
         une vitrine et une chambre froide n'appellent pas la même réaction. */
      const enceintesCrit = [];
+     /* Et le dernier dépassement, jour et moment : « Ouvrir » y mène, au lieu
+        du relevé du jour choisi d'après l'heure. */
+     let dernierCrit = null;
      /* La veille sert au fond initial quand le matin n'a pas été saisi. */
      let caisseVeille = jours.length ? await DB.get('caisse:' + addD(jours[0], -1), null) : null;
      for (const d of jours) {
@@ -3680,6 +3745,7 @@ function ouvrirPremierePeriode() {
            if (etatTemp(en, t[mo + '_' + en.id]) === 'crit') {
              tempCrit++;
              if (enceintesCrit.indexOf(en.nom) < 0) enceintesCrit.push(en.nom);
+             if (!dernierCrit || dernierCrit.jour !== d || mo === 's') dernierCrit = { jour:d, moment:mo };
            }
          });
        });
@@ -3719,19 +3785,20 @@ function ouvrirPremierePeriode() {
         sous la pastille rouge « Frigos matin manquants ». Passé l'heure
         d'ouverture, un relevé du matin absent est une alerte HACCP ; passé
         l'heure de fermeture, celui du soir aussi. Horaires du back-office,
-        sinon ceux d'usine (HORAIRES n'est relu qu'à l'écran des horaires). */
+        sinon ceux d'usine (HORAIRES est aussi recalé par appliquerReglages). */
      const horaires = Object.assign({}, HORAIRES, (await DB.get('horaires', null)) || {});
      const minutesDe = h => (/^\d{2}:\d{2}$/.test(h || '') ? +h.slice(0, 2) * 60 + +h.slice(3, 5) : null);
      const maintenant = new Date().getHours() * 60 + new Date().getMinutes();
      const passe = h => { const x = minutesDe(h); return x !== null && maintenant >= x; };
      const matinDu = passe(horaires.ouverture), soirDu = passe(horaires.fermeture);
      if (matinDu && !e.tempM) A.push(['bad', 'Frigos du matin non relevés',
-       'Relevé à faire dès l’ouverture (' + horaires.ouverture + '), avant la mise en vitrine.', 'temp']);
+       'Relevé à faire dès l’ouverture (' + horaires.ouverture + '), avant la mise en vitrine.', 'temp', 'm']);
      if (soirDu && !e.tempS) A.push(['warn', 'Frigos du soir non relevés',
-       'Relevé à faire avant la fermeture (' + horaires.fermeture + ').', 'temp']);
+       'Relevé à faire avant la fermeture (' + horaires.fermeture + ').', 'temp', 's']);
      if (tempCrit) A.push(['bad', tempCrit + ' relevé(s) en limite critique',
        (enceintesCrit.length ? enceintesCrit.slice(0, 3).join(', ') + '. ' : '') +
-       'Chaque dépassement doit avoir une action corrective écrite.', 'temp']);
+       'Chaque dépassement doit avoir une action corrective écrite.', 'temp',
+       dernierCrit && dernierCrit.moment, dernierCrit && dernierCrit.jour]);
      if (Math.abs(cumulCaisse) > SEUILS.caisseCumulEur) A.push(['warn', 'Écart de caisse cumulé : ' + eur(cumulCaisse), 'Au-delà de ' + eur(SEUILS.caisseCumulEur) + ' sur la période.', 'caisse']);
      if (sansNet >= SEUILS.joursSansNettoyage) A.push(['warn', sansNet + ' jour(s) sans nettoyage validé', 'À reprendre avec l’équipe.', 'clean']);
      if (bientot) {
@@ -3767,7 +3834,9 @@ function ouvrirPremierePeriode() {
          '<div class="alerte ' + a[0] + '"><span class="ai">' + (a[0] === 'bad' ? '▲' : '●') + '</span>' +
          '<div><b>' + esc(a[1]) + '</b><p>' + esc(a[2]) + '</p></div>' +
          '<span class="go"><button class="btn clair sm" ' + (a[3].charAt(0) === '#'
-           ? 'data-ancre="' + a[3].slice(1) + '"' : 'data-go="' + a[3] + '"') + '>Ouvrir</button></span></div>').join('') + '</div>'
+           ? 'data-ancre="' + a[3].slice(1) + '"' : 'data-go="' + a[3] + '"') +
+           (a[4] ? ' data-moment="' + a[4] + '"' : '') + (a[5] ? ' data-jour="' + a[5] + '"' : '') +
+           '>Ouvrir</button></span></div>').join('') + '</div>'
          : carte('<div class="alerte ok"><span class="ai">•</span><div><b>Rien à signaler</b>' +
            '<p>Aucune alerte sur la caisse, les frigos, le nettoyage et les stocks.</p></div></div>', 'plat')) +
    
@@ -4460,9 +4529,10 @@ function ouvrirPremierePeriode() {
    
      for (const d of joursEntre(per.debut, today() < per.fin ? today() : per.fin)) {
        const st = await etatJour(d);
-       if (!st.tempM || !st.tempS) B.push({ id:'temp', txt:'Températures incomplètes le ' + fmtDC(d), go:'temp' });
-       if (st.netTotal && st.net === 0) B.push({ id:'nettoyage', txt:'Aucun nettoyage validé le ' + fmtDC(d), go:'clean' });
-       if (!st.caisse) B.push({ id:'caisse', txt:'Fermeture de caisse non validée le ' + fmtDC(d), go:'caisse' });
+       if (!st.tempM || !st.tempS) B.push({ id:'temp', txt:'Températures incomplètes le ' + fmtDC(d), go:'temp', jour:d,
+                                            moment:st.tempM ? 's' : 'm' });
+       if (st.netTotal && st.net === 0) B.push({ id:'nettoyage', txt:'Aucun nettoyage validé le ' + fmtDC(d), go:'clean', jour:d });
+       if (!st.caisse) B.push({ id:'caisse', txt:'Fermeture de caisse non validée le ' + fmtDC(d), go:'caisse', jour:d, moment:'s' });
      }
      return B.map(b => Object.assign(b, {
        forcable: (PERIODES.blocages.filter(x => x.id === b.id)[0] || { forcable:false }).forcable
@@ -4489,7 +4559,8 @@ function ouvrirPremierePeriode() {
        (B.length ? '<div class="entete"><h3>Ce qui reste à faire</h3></div><div class="stack">' + B.map(b =>
          '<div class="alerte ' + (b.forcable ? 'warn' : 'bad') + '"><span class="ai">' + (b.forcable ? '●' : '▲') + '</span>' +
          '<div><b>' + esc(b.txt) + '</b><p>' + (b.forcable ? 'Peut être forcé avec un motif écrit.' : 'Bloquant : la clôture est impossible sans cela.') + '</p></div>' +
-         '<span class="go"><button class="btn clair sm" data-go="' + b.go + '">Ouvrir</button></span></div>').join('') + '</div>'
+         '<span class="go"><button class="btn clair sm" data-go="' + b.go + '"' + (b.jour ? ' data-jour="' + b.jour + '"' : '') +
+         (b.moment ? ' data-moment="' + b.moment + '"' : '') + '>Ouvrir</button></span></div>').join('') + '</div>'
          : carte('<div class="alerte ok"><span class="ai">•</span><div><b>Tout est en ordre</b>' +
            '<p>Inventaires validés, achats saisis, registres complets.</p></div></div>', 'plat')) +
    
@@ -4593,12 +4664,13 @@ function modifierPeriode(per) {
          '<p class="sub">' + bloquants.length + ' point(s) ne peuvent pas être contournés.</p>' +
          '<div class="stack">' + bloquants.map(b =>
            '<div class="alerte bad"><span class="ai">▲</span><div><b>' + esc(b.txt) + '</b></div>' +
-           '<span class="go"><button class="btn clair sm" data-saut="' + b.go + '">Ouvrir</button></span></div>').join('') + '</div>' +
+           '<span class="go"><button class="btn clair sm" data-saut="' + b.go + '"' + (b.jour ? ' data-jour="' + b.jour + '"' : '') +
+           (b.moment ? ' data-moment="' + b.moment + '"' : '') + '>Ouvrir</button></span></div>').join('') + '</div>' +
          '<div class="alerte info" style="margin-top:14px"><span class="ai">ℹ️</span><div><b>Pourquoi c’est bloquant</b>' +
          '<p>Sans inventaire de glace réel et sans achats saisis, le stock de fin est une invention : ' +
          'l’écart calculé serait faux et toute la période suivante partirait de travers.</p></div></div>' +
          '<div class="actions"><button class="btn clair" data-fermer>Fermer</button></div>');
-       $$('[data-saut]').forEach(b => b.onclick = () => { closeSheet(); rendre(b.dataset.saut); });
+       $$('[data-saut]').forEach(b => b.onclick = () => { closeSheet(); rendre(b.dataset.saut, false, b.dataset.jour, b.dataset.moment); });
        return;
      }
    
@@ -4976,16 +5048,84 @@ function modifierPeriode(per) {
 
    /* Écrit l'équipe après transformation. La liste est relue en base juste
       avant, pour ne pas écraser une modification faite sur un autre iPad ;
-      sans base joignable, on n'écrit rien (comme à l'amorçage). */
+      sans base joignable, on n'écrit rien (comme à l'amorçage).
+      La relecture ne suffisait pas : deux managers qui modifiaient l'équipe
+      en même temps sur deux iPads perdaient l'une des deux modifications, et
+      une écriture ratée, gardée en file, remettait plus tard une équipe
+      périmée (une personne retirée revenait, avec son code). La ligne n'est
+      donc remplacée que si sa date d'écriture (updated_at, posée par la base)
+      n'a pas bougé depuis la lecture ; sinon la modification est refaite sur
+      la liste fraîche. Rien ne part en file d'attente. */
+   const CONNEXION_EQUIPE = 'Connexion nécessaire pour modifier l’équipe. Réessayez.';
    async function modifierEquipe(transformer) {
-     const lu = await lireEquipeBase();
-     if (lu.etat === 'reseau') throw new Error('Connexion nécessaire pour modifier l’équipe. Réessayez.');
-     const source = (Array.isArray(lu.data) && lu.data.length) ? lu.data : EQUIPE;
-     const liste = await transformer(source.map(e => Object.assign({}, e)));
-     if (!liste.some(e => e.role === 'manager')) throw new Error('Il faut au moins un manager.');
-     await DB.set('equipe', liste);
-     EQUIPE.splice(0, EQUIPE.length, ...liste.filter(ficheValide));
-     return liste;
+     const copie = l => l.map(e => Object.assign({}, e));
+     const avecManager = liste => {
+       if (!liste.some(e => e.role === 'manager')) throw new Error('Il faut au moins un manager.');
+       return liste;
+     };
+     const garder = liste => {
+       try { DB._ecrire('equipe', JSON.stringify(liste)); } catch (e) {}
+       EQUIPE.splice(0, EQUIPE.length, ...liste.filter(ficheValide));
+       return liste;
+     };
+     /* Écriture d'avant, sans contrôle de version : pas de base, équipe encore
+        en file (amorçage), pas encore de ligne, ou base sans updated_at. */
+     const sansVersion = async () => {
+       const lu = await lireEquipeBase();
+       if (lu.etat === 'reseau') throw new Error(CONNEXION_EQUIPE);
+       const source = (Array.isArray(lu.data) && lu.data.length) ? lu.data : EQUIPE;
+       const liste = avecManager(await transformer(copie(source)));
+       await DB.set('equipe', liste);
+       EQUIPE.splice(0, EQUIPE.length, ...liste.filter(ficheValide));
+       return liste;
+     };
+     if (!DB.configure || !DB._distant('equipe') || fileLire().some(x => x.cle === 'equipe')) return sansVersion();
+     const chemin = DB._table('equipe') + '?id=eq.' + encodeURIComponent('equipe');
+     const lire = async () => {
+       const l = await DB._appel(chemin + '&select=data,updated_at&limit=1');
+       return (l && l.length) ? l[0] : null;
+     };
+     /* La base range les clés à sa façon : on compare clés triées. */
+     const canon = v => JSON.stringify(v, (k, x) => (x && typeof x === 'object' && !Array.isArray(x))
+       ? Object.keys(x).sort().reduce((o, c) => { o[c] = x[c]; return o; }, {}) : x);
+     let versionVue = null;
+     for (let essai = 0; essai < 3; essai++) {
+       let lu;
+       try { lu = await lire(); }
+       catch (e) {
+         if (e && e.http === 400) return sansVersion();
+         throw new Error(CONNEXION_EQUIPE);
+       }
+       if (!lu || !lu.updated_at || !Array.isArray(lu.data) || !lu.data.length) return sansVersion();
+       /* [] alors que la ligne n'a pas bougé : ce n'est pas un autre iPad, la base refuse. */
+       if (versionVue === lu.updated_at) throw new Error('La base refuse la modification de l’équipe. Réessayez plus tard.');
+       versionVue = lu.updated_at;
+       const liste = avecManager(await transformer(copie(lu.data)));
+       let r;
+       try {
+         r = await DB._appel(chemin + '&updated_at=eq.' + encodeURIComponent(lu.updated_at) + '&select=updated_at', {
+           method: 'PATCH',
+           headers: { 'Prefer': 'return=representation' },
+           body: JSON.stringify({ data:liste })
+         });
+       } catch (e) {
+         /* Réponse perdue : l'écriture a pu passer. On le vérifie. */
+         let relu = null;
+         try { relu = await lire(); } catch (x) {}
+         const refus = e && e.http >= 400 && e.http < 500 && [408, 429].indexOf(e.http) < 0;
+         if (!refus && relu && canon(relu.data) === canon(liste)) return garder(liste);
+         if (relu && Array.isArray(relu.data) && relu.data.length) garder(relu.data);
+         if (refus) throw new Error('La base a refusé la modification (erreur ' + e.http + ').');
+         /* Aucune réponse HTTP et relecture impossible : la modification a pu passer. */
+         if (!relu && !(e && e.http)) throw new Error('Réseau coupé pendant l’enregistrement : la modification ' +
+                                                      'est peut-être passée. Vérifiez la liste avant de réessayer.');
+         if (!relu || relu.updated_at === lu.updated_at) throw new Error(CONNEXION_EQUIPE);   // rien n'est passé
+         throw new Error('L’équipe vient d’être modifiée sur un autre iPad : vérifiez la liste, puis réessayez.');
+       }
+       if (Array.isArray(r) && r.length) return garder(liste);
+       /* Ligne modifiée entre-temps sur un autre iPad : on recommence sur la liste fraîche. */
+     }
+     throw new Error('L’équipe vient d’être modifiée sur un autre iPad. Réessayez.');
    }
 
    /* Pose un nouveau code sur une fiche, haché ou non selon PIN_HACHAGE —
@@ -5000,6 +5140,9 @@ function modifierPeriode(per) {
      if (!STATE.user || STATE.user.role !== 'manager') return;
      const neuf = !e;
      const moi = !neuf && e.id === STATE.user.id;
+     /* Identifiant tiré une fois par feuille : un second « Enregistrer » après une réponse perdue
+        retrouve la fiche déjà ajoutée au lieu d'en créer une seconde (« existe déjà »). */
+     const idNouveau = neuf ? 'e' + uid() : null;
      const champCode = (id, libelle) =>
        '<div class="champ"><label class="f">' + libelle + '</label>' +
        '<input type="password" id="' + id + '" inputmode="numeric" pattern="[0-9]*" maxlength="4" autocomplete="new-password"></div>';
@@ -5040,29 +5183,30 @@ function modifierPeriode(per) {
        $('#eq-ok').disabled = true;
        try {
          await modifierEquipe(async liste => {
-           const autres = neuf ? liste : liste.filter(x => x.id !== e.id);
+           const cible = neuf ? idNouveau : e.id;
+           const dejaLa = neuf && liste.some(x => x.id === idNouveau);
+           const autres = liste.filter(x => x.id !== cible);
            if (autres.some(x => String(x.prenom || '').trim().toLowerCase() === prenom.toLowerCase()))
              throw new Error('« ' + prenom + ' » existe déjà : ajoutez une initiale (ex. ' + prenom + ' B.)');
            /* Même règle qu'à l'amorçage : deux personnes, deux codes. */
            if (pin) for (const x of autres) if (await pinCorrect(x, pin)) throw new Error('Ce code est déjà utilisé : choisissez-en un autre');
            let fiche;
-           if (neuf) {
+           if (neuf && !dejaLa) {
              /* Identifiant jamais réutilisé. Le numéro suivait le plus grand id
                 restant : après le retrait de Nina (e3), Paul recevait e3, et
                 l'iPad où Nina était connectée se rouvrait sous le nom de Paul,
                 manager, sans code ; Paul héritait aussi de ses actions. */
-             let id = 'e' + uid();
-             while (liste.some(x => x.id === id)) id = 'e' + uid();
+             const id = idNouveau;
              fiche = { id:id, prenom:prenom, role:role, couleur:COULEURS_EQUIPE[liste.length % COULEURS_EQUIPE.length],
                        initiales:prenom.slice(0, 2).toUpperCase() };
            } else {
-             const ancienne = liste.filter(x => x.id === e.id)[0];
+             const ancienne = liste.filter(x => x.id === cible)[0];
              if (!ancienne) throw new Error(e.prenom + ' a été retiré(e) de l’équipe sur un autre appareil');
              fiche = Object.assign({}, ancienne, { prenom:prenom, role:role,
                initiales:prenom === ancienne.prenom ? ancienne.initiales : prenom.slice(0, 2).toUpperCase() });
            }
            if (pin) fiche = await ficheAvecCode(fiche, pin);
-           return neuf ? liste.concat([fiche]) : liste.map(x => x.id === fiche.id ? fiche : x);
+           return (neuf && !dejaLa) ? liste.concat([fiche]) : liste.map(x => x.id === fiche.id ? fiche : x);
          });
        } catch (err) {
          if ($('#eq-ok')) $('#eq-ok').disabled = false;
