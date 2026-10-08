@@ -1860,7 +1860,11 @@ V.lots = async function () {
             '<span class="invc">' + etat + '<br>' +
             '<button type="button" class="btn clair sm" data-armoire="' + esc(b.id) + '">Retirer</button></span></div>';
         }).join('') + '</div>'
-      : '') +
+      /* La section reste visible même vide : sinon personne ne sait où
+         regarder, et « rien ici » se lit comme « l'écran n'existe pas ». */
+      : '<div class="entete" style="margin-top:20px"><h3>À l’armoire −13</h3></div>' +
+        '<p class="cs">Aucun bac noté à l’armoire −13. Scannez un bac et choisissez ' +
+        '« Armoire −13 » pour qu’il apparaisse ici.</p>') +
 
     (ouvertures.length
       ? '<div class="entete" style="margin-top:20px"><h3>Dernières ouvertures</h3>' +
