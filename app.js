@@ -1104,7 +1104,7 @@
       4. CONNEXION TACTILE
       ========================================================================== */
    function initLogin() {
-     $('#login-site').textContent = APP.site + ' · ' + APP.version;
+     $('#login-site').textContent = APP.site;
    
      $('#qui-liste').innerHTML = EQUIPE.map(e =>
        '<button type="button" data-qui="' + esc(e.id) + '">' +
@@ -1427,11 +1427,22 @@ function renderNav() {
        '<span class="mi-tx"><span class="mi-t">' + esc(PAGES[id].titre) + '</span>' +
        '<span class="mi-s">' + esc(PAGES[id].sous) + '</span></span>' +
        '<span class="mi-fl">›</span>' +
-       '</button>').join('') + '</div>' +
+       '</button>').join('') +
+       /* Le retour bêta vit ici et non plus en bouton flottant : posé sur
+          le contenu, il couvrait « HS » et « + » des frigos sur téléphone. */
+       (APP.beta ? '<button type="button" class="menu-item" id="mp-retour">' +
+         '<span class="mi-tx"><span class="mi-t">Signaler un souci</span>' +
+         '<span class="mi-s">Un bug, un chiffre faux, une idée : c’est transmis à ' + esc(nomManager()) + '</span></span>' +
+         '<span class="mi-fl">›</span></button>' : '') +
+       '</div>' +
        '<div class="actions"><button class="btn clair" data-fermer>Fermer</button>' +
-       '<button class="btn fantome" id="mp-out">Déconnexion</button></div>'
+       '<button class="btn fantome" id="mp-out">Déconnexion</button></div>' +
+       /* La version, utile au dépannage, quitte l'écran de connexion. */
+       '<p class="mini" style="text-align:center;margin-top:14px">' + esc(APP.nom + ' ' + APP.version + ' · ' + APP.site) + '</p>'
      );
      $$('[data-plus]').forEach(b => b.onclick = () => { closeSheet(); rendre(b.dataset.plus); });
+     const rb = $('#mp-retour');
+     if (rb) rb.onclick = ouvrirRetour;
      $('#mp-out').onclick = () => { closeSheet(); deconnexion(); };
    }
    
@@ -2367,37 +2378,33 @@ async function purgerLocalAncien() {
    /* =============================================================================
       18. RETOUR BÊTA
       ========================================================================== */
-   function initFeedback() {
-     if (!APP.beta) return;
-     const b = $('#fb');
-     b.hidden = false;
-     b.onclick = () => {
-       showSheet(
-         '<h2 id="sheet-titre">Signaler un souci</h2>' +
-         '<p class="sub">L’application est en bêta. La page et l’heure sont ajoutées automatiquement.</p>' +
-         '<div class="chips" id="fbt">' +
-         ['Ça ne marche pas', 'Un chiffre est faux', 'Une idée', 'Autre'].map((t, i) =>
-           '<button type="button" class="chip' + (i === 0 ? ' on' : '') + '" data-t="' + esc(t) + '">' + esc(t) + '</button>').join('') +
-         '</div><div class="champ" style="margin-top:14px">' +
-         '<textarea id="fbx" data-autofocus aria-label="Décrivez le souci" placeholder="Ex. quand je valide le nettoyage, la ligne ne se coche pas."></textarea>' +
-         '<p class="mini" style="margin-top:6px">' + esc(CONSIGNE_TEXTE_LIBRE) + '</p></div>' +
-         '<div class="actions"><button class="btn clair" data-fermer>Annuler</button>' +
-         '<button class="btn menthe" id="fbv">Envoyer</button></div>');
+   /* Ouvert depuis le menu « Tout le reste » (ouvrirPlus). */
+   function ouvrirRetour() {
+     showSheet(
+       '<h2 id="sheet-titre">Signaler un souci</h2>' +
+       '<p class="sub">L’application est en bêta. La page et l’heure sont ajoutées automatiquement.</p>' +
+       '<div class="chips" id="fbt">' +
+       ['Ça ne marche pas', 'Un chiffre est faux', 'Une idée', 'Autre'].map((t, i) =>
+         '<button type="button" class="chip' + (i === 0 ? ' on' : '') + '" data-t="' + esc(t) + '">' + esc(t) + '</button>').join('') +
+       '</div><div class="champ" style="margin-top:14px">' +
+       '<textarea id="fbx" data-autofocus aria-label="Décrivez le souci" placeholder="Ex. quand je valide le nettoyage, la ligne ne se coche pas."></textarea>' +
+       '<p class="mini" style="margin-top:6px">' + esc(CONSIGNE_TEXTE_LIBRE) + '</p></div>' +
+       '<div class="actions"><button class="btn clair" data-fermer>Annuler</button>' +
+       '<button class="btn menthe" id="fbv">Envoyer</button></div>');
    
-       let type = 'Ça ne marche pas';
-       $$('#fbt [data-t]').forEach(x => x.onclick = () => {
-         $$('#fbt .chip').forEach(y => y.classList.remove('on'));
-         x.classList.add('on'); type = x.dataset.t;
-       });
-       $('#fbv').onclick = async () => {
-         const t = $('#fbx').value.trim();
-         if (!t) return toast('Décrivez le souci en une phrase', 'erreur');
-         await DB.push('feedback', { id:uid(), type:type, texte:t, vue:STATE.view,
-                                     par:STATE.user.prenom, at:nowISO(), version:APP.version });
-         await feed('warn', STATE.user.prenom + ' a signalé un souci sur « ' + (PAGES[STATE.view] || {}).titre + ' »');
-         closeSheet();
-         toast(messageEnvoi('feedback', 'Merci, c’est transmis à ' + nomManager()));
-       };
+     let type = 'Ça ne marche pas';
+     $$('#fbt [data-t]').forEach(x => x.onclick = () => {
+       $$('#fbt .chip').forEach(y => y.classList.remove('on'));
+       x.classList.add('on'); type = x.dataset.t;
+     });
+     $('#fbv').onclick = async () => {
+       const t = $('#fbx').value.trim();
+       if (!t) return toast('Décrivez le souci en une phrase', 'erreur');
+       await DB.push('feedback', { id:uid(), type:type, texte:t, vue:STATE.view,
+                                   par:STATE.user.prenom, at:nowISO(), version:APP.version });
+       await feed('warn', STATE.user.prenom + ' a signalé un souci sur « ' + (PAGES[STATE.view] || {}).titre + ' »');
+       closeSheet();
+       toast(messageEnvoi('feedback', 'Merci, c’est transmis à ' + nomManager()));
      };
    }
    
@@ -3190,7 +3197,6 @@ window.addEventListener('error', function (ev) {
      qu'on ait vérifié qu'elle existe encore. */
   STATE.erreurBase = null;
   majBandeau();
-  initFeedback();
   purgerPreuves();          // copie locale des photos de plus de 7 jours (le serveur garde tout)
   purgerLocalAncien();      // copies locales anciennes : journal, heures, caisses, registres (voir sa note)
   /* Bouton de compte : le seul accès à « tout le reste » et à la déconnexion

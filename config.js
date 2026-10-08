@@ -12,12 +12,12 @@
 const APP = {
   nom:        'Pilot-Shop',
   site:       'Paccard',
-  version:    '3.1.0-beta',
-  build:      '2026-09-12',
+  version:    '3.2.0-beta',
+  build:      '2026-10-08',
   locale:     'fr-FR',
   fuseau:     'Europe/Paris',
   devise:     'EUR',
-  beta:       true          // affiche le bouton de retour flottant
+  beta:       true          // « Signaler un souci » dans le menu Tout le reste
 };
 
 /* -----------------------------------------------------------------------------

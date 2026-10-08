@@ -26,7 +26,7 @@
 
    Version finale : direction « Maison glacière » (B), complétée des meilleures
    idées des deux autres pistes — liste à filets des tâches, curseur de
-   segment, onglets horizontaux en paysage, verre clair du « Retour bêta »,
+   segment, onglets horizontaux en paysage,
    titres coupés en « … » — et corrigée des défauts relevés par le jury
    (toast, liste déroulante, « Ma journée », marqueur d'onglet, pavé PIN).
 
@@ -1064,18 +1064,6 @@ select,select:focus{
 /* Caramel brûlé : 6,5:1 avec le texte porcelaine. */
 #offline{background:#8A4E0B;color:#FFFCF7}
 
-/* Retour bêta : pilule de verre ivoire, filet et point or. Elle ne fait plus
-   concurrence au bouton principal chocolat. */
-#fb{
-  background:rgba(255,252,247,.90);color:var(--chocolat);min-height:48px;
-  -webkit-backdrop-filter:blur(16px) saturate(1.4);backdrop-filter:blur(16px) saturate(1.4);
-  border:1px solid var(--filet-fort);box-shadow:var(--ombre-lev);
-  font-size:13.5px;font-weight:650;padding:0 18px 0 15px;
-  bottom:calc(var(--barre-h) + 14px);
-}
-#fb:active{background:var(--creme-2)}
-#fb .pt{background:var(--or);box-shadow:0 0 0 3px rgba(176,138,74,.22)}
-
 
 /* =============================================================================
    16. TÉLÉPHONE (≤ 600 px)
@@ -1157,7 +1145,6 @@ select,select:focus{
   .card.tap:hover{border-color:var(--filet-fort)}
   #tabbar button:not(.on):hover{color:var(--chocolat);background:var(--creme-2)}
   .tseg button:not(.on):hover,.phase-nav button:not(.on):hover{background:var(--creme-3)}
-  #fb:hover{background:var(--porcelaine)}
 }
 
 
@@ -1169,7 +1156,7 @@ select,select:focus{
 @media (prefers-reduced-motion:reduce){
   .btn:active,.chip:active,.pave button:active,.qui button:active,.menu-item:active,
   #page .tache .box:active,.card.tap:active,.pas:active,.jbtn:active,
-  #fb:active,#compte:active,.tm-pas:active,.navjour button:active,.pins i.on{transform:none}
+  #compte:active,.tm-pas:active,.navjour button:active,.pins i.on{transform:none}
   .card.urgence{animation:none}
   #login:not([hidden]) ~ #toast{transform:translateX(-50%)}
 }
@@ -1194,7 +1181,6 @@ select,select:focus{
        chiffre KPI pistache-d / porcelaine 6,1 (5,6 sur crème)
        toast porcelaine / chocolat 94 % 14,0 · toast d'erreur 7,5
        hors ligne 6,5 · onglet inactif 5,8 · onglet actif / pastille 12,3
-       « Retour bêta » chocolat / verre ivoire 16,2
        initiales porcelaine / avatar voilé : 4,6 à 16,7 selon la couleur.
      — éléments graphiques (≥ 3:1) :
        bord de champ et points PIN 3,6 · anneau du segment actif 13,8
