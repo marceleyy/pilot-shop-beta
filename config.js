@@ -12,7 +12,7 @@
 const APP = {
   nom:        'Pilot-Shop',
   site:       'Paccard',
-  version:    '3.2.0-beta',
+  version:    '3.2.1-beta',
   build:      '2026-10-08',
   locale:     'fr-FR',
   fuseau:     'Europe/Paris',
