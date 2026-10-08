@@ -62,10 +62,14 @@ function parfumDepuisDesignation(nom) {
   return null;
 }
 
-/* Taille du bac lue dans la désignation : « Glace Café 3 litres ». */
+/* Taille du bac lue dans la désignation : « Glace Café 3 litres », « 3L »,
+   « 3 lt ». Seules les tailles de bac connues sont retenues : un « 12 L »
+   lu ailleurs dans le texte ne doit pas créer un bac qui n'existe pas. */
 function tailleDepuisDesignation(nom) {
-  const m = String(nom || '').match(/(\d+)\s*litres?/i);
-  return m ? +m[1] : null;
+  const m = String(nom || '').match(/(\d+(?:[.,]\d+)?)\s*(?:litres?|lt|l)\b/i);
+  if (!m) return null;
+  const t = parseFloat(m[1].replace(',', '.'));
+  return (FOURNISSEUR.taillesBac || []).indexOf(t) >= 0 ? t : null;
 }
 
 function devinerFamille(nom) {
@@ -213,6 +217,7 @@ async function ajouterMouvement(type, cle, qte, extra) {
      et ils fausseraient le stock de façon invisible. */
   const dernier = l[l.length - 1];
   if (dernier && dernier.t === type && dernier.c === cle &&
+      dernier.e === (STATE.user ? STATE.user.id : null) &&   // pas le scan d'un autre iPad
       num(dernier.q) === num(qte) &&
       ((extra && extra.lot) ? dernier.l === extra.lot : true) &&
       (Date.now() - new Date(dernier.a)) < 15000) {
@@ -483,7 +488,7 @@ function litMouvement(m) {
     cle:  m.c || m.cle,
     qte:  num(m.q !== undefined ? m.q : m.qte),
     at:   m.a || m.at,
-    jour: (m.a || m.at || '').slice(0, 10),
+    jour: (m.a || m.at) ? isoOf(new Date(m.a || m.at)) : '',   // jour local, pas UTC
     lot:  m.l || m.lot || '',
     employe: m.e || m.employe || null
   };
@@ -705,7 +710,7 @@ V.stock = async function () {
                   const negatif = tailles.some(c => num(articles[c]) < 0);
                   return carte('<div class="rang"><div style="flex:1;min-width:0"><b>' + esc(p) + '</b>' +
                     '<div class="mini tailles">' + tailles.map(c => { const q = num(articles[c]);
-                      return '<span class="tq' + (q < 0 ? ' neg' : '') + '"><b>' + q + '</b>×' + litArticle(c).taille + ' L</span>';
+                      return '<span class="tq' + (q < 0 ? ' neg' : '') + '"><b>' + q + '</b>×' + esc(litArticle(c).taille) + ' L</span>';
                     }).join('') + '</div></div>' +
                     '<b class="num" style="font-size:20px">' + n + '</b></div>', negatif ? 'corail' : '');
                 }).join('');
@@ -1217,7 +1222,7 @@ V.inventaire = async function () {
     const mode = r.decimal === false ? 'numeric' : 'decimal';
     return '<div class="saisie-u">' +
       '<input type="number" inputmode="' + mode + '" min="0" step="' + pas + '" ' +
-      'data-sec="' + c + '" value="' + (saisieSec[c] !== undefined ? saisieSec[c] : '') + '" ' +
+      'data-sec="' + esc(c) + '" value="' + (saisieSec[c] !== undefined ? esc(saisieSec[c]) : '') + '" ' +
       'placeholder="0">' +
       '<span class="su">' + esc(r.unite) + '</span></div>';
   };
@@ -1258,7 +1263,7 @@ V.inventaire = async function () {
           const total  = r.variantes.reduce((s, v) => s + num(saisieSec[cleSec(r, v)] || 0), 0);
 
           return '<div class="invp">' +
-            '<button type="button" class="invp-h depliable" data-deplier="' + r.id + '">' +
+            '<button type="button" class="invp-h depliable" data-deplier="' + esc(r.id) + '">' +
             '<b>' + esc(r.nom) + '</b>' +
             '<span class="invc">' + (saisis
               ? n1(total) + ' ' + esc(r.unite) + (total > 1 ? 's' : '') + ' · ' + saisis + '/' + r.variantes.length
@@ -1418,8 +1423,16 @@ V.inventaire = async function () {
     cptes.forEach(c => { lignes[c] = num(saisie[c]); });
     const t = totauxStock(lignes);
 
-    /* État AVANT le comptage : c'est lui qui révèle les bacs disparus. */
-    const avant = (await stockReel()).articles;
+    /* État AVANT le comptage : c'est lui qui révèle les bacs disparus. Sans
+       les familles du sec (chantilly, coulis…) : la chambre froide ne les
+       compte pas, elles passaient toutes pour manquantes à chaque inventaire. */
+    const tout = (await stockReel()).articles;
+    const avant = {};
+    Object.keys(tout).forEach(c => {
+      const fam = FAMILLES_PRODUIT.filter(f => f.id === litArticle(c).famille)[0];
+      if (litArticle(c).famille === 'sec' || (fam && (fam.lieu === 'sec' || fam.stock === 'sec'))) return;
+      avant[c] = tout[c];
+    });
     const ecart = Object.keys(lignes).reduce((s, c) =>
       s + (num(lignes[c]) - num(avant[c] || 0)), 0);
 
@@ -1615,7 +1628,9 @@ function confirmerOuverture(r) {
       garder();
       const fam = FAMILLES_PRODUIT.filter(f => f.id === famille)[0];
       if (!fam) return toast('Choisissez la famille', 'erreur');
-      if (fam.parfums && !parfum) {
+      /* Le menu fait foi : s'il n'a pas été touché, parfum contient encore le
+         texte lu par l'OCR, qui peut ne correspondre à aucune option affichée. */
+      if (fam.parfums) {
         const sp = $('#co-parfum');
         if (sp) parfum = sp.value;
         if (!parfum) return toast('Choisissez le parfum', 'erreur');
