@@ -1499,7 +1499,10 @@ function renderNav() {
    /* Jour calendaire du dernier rendu : un iPad laissé ouvert passe minuit. */
    let _jourDernierRendu = today();
 
-   async function rendre(id, viaHistorique) {
+   /* Écrans à barre de dates : un lien peut les ouvrir sur un jour donné. */
+   const VUES_DATEES = ['temp', 'clean', 'caisse', 'hebdo'];
+
+   async function rendre(id, viaHistorique, jour) {
    if (!V[id]) { toast('Vue indisponible'); return; }
    if (!vueAutorisee(id)) id = vueAccueil();
    /* Rôle changé pendant qu'une feuille était ouverte, et la feuille se ferme
@@ -1530,6 +1533,14 @@ function renderNav() {
   if (!memeVue && STATE.jour !== today()) {
     STATE.jour = today();
     if (V.temp && V.temp._d !== undefined) V.temp._d = STATE.jour;
+  }
+  /* Lien vers un jour précis (« Aucun nettoyage validé le 17/09 » des
+     Périodes) : l'écran s'ouvre sur ce jour, comme avec la barre des dates.
+     « Ouvrir » menait sinon au jour en cours, et il fallait remonter les
+     jours un par un. Jamais un jour futur, et seulement un écran daté. */
+  if (jour && VUES_DATEES.indexOf(id) >= 0 && /^\d{4}-\d{2}-\d{2}$/.test(jour) && jour <= today()) {
+    STATE.jour = jour;
+    if (V.temp) { V.temp._d = jour; V.temp._auj = today(); }
   }
   STATE.view = id;
      const p = PAGES[id] || { titre:id, sous:'' };
@@ -1592,7 +1603,7 @@ function renderNav() {
         sur le mauvais onglet. */
      $$('#page [data-go]').forEach(b => b.onclick = () => {
        if (b.dataset.partie) STATE.inventairePartie = b.dataset.partie;
-       rendre(b.dataset.go);
+       rendre(b.dataset.go, false, b.dataset.jour);
      });
 
      /* Chaque vue laisse une trace dans l'historique du navigateur : sans cela,
@@ -4486,9 +4497,9 @@ function ouvrirPremierePeriode() {
    
      for (const d of joursEntre(per.debut, today() < per.fin ? today() : per.fin)) {
        const st = await etatJour(d);
-       if (!st.tempM || !st.tempS) B.push({ id:'temp', txt:'Températures incomplètes le ' + fmtDC(d), go:'temp' });
-       if (st.netTotal && st.net === 0) B.push({ id:'nettoyage', txt:'Aucun nettoyage validé le ' + fmtDC(d), go:'clean' });
-       if (!st.caisse) B.push({ id:'caisse', txt:'Fermeture de caisse non validée le ' + fmtDC(d), go:'caisse' });
+       if (!st.tempM || !st.tempS) B.push({ id:'temp', txt:'Températures incomplètes le ' + fmtDC(d), go:'temp', jour:d });
+       if (st.netTotal && st.net === 0) B.push({ id:'nettoyage', txt:'Aucun nettoyage validé le ' + fmtDC(d), go:'clean', jour:d });
+       if (!st.caisse) B.push({ id:'caisse', txt:'Fermeture de caisse non validée le ' + fmtDC(d), go:'caisse', jour:d });
      }
      return B.map(b => Object.assign(b, {
        forcable: (PERIODES.blocages.filter(x => x.id === b.id)[0] || { forcable:false }).forcable
@@ -4515,7 +4526,8 @@ function ouvrirPremierePeriode() {
        (B.length ? '<div class="entete"><h3>Ce qui reste à faire</h3></div><div class="stack">' + B.map(b =>
          '<div class="alerte ' + (b.forcable ? 'warn' : 'bad') + '"><span class="ai">' + (b.forcable ? '●' : '▲') + '</span>' +
          '<div><b>' + esc(b.txt) + '</b><p>' + (b.forcable ? 'Peut être forcé avec un motif écrit.' : 'Bloquant : la clôture est impossible sans cela.') + '</p></div>' +
-         '<span class="go"><button class="btn clair sm" data-go="' + b.go + '">Ouvrir</button></span></div>').join('') + '</div>'
+         '<span class="go"><button class="btn clair sm" data-go="' + b.go + '"' + (b.jour ? ' data-jour="' + b.jour + '"' : '') +
+         '>Ouvrir</button></span></div>').join('') + '</div>'
          : carte('<div class="alerte ok"><span class="ai">•</span><div><b>Tout est en ordre</b>' +
            '<p>Inventaires validés, achats saisis, registres complets.</p></div></div>', 'plat')) +
    
@@ -4619,12 +4631,13 @@ function modifierPeriode(per) {
          '<p class="sub">' + bloquants.length + ' point(s) ne peuvent pas être contournés.</p>' +
          '<div class="stack">' + bloquants.map(b =>
            '<div class="alerte bad"><span class="ai">▲</span><div><b>' + esc(b.txt) + '</b></div>' +
-           '<span class="go"><button class="btn clair sm" data-saut="' + b.go + '">Ouvrir</button></span></div>').join('') + '</div>' +
+           '<span class="go"><button class="btn clair sm" data-saut="' + b.go + '"' + (b.jour ? ' data-jour="' + b.jour + '"' : '') +
+           '>Ouvrir</button></span></div>').join('') + '</div>' +
          '<div class="alerte info" style="margin-top:14px"><span class="ai">ℹ️</span><div><b>Pourquoi c’est bloquant</b>' +
          '<p>Sans inventaire de glace réel et sans achats saisis, le stock de fin est une invention : ' +
          'l’écart calculé serait faux et toute la période suivante partirait de travers.</p></div></div>' +
          '<div class="actions"><button class="btn clair" data-fermer>Fermer</button></div>');
-       $$('[data-saut]').forEach(b => b.onclick = () => { closeSheet(); rendre(b.dataset.saut); });
+       $$('[data-saut]').forEach(b => b.onclick = () => { closeSheet(); rendre(b.dataset.saut, false, b.dataset.jour); });
        return;
      }
    
