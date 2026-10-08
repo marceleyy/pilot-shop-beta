@@ -5309,7 +5309,8 @@ function modifierPeriode(per) {
      '15111':470, '15112':930,
      '12115':160, '12121':160, '12122':160, '12123':160, '12126':160,
      '14111':160, '14121':160, '14127':160, '14131':160, '14132':200, '14133':160,
-     '13111':25,  '13112':50,  '13113':75,  '13114':100, '13116':150, '13141':60, '17010':60,
+     /* Macarons et gianduiotto : hors du calcul d'écart. */
+     '13111':0,   '13112':0,   '13113':0,   '13114':0,   '13116':0,   '13141':0,  '17010':0,
      '41171':80,  '41173':80,  '41175':80,  '41116':100,
      '41121':50,  '41122':50,  '41123':50,  '41126':50,  '41133':50, '41134':50, '41137':50, '41313':50,
      '31132':50,  '31134':50,  '31312':50,  '31313':50,  '31314':50,
@@ -5318,9 +5319,13 @@ function modifierPeriode(per) {
 
    /* Export Innovorder sans SKU (« ventes tous produits » v2) : le libellé de
       caisse donne le produit. Grammages du classeur Amorino ; null = glace dont
-      le grammage reste à saisir (macarons, gaufres et crêpes garnies). */
+      le grammage reste à saisir. */
+   /* Macarons et gianduiotto : hors du classeur des écarts (manager), jamais
+      comptés, même avec un SKU ou un grammage retenu. */
+   const HORS_ECART = /^(\d+ )?MAC\b|^MACARON|^COFFRET .*\bMAC\b|^GIANDUIOTTO/;
    const GRAMMAGES_NOMS = [
      [/CONE VIDE/, 0], [/MAC TRADITIONNEL/, 0],
+     [HORS_ECART, 0],
      [/^POT ENFANT/, 81], [/^POT PETIT/, 133], [/^POT CLASSI/, 163], [/^POT GRAND/, 221],
      [/^POT GEANT/, 275], [/^POT (A )?PARTAG/, 529],
      [/^CHOCO ?CONE ENFANT/, 67], [/^CHOCO ?CONE PETIT/, 112], [/^CHOCO ?CONE CLASSI/, 149], [/^CHOCO ?CONE GRAND/, 208],
@@ -5331,10 +5336,6 @@ function modifierPeriode(per) {
      /* « x2 glace », « 2 glaces » : 50 g par boule, comme le classeur. */
      [/\b(X ?1 GLACE|1 GLACE)\b/, 50], [/\bX? ?2 GLACES?\b/, 100], [/\bX? ?3 GLACES?\b/, 150],
      [/^EXTRA GLACE X ?2/, 100], [/^EXTRA GLACE/, 50],
-     /* Macarons : 25 g par macaron (SKU 13111 à 13116 du catalogue). */
-     [/^1 MAC GELATO/, 25], [/^2 MAC GELATO/, 50], [/^3 MAC GELATO/, 75], [/^4 MAC GELATO/, 100],
-     [/^6 MAC GELATO/, 150], [/^MACARON XL/, 60], [/^GIANDUIOTTO/, 60],
-     [/^COFFRET 12 MAC GELATO/, 300],
      /* Gaufres et crêpes garnies : 1 boule (50 g) au catalogue. */
      [/^(GAUFRE|CREPE) (PARFAITE|DELICIEUSE|TRADITIONNELLE)/, 50],
      /* Crêpe gianduja : vendue avec une boule (liste du manager). */
@@ -5490,6 +5491,7 @@ function modifierPeriode(per) {
              if (!nom || q <= 0) return;
              const sku = cSku ? String(r[cSku]).trim() : '';
              const n0 = nomCaisse(nom);
+             if (HORS_ECART.test(n0)) return;
              let gr = (retenus && num(retenus[n0]) > 0) ? num(retenus[n0])
                : (sku && GRAMMAGES[sku] !== undefined) ? GRAMMAGES[sku] : grammageNom(nom);
              if (gr === undefined && cCat && /GELATO|GLAC|COUPE/.test(nomCaisse(r[cCat]))) gr = null;

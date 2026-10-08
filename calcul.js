@@ -50,7 +50,7 @@ const CALCUL = {
     ['Cornet Sans Gluten', 153], ['Extra glace x1', 50], ['Extra glace x2', 100]
   ],
   /* Produit de caisse (libellé Innovorder) → colonne du classeur où il se
-     range. Testé dans l'ordre ; un produit sans colonne (macarons…) garde sa
+     range. Testé dans l'ordre ; un produit sans colonne garde sa
      propre ligne. */
   colonnes: [
     [/^POT ENFANT/, 'Coppa enfant'], [/^POT PETIT/, 'Coppa petit'], [/^POT CLASSI/, 'Coppa classic'],
@@ -1006,7 +1006,8 @@ const CALCUL = {
      const eD = async () => {
        if (!w.ventes.lignes) {
          const cat = await DB.get(CALCUL.cleProduits, []);
-         const base = (Array.isArray(cat) && cat.length) ? cat : CALCUL.produitsDefaut.map(x => ({ nom:x[0], g:x[1] }));
+         const garde = (Array.isArray(cat) ? cat : []).filter(p => p && !HORS_ECART.test(nomCaisse(p.nom)));
+         const base = garde.length ? garde : CALCUL.produitsDefaut.map(x => ({ nom:x[0], g:x[1] }));
          w.ventes.lignes = base.map(p => ({ nom:p.nom, g:p.g, q:'' }));
          if (!w.ventes.lignes.length) w.ventes.lignes = [{ nom:'', g:'', q:'' }];
        }
@@ -1213,7 +1214,7 @@ const CALCUL = {
    /* Range les produits de caisse dans les lignes du classeur (Coppa petit,
       Gaufre x1 glace…) : quantités additionnées, grammage de la ligne. Les
       lignes du classeur restent toutes affichées, même à 0 ; un produit sans
-      colonne (macarons…) s'ajoute à la fin avec son propre grammage. */
+      colonne s'ajoute à la fin avec son propre grammage. */
    function rangerClasseur(produits, base) {
      const lignes = base.map(p => ({ nom:p.nom, g:p.g, q:0, de:[] }));
      const parNom = {};
