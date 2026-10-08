@@ -152,7 +152,7 @@
       iPad disparaissaient (vérifié : ventes et imports effacés). */
    const FUSIONNER = ['checklist:', 'hebdo:', 'temp:', 'caisse:', 'reassort:',
                       'preuves:', 'ruptures', 'releve', 'lots:', 'clean:',
-                      'anomalies', 'reception:', 'stock:mv:', 'pointage:', 'ecart:'];
+                      'anomalies', 'reception:', 'stock:mv:', 'stock:m13:', 'pointage:', 'ecart:'];
    const aFusionner = cle => FUSIONNER.some(p => cle.indexOf(p) === 0);
 
    /* Fusion superficielle, champ par champ. Suffisante : chaque personne
@@ -168,7 +168,9 @@
       l'union la ferait revenir. */
    /* « pointage: » : deux équipiers qui pointent sur deux iPads le même jour
       ajoutent chacun leur session ; sans union, la seconde effaçait la première. */
-   const UNIR = ['ruptures', 'releve', 'anomalies', 'reception:', 'stock:mv:', 'pointage:', 'preuves:'];
+   /* « stock:m13: » : entrées et sorties de l'armoire −13, en ajout seul. Deux
+      iPads qui y posent chacun un bac ne doivent pas s'effacer. */
+   const UNIR = ['ruptures', 'releve', 'anomalies', 'reception:', 'stock:mv:', 'stock:m13:', 'pointage:', 'preuves:'];
    const ts = x => (x && (x.a || x.at)) || '';
    const idLigne = x => x && (x.id || [ts(x), x.c || x.cle, x.t || x.type, x.e || x.employe || '',
                                        x.q !== undefined ? x.q : x.qte, x.l || x.lot || ''].join('|'));
@@ -2006,7 +2008,7 @@ async function purgerLocalAncien() {
          '<div class="champ"><label class="f">Litrage par unité (L)</label><input type="number" id="pl" min="0" step="0.5" placeholder="0"></div></div>' +
          '<div style="margin-top:14px"><label class="f">Motif</label><div class="chips" id="pm">' +
          MOTIFS_PERTE.map((m, i) => '<button type="button" class="chip corail' + (i === 0 ? ' on' : '') +
-           '" data-m="' + m.id + '">' + m.icone + ' ' + esc(m.label) + '</button>').join('') + '</div></div>' +
+           '" data-m="' + m.id + '">' + esc(m.label) + '</button>').join('') + '</div></div>' +
          '<button class="btn menthe bloc" id="pa" style="margin-top:18px">Enregistrer la perte</button>') +
    
        '<div class="entete"><h3>Jetés aujourd’hui</h3>' +
@@ -2014,7 +2016,7 @@ async function purgerLocalAncien() {
    
        (liste.length ? '<div class="stack">' + liste.map((w, i) => {
          const m = MOTIFS_PERTE.filter(x => x.id === w.motif)[0] || MOTIFS_PERTE[0];
-         return carte('<div class="rang"><span class="ci">' + m.icone + '</span>' +
+         return carte('<div class="rang">' +
            '<div style="flex:1"><b>' + esc(w.produit) + '</b>' +
            '<div class="mini">' + w.nombre + ' × · ' + (w.litrage ? n1(w.litrage) + ' L · ' : '') +
            esc(w.par) + ' · ' + heure(w.at) + '</div></div>' +
@@ -4766,7 +4768,7 @@ function modifierPeriode(per) {
    }
    
    /* =============================================================================
-      29. HISTORIQUE + BOUCLIER SANITAIRE
+      29. HISTORIQUE + REGISTRE SANITAIRE
       ========================================================================== */
    V.histo = async function () {
      const onglet = V.histo._t || 'caisse';
@@ -4825,7 +4827,7 @@ function modifierPeriode(per) {
          '<button type="button" class="chip' + (onglet === k ? ' on' : '') + '" data-h="' + k + '">' +
          esc(defs[k].l) + '</button>').join('') + '</div>' +
    
-       carte(entete('🛡️', 'Bouclier sanitaire',
+       carte(entete('🛡️', 'Registre sanitaire',
          'Compile températures, nettoyage et lots ouverts en un document présentable à un contrôle.') +
          '<button class="btn ciel bloc xl" id="pdf2">Export PDF contrôle sanitaire</button>', 'ciel') +
    
