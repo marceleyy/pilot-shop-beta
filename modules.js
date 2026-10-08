@@ -1277,23 +1277,37 @@ V.caisse = async function () {
         ? 'Renseignez le fond de caisse initial'
         : 'Renseignez tous les montants du soir', 'erreur');
       champsSaisie().forEach(i => { r[i.dataset.k] = i.value; });
+      /* Bouton désactivé dès le clic, pour tous : un double appui du manager
+         validait deux fois, et la seconde validation, prenant la première pour
+         un comptage à corriger, journalisait une correction fictive (« Marie →
+         Marie, montants inchangés »). */
+      const bouton = $('#cv');
+      bouton.disabled = true; bouton.textContent = 'Vérification…';
       /* Écran ouvert avant une validation ou une correction faite sur un autre
          iPad : la fusion refuserait cette validation (correction en cours) ou la
-         laisserait remplacer celle du collègue (comptage validé), sans rien dire,
-         et le fil annoncerait « a validé ». L'équipier relit d'abord la fiche. */
-      if (STATE.user.role !== 'manager') {
-        const bouton = $('#cv');
-        bouton.disabled = true; bouton.textContent = 'Vérification…';
-        const frais = await DB.get('caisse:' + j, null);
-        const sig = frais && (frais[p + 'valide'] || frais[p + 'avant']);
-        if (sig) {
-          toast(frais[p + 'valide']
+         laisserait remplacer celle du collègue (comptage validé), et le fil
+         annoncerait « a validé ». On relit d'abord la fiche. L'équipier s'arrête
+         devant toute signature. Le manager, qui peut corriger, devant une
+         signature que son écran ne connaît pas : il voit d'abord ce qui a été
+         validé, puis corrige s'il le faut (Lucas valide 150 €, Marie, écran
+         resté ouvert, validait 155 € par-dessus sans le savoir). */
+      const frais = await DB.get('caisse:' + j, null);
+      const sig = frais && (frais[p + 'valide'] || frais[p + 'avant']);
+      const manager = STATE.user.role === 'manager';
+      const connue = s => [r[p + 'valide'], r[p + 'avant']]
+        .concat(Array.isArray(r[p + 'corrections']) ? r[p + 'corrections'] : [])
+        .some(x => x && x.at === s.at);
+      if (sig && (!manager || !connue(sig))) {
+        toast(manager
+          ? (frais[p + 'valide']
+            ? 'Comptage validé entre-temps par ' + (sig.par || 'un collègue') + ' : vérifiez-le avant de le corriger'
+            : 'Comptage en cours de correction sur un autre iPad')
+          : (frais[p + 'valide']
             ? 'Comptage déjà validé par ' + (sig.par || 'un collègue') + ' : seul le manager peut le modifier'
-            : 'Comptage en cours de correction par le manager', 'erreur');
-          /* Parti entre-temps sur un autre onglet, un autre jour ou un autre
-             écran : le message suffit, on ne l'en arrache pas. */
-          return bouton.isConnected ? rendre('caisse') : undefined;
-        }
+            : 'Comptage en cours de correction par le manager'), 'erreur');
+        /* Parti entre-temps sur un autre onglet, un autre jour ou un autre
+           écran : le message suffit, on ne l'en arrache pas. */
+        return bouton.isConnected ? rendre('caisse') : undefined;
       }
       /* Revalidation d'un comptage déjà signé, corrigé ou non : l'ancienne
          signature et les anciens montants vont au journal et restent dans la
