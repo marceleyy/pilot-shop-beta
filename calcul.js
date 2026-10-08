@@ -284,9 +284,9 @@ const CALCUL = {
      const tailles = Object.keys(bacs).filter(t => bacs[t] > 0);
      if (!tailles.length) return;
      box.innerHTML = '<div class="alerte info" style="margin-top:12px"><span class="ai">•</span><div>' +
-       '<b>Proposé par l’appli : chambre froide aujourd’hui</b><p>' +
+       '<b>Proposé par l’appli : bacs fermés aujourd’hui</b><p>' +
        tailles.map(t => bacs[t] + ' × ' + t + ' L').join(' · ') +
-       (s.depuis ? ' (inventaire du ' + esc(fmtDC(s.depuis)) + ' + mouvements tracés)' : ' (mouvements tracés)') + '.</p>' +
+       (s.depuis ? ' (inventaire du ' + esc(fmtDC(s.depuis)) + ' + mouvements tracés)' : ' (mouvements tracés)') + '. L’appli ne sait pas où ils sont rangés : ils sont repris en chambre froide, déplacez ceux du congélateur −13.</p>' +
        '<button type="button" class="btn clair sm" id="' + p + '-prop-ok" style="margin-top:6px">Reprendre ces bacs</button></div></div>';
      $('#' + p + '-prop-ok').onclick = () => {
        CALCUL.taillesBac.forEach(t => {
