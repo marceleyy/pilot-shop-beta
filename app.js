@@ -5294,13 +5294,19 @@ function modifierPeriode(per) {
      [/^CORNET ENFANT/, 69], [/^CORNET PETIT/, 114], [/^CORNET CLASSI/, 153], [/^CORNET GRAND/, 224],
      [/^(BAC|COFFRET) .*\b550 ?ML\b/, 470], [/^(BAC|COFFRET) .*\b(1100 ?ML|1 1 ?L)\b/, 930],
      [/SHAKE|SORBET DRINK/, 160], [/^AFFOGATO/, 160], [/^ESPRESSO FRAPPE/, 200], [/^INCONTOURNABLE/, 80],
-     [/^COUPE/, 160], [/^BRIOCHE GLACE/, 100], [/^EXTRA GLACE/, 50],
+     [/^COUPE/, 160], [/^BRIOCHE GLACE/, 100], [/^BRIOCHE .*X ?2\b/, 160],
+     /* « x2 glace », « 2 glaces » : 50 g par boule, comme le classeur. */
+     [/\b(X ?1 GLACE|1 GLACE)\b/, 50], [/\b(X ?2 GLACES?|2 GLACES)\b/, 100], [/\b(X ?3 GLACES?|3 GLACES)\b/, 150],
+     [/^EXTRA GLACE X ?2/, 100], [/^EXTRA GLACE/, 50],
      /* Macarons : 25 g par macaron (SKU 13111 à 13116 du catalogue). */
      [/^1 MAC GELATO/, 25], [/^2 MAC GELATO/, 50], [/^3 MAC GELATO/, 75], [/^4 MAC GELATO/, 100],
      [/^6 MAC GELATO/, 150], [/^MACARON XL/, 60], [/^GIANDUIOTTO/, 60],
+     [/^COFFRET 12 MAC GELATO/, 300],
      /* Gaufres et crêpes garnies : 1 boule (50 g) au catalogue. */
      [/^(GAUFRE|CREPE) (PARFAITE|DELICIEUSE|TRADITIONNELLE)/, 50],
-     [/GELATO|GLACE|^GAUFRE|^CREPE|^BRIOCHE/, null]
+     /* Crêpe ou gaufre nature (sucre, chocolat, gianduja…) : sans glace. */
+     [/^(GAUFRE|CREPE)\b/, 0],
+     [/GELATO|^BRIOCHE/, null]
    ];
    const nomCaisse = s => String(s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '')
      .toUpperCase().replace(/[^A-Z0-9]+/g, ' ').trim();
@@ -5437,8 +5443,8 @@ function modifierPeriode(per) {
    
          /* Libellé de caisse (avec ou sans SKU) → chaque produit glacé, avec
             son grammage : celui déjà saisi, sinon celui du SKU, sinon celui du
-            classeur. Une glace sans grammage connu arrive vide, à compléter :
-            rien de ce qui porte de la glace n'est écarté en silence. */
+            classeur. Une glace sans grammage connu (libellé ou catégorie
+            glace) arrive vide, à compléter. */
          const cCat = trouve(/cat[eé]gorie|famille|rayon/i);
          if (cNom) {
            let g = 0, n = 0;
@@ -5451,7 +5457,7 @@ function modifierPeriode(per) {
              const n0 = nomCaisse(nom);
              let gr = (retenus && num(retenus[n0]) > 0) ? num(retenus[n0])
                : (sku && GRAMMAGES[sku] !== undefined) ? GRAMMAGES[sku] : grammageNom(nom);
-             if (gr === undefined && cCat && /GELATO|GLAC|GAUFRE|CREPE|COUPE/.test(nomCaisse(r[cCat]))) gr = null;
+             if (gr === undefined && cCat && /GELATO|GLAC|COUPE/.test(nomCaisse(r[cCat]))) gr = null;
              if (gr === undefined || gr === 0) return;
              lignes.push({ nom:nom, g:gr || '', q:q });
              if (gr === null) { aSaisir.push(nom + ' (' + q + ')'); return; }
@@ -5549,7 +5555,7 @@ function modifierPeriode(per) {
    
        (r.inconnus.length
          ? '<div class="alerte warn" style="margin-top:14px"><span class="ai">•</span>' +
-           '<div><b>' + r.inconnus.length + ' SKU sans grammage</b><p>' +
+           '<div><b>' + r.inconnus.length + ' produit(s) sans grammage</b><p>' +
            esc(r.inconnus.slice(0, 8).join(', ')) + (r.inconnus.length > 8 ? '…' : '') +
            '. Leur glace n’est pas comptée dans les ventes, donc elle apparaîtra comme un manque.</p></div></div>'
          : '') +
