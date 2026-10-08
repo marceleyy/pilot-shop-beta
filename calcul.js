@@ -299,9 +299,24 @@ const CALCUL = {
      if (jour === today() && typeof stockReel === 'function') {
        try {
          const sr = await stockReel();
-         const z = sr && parTaille(sr.articles);
-         if (z) props.push({ libelle:'Stock tracé aujourd’hui' + (sr.depuis ? ' (inventaire du ' + fmtDC(sr.depuis) + ' + mouvements)' : ''),
-                             zones:z, sansRangement:true });
+         /* Bacs posés à l'armoire −13 (scan du réassort, si disponible) : sortis
+            du compte de la chambre froide et rangés au congélateur. */
+         let armoire = null;
+         if (sr && typeof bacsArmoire === 'function') {
+           try {
+             armoire = {};
+             (await bacsArmoire()).forEach(x => { if (x && x.cle) armoire[x.cle] = (armoire[x.cle] || 0) + 1; });
+           } catch (e) { armoire = null; }
+         }
+         const froid = {};
+         Object.keys((sr && sr.articles) || {}).forEach(k => {
+           froid[k] = Math.max(0, num(sr.articles[k]) - ((armoire && armoire[k]) || 0));
+         });
+         const z = sr && parTaille(froid);
+         const zc = armoire && parTaille(armoire);
+         if (z || zc) props.push({ libelle:'Stock tracé aujourd’hui' + (sr.depuis ? ' (inventaire du ' + fmtDC(sr.depuis) + ' + mouvements)' : ''),
+                                   zones:Object.assign({}, z || {}, zc ? { congel:zc.froid } : {}),
+                                   sansRangement:!armoire, rangement:!!armoire });
        } catch (e) {}
      }
      return props;
@@ -338,7 +353,14 @@ const CALCUL = {
        const z = JSON.parse(JSON.stringify(x.zones));
        /* Bacs fermés sans rangement : seule la chambre froide est remplacée, le
           congélateur et les entamés déjà saisis restent. */
-       reprendre(x.sansRangement ? Object.assign(lireZones(p), z) : z);
+       let cible = z;
+       if (x.sansRangement) cible = Object.assign(lireZones(p), z);
+       else if (x.rangement) {
+         /* Bacs entiers des deux zones repris, entamés déjà saisis gardés. */
+         cible = lireZones(p);
+         ['froid', 'congel'].forEach(id => { cible[id] = Object.assign({}, cible[id] || {}, { bacs:(z[id] && z[id].bacs) || {} }); });
+       }
+       reprendre(cible);
        toast('Comptage repris : vérifiez-le');
      });
    }
