@@ -953,10 +953,7 @@ V.caisse = async function () {
        : (veille.ff !== undefined && veille.ff !== '' ? num(veille.ff) : null))
     : null;
 
-  if (!V.caisse._m) {
-    const h = new Date().getHours();
-    V.caisse._m = (h < 15 && !r.m_valide) ? 'm' : (r.s_valide ? 'm' : 's');
-  }
+  if (!V.caisse._m) V.caisse._m = (!soirCommence() && !r.m_valide) ? 'm' : (r.s_valide ? 'm' : 's');
   let mom = V.caisse._m;
 
   /* Relecture des anciennes clés pour préremplir sans rien perdre */
@@ -1479,6 +1476,16 @@ V.hebdo = async function () {
    défaut, deux flèches, un bouton hors service, une saisie libre, et un
    bouton de validation unique en bas qui ramène à l'accueil.
    ========================================================================== */
+/* Le soir commence avec la phase de fermeture de la boutique, comme dans la
+   check-liste. Températures et Caisse basculaient à 15 h fixes : une demi-heure
+   après une ouverture à 14:30, elles ouvraient le soir, matin pas encore fait. */
+function soirCommence() {
+  const d = new Date(), bf = HORAIRES.debutFermeture;
+  return /^\d{2}:\d{2}$/.test(bf || '')
+    ? d.getHours() * 60 + d.getMinutes() >= +bf.slice(0, 2) * 60 + +bf.slice(3, 5)
+    : d.getHours() >= 15;
+}
+
 function defautEnceinte(e) {
   return Math.round((e.vert[0] + e.vert[1]) / 2);
 }
@@ -1501,11 +1508,11 @@ V.temp = async function () {
   if (V.temp._voulu) { V.temp._m = V.temp._voulu; V.temp._j = j; V.temp._voulu = null; }
   else if (!V.temp._m || V.temp._j !== j) {
     V.temp._j = j;
-    const h = new Date().getHours();
-    if (!rec.valide.m && h < 15)      V.temp._m = 'm';
+    const soir = soirCommence();
+    if (!rec.valide.m && !soir)       V.temp._m = 'm';
     else if (!rec.valide.s)           V.temp._m = 's';
     else if (!rec.valide.m)           V.temp._m = 'm';
-    else                              V.temp._m = (h < 15) ? 'm' : 's';
+    else                              V.temp._m = soir ? 's' : 'm';
   }
   /* « let » et non « const » : le moment change quand on bascule, et toutes
      les fonctions ci-dessous doivent suivre. Avec const, le clic sur « Soir »
