@@ -211,7 +211,11 @@ label.f,.f{
   padding:calc(var(--safe-t) + 12px) var(--pad-x) 12px;
   gap:12px;min-height:76px;
 }
-#topbar{min-height:var(--topbar-h)}
+/* L'encoche (safe-t) s'ajoute à la hauteur fixe : comprise dedans, elle
+   rognait le titre et le total d'inventaire collant passait sous la barre.
+   Hors ligne, le bandeau la prend déjà en charge. */
+#topbar{min-height:calc(var(--topbar-h) + var(--safe-t))}
+@media (min-width:601px){#offline.on ~ #app #topbar{min-height:var(--topbar-h)}}
 /* Titre et sous-titre sur UNE ligne chacun, coupés en « … » si besoin. Le
    serif d'affiche (New York sur iPad) est plus large que celui des essais :
    sans cette coupe, un titre long faisait passer la barre à 133 px en
@@ -632,7 +636,7 @@ select,select:focus{
   background:var(--framboise);color:#FFFCF7;font-size:13px;
 }
 .tache.urgente .tm{color:var(--framboise-d)}
-.tn-btn{min-height:44px;display:inline-flex;align-items:center;color:var(--chocolat)}
+.tn-btn{min-height:48px;display:inline-flex;align-items:center;color:var(--chocolat)}
 
 /* Tâches réunies dans une carte (procédures de « Ma journée ») : une liste à
    filets, pas des boîtes dans une boîte. La ligne faite garde son code :
@@ -706,6 +710,9 @@ select,select:focus{
 /* --- Traçabilité, inventaire ------------------------------------------- */
 .lotl,.invp,.invl{background:var(--porcelaine);border:1px solid var(--filet);border-radius:var(--r-bloc)}
 .lotf,.lotd,.invn small,.invc,.invp-t label span{color:var(--noisette)}
+/* « rien attendu », « préc. » : l'opacité .62 de style.css les tombait à
+   2,6:1. Noisette pleine (5,8:1 sur la carte), l'italique garde la nuance. */
+.invc.faible{opacity:1;font-style:italic}
 .inv-total{background:var(--chocolat);color:var(--porcelaine);border-radius:16px;box-shadow:var(--ombre-btn)}
 .inv-total b{font-family:var(--serif);font-weight:600;font-variant-numeric:lining-nums tabular-nums}
 .inv-total span{opacity:.82}
@@ -1136,7 +1143,7 @@ select,select:focus{
 /* Total d'inventaire collant : avec « top:0 », il glissait SOUS la barre du
    haut (plus haute dans l'empilement) et disparaissait au défilement. Il
    s'accroche maintenant juste sous elle, bandeau hors ligne compris. */
-.inv-total{top:calc(var(--topbar-h) + 8px)}
+.inv-total{top:calc(var(--topbar-h) + var(--safe-t) + 8px)}
 #offline.on ~ #app .inv-total{top:calc(var(--offline-h) + var(--topbar-h) + 8px)}
 
 /* Survol : seulement avec une vraie souris ou un trackpad (poste du

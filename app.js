@@ -915,6 +915,28 @@
      corps.addEventListener('change', marquer);
    })();
 
+   /* Étiquettes reliées aux champs. Les gabarits posent <label class="f">
+      sans « for » à côté du champ : un lecteur d'écran annonçait près de
+      150 champs sans nom, et toucher l'étiquette ne plaçait pas le curseur.
+      Plutôt que reprendre chaque gabarit, chaque étiquette est reliée au
+      champ de son bloc .champ, à chaque changement de la page ou de la
+      feuille. Seuls les nœuds ajoutés sont observés : poser « for » ou un
+      id ne relance pas l'observateur. */
+   (function () {
+     let n = 0;
+     const relier = racine => $$('.champ > label.f:not([for])', racine).forEach(l => {
+       const c = l.parentNode.querySelector('input:not([type=hidden]), select, textarea');
+       if (!c) return;
+       if (!c.id) c.id = 'champ-' + (++n);
+       l.htmlFor = c.id;
+     });
+     if (typeof MutationObserver === 'undefined') return;
+     ['page', 'sheet-corps'].forEach(id => {
+       const r = document.getElementById(id);
+       if (r) new MutationObserver(() => relier(r)).observe(r, { childList:true, subtree:true });
+     });
+   })();
+
    /* Toucher le voile : une feuille obligatoire reste ouverte, et une saisie
       commencée n'est pas jetée sans confirmation. « Continuer la saisie »
       remet la feuille telle quelle — mêmes nœuds, mêmes valeurs, mêmes
@@ -2212,7 +2234,7 @@ async function purgerLocalAncien() {
            '<button type="button" class="chip' + (i === 3 ? ' on' : '') + '" data-rc="' + c.id + '">' +
            esc(c.label) + '</button>').join('') + '</div>' +
          '<div class="champ" style="margin-top:14px">' +
-         '<textarea id="rt" placeholder="' + esc(RELEVE.exemples[0]) + '"></textarea>' +
+         '<textarea id="rt" aria-label="Message pour la prochaine équipe" placeholder="' + esc(RELEVE.exemples[0]) + '"></textarea>' +
          '<p class="mini" style="margin-top:6px">' + esc(CONSIGNE_TEXTE_LIBRE) + '</p></div>' +
          '<div class="btn-row" style="margin-top:14px">' +
          '<button class="btn menthe" id="rv">Publier</button>' +
@@ -2876,6 +2898,19 @@ setInterval(function () {
   if (typeof chargerEquipe === 'function' && STATE.enLigne) chargerEquipe().then(revaliderSession, function () {});
 }, 300000);
 
+/* Bouton de compte : initiales et couleur de la personne connectée. Le nom
+   lu par un lecteur d'écran commence par les initiales affichées : « Mon
+   compte » seul ne correspondait pas à ce qu'on voit (WCAG 2.5.3). */
+function majBoutonCompte() {
+  const bc = $('#compte');
+  if (!bc || !STATE.user) return bc;
+  const ini = STATE.user.initiales || '';
+  bc.textContent = ini;
+  bc.style.background = STATE.user.couleur || 'var(--encre)';
+  bc.setAttribute('aria-label', (ini ? ini + ', ' : '') + 'compte de ' + STATE.user.prenom);
+  return bc;
+}
+
 /* L'équipe relue, la session ouverte suit. Une personne retirée sur un autre
    iPad gardait sa session jusqu'au prochain rechargement, et un rôle changé
    restait l'ancien. Retirée : retour immédiat à l'écran des prénoms. Rôle
@@ -3142,12 +3177,8 @@ window.addEventListener('error', function (ev) {
   purgerLocalAncien();      // copies locales anciennes : journal, heures, caisses, registres (voir sa note)
   /* Bouton de compte : le seul accès à « tout le reste » et à la déconnexion
      pour l'équipe, dont la barre du bas n'a plus d'onglet « Plus ». */
-  const bc = $('#compte');
-  if (bc) {
-    bc.textContent = STATE.user.initiales || '';
-    bc.style.background = STATE.user.couleur || 'var(--encre)';
-    bc.onclick = ouvrirPlus;
-  }
+  const bc = majBoutonCompte();
+  if (bc) bc.onclick = ouvrirPlus;
   renderNav();
   /* Une première entrée d'historique, pour que le tout premier « retour »
      ramène à l'accueil au lieu de sortir de l'application. */
@@ -4877,7 +4908,7 @@ function modifierPeriode(per) {
        if (moi) {
          STATE.user.prenom = prenom;
          STATE.user.initiales = (EQUIPE.filter(x => x.id === e.id)[0] || {}).initiales || STATE.user.initiales;
-         const bc = $('#compte'); if (bc) bc.textContent = STATE.user.initiales;
+         majBoutonCompte();
        }
        closeSheet();
        toast(neuf ? prenom + ' ajouté(e) à l’équipe' : 'Fiche de ' + prenom + ' enregistrée');

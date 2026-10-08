@@ -2339,11 +2339,11 @@ function formulaireAnomalie() {
            '<div class="grid g4" style="margin-top:12px;gap:8px">' +
            TAILLES_BAC.map(t =>
              '<div class="champ"><label class="f">' + t + ' L</label>' +
-             '<input type="number" min="0" step="1" data-g="p' + i + '.' + t + '" value="' +
+             '<input type="number" min="0" step="1" aria-label="' + esc(p) + ', bacs de ' + t + ' L" data-g="p' + i + '.' + t + '" value="' +
              (v.t[t] === undefined || v.t[t] === '' ? '' : v.t[t]) + '"' + (rec.valide ? ' disabled' : '') + '></div>').join('') +
            '</div>' +
            '<div class="champ" style="margin-top:10px"><label class="f">Entamé, tous formats confondus (L)</label>' +
-           '<input type="number" min="0" step="0.5" data-e="p' + i + '" value="' +
+           '<input type="number" min="0" step="0.5" aria-label="' + esc(p) + ', entamé, tous formats confondus (L)" data-e="p' + i + '" value="' +
            (v.ent === undefined ? '' : v.ent) + '"' + (rec.valide ? ' disabled' : '') + '></div>',
            tot ? 'menthe' : '');
        }).join('') + '</div>' +

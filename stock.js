@@ -1249,6 +1249,7 @@ V.inventaire = async function () {
           const c = cleArticle('glace', p, t);
           return '<label><span>' + t + ' L</span>' +
             '<input type="number" inputmode="numeric" min="0" step="1" data-inv="' + esc(c) + '" ' +
+            'aria-label="' + esc(p + ', bacs de ' + t + ' L') + '" ' +
             'value="' + (saisie[c] !== undefined ? esc(saisie[c]) : '') + '" placeholder="0"></label>';
         }).join('') + '</div></div>';
     }).join('') + '</div>' +
@@ -1270,6 +1271,7 @@ V.inventaire = async function () {
                 '<span class="invn">' + esc(sv) + '</span>' +
                 (q ? '<span class="invc">' + q + '</span>' : '') +
                 '<input type="number" inputmode="numeric" min="0" step="1" data-inv="' + esc(c) + '" ' +
+                'aria-label="' + esc(f.libelle + ', ' + sv) + '" ' +
                 'value="' + (saisie[c] !== undefined ? esc(saisie[c]) : '') + '" placeholder="0"></div>';
             }).join('') + '</div></div>';
         }
@@ -1280,6 +1282,7 @@ V.inventaire = async function () {
           '<small>en ' + esc(f.unites) + '</small></span>' +
           (q ? '<span class="invc">' + q + ' en stock</span>' : '') +
           '<input type="number" inputmode="numeric" min="0" step="1" data-inv="' + esc(c) + '" ' +
+          'aria-label="' + esc(f.libelle + ' (en ' + f.unites + ')') + '" ' +
           'value="' + (saisie[c] !== undefined ? esc(saisie[c]) : '') + '" placeholder="0"></div>';
     }).join('') + '</div>';
 
@@ -1291,11 +1294,13 @@ V.inventaire = async function () {
   let deplies = {};
   const cleSec = (r, v) => 'sec|' + r.id + '|' + (v || '');
 
-  const champSec = (r, c) => {
+  /* nom : ce qu'un lecteur d'écran annonce, la ligne n'ayant pas d'étiquette. */
+  const champSec = (r, c, nom) => {
     const pas = r.decimal === false ? '1' : '0.5';
     const mode = r.decimal === false ? 'numeric' : 'decimal';
     return '<div class="saisie-u">' +
       '<input type="number" inputmode="' + mode + '" min="0" step="' + pas + '" ' +
+      'aria-label="' + esc(nom + ' (' + r.unite + ')') + '" ' +
       'data-sec="' + esc(c) + '" value="' + (saisieSec[c] !== undefined ? esc(saisieSec[c]) : '') + '" ' +
       'placeholder="0">' +
       '<span class="su">' + esc(r.unite) + '</span></div>';
@@ -1329,7 +1334,7 @@ V.inventaire = async function () {
             return '<div class="invl">' +
               '<span class="invn">' + esc(r.nom) + '</span>' +
               (anc[c] !== undefined ? '<span class="invc faible">préc. ' + anc[c] + '</span>' : '') +
-              champSec(r, c) + '</div>';
+              champSec(r, c, r.nom) + '</div>';
           }
 
           const ouvert = deplies[r.id];
@@ -1349,7 +1354,7 @@ V.inventaire = async function () {
                   return '<div class="invl">' +
                     '<span class="invn">' + esc(v) + '</span>' +
                     (anc[c] !== undefined ? '<span class="invc faible">préc. ' + anc[c] + '</span>' : '') +
-                    champSec(r, c) + '</div>';
+                    champSec(r, c, r.nom + ', ' + v) + '</div>';
                 }).join('') + '</div>'
               : '') +
             '</div>';
