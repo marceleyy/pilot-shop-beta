@@ -125,13 +125,13 @@ const CALCUL = {
           ¼, ½ ou ¾ d'un bac de la taille choisie. */
        '<div class="chips" style="margin-top:8px" data-quarts="' + p + '-' + x.id + '">' +
          CALCUL.taillesBac.map(t => '<button type="button" class="chip' + (t === CALCUL.tailleQuarts ? ' on' : '') +
-           '" data-qt="' + t + '" aria-pressed="' + (t === CALCUL.tailleQuarts) + '" aria-label="Bac de ' + t + ' L pour ' + esc(x.label) + '">' +
+           '" data-qt="' + t + '" aria-pressed="' + (t === CALCUL.tailleQuarts) + '" aria-label="Bac de ' + t + ' L pour ' + esc(x.labelEntames || x.label) + '">' +
            t + ' L</button>').join('') + '</div>' +
        '<div class="chips" style="margin-top:6px">' +
          [[0.25, '+ ¼'], [0.5, '+ ½'], [0.75, '+ ¾']].map(q =>
            '<button type="button" class="chip" data-qa="' + p + '-' + x.id + '" data-qf="' + q[0] + '" aria-label="Ajouter ' +
-             q[1].slice(2) + ' de bac à ' + esc(x.label) + '">' + q[1] + '</button>').join('') +
-         '<button type="button" class="chip" data-qz="' + p + '-' + x.id + '" aria-label="Effacer les entamés de ' + esc(x.label) + '">Effacer</button></div></div>').join('');
+             q[1].slice(2) + ' de bac à ' + esc(x.labelEntames || x.label) + '">' + q[1] + '</button>').join('') +
+         '<button type="button" class="chip" data-qz="' + p + '-' + x.id + '" aria-label="Effacer les entamés de ' + esc(x.labelEntames || x.label) + '">Effacer</button></div></div>').join('');
      return '<div id="' + p + '-prop"></div>' + entiers +
        '<p class="f" style="margin:20px 0 6px"><b>Vitrine + Quarts</b> · bacs déjà entamés</p>' +
        '<p class="mini">Estimez chaque bac entamé au quart : choisissez sa taille, puis touchez ¼, ½ ou ¾.</p>' +
@@ -448,7 +448,7 @@ const CALCUL = {
      const resume = z => CALCUL.zones.map(x => {
        const s = (z && z[x.id]) || {};
        const b = Object.keys(s.bacs || {}).filter(t => num(s.bacs[t]) > 0).map(t => s.bacs[t] + ' × ' + t + ' L');
-       if (num(s.entamesL) > 0) b.push(n1(s.entamesL) + ' L entamés');
+       if (num(s.entamesL) > 0) b.push(n1(s.entamesL) + (x.labelEntames ? ' L de quarts' : ' L entamés'));
        return b.length ? x.label + ' : ' + b.join(', ') : '';
      }).filter(Boolean).join(' · ');
      box.innerHTML = sansComptage + props.map((x, i) => x.compte
