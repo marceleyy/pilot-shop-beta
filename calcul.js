@@ -609,7 +609,9 @@ const CALCUL = {
    async function demarrerCalcul() {
      const cs = await lireCalculs();
      const prec = derniereCloture(cs);
-     const w = { essai:false, debut:today(), fin:today(), source:prec ? 'precedent' : 'manuel', zones:null, livraisons:[] };
+     /* Rien n'est repris sans que le manager le choisisse : la clôture
+        précédente est proposée, « Compter maintenant » est coché par défaut. */
+     const w = { essai:false, debut:today(), fin:today(), source:'manuel', zones:null, livraisons:[] };
      const debutReel = () => (!w.essai && w.source === 'precedent' && prec) ? prec.fin : w.debut;
 
      const e1 = () => {
@@ -647,7 +649,6 @@ const CALCUL = {
          w.fin = $('#cd-fin').value || w.fin;
          w.essai = b.dataset.t === 'essai';
          if (w.essai) w.source = 'manuel';
-         else if (prec) w.source = 'precedent';
          e1();
        });
        $$('#cd-src .chip').forEach(b => b.onclick = () => {
@@ -977,16 +978,19 @@ const CALCUL = {
      };
 
      const eC = async () => {
-       /* Calcul réel : pertes reprises du registre, corrigeables. Essai : les
-          chiffres viennent de l'ancien classeur, on part de zéro. */
+       /* Calcul réel : le registre des pertes est montré, et repris seulement
+          si le manager le demande. Essai : les chiffres viennent de l'ancien
+          classeur, on part de zéro. */
        let reg = null;
        const d0 = debutFlux(c);
        if (!c.essai) reg = d0 <= w.fin ? await litresPertesRegistre(d0, w.fin) : 0;
-       if (w.perteL === null) { w.perteL = reg || 0; w.perteSource = c.essai ? 'Saisie' : 'Registre des pertes'; }
+       if (w.perteL === null) { w.perteL = 0; w.perteSource = 'Saisie'; }
        showSheet(
          '<h2 id="sheet-titre">Pertes de la période</h2>' +
          '<p class="sub">Étape 3 sur 4 · Glace jetée ' + esc(texteDates(debutFlux(c), w.fin)) + '</p>' +
-         (reg !== null ? '<p class="mini">Registre des pertes : ' + n1(reg) + ' L sur ces dates.</p>' : '') +
+         (reg !== null ? '<p class="mini">Registre des pertes : ' + n1(reg) + ' L sur ces dates.</p>' +
+           (reg > 0 ? '<button type="button" class="btn clair sm" id="cp-reg" style="margin-top:6px">Reprendre le registre (' +
+             n1(reg) + ' L)</button>' : '') : '') +
          '<div class="champ" style="margin-top:10px"><label class="f">Litres jetés</label>' +
          '<input type="number" id="cp-l" min="0" step="0.1" inputmode="decimal" value="' + (w.perteL || '') + '" placeholder="0"></div>' +
          '<div class="champ" style="margin-top:10px"><label class="f">Et/ou kg jetés (pesés)</label>' +
@@ -997,9 +1001,10 @@ const CALCUL = {
        const maj = () => { $('#cp-kg').textContent = 'Pertes : ' +
          kgTxt(kgDeLitres($('#cp-l').value, poidsLitre(c)) + Math.max(0, num($('#cp-k').value))); };
        $('#cp-l').oninput = maj; $('#cp-k').oninput = maj; maj();
+       if ($('#cp-reg')) $('#cp-reg').onclick = () => { $('#cp-l').value = +num(reg).toFixed(2); maj(); };
        const lire = () => {
          const v = Math.max(0, num($('#cp-l').value));
-         if (reg === null || Math.abs(v - reg) > 0.001) w.perteSource = 'Saisie';
+         if (reg === null || !(reg > 0) || Math.abs(v - reg) > 0.001) w.perteSource = 'Saisie';
          else w.perteSource = 'Registre des pertes';
          w.perteL = v;
          w.perteKg = Math.max(0, num($('#cp-k').value));
