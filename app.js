@@ -5466,12 +5466,24 @@ function modifierPeriode(per) {
             option d'un autre produit (macaron glacé d'une formule…). Pour un
             SKU de glace, elles sortent aussi de la vitrine. */
          const cOpt   = cols.filter(c => c !== cQte && /qt[eé]\s*option/i.test(c))[0];
+         /* Jours couverts par l'export : colonne « nbjour », sinon quantité ÷
+            « Moyenne/jour » (médiane des lignes). Sert à repérer un export qui
+            ne couvre pas la période du calcul. */
+         const cJours = trouve(/^nb\s*jours?$/i);
+         const cMoy   = trouve(/moyenne\s*\/?\s*jour/i);
+         let jours = 0;
+         if (cJours) jours = rows.reduce((m, r) => Math.max(m, num(r[cJours])), 0);
+         else if (cMoy && cQte) {
+           const l = rows.filter(r => num(r[cMoy]) > 0 && num(r[cQte]) > 0).map(r => num(r[cQte]) / num(r[cMoy])).sort((x, y) => x - y);
+           if (l.length) jours = Math.round(l[l.length >> 1]);
+         }
+         const fini = o => resolve(jours > 0 ? Object.assign(o, { jours:jours }) : o);
    
          /* Colonne de poids : la plus sûre */
          if (cPoids) {
            let kg = 0, n = 0;
            rows.forEach(r => { const v = num(r[cPoids]); if (v > 0) { kg += v; n++; } });
-           if (kg > 0) return resolve({ kg:kg, lignes:n, methode:'Colonne « ' + cPoids + ' »',
+           if (kg > 0) return fini({ kg:kg, lignes:n, methode:'Colonne « ' + cPoids + ' »',
                                         fiable:true, detail:[[n + ' lignes additionnées', n1(kg) + ' kg']], inconnus:[] });
          }
    
@@ -5510,7 +5522,7 @@ function modifierPeriode(per) {
            if (lignes.length) {
              const top = lignes.filter(l => l.g).sort((a, b) => b.g * b.q - a.g * a.q).slice(0, 8)
                .map(l => [l.nom, n1(l.g * l.q / 1000) + ' kg']);
-             return resolve({
+             return fini({
                kg:g / 1000, lignes:n, fiable:true, detail:top, inconnus:aSaisir, produits:lignes,
                methode:cSku ? 'SKU et libellés × grammage du catalogue' : 'Libellés de caisse × grammage du classeur'
              });
@@ -5535,7 +5547,7 @@ function modifierPeriode(per) {
            if (g > 0) {
              const top = Object.keys(parProduit).sort((a, b) => parProduit[b] - parProduit[a]).slice(0, 8)
                .map(k => [k, n1(parProduit[k]) + ' kg']);
-             return resolve({
+             return fini({
                kg:g / 1000, lignes:n, methode:'SKU × grammage du catalogue', fiable:true,
                detail:top, inconnus:Object.keys(inconnus).map(s => s + ' (' + inconnus[s] + ')')
              });
@@ -5560,7 +5572,7 @@ function modifierPeriode(per) {
              parProduit[p] = (parProduit[p] || 0) + gr * q / 1000;
            });
            if (g > 0) {
-             return resolve({
+             return fini({
                kg:g / 1000, lignes:n, methode:'Rapprochement par nom de parfum, 150 g par unité',
                fiable:false,
                detail:Object.keys(parProduit).slice(0, 8).map(k => [k, n1(parProduit[k]) + ' kg']),

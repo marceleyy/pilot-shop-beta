@@ -24,7 +24,10 @@ const CALCUL = {
      bacs entamés (vitrine, congélateur −13). */
   zones: [
     { id:'froid',   label:'Chambre froide',  bacs:true },
-    { id:'congel',  label:'Congélateur −13', bacs:true, entames:true },
+    { id:'congel',  label:'Congélateur −13', bacs:true, entames:true,
+      /* Vocabulaire du classeur : « Vitrine + Quarts », les quarts étant les
+         bacs entamés rangés au −13. */
+      labelEntames:'Quarts · congélateur −13' },
     { id:'vitrine', label:'Vitrine',         entames:true }
   ],
   ordreEntames: ['vitrine', 'congel'],
@@ -71,11 +74,12 @@ const CALCUL = {
   ]
 };
 
-   /* Poids d'un litre de glace. Un calcul réel prend la valeur mesurée ; un
-      essai, qui rejoue l'ancien classeur, prend la sienne pour retrouver ses
-      chiffres. Retenue sur le calcul à sa création. */
-   /* Un calcul créé avant cette règle n'a pas de poids retenu : ses kg ont été
-      enregistrés avec la valeur mesurée, il la garde. */
+   /* Poids d'un litre de glace. Un calcul réel prend celui de config.js ; un
+      essai, qui rejoue le classeur, prend le sien. Les deux valent aujourd'hui
+      la même valeur, au dernier chiffre près. Retenu sur le calcul à sa création. */
+   /* Un calcul créé avant cette règle n'a pas de poids retenu : il prend celui
+      de config.js, donc ses kg tirés de litres (livraisons) suivent un
+      changement de cette valeur. */
    const poidsLitre = c => (c && num(c.poidsLitre) > 0) ? num(c.poidsLitre) : FOURNISSEUR.poidsMoyenLitre;
    const poidsNeuf = w => (w.essai && FOURNISSEUR.poidsMoyenLitreClasseur) ? FOURNISSEUR.poidsMoyenLitreClasseur
      : FOURNISSEUR.poidsMoyenLitre;
@@ -115,22 +119,22 @@ const CALCUL = {
        '</div>').join('');
      const ordre = CALCUL.ordreEntames.concat(CALCUL.zones.map(x => x.id).filter(id => CALCUL.ordreEntames.indexOf(id) < 0));
      const entam = ordre.map(id => CALCUL.zones.find(x => x.id === id)).filter(x => x && aEntames(x)).map(x =>
-       '<div class="champ"><label class="f">' + esc(x.label) + ' (litres approx.)</label>' +
+       '<div class="champ"><label class="f">' + esc(x.labelEntames || x.label) + ' (litres approx.)</label>' +
        '<input type="number" min="0" step="0.25" inputmode="decimal" data-zone="' + x.id + '" data-entames ' +
        'id="' + p + '-' + x.id + '-el" value="' + esc(v(entames(zs(x.id)))) + '" placeholder="0">' +
        /* Estimation au quart de bac, comme en boutique : chaque touche ajoute
           ¼, ½ ou ¾ d'un bac de la taille choisie. */
        '<div class="chips" style="margin-top:8px" data-quarts="' + p + '-' + x.id + '">' +
          CALCUL.taillesBac.map(t => '<button type="button" class="chip' + (t === CALCUL.tailleQuarts ? ' on' : '') +
-           '" data-qt="' + t + '" aria-pressed="' + (t === CALCUL.tailleQuarts) + '" aria-label="Bac de ' + t + ' L pour ' + esc(x.label) + '">' +
+           '" data-qt="' + t + '" aria-pressed="' + (t === CALCUL.tailleQuarts) + '" aria-label="Bac de ' + t + ' L pour ' + esc(x.labelEntames || x.label) + '">' +
            t + ' L</button>').join('') + '</div>' +
        '<div class="chips" style="margin-top:6px">' +
          [[0.25, '+ ¼'], [0.5, '+ ½'], [0.75, '+ ¾']].map(q =>
            '<button type="button" class="chip" data-qa="' + p + '-' + x.id + '" data-qf="' + q[0] + '" aria-label="Ajouter ' +
-             q[1].slice(2) + ' de bac à ' + esc(x.label) + '">' + q[1] + '</button>').join('') +
-         '<button type="button" class="chip" data-qz="' + p + '-' + x.id + '" aria-label="Effacer les entamés de ' + esc(x.label) + '">Effacer</button></div></div>').join('');
+             q[1].slice(2) + ' de bac à ' + esc(x.labelEntames || x.label) + '">' + q[1] + '</button>').join('') +
+         '<button type="button" class="chip" data-qz="' + p + '-' + x.id + '" aria-label="Effacer les entamés de ' + esc(x.labelEntames || x.label) + '">Effacer</button></div></div>').join('');
      return '<div id="' + p + '-prop"></div>' + entiers +
-       '<p class="f" style="margin:20px 0 6px"><b>Bacs déjà entamés</b></p>' +
+       '<p class="f" style="margin:20px 0 6px"><b>Vitrine + Quarts</b> · bacs déjà entamés</p>' +
        '<p class="mini">Estimez chaque bac entamé au quart : choisissez sa taille, puis touchez ¼, ½ ou ¾.</p>' +
        '<div class="grid g2" style="margin-top:8px">' + entam + '</div>' +
        '<p class="mini" id="' + p + '-total" style="margin-top:12px"></p>';
@@ -445,7 +449,7 @@ const CALCUL = {
      const resume = z => CALCUL.zones.map(x => {
        const s = (z && z[x.id]) || {};
        const b = Object.keys(s.bacs || {}).filter(t => num(s.bacs[t]) > 0).map(t => s.bacs[t] + ' × ' + t + ' L');
-       if (num(s.entamesL) > 0) b.push(n1(s.entamesL) + ' L entamés');
+       if (num(s.entamesL) > 0) b.push(n1(s.entamesL) + (x.labelEntames ? ' L de quarts' : ' L entamés'));
        return b.length ? x.label + ' : ' + b.join(', ') : '';
      }).filter(Boolean).join(' · ');
      box.innerHTML = sansComptage + props.map((x, i) => x.compte
@@ -1028,10 +1032,18 @@ const CALCUL = {
        }
        const v = w.ventes;
        const modes = [['produits', 'Par produit'], ['total', 'Total en kg'], ['fichier', 'Fichier de caisse']];
+       /* Export qui ne couvre pas la période : un fichier de deux mois donnait
+          547 kg vendus pour une semaine. Signalé, rien n'est changé. */
+       const joursPer = Math.round((new Date(w.fin) - new Date(debutFlux(c))) / 864e5) + 1;
+       const fichierActif = (v.mode === 'produits' && v.fichierLu) || (v.mode === 'fichier' && v.fichier);
+       const horsPeriode = fichierActif && joursPer > 0 && num(v.joursFichier) > 0 && num(v.joursFichier) !== joursPer
+         ? '<div class="alerte warn" style="margin-top:12px"><span class="ai">●</span><div><b>Ce fichier couvre ' + num(v.joursFichier) +
+           ' jour(s), la période en compte ' + joursPer + '</b><p>Vérifiez les dates de l’export de caisse : il doit couvrir ' +
+           esc(texteDates(debutFlux(c), w.fin)) + '.</p></div></div>' : '';
        showSheet(
          '<h2 id="sheet-titre">Ventes de la période</h2>' +
          '<p class="sub">Étape 4 sur 4 · Exportez de la caisse les ventes ' + esc(texteDates(debutFlux(c), w.fin)) + '</p>' +
-         '<div id="cv-prop"></div>' +
+         '<div id="cv-prop"></div>' + horsPeriode +
          '<div class="chips" id="cv-mode" style="margin-top:12px">' + modes.map(m =>
            '<button type="button" class="chip' + (v.mode === m[0] ? ' on' : '') + '" data-m="' + m[0] + '">' + m[1] + '</button>').join('') + '</div>' +
          '<div id="cv-corps" style="margin-top:14px">' +
@@ -1101,6 +1113,7 @@ const CALCUL = {
            try { r = await lireExportCaisse(f, retenus); }
            catch (err) { $('#cv-lu').textContent = 'Aucun fichier lu.'; return toast(err && err.message ? err.message : 'Fichier illisible', 'erreur'); }
            if (!$('#cv-lu')) return;   // feuille fermée entre-temps
+           v.joursFichier = num(r.jours) || 0;
            /* Export par libellés : chaque produit arrive dans « Par produit »,
               où les grammages se vérifient et se complètent. */
            if (r.produits) {
@@ -1125,6 +1138,7 @@ const CALCUL = {
            v.detail = (r.detail || []).slice(0, 8);
            $('#cv-lu').textContent = v.fichier + ' · ' + v.methode + ' · ' + kgTxt(v.kg);
            if ($('#cv-detail')) $('#cv-detail').innerHTML = detailVentes(v.detail);
+           if (v.joursFichier) { eD(); return; }   // redessine avec l'avis de période
            calcule();
          };
        }
