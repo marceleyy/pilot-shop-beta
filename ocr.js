@@ -790,7 +790,7 @@ async function analyserCanvas(type, canvas, nom, resolve) {
           production: champs.production || null, dluo: champs.dluo || null,
           confiance: confiance, corrige: !!(batch && batch.corrige),
           texte: (code.texte + '\n' + parfum.texte).trim() }
-      : { fournisseur: FOURNISSEUR.nom, numero: batch ? batch.code : '', date: today(),
+      : { fournisseur: FOURNISSEUR.nom, numero: batch ? batch.code : '', lot: batch ? batch.code : '', date: today(),
           /* La lecture des lignes d'un bon de livraison n'est pas implémentée :
              l'OCR ne sait extraire qu'un code lot, pas un tableau de références. */
           lignes: [], lignesNonLues: true,
@@ -891,7 +891,7 @@ function scannerPhotoNatif(type) {
           ? { lot: batch ? batch.code : '', ouv: today(), parfum: trouve ? trouve.parfum : '',
               confiance: confiance, corrige: !!(batch && batch.corrige),
               texte: (code.texte + '\n' + parfum.texte).trim() }
-          : { fournisseur: FOURNISSEUR.nom, numero: batch ? batch.code : '', date: today(),
+          : { fournisseur: FOURNISSEUR.nom, numero: batch ? batch.code : '', lot: batch ? batch.code : '', date: today(),
               /* La lecture des lignes d'un bon de livraison n'est pas implémentée :
                  l'OCR ne sait extraire qu'un code lot, pas un tableau de références.
                  On le déclare, au lieu de renvoyer un tableau vide qui s'ajouterait
@@ -1075,7 +1075,10 @@ function extraireCarton(texte) {
   const valide = d => {
     if (!/^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/.test(d)) return false;
     const an = +d.slice(0, 4);
-    return an >= 2020 && an <= 2040;
+    if (an < 2020 || an > 2040) return false;
+    /* 31/02 passait le contrôle de forme : on exige un jour qui existe. */
+    const j = new Date(an, +d.slice(5, 7) - 1, +d.slice(8, 10));
+    return j.getMonth() === +d.slice(5, 7) - 1;
   };
   const brutes = [];
   (T.match(/\b\d{1,2}[\/.\-]\d{1,2}[\/.\-]\d{4}\b/g) || []).forEach(d => brutes.push(iso(d)));
@@ -1107,11 +1110,18 @@ function extraireCarton(texte) {
   const mB = T.match(/(?:BBD|BEST\s*(?:USED\s*)?BEFORE|DLUO|CONSOMMER\s+DE\s+PRÉFÉRENCE[^\d]{0,40}|CONSUMARSI[^\d]{0,40})[^\d]{0,20}(\d{1,2}[\/.\-]\d{1,2}[\/.\-]\d{4})/);
   const mP = T.match(/(?:PRODUCTION\s*DATE|DATA\s*PRODUZIONE|DATE\s+DE\s+PRODUCTION|DATE\s+CONDITIONNEMENT)[^\d]{0,24}(\d{1,2}[\/.\-]\d{1,2}[\/.\-]\d{4})/);
 
-  const expiration = mB ? iso(mB[1])
-    : (dates.length >= 2 ? dates[dates.length - 1]
-    : (dates.length === 1 ? dates[0] : null));
-  const production = mP ? iso(mP[1])
-    : (dates.length >= 2 ? dates[0] : null);
+  /* Une date ancrée passe le même contrôle que les autres : « BBD 27/66/2028 »
+     (chiffre mal lu) donnait 2028-66-27, une DLC qui ne déclenchait jamais
+     d'alerte. Invalide, on retombe sur les dates validées. */
+  const ancree = m => { if (!m) return null; const d = iso(m[1]); return valide(d) ? d : null; };
+  const bAncree = ancree(mB), pAncree = ancree(mP);
+  /* BBD présent mais illisible : pas de repli sur une date seule, qui serait
+     souvent la date de production — une DLC passée, présentée comme lue. */
+  const expiration = bAncree
+    || (dates.length >= 2 ? dates[dates.length - 1]
+    : (dates.length === 1 && !mB && dates[0] !== pAncree ? dates[0] : null));
+  const production = pAncree
+    || (dates.length >= 2 ? dates[0] : null);
 
   return {
     parBac:    mC ? +mC[1] : null,     // nombre de bacs dans le carton
