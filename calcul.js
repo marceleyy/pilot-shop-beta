@@ -1354,12 +1354,22 @@ const CALCUL = {
          : '') +
        (livraisonsDe(c).length ? '<p class="mini" style="margin-top:14px"><b>Livraisons</b></p>' + listeLivraisons(livraisonsDe(c), false) : '') +
        '<div class="actions"><button class="btn clair" data-fermer>Fermer</button>' +
-       (c.essai ? '<button class="btn corail" id="cv-sup">Supprimer l’essai</button>' : '') + '</div>');
-     if ($('#cv-sup')) $('#cv-sup').onclick = () => confirmer('Supprimer cet essai ?',
-       'Essai du ' + fmtD(c.debut) + ' au ' + fmtD(c.fin) + '.', 'Supprimer', async () => {
-         await DB.patch(c.id, { statut:'supprime', suppPar:STATE.user.prenom, suppAt:nowISO() });
-         rendre('calcul');
-       });
+       '<button class="btn corail" id="cv-sup">' + (c.essai ? 'Supprimer l’essai' : 'Supprimer ce calcul') + '</button></div>');
+     /* Un calcul clôturé se supprime aussi, toujours après confirmation. Le
+        calcul suivant qui part de sa clôture garde son stock de départ. */
+     $('#cv-sup').onclick = async () => {
+       const suivant = c.essai ? null
+         : (await lireCalculs()).filter(x => x.depart && x.depart.source === 'precedent' && x.depart.ref === c.id)[0];
+       confirmer(c.essai ? 'Supprimer cet essai ?' : 'Supprimer ce calcul ?',
+         (c.essai ? 'Essai' : 'Calcul') + ' du ' + fmtD(c.debut) + ' au ' + fmtD(c.fin) + '. ' +
+         (c.essai ? '' : 'Son résultat sera retiré des calculs clôturés.' +
+           (suivant ? ' Le calcul du ' + fmtD(suivant.debut) + ' part de sa clôture : il garde ce stock de départ.' : '')),
+         'Supprimer', async () => {
+           await DB.patch(c.id, { statut:'supprime', suppPar:STATE.user.prenom, suppAt:nowISO() });
+           if (!c.essai) await feed('ok', STATE.user.prenom + ' a supprimé le calcul d’écart du ' + fmtDC(c.debut) + ' au ' + fmtDC(c.fin));
+           rendre('calcul');
+         });
+     };
    }
 
    /* L'écran Écarts mène au calcul guidé. */
