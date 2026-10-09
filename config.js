@@ -557,10 +557,10 @@ const FOURNISSEUR = {
   taillesCourantes: [3, 5],
   taillesRares: [7],
   tailleParDefaut: 5,
-  /* Mesuré sur étiquette Amorino : 2,525 kg pour 3 L, soit 0,84167 kg/L.
-     L'ancienne valeur du classeur surestimait le stock de 0,58 %, soit environ
-     1,8 kg d'écart fantôme sur un inventaire de 120 bacs. */
-  poidsMoyenLitre: 0.8416666666666667,
+  /* Poids d'un litre de glace : la valeur du classeur des écarts, choisie par
+     le manager pour que l'appli et le fichier Excel donnent les mêmes kilos.
+     (L'étiquette Amorino donne 2,525 kg pour 3 L, soit 0,84167 kg/L.) */
+  poidsMoyenLitre: 0.846584074074074,
   poidsMoyenLitreClasseur: 0.8465840740740742,  // valeur historique, pour comparaison
   prixMoyenKg: 6.7
 };
