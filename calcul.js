@@ -355,9 +355,9 @@ const CALCUL = {
        (await lireCalculs()).forEach(c => {
          if (c.essai || c.id === sauf) return;
          if (c.statut === 'clos' && c.fin === jour && c.arrivee && c.arrivee.zones)
-           props.push({ libelle:'Stock de fin du calcul clôturé le ' + fmtDC(c.fin), zones:c.arrivee.zones, kg:num(c.arrivee.kg) });
+           props.push({ libelle:'Stock de fin du calcul clôturé le ' + fmtDC(c.fin), zones:c.arrivee.zones, kg:num(c.arrivee.kg), compte:true });
          else if (c.debut === jour && c.depart && c.depart.zones)
-           props.push({ libelle:'Stock de départ du calcul du ' + fmtDC(c.debut), zones:c.depart.zones, kg:num(c.depart.kg) });
+           props.push({ libelle:'Stock de départ du calcul du ' + fmtDC(c.debut), zones:c.depart.zones, kg:num(c.depart.kg), compte:true });
        });
      } catch (e) {}
      /* Bacs fermés par taille (glace seulement). */
@@ -410,16 +410,17 @@ const CALCUL = {
        }
        if (r) props.push({ libelle:'Inventaire du ' + fmtDC(inv.jour) + (inv.par ? ' par ' + inv.par : '') +
                              (inv.jour < jour ? ' (dernier inventaire avant le ' + fmtDC(jour) + ')' : ''),
-                           avis:depuis ? depuis + ' mouvement(s) de glace tracé(s) depuis (réceptions, ouvertures, pertes) : ' +
-                             'ce comptage n’est plus exact, recomptez ce qui a bougé.' : '',
-                           zones:r.zones, sansRangement:!r.rangement, rangement:r.rangement });
+                           zones:r.zones, sansRangement:!r.rangement, rangement:r.rangement, compte:inv.jour === jour,
+                           pourquoi:'Cet inventaire date du ' + fmtDC(inv.jour) + (depuis ? ', avec ' + depuis +
+                             ' mouvement(s) de glace tracé(s) depuis (réceptions, ouvertures, pertes).' : '.') });
      } catch (e) {}
      if (jour === today() && typeof stockReel === 'function') {
        try {
          const sr = await stockReel();
          const r = sr && repartir(sr.articles, armoire);
          if (r) props.push({ libelle:'Stock tracé aujourd’hui' + (sr.depuis ? ' (inventaire du ' + fmtDC(sr.depuis) + ' + mouvements)' : ''),
-                             zones:r.zones, sansRangement:!r.rangement, rangement:r.rangement });
+                             zones:r.zones, sansRangement:!r.rangement, rangement:r.rangement, compte:false,
+                             pourquoi:'Ce chiffre vient des scans, pas de la chambre froide.' });
        } catch (e) {}
      }
      return props;
@@ -432,23 +433,28 @@ const CALCUL = {
      if (!box) return;
      const props = await stockAppli(jour, sauf);
      if (!box.isConnected) return;
-     if (!props.length) {
-       box.innerHTML = '<p class="mini" style="margin-top:10px">L’appli n’a pas de comptage du ' + esc(fmtDC(jour)) +
-         ' : saisissez-le ci-dessous.</p>';
-       return;
-     }
+     /* Seul un comptage fait ce jour-là peut être repris. Le stock tracé (dernier
+        inventaire + bacs scannés en réception et à l'ouverture) et un inventaire
+        plus ancien ne sont montrés que pour comparer : repris comme stock réel,
+        ils mesuraient l'écart entre scans et ventes, pas la glace qui manque. */
+     const sansComptage = props.some(x => x.compte) ? '' :
+       '<p class="mini" style="margin-top:10px">L’appli n’a pas de comptage du ' + esc(fmtDC(jour)) +
+       ' : comptez les bacs et saisissez-les ci-dessous.</p>';
+     if (!props.length) { box.innerHTML = sansComptage; return; }
      const resume = z => CALCUL.zones.map(x => {
        const s = (z && z[x.id]) || {};
        const b = Object.keys(s.bacs || {}).filter(t => num(s.bacs[t]) > 0).map(t => s.bacs[t] + ' × ' + t + ' L');
        if (num(s.entamesL) > 0) b.push(n1(s.entamesL) + ' L entamés');
        return b.length ? x.label + ' : ' + b.join(', ') : '';
      }).filter(Boolean).join(' · ');
-     box.innerHTML = props.map((x, i) =>
-       '<div class="alerte info" style="margin-top:12px"><span class="ai">•</span><div>' +
-       '<b>Proposé par l’appli : ' + esc(x.libelle) + '</b><p>' + esc(resume(x.zones)) + ' (' + kgTxt(x.kg || kgZones(x.zones, pl)) + ')' +
-       (x.sansRangement ? '. L’appli ne sait pas où les bacs sont rangés : ils sont repris en chambre froide, déplacez ceux du congélateur −13.' : '.') +
-       (x.avis ? ' <b>' + esc(x.avis) + '</b>' : '') +
-       '</p><button type="button" class="btn clair sm" data-st-prop="' + i + '" style="margin-top:6px">Reprendre ce comptage</button></div></div>').join('');
+     box.innerHTML = sansComptage + props.map((x, i) => x.compte
+       ? '<div class="alerte info" style="margin-top:12px"><span class="ai">•</span><div>' +
+         '<b>Proposé par l’appli : ' + esc(x.libelle) + '</b><p>' + esc(resume(x.zones)) + ' (' + kgTxt(x.kg || kgZones(x.zones, pl)) + ')' +
+         (x.sansRangement ? '. L’appli ne sait pas où les bacs sont rangés : ils sont repris en chambre froide, déplacez ceux du congélateur −13.' : '.') +
+         '</p><button type="button" class="btn clair sm" data-st-prop="' + i + '" style="margin-top:6px">Reprendre ce comptage</button></div></div>'
+       : '<div class="alerte warn" style="margin-top:12px"><span class="ai">!</span><div>' +
+         '<b>Pour comparer, pas un comptage : ' + esc(x.libelle) + '</b><p>' + esc(resume(x.zones)) + ' (' + kgTxt(x.kg || kgZones(x.zones, pl)) + '). ' +
+         esc(x.pourquoi) + ' Comptez les bacs et saisissez votre comptage.</p></div></div>').join('');
      /* Le comptage repris remplace celui de l'étape, qui se redessine : les
         champs suivent alors les zones reprises (anciens entamés en chambre
         froide, bacs pleins en vitrine), rien n'est perdu. */
