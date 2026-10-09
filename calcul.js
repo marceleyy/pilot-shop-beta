@@ -206,8 +206,9 @@ const CALCUL = {
    }
    /* Départ repris d'une clôture : le stock a été compté ce jour-là, en fin de
       journée. Les pertes et les ventes de ce jour appartiennent au calcul
-      précédent ; le nouveau les prend à partir du lendemain. */
-   const debutFlux = c => (c.depart && c.depart.source === 'precedent') ? addD(c.debut, 1) : c.debut;
+      précédent ; le nouveau les prend à partir du lendemain. Pareil pour un
+      départ recompté le jour de cette clôture (apresCloture). */
+   const debutFlux = c => (c.depart && (c.depart.source === 'precedent' || c.depart.apresCloture)) ? addD(c.debut, 1) : c.debut;
 
    function resultatCalcul(c) {
      const debut  = num(c.depart && c.depart.kg);
@@ -613,6 +614,7 @@ const CALCUL = {
         précédente est proposée, « Compter maintenant » est coché par défaut. */
      const w = { essai:false, debut:today(), fin:today(), source:'manuel', zones:null, livraisons:[] };
      const debutReel = () => (!w.essai && w.source === 'precedent' && prec) ? prec.fin : w.debut;
+     const apresCloture = () => !w.essai && !!prec && (w.source === 'precedent' || w.debut === prec.fin);
 
      const e1 = () => {
        showSheet(
@@ -660,6 +662,8 @@ const CALCUL = {
          const d = $('#cd-debut').value;
          if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) { toast('Indiquez la date de départ', 'erreur'); return; }
          if (d > today()) { toast('La date de départ ne peut pas être dans le futur', 'erreur'); return; }
+         if (!w.essai && prec && d < prec.fin) {
+           toast('Le calcul précédent couvre déjà jusqu’au ' + fmtDC(prec.fin) + ' : partez de cette date ou après', 'erreur'); return; }
          const f = $('#cd-fin').value;
          if (!/^\d{4}-\d{2}-\d{2}$/.test(f) || f < d) { toast('La fin de la période doit tomber après le départ', 'erreur'); return; }
          w.fin = f;
@@ -716,7 +720,7 @@ const CALCUL = {
          const depart = (!w.essai && w.source === 'precedent' && prec)
            ? { source:'precedent', ref:prec.id, zones:(prec.arrivee && prec.arrivee.zones) || null,
                kg:+num(prec.arrivee && prec.arrivee.kg).toFixed(3) }
-           : { source:'manuel', zones:w.zones, kg:+kgZones(w.zones, poidsNeuf(w)).toFixed(3) };
+           : { source:'manuel', zones:w.zones, kg:+kgZones(w.zones, poidsNeuf(w)).toFixed(3), apresCloture:apresCloture() };
          const c = { id:id, essai:w.essai, debut:w.debut, statut:'ouvert', depart:depart, poidsLitre:poidsNeuf(w),
                      livraisons:w.livraisons, par:STATE.user.prenom, at:nowISO() };
          /* Fin déjà passée : la clôture la reprend. Fin à venir : on clôturera
@@ -735,12 +739,12 @@ const CALCUL = {
          '<h2 id="sheet-titre">Une livraison ?</h2>' +
          '<p class="sub">Étape 3 · Seulement une livraison arrivée après le comptage de départ</p>' +
          listeLivraisons(w.livraisons, true) +
-         formLivraison(w.source === 'precedent' && !w.essai && w.debut < today() ? addD(w.debut, 1) : w.debut) +
+         formLivraison(apresCloture() && w.debut < today() ? addD(w.debut, 1) : w.debut) +
          '<div id="lv-doublon"></div>' +
          '<div class="actions"><button class="btn clair" id="lv-ret">Retour</button>' +
          '<button class="btn menthe" id="lv-suiv">Suivant</button></div>');
        const aj3 = brancherLivraisons(w.livraisons, e3);
-       proposerLivraisons(w.livraisons, w.source === 'precedent' && !w.essai ? addD(w.debut, 1) : w.debut, today(), aj3);
+       proposerLivraisons(w.livraisons, apresCloture() ? addD(w.debut, 1) : w.debut, today(), aj3);
        $('#lv-ret').onclick = () => (!w.essai && w.source === 'precedent' && prec) ? e1() : e2();
        $('#lv-suiv').onclick = () => {
          if (num($('#lv-litres').value) > 0) { toast('Touchez « Ajouter cette livraison » ou videz le champ des litres', 'erreur'); return; }
