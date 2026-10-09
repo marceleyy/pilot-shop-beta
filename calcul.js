@@ -1031,10 +1031,18 @@ const CALCUL = {
        }
        const v = w.ventes;
        const modes = [['produits', 'Par produit'], ['total', 'Total en kg'], ['fichier', 'Fichier de caisse']];
+       /* Export qui ne couvre pas la période : un fichier de deux mois donnait
+          547 kg vendus pour une semaine. Signalé, rien n'est changé. */
+       const joursPer = Math.round((new Date(w.fin) - new Date(debutFlux(c))) / 864e5) + 1;
+       const fichierActif = (v.mode === 'produits' && v.fichierLu) || (v.mode === 'fichier' && v.fichier);
+       const horsPeriode = fichierActif && num(v.joursFichier) > 0 && num(v.joursFichier) !== joursPer
+         ? '<div class="alerte warn" style="margin-top:12px"><span class="ai">●</span><div><b>Ce fichier couvre ' + num(v.joursFichier) +
+           ' jour(s), la période en compte ' + joursPer + '</b><p>Vérifiez les dates de l’export de caisse : il doit couvrir ' +
+           esc(texteDates(debutFlux(c), w.fin)) + '.</p></div></div>' : '';
        showSheet(
          '<h2 id="sheet-titre">Ventes de la période</h2>' +
          '<p class="sub">Étape 4 sur 4 · Exportez de la caisse les ventes ' + esc(texteDates(debutFlux(c), w.fin)) + '</p>' +
-         '<div id="cv-prop"></div>' +
+         '<div id="cv-prop"></div>' + horsPeriode +
          '<div class="chips" id="cv-mode" style="margin-top:12px">' + modes.map(m =>
            '<button type="button" class="chip' + (v.mode === m[0] ? ' on' : '') + '" data-m="' + m[0] + '">' + m[1] + '</button>').join('') + '</div>' +
          '<div id="cv-corps" style="margin-top:14px">' +
@@ -1104,6 +1112,7 @@ const CALCUL = {
            try { r = await lireExportCaisse(f, retenus); }
            catch (err) { $('#cv-lu').textContent = 'Aucun fichier lu.'; return toast(err && err.message ? err.message : 'Fichier illisible', 'erreur'); }
            if (!$('#cv-lu')) return;   // feuille fermée entre-temps
+           v.joursFichier = num(r.jours) || 0;
            /* Export par libellés : chaque produit arrive dans « Par produit »,
               où les grammages se vérifient et se complètent. */
            if (r.produits) {
@@ -1128,6 +1137,7 @@ const CALCUL = {
            v.detail = (r.detail || []).slice(0, 8);
            $('#cv-lu').textContent = v.fichier + ' · ' + v.methode + ' · ' + kgTxt(v.kg);
            if ($('#cv-detail')) $('#cv-detail').innerHTML = detailVentes(v.detail);
+           if (v.joursFichier) { eD(); return; }   // redessine avec l'avis de période
            calcule();
          };
        }
