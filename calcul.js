@@ -452,7 +452,7 @@ const CALCUL = {
          '<b>Proposé par l’appli : ' + esc(x.libelle) + '</b><p>' + esc(resume(x.zones)) + ' (' + kgTxt(x.kg || kgZones(x.zones, pl)) + ')' +
          (x.sansRangement ? '. L’appli ne sait pas où les bacs sont rangés : ils sont repris en chambre froide, déplacez ceux du congélateur −13.' : '.') +
          '</p><button type="button" class="btn clair sm" data-st-prop="' + i + '" style="margin-top:6px">Reprendre ce comptage</button></div></div>'
-       : '<div class="alerte warn" style="margin-top:12px"><span class="ai">!</span><div>' +
+       : '<div class="alerte warn" style="margin-top:12px"><span class="ai">●</span><div>' +
          '<b>Pour comparer, pas un comptage : ' + esc(x.libelle) + '</b><p>' + esc(resume(x.zones)) + ' (' + kgTxt(x.kg || kgZones(x.zones, pl)) + '). ' +
          esc(x.pourquoi) + ' Comptez les bacs et saisissez votre comptage.</p></div></div>').join('');
      /* Le comptage repris remplace celui de l'étape, qui se redessine : les
