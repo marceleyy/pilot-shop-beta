@@ -663,7 +663,7 @@ const CALCUL = {
          if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) { toast('Indiquez la date de départ', 'erreur'); return; }
          if (d > today()) { toast('La date de départ ne peut pas être dans le futur', 'erreur'); return; }
          if (!w.essai && prec && d < prec.fin) {
-           toast('Le calcul précédent couvre déjà jusqu’au ' + fmtDC(prec.fin) + ' : partez de cette date ou après', 'erreur'); return; }
+           toast('Le calcul précédent couvre déjà jusqu’au ' + fmtDC(prec.fin) + ' : partez de cette date ou après, ou supprimez d’abord ce calcul pour le refaire', 'erreur'); return; }
          const f = $('#cd-fin').value;
          if (!/^\d{4}-\d{2}-\d{2}$/.test(f) || f < d) { toast('La fin de la période doit tomber après le départ', 'erreur'); return; }
          w.fin = f;
