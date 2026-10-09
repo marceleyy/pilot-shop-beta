@@ -76,9 +76,10 @@ const CALCUL = {
 
    /* Poids d'un litre de glace. Un calcul réel prend celui de config.js ; un
       essai, qui rejoue le classeur, prend le sien. Les deux valent aujourd'hui
-      la même chose. Retenu sur le calcul à sa création. */
+      la même valeur, au dernier chiffre près. Retenu sur le calcul à sa création. */
    /* Un calcul créé avant cette règle n'a pas de poids retenu : il prend celui
-      de config.js, donc ses kg suivent un changement de cette valeur. */
+      de config.js, donc ses kg tirés de litres (livraisons) suivent un
+      changement de cette valeur. */
    const poidsLitre = c => (c && num(c.poidsLitre) > 0) ? num(c.poidsLitre) : FOURNISSEUR.poidsMoyenLitre;
    const poidsNeuf = w => (w.essai && FOURNISSEUR.poidsMoyenLitreClasseur) ? FOURNISSEUR.poidsMoyenLitreClasseur
      : FOURNISSEUR.poidsMoyenLitre;
