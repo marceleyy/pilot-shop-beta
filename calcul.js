@@ -1035,7 +1035,7 @@ const CALCUL = {
           547 kg vendus pour une semaine. Signalé, rien n'est changé. */
        const joursPer = Math.round((new Date(w.fin) - new Date(debutFlux(c))) / 864e5) + 1;
        const fichierActif = (v.mode === 'produits' && v.fichierLu) || (v.mode === 'fichier' && v.fichier);
-       const horsPeriode = fichierActif && num(v.joursFichier) > 0 && num(v.joursFichier) !== joursPer
+       const horsPeriode = fichierActif && joursPer > 0 && num(v.joursFichier) > 0 && num(v.joursFichier) !== joursPer
          ? '<div class="alerte warn" style="margin-top:12px"><span class="ai">●</span><div><b>Ce fichier couvre ' + num(v.joursFichier) +
            ' jour(s), la période en compte ' + joursPer + '</b><p>Vérifiez les dates de l’export de caisse : il doit couvrir ' +
            esc(texteDates(debutFlux(c), w.fin)) + '.</p></div></div>' : '';
