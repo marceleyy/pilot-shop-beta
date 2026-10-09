@@ -206,8 +206,9 @@ const CALCUL = {
    }
    /* Départ repris d'une clôture : le stock a été compté ce jour-là, en fin de
       journée. Les pertes et les ventes de ce jour appartiennent au calcul
-      précédent ; le nouveau les prend à partir du lendemain. */
-   const debutFlux = c => (c.depart && c.depart.source === 'precedent') ? addD(c.debut, 1) : c.debut;
+      précédent ; le nouveau les prend à partir du lendemain. Pareil pour un
+      départ recompté le jour de cette clôture (apresCloture). */
+   const debutFlux = c => (c.depart && (c.depart.source === 'precedent' || c.depart.apresCloture)) ? addD(c.debut, 1) : c.debut;
 
    function resultatCalcul(c) {
      const debut  = num(c.depart && c.depart.kg);
@@ -355,9 +356,9 @@ const CALCUL = {
        (await lireCalculs()).forEach(c => {
          if (c.essai || c.id === sauf) return;
          if (c.statut === 'clos' && c.fin === jour && c.arrivee && c.arrivee.zones)
-           props.push({ libelle:'Stock de fin du calcul clôturé le ' + fmtDC(c.fin), zones:c.arrivee.zones, kg:num(c.arrivee.kg) });
+           props.push({ libelle:'Stock de fin du calcul clôturé le ' + fmtDC(c.fin), zones:c.arrivee.zones, kg:num(c.arrivee.kg), compte:true });
          else if (c.debut === jour && c.depart && c.depart.zones)
-           props.push({ libelle:'Stock de départ du calcul du ' + fmtDC(c.debut), zones:c.depart.zones, kg:num(c.depart.kg) });
+           props.push({ libelle:'Stock de départ du calcul du ' + fmtDC(c.debut), zones:c.depart.zones, kg:num(c.depart.kg), compte:true });
        });
      } catch (e) {}
      /* Bacs fermés par taille (glace seulement). */
@@ -410,16 +411,17 @@ const CALCUL = {
        }
        if (r) props.push({ libelle:'Inventaire du ' + fmtDC(inv.jour) + (inv.par ? ' par ' + inv.par : '') +
                              (inv.jour < jour ? ' (dernier inventaire avant le ' + fmtDC(jour) + ')' : ''),
-                           avis:depuis ? depuis + ' mouvement(s) de glace tracé(s) depuis (réceptions, ouvertures, pertes) : ' +
-                             'ce comptage n’est plus exact, recomptez ce qui a bougé.' : '',
-                           zones:r.zones, sansRangement:!r.rangement, rangement:r.rangement });
+                           zones:r.zones, sansRangement:!r.rangement, rangement:r.rangement, compte:inv.jour === jour,
+                           pourquoi:'Cet inventaire date du ' + fmtDC(inv.jour) + (depuis ? ', avec ' + depuis +
+                             ' mouvement(s) de glace tracé(s) depuis (réceptions, ouvertures, pertes).' : '.') });
      } catch (e) {}
      if (jour === today() && typeof stockReel === 'function') {
        try {
          const sr = await stockReel();
          const r = sr && repartir(sr.articles, armoire);
          if (r) props.push({ libelle:'Stock tracé aujourd’hui' + (sr.depuis ? ' (inventaire du ' + fmtDC(sr.depuis) + ' + mouvements)' : ''),
-                             zones:r.zones, sansRangement:!r.rangement, rangement:r.rangement });
+                             zones:r.zones, sansRangement:!r.rangement, rangement:r.rangement, compte:false,
+                             pourquoi:'Ce chiffre vient des scans, pas de la chambre froide.' });
        } catch (e) {}
      }
      return props;
@@ -432,23 +434,28 @@ const CALCUL = {
      if (!box) return;
      const props = await stockAppli(jour, sauf);
      if (!box.isConnected) return;
-     if (!props.length) {
-       box.innerHTML = '<p class="mini" style="margin-top:10px">L’appli n’a pas de comptage du ' + esc(fmtDC(jour)) +
-         ' : saisissez-le ci-dessous.</p>';
-       return;
-     }
+     /* Seul un comptage fait ce jour-là peut être repris. Le stock tracé (dernier
+        inventaire + bacs scannés en réception et à l'ouverture) et un inventaire
+        plus ancien ne sont montrés que pour comparer : repris comme stock réel,
+        ils mesuraient l'écart entre scans et ventes, pas la glace qui manque. */
+     const sansComptage = props.some(x => x.compte) ? '' :
+       '<p class="mini" style="margin-top:10px">L’appli n’a pas de comptage du ' + esc(fmtDC(jour)) +
+       ' : comptez les bacs et saisissez-les ci-dessous.</p>';
+     if (!props.length) { box.innerHTML = sansComptage; return; }
      const resume = z => CALCUL.zones.map(x => {
        const s = (z && z[x.id]) || {};
        const b = Object.keys(s.bacs || {}).filter(t => num(s.bacs[t]) > 0).map(t => s.bacs[t] + ' × ' + t + ' L');
        if (num(s.entamesL) > 0) b.push(n1(s.entamesL) + ' L entamés');
        return b.length ? x.label + ' : ' + b.join(', ') : '';
      }).filter(Boolean).join(' · ');
-     box.innerHTML = props.map((x, i) =>
-       '<div class="alerte info" style="margin-top:12px"><span class="ai">•</span><div>' +
-       '<b>Proposé par l’appli : ' + esc(x.libelle) + '</b><p>' + esc(resume(x.zones)) + ' (' + kgTxt(x.kg || kgZones(x.zones, pl)) + ')' +
-       (x.sansRangement ? '. L’appli ne sait pas où les bacs sont rangés : ils sont repris en chambre froide, déplacez ceux du congélateur −13.' : '.') +
-       (x.avis ? ' <b>' + esc(x.avis) + '</b>' : '') +
-       '</p><button type="button" class="btn clair sm" data-st-prop="' + i + '" style="margin-top:6px">Reprendre ce comptage</button></div></div>').join('');
+     box.innerHTML = sansComptage + props.map((x, i) => x.compte
+       ? '<div class="alerte info" style="margin-top:12px"><span class="ai">•</span><div>' +
+         '<b>Proposé par l’appli : ' + esc(x.libelle) + '</b><p>' + esc(resume(x.zones)) + ' (' + kgTxt(x.kg || kgZones(x.zones, pl)) + ')' +
+         (x.sansRangement ? '. L’appli ne sait pas où les bacs sont rangés : ils sont repris en chambre froide, déplacez ceux du congélateur −13.' : '.') +
+         '</p><button type="button" class="btn clair sm" data-st-prop="' + i + '" style="margin-top:6px">Reprendre ce comptage</button></div></div>'
+       : '<div class="alerte warn" style="margin-top:12px"><span class="ai">●</span><div>' +
+         '<b>Pour comparer, pas un comptage : ' + esc(x.libelle) + '</b><p>' + esc(resume(x.zones)) + ' (' + kgTxt(x.kg || kgZones(x.zones, pl)) + '). ' +
+         esc(x.pourquoi) + ' Comptez les bacs et saisissez votre comptage.</p></div></div>').join('');
      /* Le comptage repris remplace celui de l'étape, qui se redessine : les
         champs suivent alors les zones reprises (anciens entamés en chambre
         froide, bacs pleins en vitrine), rien n'est perdu. */
@@ -603,8 +610,11 @@ const CALCUL = {
    async function demarrerCalcul() {
      const cs = await lireCalculs();
      const prec = derniereCloture(cs);
-     const w = { essai:false, debut:today(), fin:today(), source:prec ? 'precedent' : 'manuel', zones:null, livraisons:[] };
+     /* Rien n'est repris sans que le manager le choisisse : la clôture
+        précédente est proposée, « Compter maintenant » est coché par défaut. */
+     const w = { essai:false, debut:today(), fin:today(), source:'manuel', zones:null, livraisons:[] };
      const debutReel = () => (!w.essai && w.source === 'precedent' && prec) ? prec.fin : w.debut;
+     const apresCloture = () => !w.essai && !!prec && (w.source === 'precedent' || w.debut === prec.fin);
 
      const e1 = () => {
        showSheet(
@@ -641,7 +651,6 @@ const CALCUL = {
          w.fin = $('#cd-fin').value || w.fin;
          w.essai = b.dataset.t === 'essai';
          if (w.essai) w.source = 'manuel';
-         else if (prec) w.source = 'precedent';
          e1();
        });
        $$('#cd-src .chip').forEach(b => b.onclick = () => {
@@ -653,6 +662,8 @@ const CALCUL = {
          const d = $('#cd-debut').value;
          if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) { toast('Indiquez la date de départ', 'erreur'); return; }
          if (d > today()) { toast('La date de départ ne peut pas être dans le futur', 'erreur'); return; }
+         if (!w.essai && prec && d < prec.fin) {
+           toast('Le calcul précédent couvre déjà jusqu’au ' + fmtDC(prec.fin) + ' : partez de cette date ou après, ou supprimez d’abord ce calcul pour le refaire', 'erreur'); return; }
          const f = $('#cd-fin').value;
          if (!/^\d{4}-\d{2}-\d{2}$/.test(f) || f < d) { toast('La fin de la période doit tomber après le départ', 'erreur'); return; }
          w.fin = f;
@@ -709,7 +720,7 @@ const CALCUL = {
          const depart = (!w.essai && w.source === 'precedent' && prec)
            ? { source:'precedent', ref:prec.id, zones:(prec.arrivee && prec.arrivee.zones) || null,
                kg:+num(prec.arrivee && prec.arrivee.kg).toFixed(3) }
-           : { source:'manuel', zones:w.zones, kg:+kgZones(w.zones, poidsNeuf(w)).toFixed(3) };
+           : { source:'manuel', zones:w.zones, kg:+kgZones(w.zones, poidsNeuf(w)).toFixed(3), apresCloture:apresCloture() };
          const c = { id:id, essai:w.essai, debut:w.debut, statut:'ouvert', depart:depart, poidsLitre:poidsNeuf(w),
                      livraisons:w.livraisons, par:STATE.user.prenom, at:nowISO() };
          /* Fin déjà passée : la clôture la reprend. Fin à venir : on clôturera
@@ -728,12 +739,12 @@ const CALCUL = {
          '<h2 id="sheet-titre">Une livraison ?</h2>' +
          '<p class="sub">Étape 3 · Seulement une livraison arrivée après le comptage de départ</p>' +
          listeLivraisons(w.livraisons, true) +
-         formLivraison(w.source === 'precedent' && !w.essai && w.debut < today() ? addD(w.debut, 1) : w.debut) +
+         formLivraison(apresCloture() && w.debut < today() ? addD(w.debut, 1) : w.debut) +
          '<div id="lv-doublon"></div>' +
          '<div class="actions"><button class="btn clair" id="lv-ret">Retour</button>' +
          '<button class="btn menthe" id="lv-suiv">Suivant</button></div>');
        const aj3 = brancherLivraisons(w.livraisons, e3);
-       proposerLivraisons(w.livraisons, w.source === 'precedent' && !w.essai ? addD(w.debut, 1) : w.debut, today(), aj3);
+       proposerLivraisons(w.livraisons, apresCloture() ? addD(w.debut, 1) : w.debut, today(), aj3);
        $('#lv-ret').onclick = () => (!w.essai && w.source === 'precedent' && prec) ? e1() : e2();
        $('#lv-suiv').onclick = () => {
          if (num($('#lv-litres').value) > 0) { toast('Touchez « Ajouter cette livraison » ou videz le champ des litres', 'erreur'); return; }
@@ -971,16 +982,19 @@ const CALCUL = {
      };
 
      const eC = async () => {
-       /* Calcul réel : pertes reprises du registre, corrigeables. Essai : les
-          chiffres viennent de l'ancien classeur, on part de zéro. */
+       /* Calcul réel : le registre des pertes est montré, et repris seulement
+          si le manager le demande. Essai : les chiffres viennent de l'ancien
+          classeur, on part de zéro. */
        let reg = null;
        const d0 = debutFlux(c);
        if (!c.essai) reg = d0 <= w.fin ? await litresPertesRegistre(d0, w.fin) : 0;
-       if (w.perteL === null) { w.perteL = reg || 0; w.perteSource = c.essai ? 'Saisie' : 'Registre des pertes'; }
+       if (w.perteL === null) { w.perteL = 0; w.perteSource = 'Saisie'; }
        showSheet(
          '<h2 id="sheet-titre">Pertes de la période</h2>' +
          '<p class="sub">Étape 3 sur 4 · Glace jetée ' + esc(texteDates(debutFlux(c), w.fin)) + '</p>' +
-         (reg !== null ? '<p class="mini">Registre des pertes : ' + n1(reg) + ' L sur ces dates.</p>' : '') +
+         (reg !== null ? '<p class="mini">Registre des pertes : ' + n1(reg) + ' L sur ces dates.</p>' +
+           (reg > 0 ? '<button type="button" class="btn clair sm" id="cp-reg" style="margin-top:6px">Reprendre le registre (' +
+             n1(reg) + ' L)</button>' : '') : '') +
          '<div class="champ" style="margin-top:10px"><label class="f">Litres jetés</label>' +
          '<input type="number" id="cp-l" min="0" step="0.1" inputmode="decimal" value="' + (w.perteL || '') + '" placeholder="0"></div>' +
          '<div class="champ" style="margin-top:10px"><label class="f">Et/ou kg jetés (pesés)</label>' +
@@ -991,9 +1005,10 @@ const CALCUL = {
        const maj = () => { $('#cp-kg').textContent = 'Pertes : ' +
          kgTxt(kgDeLitres($('#cp-l').value, poidsLitre(c)) + Math.max(0, num($('#cp-k').value))); };
        $('#cp-l').oninput = maj; $('#cp-k').oninput = maj; maj();
+       if ($('#cp-reg')) $('#cp-reg').onclick = () => { $('#cp-l').value = +num(reg).toFixed(2); maj(); };
        const lire = () => {
          const v = Math.max(0, num($('#cp-l').value));
-         if (reg === null || Math.abs(v - reg) > 0.001) w.perteSource = 'Saisie';
+         if (reg === null || !(reg > 0) || Math.abs(v - reg) > 0.001) w.perteSource = 'Saisie';
          else w.perteSource = 'Registre des pertes';
          w.perteL = v;
          w.perteKg = Math.max(0, num($('#cp-k').value));
