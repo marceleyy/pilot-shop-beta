@@ -561,7 +561,7 @@ const FOURNISSEUR = {
      le manager pour que l'appli et le fichier Excel donnent les mêmes kilos.
      (L'étiquette Amorino donne 2,525 kg pour 3 L, soit 0,84167 kg/L.) */
   poidsMoyenLitre: 0.846584074074074,
-  poidsMoyenLitreClasseur: 0.8465840740740742,  // valeur historique, pour comparaison
+  poidsMoyenLitreClasseur: 0.8465840740740742,  // celle du classeur, pour les essais
   prixMoyenKg: 6.7
 };
 
