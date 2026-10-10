@@ -734,6 +734,21 @@ function ouvrirViseur(aide, type) {
   });
 }
 
+/* Feuille refermée sans ses boutons (retour du téléphone, voile) : personne
+   ne répondait, et l'appelant attendait pour toujours — en mode chaîne, la
+   liste des lots ne se redessinait plus. On répond « rien » à la fermeture.
+   Chaque bouton de la feuille lâche d'abord cette écoute, pour que sa propre
+   fermeture (ou « Reprendre la photo ») ne réponde pas à sa place. */
+function surFermetureFeuille(siFermee) {
+  const sheet = document.getElementById('sheet');
+  if (!sheet || typeof MutationObserver === 'undefined') return () => {};
+  const obs = new MutationObserver(() => {
+    if (sheet.hidden) { obs.disconnect(); siFermee(); }
+  });
+  obs.observe(sheet, { attributes: true, attributeFilter: ['hidden'] });
+  return () => obs.disconnect();
+}
+
 /* Repli : rappel de cadrage avant d'ouvrir l'appareil photo natif, puisqu'on
    ne pourra rien afficher par-dessus. */
 function rappelCadrage(type) {
@@ -748,8 +763,9 @@ function rappelCadrage(type) {
       'éviter le reflet de l’inox.</p></div></div>' +
       '<div class="actions"><button class="btn clair" id="rc-x">Annuler</button>' +
       '<button class="btn ciel" id="rc-ok">Ouvrir l’appareil photo</button></div>');
-    document.getElementById('rc-x').onclick = () => { closeSheet(); resolve(false); };
-    document.getElementById('rc-ok').onclick = () => { closeSheet(); resolve(true); };
+    const lacher = surFermetureFeuille(() => resolve(false));
+    document.getElementById('rc-x').onclick = () => { lacher(); closeSheet(); resolve(false); };
+    document.getElementById('rc-ok').onclick = () => { lacher(); closeSheet(); resolve(true); };
   });
 }
 
@@ -1202,6 +1218,8 @@ function confirmerLecture(type, r, apercu, resolve) {
     (OCR._chaine ? '<button class="btn ciel bloc" id="oc-suite" style="margin-top:10px">' +
     '✅ Valider et scanner le suivant</button>' : ''));
 
+  const lacher = surFermetureFeuille(() => resolve(null));
+
   const recolter = () => {
     const lot = document.getElementById('oc-lot').value.trim().toUpperCase();
     if (!lot) { toast('Le numéro de lot est obligatoire', 'erreur'); return null; }
@@ -1219,12 +1237,12 @@ function confirmerLecture(type, r, apercu, resolve) {
      il fallait retoucher « Scanner une étiquette ». La nouvelle lecture
      répond à l'appelant d'origine. */
   document.getElementById('oc-x').onclick  = () => {
-    closeSheet();
+    lacher(); closeSheet();
     scannerPhoto(type, { enchainer: OCR._chaine }).then(resolve, () => resolve(null));
   };
   document.getElementById('oc-ok').onclick = () => {
     const v = recolter(); if (!v) return;
-    closeSheet(); resolve(v);
+    lacher(); closeSheet(); resolve(v);
   };
   /* Mode chaîne : on enregistre et l'appareil photo repart immédiatement.
      Une livraison, c'est cinquante étiquettes — refermer la fiche et rouvrir
@@ -1232,7 +1250,7 @@ function confirmerLecture(type, r, apercu, resolve) {
   const suite = document.getElementById('oc-suite');
   if (suite) suite.onclick = () => {
     const v = recolter(); if (!v) return;
-    closeSheet(); resolve(Object.assign(v, { enchainer: true }));
+    lacher(); closeSheet(); resolve(Object.assign(v, { enchainer: true }));
   };
 }
 
@@ -1255,12 +1273,13 @@ function saisieManuelle(type, raison, resolve) {
     (OCR._chaine ? '<button class="btn ciel bloc" id="sm-suite" style="margin-top:10px">' +
     '✅ Enregistrer et scanner le suivant</button>' : ''));
 
-  document.getElementById('sm-x').onclick  = () => { closeSheet(); resolve(null); };
+  const lacher = surFermetureFeuille(() => resolve(null));
+  document.getElementById('sm-x').onclick  = () => { lacher(); closeSheet(); resolve(null); };
   const valider = enchainer => {
     const lot = document.getElementById('sm-lot').value.trim().toUpperCase();
     if (!lot) return toast('Saisissez le numéro de lot', 'erreur');
     const pf = document.getElementById('sm-parfum');
-    closeSheet();
+    lacher(); closeSheet();
     resolve({ lot: lot, numero: lot, ouv: today(), date: today(),
               parfum: pf ? pf.value : '', fournisseur: FOURNISSEUR.nom,
               lignes: [], lignesNonLues: true,
