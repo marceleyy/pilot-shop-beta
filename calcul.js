@@ -27,7 +27,7 @@ const CALCUL = {
     { id:'congel',  label:'Congélateur −13', bacs:true, entames:true,
       /* Vocabulaire du classeur : « Vitrine + Quarts », les quarts étant les
          bacs entamés rangés au −13. */
-      labelEntames:'Quarts' },
+      labelEntames:'Quarts', ariaEntames:'quarts du congélateur −13' },
     { id:'vitrine', label:'Vitrine',         entames:true }
   ],
   ordreEntames: ['vitrine', 'congel'],
@@ -130,8 +130,8 @@ const CALCUL = {
        '<div class="chips" style="margin-top:8px">' +
          [[0.25, '+ ¼'], [0.5, '+ ½'], [0.75, '+ ¾']].map(q =>
            '<button type="button" class="chip" data-qa="' + p + '-' + x.id + '" data-qf="' + q[0] + '" aria-label="Ajouter ' +
-             q[1].slice(2) + ' de bac à ' + esc(x.labelEntames || x.label) + '">' + q[1] + '</button>').join('') +
-         '<button type="button" class="chip" data-qz="' + p + '-' + x.id + '" aria-label="Effacer les entamés de ' + esc(x.labelEntames || x.label) + '">Effacer</button></div></div>').join('');
+             q[1].slice(2) + ' de bac de ' + CALCUL.tailleQuarts + ' L à ' + esc(x.ariaEntames || x.labelEntames || x.label) + '">' + q[1] + '</button>').join('') +
+         '<button type="button" class="chip" data-qz="' + p + '-' + x.id + '" aria-label="Effacer les entamés de ' + esc(x.ariaEntames || x.labelEntames || x.label) + '">Effacer</button></div></div>').join('');
      return '<div id="' + p + '-prop"></div>' + entiers +
        '<p class="f" style="margin:20px 0 6px"><b>Vitrine + Quarts</b> · bacs déjà entamés</p>' +
        '<p class="mini">Saisissez les litres, ou touchez ¼, ½ ou ¾ pour chaque bac de ' + CALCUL.tailleQuarts + ' L entamé.</p>' +
