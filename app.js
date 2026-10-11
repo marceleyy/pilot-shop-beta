@@ -152,7 +152,11 @@
       des iPads différents. Sans fusion, un iPad revenu en ligne rejouait sa
       copie entière, périmée : les ventes importées entre-temps sur l'autre
       iPad disparaissaient (vérifié : ventes et imports effacés). */
-   const FUSIONNER = ['checklist:', 'hebdo:', 'temp:', 'caisse:', 'reassort:',
+   /* « feed: » : le fil du jour, où chaque iPad ajoute ses lignes. Sans fusion,
+      la copie d'un iPad resté hors ligne, rejouée au retour du réseau,
+      remplaçait le fil écrit entre-temps par les autres iPads (vérifié : les
+      lignes de Marie disparaissaient). Voir unirFil. */
+   const FUSIONNER = ['feed:', 'checklist:', 'hebdo:', 'temp:', 'caisse:', 'reassort:',
                       'preuves:', 'ruptures', 'releve', 'lots:', 'clean:',
                       'anomalies', 'reception:', 'stock:mv:', 'stock:m13:', 'pointage:', 'ecart:'];
    const aFusionner = cle => FUSIONNER.some(p => cle.indexOf(p) === 0);
@@ -241,7 +245,20 @@
      return out.every(x => x && x.at) ? out.sort((p, q) => p.at < q.at ? -1 : p.at > q.at ? 1 : 0) : out;
    }
 
+   /* Fil du jour : on n'y fait qu'ajouter des lignes. Leur « id » est celui de
+      leur auteur, pas de la ligne : unirListes les confondrait. Une ligne se
+      reconnaît donc à son heure, son auteur et son texte. Le fil reste dans
+      l'ordre des heures et garde ses 400 dernières lignes, comme dans feed(). */
+   function unirFil(distant, local) {
+     const cleFil = x => [x.at, x.id || x.par, x.x].join('|');
+     const vus = new Set(local.filter(Boolean).map(cleFil));
+     const out = local.concat(distant.filter(x => x && !vus.has(cleFil(x))));
+     return (out.every(x => x && x.at) ? out.sort((p, q) => p.at < q.at ? -1 : p.at > q.at ? 1 : 0) : out).slice(-400);
+   }
+
    function fusionner(distant, local, cle) {
+     if (Array.isArray(distant) && Array.isArray(local) && cle &&
+         cle.indexOf('feed:') === 0) return unirFil(distant, local);
      if (Array.isArray(distant) && Array.isArray(local) && cle &&
          UNIR.some(p => cle.indexOf(p) === 0)) return unirListes(distant, local, cle);
      if (!distant || typeof distant !== 'object' || Array.isArray(distant)) return local;
@@ -292,10 +309,35 @@
       (signature nouvelle, correction connue dans <moment>_corrections). La copie
       lue avant la correction porte encore la signature corrigée : écrite
       pendant la correction, elle remettait 150 € et l'ancienne signature
-      jusqu'à ce que le manager revalide. */
+      jusqu'à ce que le manager revalide.
+      Une validation faite sans connaître la signature en base (écran ouvert
+      avant, iPad hors ligne, validation arrivée pendant la relecture) passe
+      toujours : c'est la dernière. Mais la signature remplacée et ses montants
+      vont dans <moment>_corrections, marqués « inconnue », au lieu de
+      disparaître (vérifié : Lucas valide 150 €, Marie, écran resté ouvert,
+      valide 155 €, et plus rien ne disait que Lucas avait compté). Et les
+      corrections de la base s'ajoutent à celles de la copie qui passe : sa
+      liste, plus ancienne, les remplaçait.
+      Pendant une correction, en revanche, une validation qui ne la connaît pas
+      ne passe pas (voir plus haut) : elle va elle aussi dans
+      <moment>_corrections, marquée « inconnue » et « refusee », au lieu de
+      disparaître. Sans cette trace, elle revenait (vérifié : Lucas, hors
+      ligne, valide 160 € ; Marie corrige 150 → 155 et revalide ; la copie
+      locale de Lucas, que le rejeu ne réécrit pas, repartait avec sa saisie
+      du soir et, dejaCorrigee ne la reconnaissant pas, ses 160 € remplaçaient
+      la correction de Marie). */
    const CHAMPS_CAISSE_SOIR = ['ecart', 'ecartCB', 'ecartEsp', 'par'];
+   /* Montants d'un comptage, comme instantane() dans V.caisse : ce que l'on
+      archive d'une signature remplacée ou refusée. Toutes les clés m_… y
+      mettaient aussi m_ecartSignale, un objet, enregistré « [object Object] ». */
+   const CHAMPS_COMPTAGE = { m:['m_fond', 'm_com'], s:['s_cb', 's_esp', 's_tpe', 's_retrait', 's_fond', 's_com'] };
    function garderComptagesValides(out, distant, local) {
      const a = (o, k) => Object.prototype.hasOwnProperty.call(o, k);
+     const montants = (mom, o) => {
+       const v = {};
+       CHAMPS_COMPTAGE[mom].forEach(k => { if (a(o, k)) v[k] = o[k] == null ? '' : String(o[k]); });
+       return v;
+     };
      const dejaCorrigee = (mom, sig) => Array.isArray(distant[mom + '_corrections']) &&
        distant[mom + '_corrections'].some(c => c && c.at && c.at === sig.at);
      const auCourant = mom => {
@@ -313,15 +355,34 @@
          local[mom + '_corrections'].some(c => c && c.at && c.at === av.at);
        return !!(sl && sl.at !== av.at && connue && !dejaCorrigee(mom, sl));   // sa revalidation
      };
+     const garderTrace = (mom, valide) => {
+       const l = Array.isArray(local[mom + '_corrections']) ? local[mom + '_corrections'] : [];
+       const d = Array.isArray(distant[mom + '_corrections']) ? distant[mom + '_corrections'] : [];
+       const tout = l.concat(d.filter(x => x && !l.some(c => c && c.at === x.at && c.le === x.le)));
+       const sig = distant[mom + '_valide'], sl = local[mom + '_valide'];
+       if (valide && sl && sl.at !== sig.at && !tout.some(c => c && c.at === sig.at)) {
+         tout.push({ par:sig.par || null, id:sig.id || null, at:sig.at || null, valeurs:montants(mom, distant),
+                     corrigePar:sl.par || null, le:sl.at || null, inconnue:true });
+       }
+       if (tout.length) out[mom + '_corrections'] = tout;
+     };
      ['m', 's'].forEach(mom => {
        const enCorrection = !distant[mom + '_valide'] &&
          !!(distant[mom + '_avant'] && distant[mom + '_avant'].at);
        if (!distant[mom + '_valide'] && !enCorrection) return;
-       if (enCorrection ? auCourantCorrection(mom) : auCourant(mom)) return;
+       if (enCorrection ? auCourantCorrection(mom) : auCourant(mom)) return garderTrace(mom, !enCorrection);
        Object.keys(local).forEach(k => {
          if (k.indexOf(mom + '_') !== 0 && !(mom === 's' && CHAMPS_CAISSE_SOIR.indexOf(k) >= 0)) return;
          if (a(distant, k)) out[k] = distant[k]; else delete out[k];
        });
+       /* Validation refusée pendant une correction, sans rien en savoir : archivée
+          (une seule fois : rejouée, elle est déjà dans la liste de la base). */
+       const sl = local[mom + '_valide'], av = distant[mom + '_avant'];
+       const liste = Array.isArray(out[mom + '_corrections']) ? out[mom + '_corrections'] : [];
+       if (enCorrection && sl && sl.at && sl.at !== av.at && !liste.some(c => c && c.at === sl.at)) {
+         out[mom + '_corrections'] = liste.concat([{ par:sl.par || null, id:sl.id || null, at:sl.at,
+           valeurs:montants(mom, local), corrigePar:null, le:null, inconnue:true, refusee:true }]);
+       }
      });
    }
 
@@ -1396,16 +1457,39 @@
    /* =============================================================================
       5. JOURNAL D'ACTIVITÉ
       ========================================================================== */
+   /* Lignes du fil demandées depuis cet écran dans la dernière minute (voir feed). */
+   let filRecent = [];
    async function feed(niveau, texte) {
      try {
        const cle = 'feed:' + today();
+       /* La ligne prend son heure à l'appui et rejoint aussitôt les lignes
+          récentes de cet écran : deux appels qui se chevauchent (feed n'est
+          pas toujours attendu) se comparent dans l'ordre des appuis, et non
+          dans celui des réponses du serveur, qui peuvent se croiser. */
+       const ligne = { n:niveau, x:texte, par:STATE.user ? STATE.user.prenom : '—',
+                       id:STATE.user ? STATE.user.id : null, at:nowISO() };
+       const avant = filRecent.filter(x => Date.now() - new Date(x.at) < 60000);
+       filRecent = avant.concat([ligne]);
        const l = await DB.get(cle, []);
-       /* Un double appui sur iPad ne doit pas produire deux lignes identiques. */
-       const dernier = l[l.length - 1];
+       /* Un double appui sur iPad ne doit pas produire deux lignes identiques.
+          La relecture ne montre pas la ligne du premier appui tant qu'elle est
+          en route vers la base, et le fil réunit les lignes des iPads : la
+          seconde s'ajoutait à la première. Les lignes récentes de cet écran
+          sont donc remises à leur place avant de regarder la dernière. Pas la
+          copie locale seule : elle ignore les lignes écrites depuis sur les
+          autres iPads, et une même phrase une minute plus tard (une autre
+          journée validée) disparaissait. On compare à la dernière ligne
+          datée d'avant cet appui : ni une ligne d'un appel suivant déjà
+          revenu, ni celle d'un iPad dont l'horloge avance, ni une ligne sans
+          heure, qui empêcherait unirFil de trier. */
+       const vues = unirFil((Array.isArray(l) ? l : []).filter(x => x && x.at && x.at <= ligne.at), avant);
+       const dernier = vues[vues.length - 1];
        if (dernier && dernier.x === texte &&
-           (Date.now() - new Date(dernier.at)) < 60000) return;
-       l.push({ n:niveau, x:texte, par:STATE.user ? STATE.user.prenom : '—',
-                id:STATE.user ? STATE.user.id : null, at:nowISO() });
+           (Date.now() - new Date(dernier.at)) < 60000) {
+         filRecent = filRecent.filter(x => x !== ligne);
+         return;
+       }
+       l.push(ligne);
        await DB.set(cle, l.slice(-400));
      } catch (e) {}
    }
@@ -1994,8 +2078,10 @@ async function purgerLocalAncien() {
    
      $('#page').innerHTML =
        carte(entete('🎙️', 'Dicter la perte', SPEECH
-           /* RGPD : la voix quitte l'iPad, il faut le dire avant le premier mot. */
-           ? 'Appuyez, parlez normalement : « J’ai jeté 2 bacs de vanille ». La voix est transcrite par le service de dictée de l’appareil (Apple ou Google).'
+           /* La voix passe par le service de dictée d'Apple ou de Google : la
+              notice d'information des salariés le dit, l'écran plus (demande de
+              la boutique). */
+           ? 'Appuyez, parlez normalement : « J’ai jeté 2 bacs de vanille ».'
            : 'La dictée n’est pas disponible sur ce navigateur. Utilisez la saisie ci-dessous.') +
          '<button class="btn corail bloc xl mic" id="mic"' + (SPEECH ? '' : ' disabled') + '>' +
          'Dicter la perte</button>' +
@@ -4014,7 +4100,7 @@ function ouvrirPremierePeriode() {
      $$('[data-jeter]').forEach(b => b.onclick = () => {
        const f = fifo.filter(x => x.cle === b.dataset.jeter)[0];
        confirmer('Jeter ' + f.nom + ' ?',
-         'Le lot ' + f.lot + ' sera enregistré en perte et retiré du frigo virtuel.', 'Jeter et déclarer', async () => {
+         'Le lot ' + f.lot + ' sera enregistré en perte et retiré des produits ouverts.', 'Jeter et déclarer', async () => {
            /* Litrage réel du lot : sa taille de bac pour une glace (5 L par
               défaut si elle n'a pas été saisie), 0 pour le reste — une
               chantilly ou un coulis n'a pas de litrage de glace, et lui
@@ -4220,13 +4306,17 @@ function ouvrirPremierePeriode() {
    
        (rec.valide ? '' : '<button class="btn menthe bloc xl" id="vs" style="margin-top:16px">Valider l’inventaire sec</button>');
    
-     const collecte = () => $$('[data-s]').forEach(i => {
+     const lireChamp = i => {
        const a = i.dataset.s.split('.');
        if (!rec.l[a[0]]) rec.l[a[0]] = {};
        rec.l[a[0]][a[1]] = i.value;
-     });
-     const save = debounce(() => { collecte(); DB.set(cle, rec); }, 400);
-     $$('[data-s]').forEach(i => i.oninput = save);
+     };
+     const collecte = () => $$('[data-s]').forEach(lireChamp);
+     /* La saisie entre dans rec à chaque frappe ; seule l'écriture est différée.
+        Relus 400 ms plus tard, les champs avaient quitté l'écran si l'on venait
+        de passer à l'onglet Glace : la dernière quantité tapée était perdue. */
+     const save = debounce(() => DB.set(cle, rec), 400);
+     $$('[data-s]').forEach(i => i.oninput = () => { lireChamp(i); save(); });
    
      const ro = $('#ro');
      /* Même confirmation que « Rouvrir » de l'onglet Glace : rouvrir rend les
@@ -4576,7 +4666,7 @@ function ouvrirPremierePeriode() {
            '<p>Inventaires validés, achats saisis, registres complets.</p></div></div>', 'plat')) +
    
        '<button class="btn ' + (bloquants.length ? 'clair' : 'menthe') + ' bloc xl" id="clo" style="margin-top:16px">' +
-       (anticipee ? '⏭️ Clôture anticipée' : 'Terminer la période') + '</button>' +
+       (anticipee ? 'Clôture anticipée' : 'Terminer la période') + '</button>' +
     '<button class="btn clair bloc" id="modif" style="margin-top:8px">Modifier les dates de la période</button>' +
    
        (historique.length ? '<div class="entete"><h3>Périodes clôturées</h3></div>' +
