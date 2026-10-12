@@ -134,6 +134,8 @@
      ['catalogue:',   'reglages'],
      /* Mise en route d'une nouvelle boutique (guide.js). */
      ['boutique',     'reglages'],
+     /* Résumé lu par les autres boutiques du franchisé (franchise.js). */
+     ['franchise:',   'reglages'],
      ['async:',       'reglages']
    ].filter(function (r) {
      /* Une route dont la table est introuvable est retirée dès le chargement :
