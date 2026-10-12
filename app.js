@@ -132,6 +132,8 @@
      ['hebdo:',       'checklists'],
      ['hebdo',        'reglages'],
      ['catalogue:',   'reglages'],
+     /* Mise en route d'une nouvelle boutique (guide.js). */
+     ['boutique',     'reglages'],
      ['async:',       'reglages']
    ].filter(function (r) {
      /* Une route dont la table est introuvable est retirée dès le chargement :
@@ -1498,6 +1500,11 @@ function renderNav() {
          '<span class="mi-tx"><span class="mi-t">Signaler un souci</span>' +
          '<span class="mi-s">Un bug, un chiffre faux, une idée : c’est transmis à ' + esc(nomManager()) + '</span></span>' +
          '<span class="mi-fl">›</span></button>' : '') +
+       /* Une personne qui travaille dans deux boutiques (guide.js). */
+       (typeof changerDeBoutique === 'function' ? '<button type="button" class="menu-item" id="mp-boutique">' +
+         '<span class="mi-tx"><span class="mi-t">Changer de boutique</span>' +
+         '<span class="mi-s">Rattacher cet appareil à une autre boutique</span></span>' +
+         '<span class="mi-fl">›</span></button>' : '') +
        '</div>' +
        '<div class="actions"><button class="btn clair" data-fermer>Fermer</button>' +
        '<button class="btn fantome" id="mp-out">Déconnexion</button></div>' +
@@ -1507,6 +1514,8 @@ function renderNav() {
      $$('[data-plus]').forEach(b => b.onclick = () => { closeSheet(); rendre(b.dataset.plus); });
      const rb = $('#mp-retour');
      if (rb) rb.onclick = ouvrirRetour;
+     const cb = $('#mp-boutique');
+     if (cb) cb.onclick = () => { closeSheet(); changerDeBoutique(); };
      $('#mp-out').onclick = () => { closeSheet(); deconnexion(); };
    }
    
@@ -3210,6 +3219,8 @@ function ecranAmorcage() {
       EQUIPE.splice(0, EQUIPE.length, ...equipe);
       try { localStorage.setItem('pilotshop.v3:equipe', JSON.stringify(equipe)); } catch (e) {}
       try { await DB.set('equipe', equipe); } catch (e) { /* partira avec la file */ }
+      /* Boutique qui démarre de zéro : le manager sera guidé (guide.js). */
+      try { await DB.set('boutique', { guide:'a-faire', etapes:{}, debut:nowISO() }); } catch (e) {}
 
       d.remove();
       if (typeof initLogin === 'function') initLogin();
