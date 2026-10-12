@@ -226,7 +226,7 @@ function ecranRattachement() {
           const n = quitterAncienneBoutique(avant);
           etat('Rattaché à ' + s.site + '.' + (n ? ' ' + n + (n > 1 ? ' saisies de ' + avant + ' attendent' : ' saisie de ' + avant + ' attend') +
                ' : ' + (n > 1 ? 'elles partiront' : 'elle partira') + ' quand l’appareil sera de nouveau rattaché à ' + avant + '.' : ''));
-          setTimeout(() => location.reload(), n ? 4000 : 300);
+          setTimeout(() => (typeof recharger === 'function' ? recharger() : location.reload()), n ? 4000 : 300);
           return;
         }
         etat('Rattaché. Chargement de l’équipe…');

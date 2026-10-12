@@ -2240,7 +2240,9 @@ function confirmerOuverture(r) {
       const lots = await DB.get('lots:' + m, {});
       const cleFifo = (fam.id === 'glace' && parfum)
         ? 'g_' + parfum
-        : 'a_' + (fam.dlc || 'defaut');
+        /* Par saveur aussi : ouvrir un coulis pistache effaçait le suivi du
+           coulis chocolat ouvert la veille (une seule entrée par règle). */
+        : 'a_' + (fam.dlc || 'defaut') + (parfum ? '|' + parfum : '');
       /* « Ouvert le » de la lecture fait foi (bac ouvert la veille, scanné ce
          matin) : il était ignoré et la DLC après ouverture partait d'aujourd'hui.
          Une date future ou illisible retombe sur aujourd'hui. */
@@ -2250,7 +2252,6 @@ function confirmerOuverture(r) {
       const dateValide = d => d && /^\d{4}-\d{2}-\d{2}$/.test(d) && d <= today();
       const ouv = (fam.id === 'glace' && orig === 'm13')
         ? (bA ? bA.jour : (dateValide(jourM13) ? jourM13 : today()))
-        : fam.id === 'glace' && orig === 'cf' ? today()
         : (dateValide(r.ouv) ? r.ouv : today());
       lots[cleFifo] = { lot: lot, ouv: ouv, par: STATE.user.prenom, at: nowISO(),
                         famille: fam.id, taille: fam.parfums ? taille : null };

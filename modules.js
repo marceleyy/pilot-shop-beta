@@ -545,7 +545,10 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
    const preuves = (await DB.get('preuves:' + j, [])).filter(p => !p.supprime);
    const alertes = await alertesDLC();
    const releve = await DB.get('releve', []);
-   const msgs = releve.filter(m => !m.lu || m.epingle).slice(-3).reverse();
+   /* Lu par moi, pas par n'importe qui : un seul « J'ai lu » retirait le
+      message de l'accueil de toute l'équipe. */
+   const luParMoi = m => m.luPar ? m.luPar.indexOf(STATE.user.prenom) >= 0 : !!m.lu;
+   const msgs = releve.filter(m => !luParMoi(m) || m.epingle).slice(-3).reverse();
 
   /* Deux étapes ne se cochent pas à la main : elles se constatent. Le relevé
      des températures et le comptage de caisse doivent avoir été réellement
@@ -675,6 +678,7 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
      const mt = (typeof meteoRapide === 'function') ? await meteoRapide() : { m:null, suite:null };
      const m = mt.m;
      const meteoMini = m => {
+       if (!m || m.source === 'indisponible') return '';
        const c = METEO.codes[m.code] || METEO.codes[3];
        return '<div class="meteo-mini"><span class="mm-t">' + m.t + '°</span>' +
               '<span class="mm-d">' + esc(c.l) + '</span>' +
@@ -855,11 +859,11 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
         '<div class="alerte bad"><span class="ai">•</span><div>' +
         '<b>' + manquantes.length + ' ' + accord(manquantes.length, 'étape') + ' à faire dans leur écran</b><p>' +
         esc(manquantes.map(x => x.lie.quoi).join(' · ')) +
-        '. Ce sont des pièces du registre sanitaire : elles doivent porter des ' +
+        '. Ce sont des étapes constatées : elles doivent porter des ' +
         'valeurs réelles et une signature.</p></div></div>' +
         '<div class="actions"><button class="btn clair" data-fermer>Fermer</button>' +
         '<button class="btn menthe" id="vp-go">' + esc('Aller à ' + premier.t.t) + '</button></div>');
-      $('#vp-go').onclick = () => { closeSheet(); rendre(premier.lie.ou); };
+      $('#vp-go').onclick = () => { closeSheet(); rendre(premier.lie.ou, false, null, phase === 'fermeture' ? 's' : 'm'); };
       return;
     }
 
@@ -1294,6 +1298,8 @@ V.caisse = async function () {
       if (vides.length) return toast(mo === 'm'
         ? 'Renseignez le fond de caisse initial'
         : 'Renseignez tous les montants du soir', 'erreur');
+      /* Un fond de « -150 » se validait. */
+      if (requis.some(k => num(r[k]) < 0)) return toast('Un montant ne peut pas être négatif', 'erreur');
       champsSaisie().forEach(i => { r[i.dataset.k] = i.value; });
       /* Écran ouvert avant une validation ou une correction faite sur un autre
          iPad : la fusion refuserait cette validation (correction en cours) ou la
@@ -1628,7 +1634,7 @@ V.temp = async function () {
         'Obligatoire dès qu’une enceinte dépasse sa limite critique.') +
         '<textarea id="obs" aria-label="Action corrective" placeholder="Ex. vitrine à −9 °C : bacs transférés en chambre froide, ' +
         esc((typeof nomManager === 'function' ? nomManager() : 'le manager')) + ' prévenu.">' +
-        esc(rec.obs || '') + '</textarea>') +
+        esc(obsDe(mom.id)) + '</textarea>') +
 
       '<button class="btn ' + (vm ? 'clair' : 'menthe') + ' bloc xl" id="tvalider" style="margin-top:16px">' +
       (vm ? '✓ Déjà validé, revalider'
@@ -1639,8 +1645,12 @@ V.temp = async function () {
     brancher();
   };
 
+  /* Une action corrective par moment : un champ commun validait une valeur
+     critique du soir avec le texte du matin. « obs » reste lu pour les anciens
+     relevés (matin). */
+  const obsDe = m => rec['obs_' + m] !== undefined ? (rec['obs_' + m] || '') : (m === 'm' ? (rec.obs || '') : '');
   const sauver = async () => {
-    if ($('#obs')) rec.obs = $('#obs').value;
+    if ($('#obs')) rec['obs_' + mom.id] = $('#obs').value;
     await DB.set('temp:' + j, rec);
   };
 
@@ -1716,7 +1726,16 @@ V.temp = async function () {
       $('#tlok').onclick = async () => {
         const v = $('#tl').value;
         if (v === '') return toast('Saisissez une température', 'erreur');
-        rec[cle(e)] = num(v);
+        /* 999 °C, ou 20 tapé pour −20, entrait au registre sans question :
+           loin de la plage de l'enceinte, un second appui confirme. */
+        const t = num(v), loin = t < e.lo - 15 || t > e.hi + 15;
+        const bt = $('#tlok');
+        if (loin && bt.dataset.confirme !== String(t)) {
+          bt.dataset.confirme = String(t);
+          bt.textContent = 'Confirmer ' + String(t).replace('.', ',') + ' °C';
+          return toast(String(t).replace('.', ',') + ' °C semble impossible pour ' + e.nom + ' : vérifiez, puis confirmez', 'erreur');
+        }
+        rec[cle(e)] = t;
         invalider();
         await sauver();
         closeSheet();
@@ -1730,7 +1749,8 @@ V.temp = async function () {
     $('#tvalider').onclick = async () => {
       const reste = manquants();
       const crit = ENCEINTES.filter(e => etatTemp(e, brut(e)) === 'crit');
-      if (crit.length && !(rec.obs || '').trim()) {
+      if ($('#obs')) rec['obs_' + mom.id] = $('#obs').value;
+      if (crit.length && !obsDe(mom.id).trim()) {
         toast('Renseignez l’action corrective', 'erreur');
         if ($('#obs')) $('#obs').focus();
         return;
@@ -1874,14 +1894,24 @@ V.parametres = async function () {
        $$('[data-e]').forEach(i => { if (enCours[i.dataset.e] !== undefined) i.value = enCours[i.dataset.e]; });
      };
      $('#ev').onclick = async () => {
+       /* Contrôlé sur une copie avant d'écrire : un champ vidé devenait 0 °C
+          (frigo toujours « critique ») et une plage verte inversée passait. */
+       const copie = ENCEINTES.map(e => Object.assign({}, e, { vert:(e.vert || []).slice() }));
+       let vide = false;
        $$('[data-e]').forEach(i => {
          const [k, f] = i.dataset.e.split('.');
-         const e = ENCEINTES[+k];
+         const e = copie[+k];
+         const chiffre = ['v0','v1','crit','lo','hi'].indexOf(f) >= 0;
+         if (chiffre && String(i.value).trim() === '') { vide = true; return; }
          if (f === 'v0') e.vert[0] = num(i.value);
          else if (f === 'v1') e.vert[1] = num(i.value);
-         else if (['crit','lo','hi'].indexOf(f) >= 0) e[f] = num(i.value);
+         else if (chiffre) e[f] = num(i.value);
          else e[f] = i.value;
        });
+       if (vide) return toast('Une température est vide : renseignez-la', 'erreur');
+       const faux = copie.filter(e => !(e.vert[0] <= e.vert[1]) || !(e.lo < e.hi) || !(e.crit > e.vert[1]))[0];
+       if (faux) return toast(faux.nom + ' : plage verte, limite critique ou bornes incohérentes', 'erreur');
+       copie.forEach((e, i) => Object.assign(ENCEINTES[i], e));
        await DB.set('enceintes', ENCEINTES);
        toast('Unités enregistrées');
      };
@@ -2278,9 +2308,21 @@ function formulaireAnomalie() {
       garder();
       if (!categorie) return toast('Choisissez une catégorie', 'erreur');
       if (!memo.titre) return toast('Décrivez le problème en une phrase', 'erreur');
-      await DB.push('anomalies', { id:uid(), categorie:categorie, gravite:gravite,
+      /* Toute la liste est une seule ligne en base : vers la 19e photo elle
+         dépassait la taille d'envoi, et les signalements suivants n'arrivaient
+         plus. Les photos des anomalies résolues, les plus anciennes d'abord,
+         sont retirées tant que la liste est trop lourde. */
+      const liste = await DB.get('anomalies', []);
+      liste.push({ id:uid(), categorie:categorie, gravite:gravite,
         titre:memo.titre, detail:memo.detail, photo:photo, jour:today(),
         par:STATE.user.prenom, employe:STATE.user.id, at:nowISO(), resolue:false });
+      const poids = () => { try { return JSON.stringify(liste).length; } catch (e) { return 0; } };
+      const plafond = OFFLINE.tailleMaxOctets * 0.85;
+      for (const a of liste) {
+        if (poids() <= plafond) break;
+        if (a && a.resolue && a.photo) { a.photo = ''; a.photoRetiree = true; }
+      }
+      await DB.set('anomalies', liste);
       await feed(gravite === 'bloquant' ? 'bad' : 'warn',
         STATE.user.prenom + ' signale : ' + memo.titre);
       closeSheet();

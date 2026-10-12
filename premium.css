@@ -1186,3 +1186,7 @@ select,select:focus{
        bord de champ et points PIN 3,6 · anneau du segment actif 13,8
        anneau de puce choisie 16,4 · repère or de l'onglet 4,9.
    ========================================================================== */
+
+/* Calcul guidé, ventes par produit : trois colonnes à toute largeur
+   (la grille .g3 s'empilait sur téléphone et mélangeait les champs). */
+.cv-g{display:grid;grid-template-columns:minmax(0,2fr) minmax(0,1fr) minmax(0,1fr);gap:8px;align-items:center}

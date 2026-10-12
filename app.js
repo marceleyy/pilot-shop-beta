@@ -446,6 +446,8 @@
          /* Le réseau a répondu : on est en ligne, même si le serveur refuse. */
          STATE.delaisDepasses = 0;
          if (!STATE.enLigne) { STATE.enLigne = true; STATE.erreurBase = null; majBandeau(); }
+         /* Le diagnostic montrait encore le 401 d'avant le rattachement. */
+         if (r.ok) STATE.dernierEchec = null;
          if (!r.ok) {
            const err = new Error('HTTP ' + r.status);
            err.http = r.status;
@@ -562,6 +564,7 @@
            }
            return horsMemoire ? memoirePleine() : true;
          }
+         delete DB._gros[cle];
 
          /* Hors ligne et mémoire pleine : la file d'attente vit elle aussi en
             mémoire locale, elle ne peut rien garder. */
@@ -709,6 +712,8 @@
       file de l'iPad (bandeau « saisies en attente ») et le manager ne le voit
       pas encore. */
    function messageEnvoi(cle, envoye) {
+     /* Trop lourd pour la base : gardé sur l'iPad seulement. Annoncer « transmis » trompait. */
+     if (DB._gros && DB._gros[cle]) return 'Gardé sur l’iPad seulement : trop lourd pour être envoyé';
      try {
        if (fileLire().some(x => x.cle === cle)) return 'Enregistré sur l’iPad, envoi dès le retour du réseau';
      } catch (e) {}
@@ -979,6 +984,14 @@
      if (_roleARedessiner) setTimeout(appliquerNouveauRole, 0);
    }
 
+   /* Rechargement après la fermeture d'une feuille (« Se déconnecter », par
+      exemple) : le history.back() programmé par closeSheet partait juste après
+      location.reload() et l'annulait. On restait connecté sous le même prénom. */
+   function recharger() {
+     if (_retourPrevu) { clearTimeout(_retourPrevu); _retourPrevu = null; }
+     location.reload();
+   }
+
    /* Tout champ touché par l'utilisateur marque la feuille comme modifiée.
       Une valeur posée par le code ne déclenche pas « input » : seul un vrai
       geste compte. */
@@ -1175,7 +1188,11 @@
       faisait appeler quelqu'un qui n'y travaille pas. Texte brut : à passer
       par esc() avant tout innerHTML. */
    function nomManager() {
-     const m = (typeof EQUIPE !== 'undefined' ? EQUIPE : []).filter(e => e && e.role === 'manager')[0];
+     /* Un autre manager que soi : « transmis à Marc » quand Marc écrit. */
+     const moi = STATE.user && STATE.user.id;
+     const ms = (typeof EQUIPE !== 'undefined' ? EQUIPE : []).filter(e => e && e.role === 'manager');
+     const m = ms.filter(e => e.id !== moi)[0];
+     if (!m && ms.length && STATE.user && STATE.user.role === 'manager') return 'l’équipe Pilot-Shop';
      return (m && m.prenom) || 'le manager';
    }
    /* Même chose en début de phrase. */
@@ -1385,7 +1402,15 @@
      STATE.service = ouverte || null;
    }
    
+   /* Double appui sur « Début de service » : deux sessions ouvertes, dont
+      une restait « en cours » après la fin de service. */
+   let _pointageEnCours = false;
    async function pointer(entree) {
+     if (_pointageEnCours) return;
+     _pointageEnCours = true;
+     try { await pointer1(entree); } finally { _pointageEnCours = false; }
+   }
+   async function pointer1(entree) {
      /* La clôture se range sous le jour de DÉBUT du service. Avec today(), un
         service commencé à 22 h et terminé à 0 h 30 cherchait sa session dans
         le mauvais jour : la fin n'était jamais enregistrée. */
@@ -1414,7 +1439,7 @@
      confirmer('Se déconnecter ?', 'Votre pointage reste enregistré. L’appareil reviendra à l’écran des prénoms.',
        'Se déconnecter', async () => {
          await DB.del('session');
-         location.reload();
+         recharger();
        });
    }
    
@@ -1540,6 +1565,13 @@ function renderNav() {
    /* Écrans à barre de dates : un lien peut les ouvrir sur un jour donné. */
    const VUES_DATEES = ['temp', 'clean', 'caisse', 'hebdo'];
 
+   /* Deux écrans demandés coup sur coup (onglet touché pendant le chargement) :
+      le premier, plus lent, finissait après le second et écrasait sa page, ou
+      ne trouvait plus ses boutons (« Cette page ne s'est pas ouverte »). On
+      numérote les rendus : un rendu dépassé n'affiche rien de plus, et s'il a
+      recouvert l'écran le plus récent, celui-ci est redessiné. */
+   let _rendusLances = 0, _dernierRenduFini = 0;
+
    async function rendre(id, viaHistorique, jour, moment) {
    if (!V[id]) { toast('Vue indisponible'); return; }
    if (!vueAutorisee(id)) id = vueAccueil();
@@ -1643,8 +1675,18 @@ function renderNav() {
          return;
        }
      }
-     try { await V[id](); }
-     catch (err) {
+     const n = ++_rendusLances;
+     let echec = null;
+     try { await V[id](); } catch (err) { echec = err; }
+     if (n !== _rendusLances) {
+       const recouvert = _dernierRenduFini > n;
+       _dernierRenduFini = Math.max(_dernierRenduFini, n);
+       if (recouvert) rendre(STATE.view, true);
+       return;
+     }
+     _dernierRenduFini = n;
+     if (echec) {
+       const err = echec;
        $('#page').innerHTML = carte(
          entete('⚠️', 'Cette page ne s’est pas ouverte', String(err && err.message || err)) +
          '<button class="btn clair bloc" id="rt">Réessayer</button>');
@@ -2349,6 +2391,15 @@ async function purgerLocalAncien() {
        if (!art) return toast('Article introuvable', 'erreur');
        if (rec[cle] && rec[cle].rupture) {
          rec[cle] = { ok:0, rupture:0 };
+         /* L'alerte envoyée au manager est classée aussi : elle restait ouverte
+            pour une rupture qui n'existait plus. */
+         const nomR = art.nom + (decl ? ' — ' + decl : '');
+         DB.get('ruptures', []).then(l => {
+           const ouvertes = l.filter(x => x && !x.traite && x.jour === j && x.article === nomR);
+           if (!ouvertes.length) return;
+           ouvertes.forEach(x => { x.traite = true; x.annulee = true; x.traitePar = STATE.user.prenom; x.traiteAt = nowISO(); });
+           return DB.set('ruptures', l);
+         }).catch(() => {});
          DB.set('reassort:' + j, rec).then(() => rendre('reas'));
          return;
        }
@@ -2376,7 +2427,7 @@ async function purgerLocalAncien() {
          $$('#qt .chip').forEach(x => x.classList.remove('on'));
          b.classList.add('on'); reste = +b.dataset.q; $('#qa').value = '';
        });
-       $('#qa').oninput = () => { $$('#qt .chip').forEach(x => x.classList.remove('on')); reste = num($('#qa').value); };
+       $('#qa').oninput = () => { $$('#qt .chip').forEach(x => x.classList.remove('on')); reste = $('#qa').value === '' ? null : num($('#qa').value); };
    
        $('#qv').onclick = async () => {
          if (reste === null) return toast('Indiquez ce qu’il reste', 'erreur');
@@ -2765,7 +2816,7 @@ function surveillerVeille() {
   let s = null;
   try { s = JSON.parse(DB._lire('session') || 'null'); } catch (e) {}
   if (s && s.vu > 0 && Date.now() - s.vu > SESSION_INACTIVITE_MS) {
-    Promise.resolve(DB.del('session')).catch(() => {}).then(() => location.reload());
+    Promise.resolve(DB.del('session')).catch(() => {}).then(() => recharger());
     return;
   }
   const saisie = document.activeElement && /^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement.tagName);
@@ -3144,7 +3195,7 @@ function revaliderSession() {
   if (!STATE.user) return;
   const e = EQUIPE.filter(x => x.id === STATE.user.id)[0];
   if (!e) {
-    DB.del('session').then(() => location.reload(), () => location.reload());
+    DB.del('session').then(() => recharger(), () => recharger());
     return;
   }
   if (e.role !== STATE.user.role) _roleARedessiner = true;
@@ -3314,6 +3365,41 @@ function ecranAmorcage() {
    pour le diagnostic.
    -------------------------------------------------------------------------- */
 STATE.incidents = [];
+
+/* DOUBLE APPUI
+   Un second appui pendant qu'un gestionnaire asynchrone travaille encore
+   enregistrait tout deux fois : deux pertes (20 L au lieu de 10), deux
+   ruptures, deux messages au carnet, deux anomalies. Plutôt qu'un verrou
+   écrit à la main dans chaque écran, tout « onclick » qui rend une promesse
+   ignore les appuis suivants jusqu'à ce qu'elle soit tenue (15 s au plus,
+   pour qu'un bouton ne reste jamais muet). Un appel direct (bouton.onclick())
+   n'est pas concerné. */
+(function () {
+  const d = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'onclick');
+  if (!d || !d.set || !d.get) return;
+  Object.defineProperty(HTMLElement.prototype, 'onclick', {
+    configurable: true, enumerable: d.enumerable,
+    get: function () { return this.__clicOrigine !== undefined ? this.__clicOrigine : d.get.call(this); },
+    set: function (fn) {
+      this.__clicOrigine = fn;
+      if (typeof fn !== 'function') { d.set.call(this, fn); return; }
+      d.set.call(this, function (ev) {
+        const el = this;
+        /* Flèches ± des températures : les appuis rapides s'additionnent exprès. */
+        if (el.dataset && (el.dataset.pas !== undefined || el.dataset.repetable !== undefined)) return fn.apply(el, arguments);
+        if (el.__occupe) { if (ev && ev.preventDefault) ev.preventDefault(); return; }
+        const r = fn.apply(el, arguments);
+        if (r && typeof r.then === 'function') {
+          el.__occupe = true;
+          const fin = () => { clearTimeout(t); el.__occupe = false; };
+          const t = setTimeout(fin, 15000);
+          r.then(fin, fin);
+        }
+        return r;
+      });
+    }
+  });
+})();
 
 window.addEventListener('unhandledrejection', function (ev) {
   const e = ev.reason || {};
@@ -3735,7 +3821,8 @@ function ouvrirPremierePeriode() {
      /* Échec récent : pas de nouvel essai avant 10 minutes. Sans ce frein,
         chaque redessin de Ma journée (phase, onglet, retour après une photo
         ou une validation) attendait de nouveau 8 s qu'open-meteo réponde. */
-     const repli = () => cache || { t:'—', code:3, max:'—', pluie:'—', at:nowISO(), source:'indisponible' };
+     /* Sans donnée : pas de « Couvert » inventé (l'écran le montrait sans météo). */
+     const repli = () => cache || { t:'—', code:null, max:'—', pluie:'—', at:nowISO(), source:'indisponible' };
      if (Date.now() - _meteoEchec < 10 * 60e3) return repli();
      try {
        const u = METEO.endpoint + '?latitude=' + METEO.lat + '&longitude=' + METEO.lon +
@@ -3777,7 +3864,7 @@ function ouvrirPremierePeriode() {
      return { m:await DB.get('meteo', null), suite:p };
    }
    function widgetMeteo(m) {
-     if (!m) return '';
+     if (!m || m.source === 'indisponible') return '';
      const c = METEO.codes[m.code] || METEO.codes[3];
      return carte(
        '<div class="meteo"><span class="mi">' + c.i + '</span>' +
@@ -3848,7 +3935,7 @@ function ouvrirPremierePeriode() {
      if (per && per.echue) {
        A.push(['bad', 'Période terminée depuis ' + per.joursDepuisFin + ' ' + accord(per.joursDepuisFin, 'jour'),
          'La semaine du ' + fmtD(per.debut) + ' au ' + fmtD(per.fin) + ' attend sa clôture. ' +
-         'Les saisies d’aujourd’hui s’y rattachent encore.', 'periodes']);
+         'Clôturez-la : la période suivante reprendra au ' + fmtD(addD(per.fin, 1)) + '.', 'periodes']);
      }
      /* Un calcul d'écart clôturé au moins une fois par mois (calcul.js). */
      if (typeof alerteCalculMensuel === 'function') {
@@ -4046,8 +4133,11 @@ function ouvrirPremierePeriode() {
           jeté — même numéro, ouvert avant le jet. */
        if (v.jete && (!v.jeteLot || v.jeteLot === v.lot) && (!v.at || v.at <= v.jete)) return;
        const type = cle.slice(0, 1);
-       const nom = type === 'g' ? cle.slice(2) : (DLC_RULES[cle.slice(2)] || DLC_RULES.defaut).label;
-       const regle = regleDLC(nom, type);
+       /* « a_<règle>|<saveur> » : une entrée par saveur ouverte. */
+       const [rg, saveur] = cle.slice(2).split('|');
+       const nom = type === 'g' ? cle.slice(2)
+                 : (DLC_RULES[rg] || DLC_RULES.defaut).label + (saveur ? ' · ' + saveur : '');
+       const regle = regleDLC(type === 'g' ? nom : (DLC_RULES[rg] || DLC_RULES.defaut).label, type);
        const heures = DLC_RULES[regle].h;
        const limite = new Date(new Date(v.ouv + 'T08:00:00').getTime() + heures * 3600e3);
        const resteH = Math.round((limite - Date.now()) / 3600e3);
@@ -4386,10 +4476,18 @@ function ouvrirPremierePeriode() {
    
      const theo = debutKg + achats - jete - vendu;
      const ecart = finKg - theo;
-     const pct = theo ? ((theo - finKg) / theo) * 100 : 0;
+     /* Théorique nul ou négatif (départ manquant, ventes plus fortes que le
+        stock) : aucun pourcentage n'a de sens. Il s'affichait « Dans la
+        fourchette » en vert, ou changeait de signe. Même règle que calcul.js. */
+     const incoherent = !(theo > 0);
+     const pct = incoherent ? 0 : ((theo - finKg) / theo) * 100;
      return { debutKg, finKg, achats, jete, vendu, theo, reel:finKg, ecart:ecart,
-              pct:pct, valeur:ecart * FOURNISSEUR.prixMoyenKg, invValide:finAncien || kgFinInv !== null };
+              pct:pct, incoherent:incoherent, valeur:ecart * FOURNISSEUR.prixMoyenKg, invValide:finAncien || kgFinInv !== null };
    }
+   /* Même convention que le calcul guidé et la jauge : « −x % » = glace manquante.
+      pct (théorique − réel) est positif quand il en manque : affiché brut, le
+      signe était inversé dans Périodes clôturées et au journal. */
+   const pctEcartTxt = p => (p > 0.05 ? '−' : p < -0.05 ? '+' : '') + n1(Math.abs(p)) + ' %';
    const etatEcart = p => {
      const a = Math.abs(p);
      return a <= SEUILS.ecartGlacePct ? { c:'ok', t:'Dans la fourchette' }
@@ -4407,7 +4505,7 @@ function ouvrirPremierePeriode() {
      /* Synthèse et jauge en fonctions : la saisie d'un champ les met à jour
         en place, sans redessiner la vue (voir plus bas). */
      const kpis = c => {
-       const st = etatEcart(c.pct);
+       const st = c.incoherent ? { c:'bad', t:'Calcul incohérent : vérifiez le départ et les ventes' } : etatEcart(c.pct);
        return kpi('Stock réel', n1(c.reel) + '<span class="u">kg</span>', '', c.invValide ? 'Inventaire validé' : 'Inventaire manquant') +
          kpi('Stock théorique', n1(c.theo) + '<span class="u">kg</span>', '', 'Calculé') +
          /* Écart arrondi à zéro : ni + ni −. « −0,0 kg » laissait croire à un manque. */
@@ -4500,6 +4598,8 @@ function ouvrirPremierePeriode() {
      Object.keys(champs).forEach(x => {
        const el = $(x);
        if (el) el.oninput = debounce(async () => {
+         /* Un litrage d'achats négatif réduisait le stock théorique. */
+         if (el.value !== '' && num(el.value) < 0) return toast('Une quantité ne peut pas être négative', 'erreur');
          await DB.patch('ecart:' + per.id, champs[x](el.value));
          await majSynthese();
        }, 700);
@@ -4675,7 +4775,7 @@ function ouvrirPremierePeriode() {
          historique.map(p =>
            '<div class="dl"><span class="c1">' + esc(libellePeriode(p)) +
            (p.anticipee ? ' · anticipée' : '') + '</span>' +
-           '<span class="c w num">' + (p.ecartPct === undefined ? '—' : n1(p.ecartPct) + ' %') + '</span>' +
+           '<span class="c w num">' + (p.ecartPct === undefined ? '—' : pctEcartTxt(p.ecartPct)) + '</span>' +
            '<span class="c ww">' + esc(p.par) + ' ' + fmtDC(p.jour) + '</span></div>').join('') + '</div>' : '');
    
      $('#clo').onclick = () => ouvrirCloture(per, B, anticipee);
@@ -4743,6 +4843,14 @@ function modifierPeriode(per) {
   $('#mp-ok').onclick = async () => {
     const d1 = $('#mp-d').value, d2 = $('#mp-f').value;
     if (!d1 || !d2 || d2 < d1) return toast('Dates incohérentes', 'erreur');
+    /* Ni chevauchement avec la période clôturée (jours comptés deux fois), ni
+       début futur (les saisies du jour sortiraient de toute période). */
+    /* Fin réelle : une clôture anticipée ancienne garde sa fin prévue. */
+    const finReelle = p => (p.anticipee && p.jour && p.jour < p.fin) ? p.jour : p.fin;
+    const closes = (await DB.get('periodes', [])).filter(p => p && p.fin && p.id !== per.id);
+    const derniere = closes.sort((a, b) => String(finReelle(a)).localeCompare(String(finReelle(b)))).pop();
+    if (derniere && d1 <= finReelle(derniere)) return toast('La période précédente finit le ' + fmtD(finReelle(derniere)) + ' : commencez après', 'erreur');
+    if (d1 > today()) return toast('Le début ne peut pas être dans le futur', 'erreur');
     const avant = libellePeriode(per);
     Object.assign(per, { type:type, debut:d1, fin:d2,
                          modifiee:nowISO(), modifieePar:STATE.user.prenom });
@@ -4775,7 +4883,9 @@ function modifierPeriode(per) {
        return;
      }
    
-     const demain = addD(today(), 1);
+     /* Période échue : la suivante reprend au lendemain de sa fin, sinon les
+        jours écoulés depuis ne comptaient dans aucune période, sans avertissement. */
+     const demain = per.fin && per.fin < today() ? addD(per.fin, 1) : addD(today(), 1);
      showSheet(
        '<h2 id="sheet-titre">' + (anticipee ? 'Clôture anticipée' : 'Terminer la période') + '</h2>' +
        '<p class="sub">' + esc(libellePeriode(per)) + (anticipee
@@ -4867,8 +4977,10 @@ function modifierPeriode(per) {
        const close = Object.assign({}, per, {
          ouverte:false, anticipee:anticipee, par:STATE.user.prenom, jour:today(), at:nowISO(),
          motif:motif, forces:forcables.map(f => f.txt)
-       }, avecEcart
-         ? { ecartKg:+n2(c.ecart), ecartPct:+n2(c.pct), stockFin:+n2(c.reel), valeur:+n2(c.valeur) }
+       /* Fermée avant terme : elle s'arrête à la veille de la suivante, sans la chevaucher. */
+       }, anticipee && d1 <= per.fin ? { fin:addD(d1, -1) < per.debut ? per.debut : addD(d1, -1), finPrevue:per.fin } : {}, avecEcart
+         ? Object.assign({ ecartKg:+n2(c.ecart), stockFin:+n2(c.reel), valeur:+n2(c.valeur) },
+                         c.incoherent ? { ecartIncoherent:true } : { ecartPct:+n2(c.pct) })
          : { sansEcart:true });
        await DB.push('periodes', close);
    
@@ -4882,7 +4994,7 @@ function modifierPeriode(per) {
          avecEcart ? { debut:{ kg:c.reel } } : {}));
    
        await feed('ok', STATE.user.prenom + ' a clôturé ' + libellePeriode(per) +
-         (anticipee ? ' (anticipée)' : '') + (avecEcart ? ', écart ' + n1(c.pct) + ' %' : ', sans écart'));
+         (anticipee ? ' (anticipée)' : '') + (avecEcart ? (c.incoherent ? ', écart incohérent' : ', écart ' + pctEcartTxt(c.pct)) : ', sans écart'));
        closeSheet();
        toast('Période clôturée · nouvelle fenêtre ouverte');
        rendre('periodes');
@@ -4903,7 +5015,14 @@ function modifierPeriode(per) {
      /* Les inventaires ne sont pas rangés par jour mais dans deux listes
         (chambre froide, sec) : on les lit à part. Chaque ligne s'ouvre sur le
         comptage complet (voirInventaire, stock.js). */
-     const cles = defs[onglet].p ? (await DB.list(defs[onglet].p)).reverse() : [];
+     let cles = defs[onglet].p ? (await DB.list(defs[onglet].p)).reverse() : [];
+     /* Nettoyage : l'écran écrit « hebdo:<jour> », l'ancien registre « clean:<jour> ».
+        Ne lire que le second laissait l'onglet vide. */
+     if (onglet === 'clean') {
+       const jours = new Set(cles.map(c => c.slice(6)));
+       (await DB.list('hebdo:')).map(c => c.slice(6)).filter(j => /^\d{4}-\d{2}-\d{2}$/.test(j)).forEach(j => jours.add(j));
+       cles = Array.from(jours).sort().reverse().map(j => 'clean:' + j);
+     }
      const lignes = [];
      const invs = [];
      if (onglet === 'inventaires') {
@@ -4924,7 +5043,10 @@ function modifierPeriode(per) {
      }
    
      for (const c of cles) {
-       const j = c.replace(defs[onglet].p, ''), v = await DB.get(c);
+       const j = c.replace(defs[onglet].p, '');
+       const v = onglet === 'clean'
+         ? Object.assign({}, await DB.get(c, {}), await DB.get('hebdo:' + j, {}))
+         : await DB.get(c);
        if (!v) continue;
        if (onglet === 'caisse') {
          /* Même calcul qu'ailleurs : la veille donne le fond initial manquant. */
@@ -5096,7 +5218,8 @@ function modifierPeriode(per) {
                const bad = etatTemp(e, m) === 'crit' || etatTemp(e, s) === 'crit';
                return '<td' + (bad ? ' style="font-weight:700"' : '') + '>' +
                  (m === undefined || m === '' ? '—' : esc(m)) + ' / ' + (s === undefined || s === '' ? '—' : esc(s)) + '</td>';
-             }).join('') + '<td>' + esc(L.t.obs || '') + '</td></tr>').join('') + '</tbody></table>' +
+             }).join('') + '<td>' + esc([L.t.obs_m !== undefined ? L.t.obs_m : L.t.obs, L.t.obs_s]
+               .filter(Boolean).join(' / ')) + '</td></tr>').join('') + '</tbody></table>' +
            '<div style="font-size:9.5px">Valeurs en °C, matin / soir. Les dépassements de limite critique sont en gras. ' +
            'Cibles : ' + ENCEINTES.map(e => esc(e.nom) + ' ' + esc(e.cible)).join(' · ') + '.</div>'
          : '<div>Aucun relevé enregistré sur la période.</div>') +
@@ -5555,6 +5678,10 @@ function modifierPeriode(per) {
            for (let j = 0; j < brut[i].length; j++) {
              const cel = String(brut[i][j]).toLowerCase();
              if (!/total\s*(kg|poids)|poids\s*total/.test(cel)) continue;
+             /* En-tête d'une colonne de poids par ligne (plusieurs nombres
+                dessous) : ce n'est pas un total. Seule la 1re ligne comptait. */
+             const dessous = brut.slice(i + 1).filter(l => num(l[j]) > 0).length;
+             if (dessous >= 2) continue;
              const voisins = [brut[i][j + 1], brut[i][j + 2], (brut[i + 1] || [])[j]];
              const v = voisins.map(num).filter(x => x > 0)[0];
              if (v) return resolve({ kg:v, lignes:1, methode:'Cellule « Total Kg » du fichier',
@@ -5597,6 +5724,7 @@ function modifierPeriode(per) {
                                         fiable:true, detail:[[n + ' lignes additionnées', n1(kg) + ' kg']], inconnus:[] });
          }
    
+         if (!cQte && !cNom && !cSku) return reject(new Error(IMPORT_ILLISIBLE));
          if (!cQte) {
            return reject(new Error('Aucune colonne de quantité trouvée. Colonnes lues : ' + cols.slice(0, 6).join(', ')));
          }

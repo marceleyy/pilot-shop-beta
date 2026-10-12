@@ -87,6 +87,8 @@ const CALCUL = {
      : FOURNISSEUR.poidsMoyenLitre;
    const kgDeLitres = (l, pl) => num(l) * (pl || FOURNISSEUR.poidsMoyenLitre);
    const kgTxt = v => n1(v) + ' kg';
+   /* « Calcul d’octobre », « Calcul de mars » : élision devant une voyelle. */
+   const deMois = m => (/^[aeiouyhéè]/i.test(m) ? 'd’' : 'de ') + esc(m);
    /* Pourcentage d'écart avec le vrai signe moins, comme l'écart en kg. */
    const pctTxt = r => r.incoherent ? 'incohérent' :
      (Math.abs(r.pct) < 0.05 ? '' : r.pct > 0 ? '−' : '+') + n1(Math.abs(r.pct)) + ' %';
@@ -539,10 +541,10 @@ const CALCUL = {
 
      $('#page').innerHTML =
        (m.fait
-         ? '<div class="alerte ok"><span class="ai">✓</span><div><b>Calcul de ' + esc(fmtM(today())) + ' fait</b>' +
+         ? '<div class="alerte ok"><span class="ai">✓</span><div><b>Calcul ' + deMois(fmtM(today())) + ' fait</b>' +
            '<p>Clôturé le ' + esc(fmtD(m.fait.fin)) + '. Rien n’empêche d’en faire d’autres en cours de mois.</p></div></div>'
          : '<div class="alerte ' + (+today().slice(8, 10) >= CALCUL.jourAlerteMois ? 'warn' : 'info') + '"><span class="ai">●</span>' +
-           '<div><b>Calcul de ' + esc(fmtM(today())) + ' à faire</b>' +
+           '<div><b>Calcul ' + deMois(fmtM(today())) + ' à faire</b>' +
            '<p>Au moins un calcul clôturé par mois. Les comptages pour l’écart se font ici, pas dans l’inventaire.</p></div></div>') +
 
        '<div class="stack" style="margin-top:12px">' + ouverts.map(carteOuvert).join('') + '</div>' +
@@ -1041,12 +1043,14 @@ const CALCUL = {
          (v.mode === 'produits'
            ? '<p class="mini">Quantité vendue de chaque produit et grammage de glace par unité. ' +
                'Les produits et grammages sont retenus pour le prochain calcul.</p>' +
-             '<div class="grid g3" style="margin-top:8px"><label class="f">Produit</label><label class="f">Grammes / unité</label><label class="f">Quantité vendue</label></div>' +
+             '<div class="cv-g" style="margin-top:8px" aria-hidden="true"><span class="f">Produit</span><span class="f">g / unité</span><span class="f">Qté vendue</span></div>' +
              v.lignes.map((l, i) =>
-               '<div class="grid g3 cv-l" data-i="' + i + '" style="margin-top:6px">' +
-               '<input type="text" data-k="nom" value="' + esc(l.nom || '') + '" placeholder="Ex. Coupe classique">' +
-               '<input type="number" data-k="g" min="0" step="1" inputmode="numeric" value="' + esc(l.g || '') + '" placeholder="g">' +
-               '<input type="number" data-k="q" min="0" step="1" inputmode="numeric" value="' + esc(l.q || '') + '" placeholder="0"></div>').join('') +
+               /* Grille propre à 3 colonnes : la grille .g3 passait à 2 puis 1
+                  colonne sur téléphone, et la quantité tombait sous le produit suivant. */
+               '<div class="cv-g cv-l" data-i="' + i + '" style="margin-top:6px">' +
+               '<input type="text" data-k="nom" aria-label="Produit" value="' + esc(l.nom || '') + '" placeholder="Ex. Coupe classique">' +
+               '<input type="number" data-k="g" aria-label="Grammes par unité" min="0" step="1" inputmode="numeric" value="' + esc(l.g || '') + '" placeholder="g">' +
+               '<input type="number" data-k="q" aria-label="Quantité vendue" min="0" step="1" inputmode="numeric" value="' + esc(l.q || '') + '" placeholder="qté"></div>').join('') +
              '<button type="button" class="btn clair bloc" id="cv-plus" style="margin-top:10px">Ajouter un produit</button>'
            : v.mode === 'total'
            ? '<div class="champ"><label class="f">Poids de glace vendu (kg)</label>' +
