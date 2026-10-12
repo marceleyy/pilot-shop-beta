@@ -111,8 +111,18 @@ function paNormaliser(d) {
   return a;
 }
 async function paEcrire(a, champs) {
-  const d = await DB.patch(a.id, champs);
-  Object.assign(a, paNormaliser(d));
+  const n = paNormaliser(await DB.patch(a.id, champs));
+  /* La copie relue ne porte pas encore les écritures qui attendent derrière
+     celle-ci (une réponse touchée juste après) : pour les réponses et les
+     actions, le local garde la main ; le serveur n'ajoute que ce qui vient
+     d'ailleurs. Statut, score… viennent du serveur. */
+  const reponses = Object.assign({}, n.reponses, a.reponses);
+  const actions = Object.assign({}, n.actions, a.actions);
+  Object.keys(champs).forEach(k => {
+    if (k.indexOf('r:') === 0) reponses[k.slice(2)] = champs[k];
+    else if (k.indexOf('a:') === 0) actions[k.slice(2)] = champs[k];
+  });
+  Object.assign(a, n, { reponses:reponses, actions:actions });
   return a;
 }
 
@@ -395,9 +405,10 @@ V.preaudit = async function () {
     if (!a) return;
     confirmer('Supprimer ce pré-audit ?', 'Commencé le ' + fmtD(a.jour) + '. Les réponses et ses actions seront perdues.',
       'Supprimer', async () => {
+        const etaitClos = a.statut === 'clos';
         await paEcrire(a, { statut:'supprime', suppPar:STATE.user.prenom, suppAt:nowISO() });
         await feed('ok', STATE.user.prenom + ' a supprimé le pré-audit du ' + fmtD(a.jour));
-        if (a.statut === 'clos') await publierDernierPreAudit();
+        if (etaitClos) await publierDernierPreAudit();
         paRedessiner();
       });
   });
