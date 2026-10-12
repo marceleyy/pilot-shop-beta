@@ -130,6 +130,8 @@
      ['hebdo:plan',   'reglages'],
      ['hebdo:responsables', 'reglages'],
      ['hebdo:',       'checklists'],
+     /* Pré-audit Amorino (preaudit.js) : un document par pré-audit. */
+     ['preaudit:',    'checklists'],
      ['hebdo',        'reglages'],
      ['catalogue:',   'reglages'],
      ['async:',       'reglages']
@@ -158,7 +160,8 @@
       iPad disparaissaient (vérifié : ventes et imports effacés). */
    const FUSIONNER = ['checklist:', 'hebdo:', 'temp:', 'caisse:', 'reassort:',
                       'preuves:', 'ruptures', 'releve', 'lots:', 'clean:',
-                      'anomalies', 'reception:', 'stock:mv:', 'stock:m13:', 'pointage:', 'ecart:'];
+                      'anomalies', 'reception:', 'stock:mv:', 'stock:m13:', 'pointage:', 'ecart:',
+                      'preaudit:'];
    const aFusionner = cle => FUSIONNER.some(p => cle.indexOf(p) === 0);
 
    /* Fusion superficielle, champ par champ. Suffisante : chaque personne
@@ -3772,6 +3775,11 @@ function ouvrirPremierePeriode() {
      if (typeof alerteCalculMensuel === 'function') {
        const ac = await alerteCalculMensuel();
        if (ac) A.push(ac);
+     }
+     /* Actions de pré-audit en retard, pré-audit à refaire (preaudit.js). */
+     if (typeof alertePreAudit === 'function') {
+       const ap = await alertePreAudit();
+       if (ap) A.push(ap);
      }
      /* Une alerte doit nommer le produit. « 2 ruptures non traitées » oblige le
         manager à ouvrir un autre écran pour savoir s'il s'agit de cornets ou

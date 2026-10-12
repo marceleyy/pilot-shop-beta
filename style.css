@@ -1299,6 +1299,13 @@ input[type="time"]:focus, input[type="date"]:focus{
    qui a été compté, on ne le cache pas. Elle disparaîtra au prochain inventaire. */
 .tq.ancienne{font-style:italic;opacity:.62}
 
+/* Pré-audit Amorino (preaudit.js) : un point de la grille par bloc. */
+.pa-pt{padding:14px 0}
+.pa-pt + .pa-pt{border-top:.5px solid rgba(15,32,39,.08)}
+.pa-lib{font-size:15px;font-weight:600;line-height:1.35}
+.pa-preuve{display:flex;gap:8px;align-items:baseline;flex-wrap:wrap;margin-top:6px}
+.pa-rep .chip{min-height:44px}
+
 /* --- 21. Impression : registre sanitaire -------------------------------- */
 #printview{display:none}
 @media print{
