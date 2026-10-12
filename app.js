@@ -2338,7 +2338,7 @@ async function purgerLocalAncien() {
                '<b>' + esc(r.nom) + '</b>' +
                '<div class="mini">' + (
                  rupt.length ? esc(rupt.join(', ')) + ' : en rupture'
-                 : v.rupture ? 'Reste ' + v.reste + ' ' + esc(r.unite) + ', signalé'
+                 : v.rupture ? 'Reste ' + v.reste + ' ' + esc(accord(v.reste, r.unite)) + ', signalé'
                  : fait && !dc.length ? 'Vérifié par ' + esc(v.par || '') + ' · ' + heure(v.at)
                  : dc.length ? faites + '/' + dc.length + ' · ' + esc(r.detail || ('en ' + r.unite))
                  : esc(r.detail || ('en ' + r.unite))) + '</div></div>' +
@@ -2419,7 +2419,7 @@ async function purgerLocalAncien() {
          '<p class="sub">Combien en reste-t-il ? ' + esc(NomManager()) + ' reçoit l’alerte immédiatement.</p>' +
          '<div class="chips" id="qt">' + RUPTURE.unitesRapides.map(q =>
            '<button type="button" class="chip corail" data-q="' + q + '">' +
-           (q === 0 ? 'Plus rien' : q + ' ' + art.unite) + '</button>').join('') + '</div>' +
+           (q === 0 ? 'Plus rien' : q + ' ' + accord(q, art.unite)) + '</button>').join('') + '</div>' +
          '<div class="champ" style="margin-top:16px"><label class="f">Autre quantité</label>' +
          '<input type="number" id="qa" min="0" step="1" placeholder="Nombre de ' + esc(art.unite) + '"></div>' +
          '<div class="champ" style="margin-top:14px"><label class="f">Précision (facultatif)</label>' +
@@ -2446,7 +2446,7 @@ async function purgerLocalAncien() {
                                      reste:reste, niveau:niveau.id, note:rec[cle].note,
                                      par:STATE.user.prenom, at:nowISO(), traite:false });
          await feed('bad', STATE.user.prenom + ' signale une rupture : ' + nomComplet +
-                    (reste === 0 ? ' (plus rien)' : ' (reste ' + reste + ' ' + art.unite + ')'));
+                    (reste === 0 ? ' (plus rien)' : ' (reste ' + reste + ' ' + accord(reste, art.unite) + ')'));
          closeSheet();
          toast(messageEnvoi('ruptures', 'Alerte transmise à ' + nomManager()));
          rendre('reas');
