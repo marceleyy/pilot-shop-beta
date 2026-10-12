@@ -752,14 +752,16 @@ const PERIODES = {
   ],
   parDefaut: 'semaine',
   cloturAnticipeeAutorisee: true,
-  /* Conditions bloquantes avant clôture. Le manager peut forcer, avec motif. */
+  /* Conditions avant clôture. Le manager peut forcer, avec motif. Celles
+     marquées pourEcart ne servent qu'à l'écart : elles n'empêchent pas de
+     terminer la période, le manager choisit à la clôture s'il calcule l'écart. */
   blocages: [
     { id: 'temp',      label: 'Relevés de température incomplets', forcable: true },
     { id: 'nettoyage', label: 'Journée sans aucun nettoyage validé', forcable: true },
     { id: 'caisse',    label: 'Feuille de caisse manquante',        forcable: true },
-    { id: 'inv_glace', label: 'Inventaire glace non validé',        forcable: false },
+    { id: 'inv_glace', label: 'Inventaire glace non validé',        forcable: false, pourEcart: true },
     { id: 'inv_sec',   label: 'Inventaire sec non validé',          forcable: true },
-    { id: 'achats',    label: 'Achats de la période non saisis',    forcable: false }
+    { id: 'achats',    label: 'Achats de la période non saisis',    forcable: false, pourEcart: true }
   ],
   forcageMotifObligatoire: true,
   /* La nouvelle période démarre le lendemain de la clôture, sans trou */
