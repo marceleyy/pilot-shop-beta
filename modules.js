@@ -399,6 +399,9 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
                        par:STATE.user.prenom, at:nowISO(), jour:today() };
          await DB.push('reception:' + today(), rec);
    
+         /* Glace non reconnue (lait, cornets, parfum hors catalogue) : tracée pour
+            sa DLC, mais pas ajoutée aux bacs de la chambre froide. */
+         const horsStock = []; let auStock = 0;
          if (!bl.refuse) {
         /* La réception incrémente le stock réel. C'est le seul enregistrement :
            l'ancien « stock fermé » tenait une comptabilité parallèle que les
@@ -412,12 +415,12 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
           /* Glace : parfum du catalogue seulement, sans tenir compte de la casse
              ni des accents (« chocolat noir » créait un 2e article). Un libellé
              qui n'est aucun parfum (lait, cornets…) n'entre pas dans les bacs de
-             la chambre froide, sauf s'il est saisi en bacs : la réception reste
-             tracée pour sa DLC. */
+             la chambre froide : la réception reste tracée pour sa DLC. */
           const nrmP = x => String(x || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/\s+/g, ' ').trim();
           const connu = glace ? (parfumDepuisDesignation(l.produit) ||
             PARFUMS.filter(p => nrmP(p) === nrmP(l.produit.replace(/\d+(?:[.,]\d+)?\s*(?:litres?|lt|l)\b/i, '')))[0] || null) : null;
-          if (glace && !connu && l.unite !== 'bac') continue;
+          if (glace && !connu) { horsStock.push(l.produit.trim()); continue; }
+          auStock++;
           let parfum = glace ? (connu || l.produit.trim()) : l.produit.trim();
           /* Macarons, gianduiotti, coulis, toppings : la saveur est retrouvée
              dans fam.saveurs avec la même normalisation que confirmerOuverture
@@ -439,7 +442,9 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
            STATE.user.prenom + (bl.refuse ? ' a REFUSÉ la livraison ' : ' a réceptionné ') + bl.numero +
            ' (' + valides.length + ' réf.)');
          closeSheet();
-         toast(bl.refuse ? 'Réception refusée et tracée' : valides.length + ' ' + accord(valides.length, 'produit ajouté', 'produits ajoutés') + ' au stock, DLC suivie');
+         toast(bl.refuse ? 'Réception refusée et tracée'
+           : (auStock ? auStock + ' ' + accord(auStock, 'produit ajouté', 'produits ajoutés') + ' au stock, DLC suivie' : 'Réception tracée, DLC suivie') +
+             (horsStock.length ? '. Non reconnu, hors stock : ' + horsStock.join(', ') : ''));
          rendre('reception');
        }
    

@@ -1629,10 +1629,34 @@ V.inventaire = async function () {
              ouvertures et réceptions tracées depuis (Vanille 3 redevenait 4). */
           try {
             const art = (await stockReel()).articles || {};
+            const famDe = c => FAMILLES_PRODUIT.filter(f => f.id === litArticle(c).famille)[0];
+            const auSec = f => !!(f && (f.lieu === 'sec' || f.stock === 'sec'));
             if (partie === 'froid') {
               Object.keys(saisie).forEach(c => { saisie[c] = String(Math.max(0, num(art[c] || 0))); });
+              /* Reçu depuis le comptage, sans y figurer : sinon perdu à la revalidation. */
+              Object.keys(art).forEach(c => {
+                if (saisie[c] !== undefined || !(num(art[c]) > 0)) return;
+                const f = famDe(c);
+                if (litArticle(c).famille === 'sec' || auSec(f)) return;
+                saisie[c] = String(num(art[c]));
+              });
             } else {
-              Object.keys(saisieSec).forEach(c => { if (art[c] !== undefined) saisieSec[c] = String(Math.max(0, num(art[c]))); });
+              /* Le sec compte « sec|<réf>|<déclinaison> » ; le stock vivant des
+                 familles tracées (coulis, chantilly…) est sous « <famille>|<saveur>| ». */
+              const nrm = x => String(x || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+              Object.keys(saisieSec).forEach(c => {
+                const [, ref, v] = c.split('|');
+                const f = FAMILLES_PRODUIT.filter(x => auSec(x) && (x.refSec || x.id) === ref)[0];
+                if (!f) return;
+                let cleV;
+                if (f.saveurs && f.saveurs.length) {
+                  const sv = f.saveurs.filter(x => nrm(x) === nrm(v))[0];
+                  if (sv) cleV = cleArticle(f.id, sv, '');
+                } else if (Object.keys(saisieSec).filter(k => k.split('|')[1] === ref).length === 1) {
+                  cleV = cleArticle(f.id, '', '');
+                }
+                if (cleV && art[cleV] !== undefined) saisieSec[c] = String(Math.max(0, num(art[cleV])));
+              });
             }
           } catch (e) { /* stock illisible : on garde le comptage affiché */ }
           if (partie === 'froid') ouvertFroid = true; else ouvertSec = true;
