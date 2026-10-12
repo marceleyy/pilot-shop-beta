@@ -1501,7 +1501,7 @@ function renderNav() {
          '<span class="mi-s">Un bug, un chiffre faux, une idée : c’est transmis à ' + esc(nomManager()) + '</span></span>' +
          '<span class="mi-fl">›</span></button>' : '') +
        /* Une personne qui travaille dans deux boutiques (guide.js). */
-       (typeof changerDeBoutique === 'function' ? '<button type="button" class="menu-item" id="mp-boutique">' +
+       (typeof changerDeBoutique === 'function' && STATE.user.role === 'manager' ? '<button type="button" class="menu-item" id="mp-boutique">' +
          '<span class="mi-tx"><span class="mi-t">Changer de boutique</span>' +
          '<span class="mi-s">Rattacher cet appareil à une autre boutique</span></span>' +
          '<span class="mi-fl">›</span></button>' : '') +

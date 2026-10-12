@@ -48,11 +48,17 @@ function appliquerParfums(m) {
   ajouts.forEach(p => { if (!PARFUMS_ALIAS[p]) PARFUMS_ALIAS[p] = [p.toLowerCase()]; });
 }
 
+/* Relu toutes les deux minutes, mais seulement dans une boutique qui a sa
+   propre liste : les autres gardent la liste d'usine sans requête de plus. */
+let _parfumsPropres = false;
 async function chargerParfums() {
-  try { appliquerParfums(await DB.get('catalogue:parfums', null)); } catch (e) { /* liste d'usine */ }
+  try {
+    const m = await DB.get('catalogue:parfums', null);
+    if (m) { _parfumsPropres = true; appliquerParfums(m); }
+  } catch (e) { /* liste d'usine */ }
 }
 chargerParfums();
-setInterval(chargerParfums, 120000);
+setInterval(() => { if (_parfumsPropres) chargerParfums(); }, 120000);
 
 /* -----------------------------------------------------------------------------
    ÉTAT DU GUIDE
@@ -60,8 +66,13 @@ setInterval(chargerParfums, 120000);
 let _guide = null;          // dernière lecture de la clé « boutique »
 let _guideMasque = false;   // « Voir la tour de contrôle quand même », le temps de la session
 
+/* Une boutique sans guide (Paccard) ou au guide terminé ne le verra plus :
+   on cesse de relire la clé, la tour de contrôle n'attend plus le réseau. */
+let _guideClos = false;
 async function lireGuide() {
+  if (_guideClos) return _guide;
   try { _guide = await DB.get('boutique', null); } catch (e) { /* on garde la dernière lecture */ }
+  if (!_guide || _guide.guide === 'fait') _guideClos = true;
   return _guide;
 }
 function guideEnCours() {
@@ -132,6 +143,12 @@ async function etatEtapes() {
   if (sec && (sec.at || sec.jour)) fait.invsec = fait.invsec || true;
   /* Un relevé VALIDÉ, matin ou soir : une valeur saisie puis abandonnée ne compte pas. */
   if (temp && temp.valide && (temp.valide.m || temp.valide.s)) fait.releve = fait.releve || true;
+  /* Une étape constatée est retenue : le relevé d'hier ne doit pas se
+     décocher aujourd'hui. */
+  const nouvelles = ETAPES_GUIDE.filter(e => e.auto && fait[e.id] === true && !(b.etapes || {})[e.id]);
+  if (nouvelles.length && b.guide === 'a-faire') {
+    await majGuide(g => nouvelles.forEach(e => { g.etapes[e.id] = { par:STATE.user.prenom, at:nowISO(), auto:true }; }));
+  }
   return { fait:fait, inventaireFait:!!(inv && inv.at) };
 }
 
@@ -139,7 +156,11 @@ async function etatEtapes() {
    VUE — MISE EN ROUTE
    -------------------------------------------------------------------------- */
 V.miseenroute = async function () {
-  if (!STATE.user || STATE.user.role !== 'manager') { rendre(vueAccueil()); return; }
+  if (!STATE.user || STATE.user.role !== 'manager') {
+    $('#page').innerHTML = carte(entete('', 'Réservé au manager', 'La mise en route se fait depuis la session d’un manager.') +
+      '<button class="btn clair bloc" data-go="' + vueAccueil() + '" style="margin-top:12px">Revenir à ma journée</button>');
+    return;
+  }
   $('#vue-titre').textContent = PAGES.miseenroute.titre;
   $('#vue-sous').textContent = PAGES.miseenroute.sous;
   const { fait, inventaireFait } = await etatEtapes();
@@ -212,10 +233,19 @@ function lancerEtape(id) {
   if (id === 'parfums')   return feuilleParfums();
   if (id === 'produits')  return feuilleProduits();
   if (id === 'sec')       return rendre('catalogue');
-  if (id === 'periode')   return ouvrirPremierePeriode().then(() => rendre('miseenroute'));
+  if (id === 'periode')   return ouvrirPeriodeGuide();
   if (id === 'invglace')  { STATE.inventairePartie = 'froid'; return rendre('inventaire'); }
   if (id === 'invsec')    { STATE.inventairePartie = 'sec';   return rendre('inventaire'); }
   if (id === 'releve')    return rendre('temp');
+}
+
+/* periodeCourante relit la base et n'ouvre la modale que si aucune période
+   n'existe vraiment : jamais de seconde période créée hors ligne. */
+async function ouvrirPeriodeGuide() {
+  oublierPeriode();
+  const p = await periodeCourante();
+  if (p && p.id === 'attente') toast('Connexion nécessaire pour ouvrir la période. Réessayez.', 'erreur');
+  rendre('miseenroute');
 }
 
 /* --- Étape 1 : horaires -------------------------------------------------- */
@@ -315,7 +345,7 @@ function feuilleAppareils() {
       if (!nom) return toast('Donnez un nom à l’appareil', 'erreur');
       if (tous.some(e => e.nom.toLowerCase() === nom.toLowerCase())) return toast('« ' + nom + ' » est déjà dans la liste', 'erreur');
       const t = TYPES_APPAREIL[$('#ga-type').value];
-      const e = { id:'u' + uid().slice(0, 6), nom:nom, cible:t.cible, lo:t.lo, hi:t.hi, pas:1,
+      const e = { id:'u' + uid(), nom:nom, cible:t.cible, lo:t.lo, hi:t.hi, pas:1,
                   vert:t.vert.slice(), crit:t.crit, zone:t.zone };
       tous.push(e);
       coches.add(e.id);
@@ -372,7 +402,8 @@ async function feuilleParfums() {
     $('#gp-rien').onclick = () => { coches.clear(); dessiner(); };
     const ajouter = () => {
       lire();
-      const nom = $('#gp-nom').value.trim().replace(/\s+/g, ' ');
+      /* « | » sépare famille, parfum et taille dans les clés du stock. */
+      const nom = $('#gp-nom').value.replace(/\|/g, ' ').trim().replace(/\s+/g, ' ');
       if (!nom) return toast('Écrivez le nom du parfum', 'erreur');
       const deja = tous.filter(p => p.toLowerCase() === nom.toLowerCase())[0];
       if (deja) { coches.add(deja); dessiner(); return toast('« ' + deja + ' » est déjà dans la liste : il est coché'); }
@@ -513,6 +544,20 @@ V.controle = async function () {
    attend d'être envoyée, elle serait perdue.
    -------------------------------------------------------------------------- */
 function changerDeBoutique() {
+  /* Un iPad partagé détaché par erreur bloquerait toute l'équipe. */
+  if (!STATE.user || STATE.user.role !== 'manager') return;
+  /* Hors ligne, l'application vidée de son cache ne se rechargerait plus. */
+  if (!STATE.enLigne || !navigator.onLine) {
+    toast('Connexion nécessaire pour changer de boutique', 'erreur');
+    return;
+  }
+  /* Ce qui n'existe que sur l'appareil : brouillon d'inventaire, saisies trop lourdes pour la base. */
+  let brouillon = false;
+  try { brouillon = !!localStorage.getItem(OFFLINE.storeLocal + ':brouillon:inventaire'); } catch (e) {}
+  if (brouillon || Object.keys(DB._gros || {}).length) {
+    toast('Un inventaire en cours ou des photos restent sur cet appareil : terminez-les avant de changer de boutique', 'erreur');
+    return;
+  }
   const enAttente = fileLire().length;
   if (enAttente) {
     toast(enAttente + ' ' + accord(enAttente, 'saisie attend', 'saisies attendent') +
