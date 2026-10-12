@@ -407,8 +407,11 @@
      let lotN = 0;
      const lotActif = () => (lot && Date.now() - lot.at < 30000) ? lot.m : null;
      const oublier = cle => { if (lot) lot.m.delete(cle); };
-     function lireServeur(cle) {
-       const m = lotActif();
+     /* Paquet refusé par la base (voir prelire) : la clé se relit seule. */
+     const RELIRE = {};
+     /* frais : lecture d'avant écriture (push), jamais servie par le lot. */
+     function lireServeur(cle, frais) {
+       const m = frais ? null : lotActif();
        if (m && m.has(cle)) return m.get(cle);
        const p = appel(table(cle) + '?id=eq.' + encodeURIComponent(cle) + '&select=data&limit=1')
          .then(l => (l && l.length) ? { data: l[0].data } : null);
@@ -525,8 +528,12 @@
             et la sonde rétablit l'état en ligne dès que la base répond. */
          const estAbandon = e && (e.name === 'AbortError' ||
                                   /abort/i.test(String(e.message || '')));
-         const dejaCompte = !!(e && e._delaiCompte);
+         /* Les paquets d'un même prelire partent ensemble : leurs délais
+            dépassés ne comptent que pour un (voir options._groupe). */
+         const groupe = options && options._groupe;
+         const dejaCompte = !!(e && e._delaiCompte) || !!(estAbandon && groupe && groupe.compte);
          if (estAbandon && e && typeof e === 'object') e._delaiCompte = true;
+         if (estAbandon && groupe) groupe.compte = true;
          const muet = estAbandon && !dejaCompte && STATE.enLigne && ++STATE.delaisDepasses >= 2;
          if (STATE.enLigne && ((!e.http && !estAbandon) || muet)) {
            STATE.enLigne = false; STATE.delaisDepasses = 0; majBandeau();
@@ -540,7 +547,7 @@
        get local() { return dispo ? 'local' : 'memoire'; },
        get configure() { return configuré(); },
    
-       async get(cle, defaut) {
+       async get(cle, defaut, frais) {
          if (defaut === undefined) defaut = null;
          const cache = () => { try { const v = lire(cle); return v === null ? defaut : JSON.parse(v); } catch (e) { return defaut; } };
          if (!distant(cle) || !STATE.enLigne) return cache();
@@ -548,7 +555,8 @@
             serveur : on garde la locale, sinon elle disparaît de l'écran. */
          if (fileLire().some(x => x.cle === cle)) return cache();
          try {
-           const l = await lireServeur(cle);
+           let l = await lireServeur(cle, frais);
+           if (l === RELIRE) { oublier(cle); l = await lireServeur(cle); }
            if (!l) return cache();
            /* Une copie à chaque lecture : deux lectures de la même clé ne
               partagent pas le même objet, l'une ne modifie pas l'autre. */
@@ -577,12 +585,13 @@
            const t = table(c);
            if ((parTable[t] = parTable[t] || []).indexOf(c) < 0) parTable[t].push(c);
          });
-         const envois = [];
+         const envois = [], groupe = { compte: false };
          Object.keys(parTable).forEach(t => {
            for (let i = 0; i < parTable[t].length; i += 40) {
              const paquet = parTable[t].slice(i, i + 40);
              const liste = '(' + paquet.map(c => '"' + c.replace(/\\/g, '\\\\').replace(/"/g, '\\"') + '"').join(',') + ')';
-             const req = appel(t + '?id=in.' + encodeURIComponent(liste) + '&select=id,data');
+             const req = appel(t + '?id=in.' + encodeURIComponent(liste) + '&select=id,data',
+                               { _groupe: groupe });
              paquet.forEach(c => {
                /* La base a répondu par une erreur (requête refusée) : chaque clé
                   est relue seule, comme avant. Panne réseau : copie locale. */
@@ -590,9 +599,11 @@
                  const r = (l || []).filter(x => x && x.id === c)[0];
                  return r ? { data: r.data } : null;
                }, e => {
-                 if (!e || !e.http) throw e;
-                 return appel(t + '?id=eq.' + encodeURIComponent(c) + '&select=data&limit=1')
-                   .then(l => (l && l.length) ? { data: l[0].data } : null);
+                 /* Requête groupée refusée (400, 414, panne serveur) : chaque
+                    clé lue par l'écran sera relue seule, comme avant. Un refus
+                    d'accès (401, 403) se répéterait à l'identique. */
+                 if (e && (e.http === 400 || e.http === 414 || e.http >= 500)) return RELIRE;
+                 throw e;
                });
                m.set(c, p);
                p.catch(() => { if (m.get(c) === p) m.delete(c); });
@@ -672,11 +683,13 @@
              await empiler('set', cle, valeur); return true;
            }
          };
-         return aFusionner(cle) ? enFile(cle, envoyer) : envoyer();
+         /* Oubliée aussi à la fin : une lecture partie pendant l'envoi
+            garderait sinon la valeur d'avant pour le reste du dessin. */
+         return (aFusionner(cle) ? enFile(cle, envoyer) : envoyer()).finally(() => oublier(cle));
        },
    
        async push(cle, element) {
-         const l = rognerAncien(cle, await this.get(cle, []));
+         const l = rognerAncien(cle, await this.get(cle, [], true));
          l.push(element);
          await this.set(cle, l);
          return l;
@@ -725,7 +738,7 @@
              if (horsMemoire) return memoirePleine();
              await empiler('patch', cle, op); return o;
            }
-         });
+         }).finally(() => oublier(cle));
        },
    
        async list(prefixe) {
@@ -763,7 +776,7 @@
    
        /* Exposés pour la file d'attente et l'écran de réglages */
        _appel: appel, _table: table, _distant: distant, _clesLocales: clesLocales,
-       _lire: lire, _ecrire: ecrire, _oter: oter, _gros: {}
+       _lire: lire, _ecrire: ecrire, _oter: oter, _oublier: oublier, _gros: {}
      };
    })();
    
@@ -908,6 +921,7 @@
            });
            if (!parti) continue;
          }
+         DB._oublier(item.cle);   // le dessin en cours relira la valeur rejouée
          envoyes++;
        } catch (e) {
          /* Échec définitif — table absente : on n'insiste pas, la donnée reste
