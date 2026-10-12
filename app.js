@@ -158,7 +158,10 @@
       iPad disparaissaient (vérifié : ventes et imports effacés). */
    const FUSIONNER = ['checklist:', 'hebdo:', 'temp:', 'caisse:', 'reassort:',
                       'preuves:', 'ruptures', 'releve', 'lots:', 'clean:',
-                      'anomalies', 'reception:', 'stock:mv:', 'stock:m13:', 'pointage:', 'ecart:'];
+                      'anomalies', 'reception:', 'stock:mv:', 'stock:m13:', 'pointage:', 'ecart:',
+                      /* Deux iPads qui ajoutent une ligne au même moment : sans fusion,
+                         la seconde écriture effaçait la ligne de l'autre. */
+                      'feed:', 'pertes:'];
    const aFusionner = cle => FUSIONNER.some(p => cle.indexOf(p) === 0);
 
    /* Fusion superficielle, champ par champ. Suffisante : chaque personne
@@ -176,9 +179,12 @@
       ajoutent chacun leur session ; sans union, la seconde effaçait la première. */
    /* « stock:m13: » : entrées et sorties de l'armoire −13, en ajout seul. Deux
       iPads qui y posent chacun un bac ne doivent pas s'effacer. */
-   const UNIR = ['ruptures', 'releve', 'anomalies', 'reception:', 'stock:mv:', 'stock:m13:', 'pointage:', 'preuves:'];
+   /* « pertes: » : une perte retirée est marquée « supprime », comme une preuve. */
+   const UNIR = ['ruptures', 'releve', 'anomalies', 'reception:', 'stock:mv:', 'stock:m13:', 'pointage:', 'preuves:',
+                 'feed:', 'pertes:'];
    const ts = x => (x && (x.a || x.at)) || '';
-   const idLigne = x => x && (x.id || [ts(x), x.c || x.cle, x.t || x.type, x.e || x.employe || '',
+   /* « k » : identifiant de ligne du journal, dont « id » est celui de la personne. */
+   const idLigne = x => x && (x.k || (typeof x.x === 'string' && x.par !== undefined ? 'f|' + ts(x) + '|' + x.x : x.id) || [ts(x), x.c || x.cle, x.t || x.type, x.e || x.employe || '',
                                        x.q !== undefined ? x.q : x.qte, x.l || x.lot || ''].join('|'));
    /* Éléments trop anciens des listes soumises à une durée de conservation
       (CONSERVATION.listes). Même règle que la purge nocturne de la base :
@@ -193,6 +199,7 @@
        if (!x || typeof x !== 'object') return true;
        if (x.epingle === true) return true;
        if (cle === 'anomalies' && x.resolue !== true) return true;
+       if (cle === 'ruptures' && x.traite !== true) return true;
        const j = jourDe(x);
        return !j || j >= limite;
      });
@@ -207,11 +214,11 @@
        try { const inv = JSON.parse(DB._lire('stock:inventaire') || 'null'); borne = (inv && inv.at) || ''; } catch (e) {}
      }
      const parId = {};
-     distant.forEach(x => { if (x && x.id) parId[x.id] = x; });
+     distant.forEach(x => { if (x && idLigne(x)) parId[idLigne(x)] = x; });
      /* Même ligne des deux côtés : la locale fait foi (une photo retirée ne
         revient pas), mais une case cochée sur un autre iPad reste cochée. */
      const fusion = local.map(l => {
-       const d = l && l.id && parId[l.id];
+       const d = l && idLigne(l) && parId[idLigne(l)];
        if (!d) return l;
        const m = Object.assign({}, l);
        ['traite', 'resolue'].forEach(f => {
@@ -721,8 +728,11 @@
        /* Le compteur suit TOUJOURS la file. Sans cette ligne, une purge
           silencieuse laissait « 2 en attente » affiché alors que la file était
           vide — un reproche permanent pour un travail déjà fait. */
-       if (STATE.fileAttente !== propres.length) {
-         STATE.fileAttente = propres.length;
+       /* Les saisies d'une autre boutique (appareil rattaché ailleurs entre-temps)
+          attendent leur boutique : elles ne comptent pas ici. */
+       const ici = propres.filter(x => !x.site || x.site === APP.site).length;
+       if (STATE.fileAttente !== ici) {
+         STATE.fileAttente = ici;
          majBandeau();
        }
        return propres;
@@ -737,7 +747,7 @@
        toast('Mémoire pleine : la saisie n’a pas pu être gardée', 'erreur');
        return false;
      }
-     STATE.fileAttente = f.length;
+     STATE.fileAttente = f.filter(x => !x.site || x.site === APP.site).length;
      majBandeau();
      return true;
    }
@@ -746,7 +756,9 @@
      /* Une écriture partielle ne remplace pas la précédente : chacune ne porte
         que ses propres champs, toutes sont rejouées dans l'ordre. */
      const f = op === 'patch' ? fileLire() : fileLire().filter(x => !(x.cle === cle && x.op === op));
-     f.push({ op:op, cle:cle, valeur:valeur, at:nowISO(), n:uid(), essais:0 });
+     /* La boutique est retenue : rejouée après un rattachement à une autre
+        boutique, la saisie partait dans la base de celle-ci. */
+     f.push({ op:op, cle:cle, valeur:valeur, at:nowISO(), n:uid(), essais:0, site:APP.site });
      fileEcrire(f);
    }
    
@@ -774,6 +786,7 @@
           valeur périmée par-dessus une plus récente. */
        if (!fileLire().some(x => id(x) === id(item))) continue;
        if (bloquees.has(item.cle)) { restants.push(item); continue; }
+       if (item.site && item.site !== APP.site) { restants.push(item); continue; }
        /* Une clé sans table ne peut pas partir : on l'abandonne au lieu
           d'appeler /rest/v1/undefined en boucle. La donnée reste en local. */
        if (!DB._table(item.cle)) {
@@ -1069,9 +1082,17 @@
        if (msg) msg.textContent = STATE.fileAttente
          ? 'Hors ligne, vos saisies partiront toutes seules'
          : 'Hors ligne, vous pouvez continuer normalement';
+     } else if (STATE.fileAttente) {
+       /* De retour en ligne, des saisies attendent encore : le bandeau
+          s'éteignait une dizaine de secondes avant leur envoi. */
+       b.classList.add('on');
+       if (msg) msg.textContent = 'Envoi en cours';
      } else {
        b.classList.remove('on');
+       /* Hors écran mais encore lu par VoiceOver : on le vide. */
+       if (msg) msg.textContent = '';
      }
+     b.setAttribute('aria-hidden', b.classList.contains('on') ? 'false' : 'true');
      $('#offline-n').textContent = STATE.fileAttente
        ? '· ' + STATE.fileAttente + (STATE.fileAttente > 1 ? ' saisies' : ' saisie') + ' en attente'
        : '';
@@ -1409,7 +1430,7 @@
        if (dernier && dernier.x === texte &&
            (Date.now() - new Date(dernier.at)) < 60000) return;
        l.push({ n:niveau, x:texte, par:STATE.user ? STATE.user.prenom : '—',
-                id:STATE.user ? STATE.user.id : null, at:nowISO() });
+                id:STATE.user ? STATE.user.id : null, at:nowISO(), k:uid() });
        await DB.set(cle, l.slice(-400));
      } catch (e) {}
    }
@@ -1995,6 +2016,7 @@ async function purgerLocalAncien() {
    V.pertes = async function () {
      const j = STATE.jour;
      const liste = await DB.get('pertes:' + j, []);
+     const visibles = liste.filter(w => w && !w.supprime);
    
      $('#page').innerHTML =
        carte(entete('🎙️', 'Dicter la perte', SPEECH
@@ -2017,16 +2039,16 @@ async function purgerLocalAncien() {
          '<button class="btn menthe bloc" id="pa" style="margin-top:18px">Enregistrer la perte</button>') +
    
        '<div class="entete"><h3>Jetés aujourd’hui</h3>' +
-       '<span class="pousse mini num">' + n1(liste.reduce((s, w) => s + litresPerte(w), 0)) + ' L</span></div>' +
+       '<span class="pousse mini num">' + n1(visibles.reduce((s, w) => s + litresPerte(w), 0)) + ' L</span></div>' +
    
-       (liste.length ? '<div class="stack">' + liste.map((w, i) => {
+       (visibles.length ? '<div class="stack">' + visibles.map(w => {
          const m = MOTIFS_PERTE.filter(x => x.id === w.motif)[0] || MOTIFS_PERTE[0];
          return carte('<div class="rang">' +
            '<div style="flex:1"><b>' + esc(w.produit) + '</b>' +
            '<div class="mini">' + w.nombre + ' × · ' + (w.litrage ? n1(w.litrage) + ' L · ' : '') +
            esc(w.par) + ' · ' + heure(w.at) + '</div></div>' +
            pastille('bad', m.label) +
-           '<button class="btn fantome sm" data-del="' + i + '">Retirer</button></div>');
+           '<button class="btn fantome sm" data-del="' + esc(w.id || ('@' + liste.indexOf(w))) + '">Retirer</button></div>');
        }).join('') + '</div>' : vide('🗑️', 'Aucune perte déclarée aujourd’hui.'));
    
      let motif = MOTIFS_PERTE[0].id;
@@ -2090,7 +2112,11 @@ async function purgerLocalAncien() {
    
      $$('[data-del]').forEach(b => b.onclick = () => {
        confirmer('Retirer cette ligne ?', 'La perte sera supprimée du registre du jour. Le retrait est noté au journal.', 'Retirer', async () => {
-         const w = liste.splice(+b.dataset.del, 1)[0];
+         /* Par identifiant, et marquée plutôt qu'ôtée : la fusion entre iPads
+            la ferait revenir, et un index d'une liste périmée visait la mauvaise. */
+         const cle = b.dataset.del;
+         const w = cle.charAt(0) === '@' ? liste[+cle.slice(1)] : liste.filter(x => x && x.id === cle)[0];
+         if (w) { w.supprime = nowISO(); w.supprimePar = STATE.user.prenom; }
          await DB.set('pertes:' + j, liste);
          await cumulerPertesMois(j);
          /* La création d'une perte est journalisée ; son retrait ne l'était pas :
@@ -2109,9 +2135,9 @@ async function purgerLocalAncien() {
    /* Seules les lignes marquées « parUnite » sont multipliées : les anciennes
       saisies étaient peut-être en litres totaux, on ne les recalcule pas
       rétroactivement. */
-   const litresPerte = w => (w && w.parUnite)
+   const litresPerte = w => (!w || w.supprime) ? 0 : w.parUnite
      ? num(w.nombre || 1) * num(w.litrage)
-     : num(w && w.litrage);
+     : num(w.litrage);
 
    /* Reporte le litrage détruit dans la période d'écart en cours. L'écart est
       rangé sous l'identifiant de la période (ecart:<id>), pas sous le mois :
@@ -2556,6 +2582,23 @@ async function purgerLocalAncien() {
    La copie locale des clés encore en file reste aussi : sans elle, une
    nouvelle saisie hors ligne sur la même fiche repartait de zéro et
    remplaçait, dans la file, celle qu'on venait de garder. */
+/* L'appareil vient d'être rattaché à une AUTRE boutique que la précédente
+   (bandeau « Appareil non rattaché », ou session perdue) sans passer par
+   « Changer de boutique » : on efface tout ce qui appartient à l'ancienne
+   (équipe, copies locales, session ouverte), sauf le nouveau jeton et la file.
+   Les saisies en attente gardent leur boutique et ne partiront que chez elle. */
+function quitterAncienneBoutique(ancienne) {
+  try {
+    const p = OFFLINE.storeLocal + ':';
+    const f = fileLire().map(x => x.site ? x : Object.assign({}, x, { site:ancienne }));
+    const garder = [AUTH.cle, p + OFFLINE.fileAttente, p + 'boutique-rattachee', p + 'pinEchecs'];
+    Object.keys(localStorage).filter(k => k.indexOf(p) === 0 && garder.indexOf(k) < 0)
+      .forEach(k => localStorage.removeItem(k));
+    fileEcrire(f);
+    return f.filter(x => x.site === ancienne).length;
+  } catch (e) { return 0; }
+}
+
 async function viderAppareil(garderRattachement) {
   let cles = 0, cachesEff = 0, sw = 0;
   try {
@@ -2712,6 +2755,27 @@ function utilisateurDeSession(s) {
   if (!e) return null;
   return { id:e.id, prenom:e.prenom, role:e.role, couleur:e.couleur, initiales:e.initiales };
 }
+
+/* iPad resté ouvert : la règle des 8 h et le changement de jour n'étaient
+   vérifiés qu'au rechargement ou au prochain écran. Une session de manager
+   restait ouverte toute la nuit, et la tâche cochée le matin, sans changer
+   d'écran, partait dans la journée de la veille. */
+function surveillerVeille() {
+  if (!STATE.user) return;
+  let s = null;
+  try { s = JSON.parse(DB._lire('session') || 'null'); } catch (e) {}
+  if (s && s.vu > 0 && Date.now() - s.vu > SESSION_INACTIVITE_MS) {
+    Promise.resolve(DB.del('session')).catch(() => {}).then(() => location.reload());
+    return;
+  }
+  const saisie = document.activeElement && /^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement.tagName);
+  if (today() !== _jourDernierRendu && $('#sheet').hidden && !saisie) {
+    if (typeof phaseCourante === 'function') STATE.phase = phaseCourante();
+    rendre(STATE.view || vueAccueil());
+  }
+}
+setInterval(surveillerVeille, 60000);
+document.addEventListener('visibilitychange', () => { if (!document.hidden) surveillerVeille(); });
 
 /* -----------------------------------------------------------------------------
    BOUTON RETOUR DU TÉLÉPHONE
@@ -4886,8 +4950,9 @@ function modifierPeriode(per) {
          lignes.push([fmtD(j), f + ' / ' + liste.length, r ? r + ' ' + accord(r, 'rupture') : 'Aucune', '—', r ? 'bad' : 'ok']);
        }
        else if (onglet === 'pertes') {
-         if (!v.length) continue;
-         lignes.push([fmtD(j), v.length + ' ' + accord(v.length, 'ligne'), n1(v.reduce((s, w) => s + litresPerte(w), 0)) + ' L', v[0].par || '—', 'warn']);
+         const vv = v.filter(w => w && !w.supprime);
+         if (!vv.length) continue;
+         lignes.push([fmtD(j), vv.length + ' ' + accord(vv.length, 'ligne'), n1(vv.reduce((s, w) => s + litresPerte(w), 0)) + ' L', vv[0].par || '—', 'warn']);
        }
        else if (onglet === 'pointage') {
          if (!v.length) continue;

@@ -2302,6 +2302,8 @@ function formulaireAnomalie() {
       jusqu'à ce que chacun ferme et rouvre l'application — ce que personne ne
       fait en plein service. */
    async function appliquerReglages() {
+     /* Appareil pas encore rattaché : la base refuse (401 en console). */
+     if (typeof appareilRattache === 'function' && !appareilRattache()) return;
      try {
        const h = await DB.get('horaires', null);
        if (h) {

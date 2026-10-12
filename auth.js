@@ -92,6 +92,9 @@ function memoriser(d) {
     site: site,
     compte: d.user ? d.user.email : null
   });
+  /* Retenue hors de la session : celle-ci disparaît quand le jeton est
+     révoqué, et il faut alors savoir si l'on revient dans la même boutique. */
+  try { localStorage.setItem('pilotshop.v3:boutique-rattachee', site); } catch (e) {}
   return _session;
 }
 
@@ -213,8 +216,21 @@ function ecranRattachement() {
       bouton.disabled = true;
       etat('Connexion…');
       try {
-        await rattacherAppareil(mail, mdp);
+        let avant = null;
+        try { avant = localStorage.getItem('pilotshop.v3:boutique-rattachee'); } catch (x) {}
+        const s = await rattacherAppareil(mail, mdp);
+        /* Autre boutique que la précédente : rien de l'ancienne ne doit rester
+           (équipe, copies locales, personne connectée). On repart d'une page
+           neuve plutôt que de continuer avec l'équipe et la session d'avant. */
+        if (avant && s && s.site && s.site !== avant && typeof quitterAncienneBoutique === 'function') {
+          const n = quitterAncienneBoutique(avant);
+          etat('Rattaché à ' + s.site + '.' + (n ? ' ' + n + (n > 1 ? ' saisies de ' + avant + ' attendent' : ' saisie de ' + avant + ' attend') +
+               ' : ' + (n > 1 ? 'elles partiront' : 'elle partira') + ' quand l’appareil sera de nouveau rattaché à ' + avant + '.' : ''));
+          setTimeout(() => location.reload(), n ? 4000 : 300);
+          return;
+        }
         etat('Rattaché. Chargement de l’équipe…');
+        if (typeof appliquerReglages === 'function') appliquerReglages();
         /* On charge l'équipe AVANT de retirer l'écran : sinon la liste des
            prénoms apparaît vide le temps de l'aller-retour. */
         if (typeof chargerEquipe === 'function') await chargerEquipe();
