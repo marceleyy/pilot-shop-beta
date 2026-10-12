@@ -443,6 +443,7 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
          await feed(bl.refuse ? 'bad' : 'ok',
            STATE.user.prenom + (bl.refuse ? ' a REFUSÉ la livraison ' : ' a réceptionné ') + bl.numero +
            ' (' + valides.length + ' réf.)');
+         if (bl.refuse && typeof feedEcrit === 'function') await feedEcrit();
          closeSheet();
          toast(bl.refuse ? 'Réception refusée et tracée'
            : (auStock ? auStock + ' ' + accord(auStock, 'produit ajouté', 'produits ajoutés') + ' au stock, DLC suivie' : 'Réception tracée, DLC suivie') +

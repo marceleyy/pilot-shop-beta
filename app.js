@@ -1462,11 +1462,16 @@
       dans l'ordre (sa fusion entre iPads coûte une relecture de la base). */
    let _feedSuite = Promise.resolve();
    function feed(niveau, texte) {
-     const at = nowISO();
-     _feedSuite = _feedSuite.then(() => feed1(niveau, texte, at), () => feed1(niveau, texte, at));
+     /* Auteur et heure pris à l'appel : une déconnexion juste après écrivait « — ». */
+     const at = nowISO(), u = STATE.user ? { prenom:STATE.user.prenom, id:STATE.user.id } : null;
+     const f = () => feed1(niveau, texte, at, u);
+     _feedSuite = _feedSuite.then(f, f);
      return Promise.resolve();
    }
-   async function feed1(niveau, texte, at) {
+   /* Pour les traces qui ne doivent pas se perdre (retrait d'une perte,
+      livraison refusée) : attendre que le journal soit écrit. */
+   function feedEcrit() { return _feedSuite; }
+   async function feed1(niveau, texte, at, u) {
      try {
        const cle = 'feed:' + today();
        const l = await DB.get(cle, []);
@@ -1474,8 +1479,8 @@
        const dernier = l[l.length - 1];
        if (dernier && dernier.x === texte &&
            (Date.now() - new Date(dernier.at)) < 60000) return;
-       l.push({ n:niveau, x:texte, par:STATE.user ? STATE.user.prenom : '—',
-                id:STATE.user ? STATE.user.id : null, at:at, k:uid() });
+       l.push({ n:niveau, x:texte, par:u ? u.prenom : '—',
+                id:u ? u.id : null, at:at, k:uid() });
        await DB.set(cle, l.slice(-400));
      } catch (e) {}
    }
@@ -2183,9 +2188,10 @@ async function purgerLocalAncien() {
          await cumulerPertesMois(j);
          /* La création d'une perte est journalisée ; son retrait ne l'était pas :
             une trace pouvait disparaître sans laisser de ligne (DON-06). */
-         if (w) await feed('warn', STATE.user.prenom + ' a retiré une perte : ' + w.produit + ' (' +
+         if (w) feed('warn', STATE.user.prenom + ' a retiré une perte : ' + w.produit + ' (' +
            w.nombre + ' ×' + (w.litrage ? ', ' + n1(litresPerte(w)) + ' L' : '') + ', déclarée par ' +
            (w.par || '?') + (w.at ? ' à ' + heure(w.at) : '') + ')');
+         await feedEcrit();
          rendre('pertes');
        });
      });

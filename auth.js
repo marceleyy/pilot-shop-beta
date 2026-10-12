@@ -30,7 +30,12 @@ let _session = null;      // { access_token, refresh_token, expires_at, site }
    toutes les boutiques, et la base n'accepte que les lignes du site inscrit
    dans le jeton. Écrire sous un autre nom serait refusé. */
 function appliquerSite(s) {
-  if (s && s.site) APP.site = s.site;
+  if (s && s.site) {
+    APP.site = s.site;
+    /* Retenue à part : la session est effacée quand le jeton est révoqué, et
+       il faut alors savoir si l'on revient dans la même boutique. */
+    try { localStorage.setItem('pilotshop.v3:boutique-rattachee', s.site); } catch (e) {}
+  }
 }
 function chargerSession() {
   try {
@@ -92,9 +97,6 @@ function memoriser(d) {
     site: site,
     compte: d.user ? d.user.email : null
   });
-  /* Retenue hors de la session : celle-ci disparaît quand le jeton est
-     révoqué, et il faut alors savoir si l'on revient dans la même boutique. */
-  try { localStorage.setItem('pilotshop.v3:boutique-rattachee', site); } catch (e) {}
   return _session;
 }
 
