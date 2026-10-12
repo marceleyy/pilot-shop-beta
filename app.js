@@ -1188,12 +1188,17 @@
       faisait appeler quelqu'un qui n'y travaille pas. Texte brut : à passer
       par esc() avant tout innerHTML. */
    function nomManager() {
-     /* Un autre manager que soi : « transmis à Marc » quand Marc écrit. */
+     /* Un autre manager que soi quand il y en a un. */
      const moi = STATE.user && STATE.user.id;
      const ms = (typeof EQUIPE !== 'undefined' ? EQUIPE : []).filter(e => e && e.role === 'manager');
-     const m = ms.filter(e => e.id !== moi)[0];
-     if (!m && ms.length && STATE.user && STATE.user.role === 'manager') return 'l’équipe Pilot-Shop';
+     const m = ms.filter(e => e.id !== moi)[0] || ms[0];
      return (m && m.prenom) || 'le manager';
+   }
+   /* Destinataire d'un « Signaler un souci » : un manager qui écrit lisait
+      « transmis à Marc » sous sa propre plume. */
+   function destinataireSouci() {
+     const n = nomManager();
+     return (STATE.user && STATE.user.role === 'manager' && STATE.user.prenom === n) ? 'l’équipe Pilot-Shop' : n;
    }
    /* Même chose en début de phrase. */
    const NomManager = () => { const n = nomManager(); return n.charAt(0).toUpperCase() + n.slice(1); };
@@ -1542,7 +1547,7 @@ function renderNav() {
           le contenu, il couvrait « HS » et « + » des frigos sur téléphone. */
        (APP.beta ? '<button type="button" class="menu-item" id="mp-retour">' +
          '<span class="mi-tx"><span class="mi-t">Signaler un souci</span>' +
-         '<span class="mi-s">Un bug, un chiffre faux, une idée : c’est transmis à ' + esc(nomManager()) + '</span></span>' +
+         '<span class="mi-s">Un bug, un chiffre faux, une idée : c’est transmis à ' + esc(destinataireSouci()) + '</span></span>' +
          '<span class="mi-fl">›</span></button>' : '') +
        '</div>' +
        '<div class="actions"><button class="btn clair" data-fermer>Fermer</button>' +
@@ -2612,7 +2617,7 @@ async function purgerLocalAncien() {
                                    par:STATE.user.prenom, at:nowISO(), version:APP.version });
        await feed('warn', STATE.user.prenom + ' a signalé un souci sur « ' + (PAGES[STATE.view] || {}).titre + ' »');
        closeSheet();
-       toast(messageEnvoi('feedback', 'Merci, c’est transmis à ' + nomManager()));
+       toast(messageEnvoi('feedback', 'Merci, c’est transmis à ' + destinataireSouci()));
      };
    }
    
