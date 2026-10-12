@@ -4877,17 +4877,14 @@ function modifierPeriode(per) {
        }
      }
    
-     $('#vue-actions').innerHTML = '<button class="btn sm" id="pdf">Registre sanitaire</button>' +
-       '<button class="btn clair sm" id="csv">CSV</button>';
+     /* L'historique ne montre que l'historique : le registre pour un contrôle
+        sanitaire reste sur la Tour de contrôle, il faisait doublon ici. */
+     $('#vue-actions').innerHTML = '<button class="btn clair sm" id="csv">CSV</button>';
    
      $('#page').innerHTML =
        '<div class="chips" style="margin-bottom:14px">' + Object.keys(defs).map(k =>
          '<button type="button" class="chip' + (onglet === k ? ' on' : '') + '" data-h="' + k + '">' +
          esc(defs[k].l) + '</button>').join('') + '</div>' +
-   
-       carte(entete('🛡️', 'Registre sanitaire',
-         'Compile températures, nettoyage et lots ouverts en un document présentable à un contrôle.') +
-         '<button class="btn ciel bloc xl" id="pdf2">Export PDF contrôle sanitaire</button>', 'ciel') +
    
        (onglet === 'inventaires' && lignes.length
          ? '<p class="mini" style="margin-top:14px">Touchez un inventaire pour voir tous ses produits.</p>' : '') +
@@ -4912,8 +4909,6 @@ function modifierPeriode(per) {
        r.onclick = ouvrir;
        r.onkeydown = e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); ouvrir(); } };
      });
-     $('#pdf').onclick = ouvrirBouclier;
-     $('#pdf2').onclick = ouvrirBouclier;
      $('#csv').onclick = () => {
        /* Guillemets : un « ; » ou un retour à la ligne dans un texte décalait les
           colonnes. Apostrophe devant = + - @ : Excel l'exécuterait en formule. */
