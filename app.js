@@ -160,8 +160,7 @@
       iPad disparaissaient (vérifié : ventes et imports effacés). */
    const FUSIONNER = ['checklist:', 'hebdo:', 'temp:', 'caisse:', 'reassort:',
                       'preuves:', 'ruptures', 'releve', 'lots:', 'clean:',
-                      'anomalies', 'reception:', 'stock:mv:', 'stock:m13:', 'pointage:', 'ecart:',
-                      'preaudit:'];
+                      'anomalies', 'reception:', 'stock:mv:', 'stock:m13:', 'pointage:', 'ecart:'];
    const aFusionner = cle => FUSIONNER.some(p => cle.indexOf(p) === 0);
 
    /* Fusion superficielle, champ par champ. Suffisante : chaque personne

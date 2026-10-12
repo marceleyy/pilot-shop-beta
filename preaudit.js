@@ -95,9 +95,30 @@ const paActions = a => Object.keys(a.actions || {}).map(k => a.actions[k])
   .sort((x, y) => String(x.echeance) < String(y.echeance) ? -1 : String(x.echeance) > String(y.echeance) ? 1 : 0);
 const paEnRetard = x => !x.fait && x.echeance && x.echeance < today();
 
+/* Stockage à plat : une réponse par champ « r:<point> », une action par champ
+   « a:<id> ». Chaque écriture est un DB.patch de ce seul champ, appliqué sur
+   la copie du serveur relue juste avant : deux iPads qui notent la même
+   grille, ou cochent des actions, ne s'écrasent pas, et le statut n'est
+   jamais renvoyé par une simple réponse. reponses et actions sont recomposés
+   ici, pour la lecture seulement : ils ne sont jamais écrits. */
+function paNormaliser(d) {
+  if (!d || typeof d !== 'object') return d;
+  const a = Object.assign({}, d, { reponses:{}, actions:{} });
+  Object.keys(d).forEach(k => {
+    if (k.indexOf('r:') === 0) a.reponses[k.slice(2)] = d[k];
+    else if (k.indexOf('a:') === 0) a.actions[k.slice(2)] = d[k];
+  });
+  return a;
+}
+async function paEcrire(a, champs) {
+  const d = await DB.patch(a.id, champs);
+  Object.assign(a, paNormaliser(d));
+  return a;
+}
+
 async function lirePreAudits() {
   const cles = (await DB.list('preaudit:')).filter(k => PA_RE.test(k));
-  const l = await Promise.all(cles.map(k => DB.get(k, null)));
+  const l = (await Promise.all(cles.map(k => DB.get(k, null)))).map(paNormaliser);
   /* Supprimé : marqué, pas effacé, sinon il revenait d'un autre iPad. */
   return l.filter(a => a && a.id && a.jour && a.statut !== 'supprime')
     .sort((x, y) => (x.jour < y.jour ? 1 : x.jour > y.jour ? -1 : String(x.at) < String(y.at) ? 1 : -1));
@@ -145,7 +166,7 @@ async function publierDernierPreAudit() {
   const clos = (await lirePreAudits()).filter(a => a.statut === 'clos')[0] || null;
   await DB.set('preaudit:dernier', clos
     ? { score:clos.score, jour:clos.jour, scores:clos.scores || {}, par:clos.closPar || '', at:nowISO() }
-    : { score:null, jour:null, at:nowISO() });
+    : { score:null, jour:null, scores:{}, par:'', at:nowISO() });
 }
 
 /* Pour la tour de contrôle : [niveau, titre, texte, vue] ou null. Rien tant
@@ -159,7 +180,7 @@ async function alertePreAudit() {
   }
   if (r.jour && !r.enCours && addD(r.jour, PREAUDIT.rappelJours) <= today()) {
     return ['warn', 'Pré-audit à refaire',
-      'Le dernier date du ' + fmtD(r.jour) + ' (' + r.score + ' %). Un par mois évite les surprises le jour de l’audit.', 'preaudit'];
+      'Le dernier date du ' + fmtD(r.jour) + ' (' + paScoreTxt(r.score) + '). Un par mois évite les surprises le jour de l’audit.', 'preaudit'];
   }
   return null;
 }
@@ -181,17 +202,25 @@ async function preuvesPreAudit(fin) {
   const pertes = [];
   let receptions = 0, refusees = 0;
   let netFaits = 0, netTotal = 0, joursSansNet = 0;
-  /* Les trente jours sont lus en parallèle : l'un après l'autre, cinq lectures
-     réseau par jour faisaient attendre de longues secondes. */
-  const lus = await Promise.all(jours.map(d => Promise.all([
-    DB.get('temp:' + d, null), DB.get('pertes:' + d, []), DB.get('reception:' + d, []), etatNettoyage(d)
-  ])));
+  /* Lus par paquets de cinq jours : l'un après l'autre, l'attente se comptait
+     en dizaines de secondes ; tous d'un coup, 150 requêtes saturaient un Wi-Fi
+     lent, et deux délais dépassés font passer l'appli hors ligne. */
+  const lus = [];
+  for (let i = 0; i < jours.length; i += 5) {
+    lus.push(...await Promise.all(jours.slice(i, i + 5).map(d => Promise.all([
+      DB.get('temp:' + d, null), DB.get('pertes:' + d, []), DB.get('reception:' + d, []), etatNettoyage(d)
+    ]))));
+  }
+  /* Jours de fermeture et relevé du soir pas encore dû : pas attendus. */
+  const ouverts = (typeof HORAIRES !== 'undefined' && HORAIRES.joursOuverture) || [1, 2, 3, 4, 5, 6, 7];
   jours.forEach((d, i) => {
     const t = lus[i][0] || {};
+    const ouvert = ouverts.indexOf(jourISO(d)) >= 0;
     let critJour = false;
     RELEVES.moments.forEach(m => {
-      attendus++;
-      if (releveMesure(t, m.id)) faits++;
+      const releve = releveMesure(t, m.id);
+      if (releve || (ouvert && !(d === fin && m.id === 's'))) attendus++;
+      if (releve) faits++;
       ENCEINTES.forEach(e => { if (etatTemp(e, t[m.id + '_' + e.id]) === 'crit') { crit++; critJour = true; } });
       vitrines.forEach(e => {
         const s = etatTemp(e, t[m.id + '_' + e.id]);
@@ -285,7 +314,13 @@ async function preuvesPreAudit(fin) {
 /* ---------------------------------------------------------------------------
    Vue principale : en cours, plan d'actions, historique
    ------------------------------------------------------------------------ */
+/* Redessin demandé par l'écran lui-même (V.preaudit._interne) : la grille
+   ouverte reste ouverte. Arrivée depuis le menu ou la tour de contrôle : on
+   repart de la liste, et rien n'est repris d'une copie en mémoire. */
+const paRedessiner = () => { V.preaudit._interne = true; return rendre('preaudit'); };
 V.preaudit = async function () {
+  if (!V.preaudit._interne) { V.preaudit._id = null; V.preaudit._doc = null; }
+  V.preaudit._interne = false;
   if (V.preaudit._id) return ecranGrille(V.preaudit._id);
   const as = await lirePreAudits();
   if (STATE.view !== 'preaudit') return;
@@ -349,7 +384,7 @@ V.preaudit = async function () {
   const nouveau = () => demarrerPreAudit();
   if ($('#pa-new')) $('#pa-new').onclick = nouveau;
   if ($('#pa-new2')) $('#pa-new2').onclick = nouveau;
-  const ouvrir = id => { V.preaudit._id = id; rendre('preaudit'); window.scrollTo(0, 0); };
+  const ouvrir = id => { V.preaudit._id = id; V.preaudit._doc = null; paRedessiner(); window.scrollTo(0, 0); };
   $$('[data-pa-ouvrir]').forEach(b => b.onclick = () => ouvrir(b.dataset.paOuvrir));
   $$('[data-pa-voir]').forEach(b => {
     b.onclick = () => ouvrir(b.dataset.paVoir);
@@ -360,10 +395,10 @@ V.preaudit = async function () {
     if (!a) return;
     confirmer('Supprimer ce pré-audit ?', 'Commencé le ' + fmtD(a.jour) + '. Les réponses et ses actions seront perdues.',
       'Supprimer', async () => {
-        await DB.set(a.id, Object.assign({}, a, { statut:'supprime', suppPar:STATE.user.prenom, suppAt:nowISO() }));
+        await paEcrire(a, { statut:'supprime', suppPar:STATE.user.prenom, suppAt:nowISO() });
         await feed('ok', STATE.user.prenom + ' a supprimé le pré-audit du ' + fmtD(a.jour));
         if (a.statut === 'clos') await publierDernierPreAudit();
-        rendre('preaudit');
+        paRedessiner();
       });
   });
   brancherActions(as);
@@ -404,7 +439,7 @@ function brancherActions(as) {
     await ecrireAction(t.a, x);
     if (x.fait) await feed('ok', STATE.user.prenom + ' a fait l’action de pré-audit « ' + x.texte + ' »');
     toast(x.fait ? 'Action faite' : 'Action rouverte');
-    rendre('preaudit');
+    paRedessiner();
   });
   $$('[data-pa-act-modif]').forEach(b => b.onclick = () => {
     const t = trouver(b.dataset.paActModif);
@@ -413,11 +448,7 @@ function brancherActions(as) {
 }
 
 async function ecrireAction(a, x) {
-  a.actions = Object.assign({}, a.actions || {});
-  a.actions[x.id] = x;
-  /* Clé fusionnée (FUSIONNER) : les actions et les réponses saisies entre-temps
-     sur un autre iPad restent, champ par champ. */
-  await DB.set(a.id, a);
+  await paEcrire(a, { ['a:' + x.id]:x });
 }
 
 /* ---------------------------------------------------------------------------
@@ -426,15 +457,15 @@ async function ecrireAction(a, x) {
 async function demarrerPreAudit() {
   const as = await lirePreAudits();
   const deja = as.filter(a => a.statut === 'en cours')[0];
-  if (deja) { V.preaudit._id = deja.id; return rendre('preaudit'); }
+  if (deja) { V.preaudit._id = deja.id; return paRedessiner(); }
   const j = today();
   const a = { id:'preaudit:' + j + ':' + uid(), jour:j, statut:'en cours',
-              par:STATE.user.prenom, at:nowISO(), reponses:{}, actions:{} };
+              par:STATE.user.prenom, at:nowISO() };
   await DB.set(a.id, a);
   await feed('ok', STATE.user.prenom + ' a commencé un pré-audit Amorino');
   V.preaudit._id = a.id;
-  V.preaudit._doc = a;
-  rendre('preaudit');
+  V.preaudit._doc = paNormaliser(a);
+  paRedessiner();
   window.scrollTo(0, 0);
 }
 
@@ -442,27 +473,28 @@ async function demarrerPreAudit() {
    Grille
    ------------------------------------------------------------------------ */
 async function ecranGrille(id) {
-  /* Copie en mémoire : chaque réponse redessine l'écran tout de suite, sans
-     attendre la relecture réseau (jusqu'à 8 s sur le Wi-Fi de la boutique). */
-  let a = (V.preaudit._doc && V.preaudit._doc.id === id) ? V.preaudit._doc : await DB.get(id, null);
+  /* Copie en mémoire, le temps des redessins de cet écran : chaque réponse
+     s'affiche tout de suite, sans attendre la relecture réseau (jusqu'à 8 s
+     sur le Wi-Fi de la boutique). Elle est relue à chaque arrivée sur l'écran. */
+  let a = (V.preaudit._doc && V.preaudit._doc.id === id) ? V.preaudit._doc : paNormaliser(await DB.get(id, null));
   if (STATE.view !== 'preaudit') return;
   if (!a || a.statut === 'supprime') { V.preaudit._id = null; V.preaudit._doc = null; return V.preaudit(); }
-  a.reponses = a.reponses || {}; a.actions = a.actions || {};
   V.preaudit._doc = a;
   const clos = a.statut === 'clos';
 
   $('#vue-titre').textContent = clos ? 'Pré-audit du ' + fmtDC(a.jour) : 'Pré-audit en cours';
   $('#vue-sous').textContent = clos ? 'Clôturé par ' + (a.closPar || '—') : 'Commencé le ' + fmtD(a.jour) + ' par ' + (a.par || '—');
   $('#vue-actions').innerHTML = '<button class="btn sm clair" id="pa-retour">Retour</button>';
-  $('#pa-retour').onclick = () => { V.preaudit._id = null; V.preaudit._doc = null; rendre('preaudit'); window.scrollTo(0, 0); };
+  $('#pa-retour').onclick = () => { V.preaudit._id = null; V.preaudit._doc = null; paRedessiner(); window.scrollTo(0, 0); };
 
-  /* Preuves : figées à la clôture, recalculées une fois par ouverture sinon. */
+  /* Preuves : figées à la clôture ; sinon calculées une fois par pré-audit et
+     par jour, et recalculées au moment de clôturer. */
   let P = clos ? (a.preuves || {}) : V.preaudit._preuves;
-  if (!clos && (!P || V.preaudit._preuvesDe !== a.id)) {
+  if (!clos && (!P || V.preaudit._preuvesDe !== a.id + '|' + today())) {
     $('#page').innerHTML = '<div class="vide">Lecture des registres des ' + PREAUDIT.joursPreuves + ' derniers jours…</div>';
     P = await preuvesPreAudit(today());
     if (STATE.view !== 'preaudit' || V.preaudit._id !== id) return;
-    V.preaudit._preuves = P; V.preaudit._preuvesDe = a.id;
+    V.preaudit._preuves = P; V.preaudit._preuvesDe = a.id + '|' + today();
   }
 
   const s = scoresAudit(a);
@@ -522,7 +554,7 @@ async function ecranGrille(id) {
   });
   $$('[data-pa-plus]').forEach(b => b.onclick = () => feuilleAction(a, b.dataset.paPlus, null));
   $('#pa-pdf').onclick = () => imprimerPreAudit(a, P);
-  if ($('#pa-clore')) $('#pa-clore').onclick = () => cloturerPreAudit(a, P);
+  if ($('#pa-clore')) $('#pa-clore').onclick = () => cloturerPreAudit(a);
   brancherActions([a]);
 }
 
@@ -534,8 +566,14 @@ function repondre(a, pid, rid) {
   const r = avant.r === rid ? null : rid;
   const val = Object.assign({}, avant, { r:r, par:STATE.user.prenom, at:nowISO() });
   a.reponses = Object.assign({}, a.reponses, { [pid]:val });
-  DB.set(a.id, a);
-  rendre('preaudit');
+  paEcrire(a, { ['r:' + pid]:val }).then(d => {
+    /* Clôturé ou supprimé entre-temps sur un autre iPad. */
+    if (d.statut !== 'en cours' && STATE.view === 'preaudit' && V.preaudit._id === a.id) {
+      toast('Ce pré-audit a été ' + (d.statut === 'clos' ? 'clôturé' : 'supprimé') + ' sur un autre appareil', 'erreur');
+      paRedessiner();
+    }
+  });
+  paRedessiner();
   const dejaUneAction = paActions(a).some(x => x.point === pid);
   if ((r === 'p' || r === 'nc') && !dejaUneAction) feuilleAction(a, pid, null);
 }
@@ -569,12 +607,12 @@ function feuilleAction(a, pid, x) {
     if (note === (r.note || '')) return;
     const val = Object.assign({}, r, { note:note });
     a.reponses = Object.assign({}, a.reponses, { [pid]:val });
-    DB.set(a.id, a);
+    paEcrire(a, { ['r:' + pid]:val });
   };
-  if ($('#pa-sans')) $('#pa-sans').onclick = () => { noter(); closeSheet(); rendre('preaudit'); };
+  if ($('#pa-sans')) $('#pa-sans').onclick = () => { noter(); closeSheet(); paRedessiner(); };
   if ($('#pa-act-sup')) $('#pa-act-sup').onclick = async () => {
     await ecrireAction(a, Object.assign({}, x, { supprime:true, suppPar:STATE.user.prenom, suppAt:nowISO() }));
-    noter(); closeSheet(); toast('Action supprimée'); rendre('preaudit');
+    noter(); closeSheet(); toast('Action supprimée'); paRedessiner();
   };
   $('#pa-act-ok').onclick = async () => {
     const texte = $('#pa-txt').value.trim();
@@ -585,14 +623,14 @@ function feuilleAction(a, pid, x) {
     await ecrireAction(a, nx);
     closeSheet();
     toast(x ? 'Action modifiée' : 'Action ajoutée au plan');
-    rendre('preaudit');
+    paRedessiner();
   };
 }
 
 /* ---------------------------------------------------------------------------
    Clôture
    ------------------------------------------------------------------------ */
-function cloturerPreAudit(a, P) {
+function cloturerPreAudit(a) {
   const s = scoresAudit(a);
   const manque = s.total - s.notes;
   if (manque) {
@@ -604,19 +642,26 @@ function cloturerPreAudit(a, P) {
   }
   const sansAction = paPoints().filter(p => ['p', 'nc'].indexOf((a.reponses[p.id] || {}).r) >= 0 &&
     !paActions(a).some(x => x.point === p.id)).length;
+  if (s.global === null) { toast('Tous les points sont « Sans objet » : aucun score possible', 'erreur'); return; }
   confirmer('Clôturer le pré-audit ?',
     'Score : ' + s.global + ' %. ' +
     (sansAction ? sansAction + ' ' + accord(sansAction, 'point à corriger n’a', 'points à corriger n’ont') + ' pas d’action. ' : '') +
     'Les réponses et les preuves des registres seront figées. Les actions restent à suivre.',
     'Clôturer', async () => {
-      const champs = { statut:'clos', score:s.global, scores:s.themes, preuves:P,
-                       closPar:STATE.user.prenom, closAt:nowISO() };
-      Object.assign(a, champs);
-      await DB.set(a.id, a);
+      /* Preuves relues au moment de clôturer : celles de l'ouverture peuvent
+         dater de plusieurs jours. Score recalculé sur la copie relue. */
+      toast('Lecture des registres…');
+      const P = await preuvesPreAudit(today());
+      const frais = paNormaliser(await DB.get(a.id, null));
+      if (!frais || frais.statut !== 'en cours') { toast('Ce pré-audit n’est plus en cours', 'erreur'); return paRedessiner(); }
+      const sf = scoresAudit(frais);
+      await paEcrire(a, { statut:'clos', score:sf.global, scores:sf.themes, preuves:P,
+                          closPar:STATE.user.prenom, closAt:nowISO() });
+      s.global = sf.global;
       await feed('ok', STATE.user.prenom + ' a clôturé le pré-audit Amorino : ' + s.global + ' %');
       await publierDernierPreAudit();
       toast('Pré-audit clôturé : ' + s.global + ' %');
-      rendre('preaudit');
+      paRedessiner();
       window.scrollTo(0, 0);
     });
 }
@@ -668,7 +713,7 @@ async function imprimerPreAudit(a, P) {
         acts.map(x => {
           const p = paPoints().filter(q => q.id === x.point)[0];
           return '<tr><td>' + esc(x.texte) + '</td><td>' + esc(p ? p.libelle : '') + '</td><td>' + esc(x.resp || '') + '</td>' +
-            '<td>' + (x.echeance ? x.echeance.split('-').reverse().join('/') : '') + '</td>' +
+            '<td>' + (x.echeance ? esc(x.echeance.split('-').reverse().join('/')) : '') + '</td>' +
             '<td>' + (x.fait ? 'Faite' + (x.faitAt ? ' le ' + isoOf(new Date(x.faitAt)).split('-').reverse().join('/') : '') : paEnRetard(x) ? 'EN RETARD' : 'À faire') + '</td></tr>';
         }).join('') + '</tbody></table>'
       : '<div>Aucune action.</div>') +
