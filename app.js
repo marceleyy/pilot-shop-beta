@@ -4835,8 +4835,8 @@ function modifierPeriode(per) {
        invs.forEach((x, i) => {
          const n = Object.keys(x.h.lignes || {}).length;
          lignes.push([fmtD(x.h.jour) + ' · ' + (x.p === 'froid' ? 'chambre froide' : 'sec'),
-                      n + ' produit(s)',
-                      x.h.manquants ? x.h.manquants + ' manquant(s)' : (x.p === 'froid' ? 'Sans manquant' : 'Compté'),
+                      n + ' ' + accord(n, 'produit'),
+                      x.h.manquants ? x.h.manquants + ' ' + accord(x.h.manquants, 'manquant') : (x.p === 'froid' ? 'Sans manquant' : 'Compté'),
                       x.h.par || '—', x.h.manquants ? 'warn' : 'ok', i]);
        });
      }

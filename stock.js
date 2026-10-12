@@ -1362,7 +1362,7 @@ V.inventaire = async function () {
       (deplies[id] ? '' : ' style="margin-bottom:0"') + '>' +
       '<b>' + esc(nom) + '</b>' +
       '<span class="invc">' + (saisies.length
-        ? total + ' ' + esc(unites) + ' · ' + saisies.length + ' saisie(s)'
+        ? total + ' ' + esc(unites) + ' · ' + saisies.length + ' ' + accord(saisies.length, 'saisie')
         : nbDecl + ' ' + (mot || 'déclinaisons') + ' · en ' + esc(unites)) + '</span>' +
       '<span class="chev">' + (deplies[id] ? '−' : '+') + '</span></button>';
   };
