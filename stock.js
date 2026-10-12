@@ -863,7 +863,7 @@ V.stock = async function () {
     $('#vue-actions').innerHTML = '';
     $('#page').innerHTML =
       '<div class="tseg">' +
-      [['froid', 'Chambre froide', t.bacs + ' bacs'], ['sec', 'Sec', sec ? Object.keys(sec.lignes || {}).length + ' réf.' : 'jamais compté']]
+      [['froid', 'Chambre froide', t.bacs + ' ' + accord(t.bacs, 'bac')], ['sec', 'Sec', sec ? Object.keys(sec.lignes || {}).length + ' réf.' : 'jamais compté']]
         .map(x => '<button class="' + (x[0] === partie ? 'on' : '') + '" data-partie="' + x[0] + '">' +
           '<span class="tsl">' + x[1] + '</span><small>' + x[2] + '</small></button>').join('') +
       '</div>' +
@@ -1111,9 +1111,13 @@ V.catalogue = async function () {
     $$('[data-dec]').forEach(b => b.onclick = () => {
       decimal = b.dataset.dec === '1'; $$('[data-dec]').forEach(x => x.classList.toggle('on', x === b)); });
 
+    let enCours = false;
     $('#ct-ok').onclick = async () => {
+      /* Double appui : la référence était créée deux fois. */
+      if (enCours) return;
       const nom = $('#ct-nom').value.trim();
       if (!nom) return toast('Le nom est obligatoire', 'erreur');
+      enCours = true; $('#ct-ok').disabled = true;
       const variantes = $('#ct-var').value.split('\n').map(s => s.trim()).filter(Boolean);
       if (neuf) {
         const id = 'm_' + nom.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
@@ -1122,7 +1126,8 @@ V.catalogue = async function () {
       } else {
         m.modifs[r.id] = { nom, unite, decimal, variantes };
       }
-      await enregistrerCatalogueSec(m);
+      try { await enregistrerCatalogueSec(m); }
+      catch (e) { enCours = false; $('#ct-ok').disabled = false; return toast('Enregistrement impossible, réessayez', 'erreur'); }
       await feed('ok', STATE.user.prenom + (neuf ? ' a ajouté ' : ' a modifié ') + nom + ' au catalogue');
       closeSheet();
       rendre('catalogue');
@@ -1218,7 +1223,7 @@ function voirInventaire(h, partie) {
         '<span class="invn">' + esc(x.nom) +
         (x.ecart ? '<small>écart ' + (x.ecart > 0 ? '+' : '') + n1(x.ecart) + '</small>' : '') + '</span>' +
         '<span class="invc">' + (x.texte !== undefined ? esc(x.texte)
-          : nb(x.q) + (x.unite ? ' ' + esc(x.unite) : '')) + '</span></div>').join('') +
+          : nb(x.q) + (x.unite ? ' ' + esc(accord(x.q, x.unite)) : '')) + '</span></div>').join('') +
       '</div>').join('') +
     '<div class="actions"><button class="btn clair" data-fermer>Fermer</button></div>');
 }
@@ -1485,7 +1490,7 @@ V.inventaire = async function () {
             const c = cleSec(r, '');
             return '<div class="invl">' +
               '<span class="invn">' + esc(r.nom) + '</span>' +
-              (anc[c] !== undefined ? '<span class="invc faible">préc. ' + anc[c] + '</span>' : '') +
+              (anc[c] !== undefined ? '<span class="invc faible">préc. ' + n1(anc[c]) + '</span>' : '') +
               champSec(r, c, r.nom) + '</div>';
           }
 
@@ -1505,7 +1510,7 @@ V.inventaire = async function () {
                   const c = cleSec(r, v);
                   return '<div class="invl">' +
                     '<span class="invn">' + esc(v) + '</span>' +
-                    (anc[c] !== undefined ? '<span class="invc faible">préc. ' + anc[c] + '</span>' : '') +
+                    (anc[c] !== undefined ? '<span class="invc faible">préc. ' + n1(anc[c]) + '</span>' : '') +
                     champSec(r, c, r.nom + ', ' + v) + '</div>';
                 }).join('') + '</div>'
               : '') +
@@ -1543,7 +1548,7 @@ V.inventaire = async function () {
 
       '<div class="tseg">' +
       [['froid', 'Chambre froide', PARFUMS.length + ' parfums'],
-       ['sec',   'Sec',            INVENTAIRE_SEC.length + ' références']].map(x =>
+       ['sec',   'Sec',            (n => n + ' ' + accord(n, 'référence'))(catalogueSec().filter(r => typeof r !== 'object' || !r.masque).length)]].map(x =>
         '<button class="' + (x[0] === partie ? 'on' : '') + '" data-partie="' + x[0] + '">' +
         '<span class="tsl">' + x[1] + '</span><small>' + x[2] + '</small></button>').join('') +
       '</div>' +
@@ -1616,9 +1621,20 @@ V.inventaire = async function () {
     const bRouvrir = $('#inv-rouvrir');
     if (bRouvrir) bRouvrir.onclick = () => {
       confirmer('Rouvrir l’inventaire ?',
-        'Les quantités comptées restent en place. Vous pourrez les corriger, ' +
+        'Les quantités reprennent le stock actuel, ouvertures et réceptions du jour comprises. Vous pourrez les corriger, ' +
         'puis il faudra revalider pour enregistrer.',
-        'Rouvrir', () => {
+        'Rouvrir', async () => {
+          /* Repartir du stock ACTUEL, pas des chiffres du comptage : revalidé
+             avec l'heure de la correction, l'ancien comptage effaçait les
+             ouvertures et réceptions tracées depuis (Vanille 3 redevenait 4). */
+          try {
+            const art = (await stockReel()).articles || {};
+            if (partie === 'froid') {
+              Object.keys(saisie).forEach(c => { saisie[c] = String(Math.max(0, num(art[c] || 0))); });
+            } else {
+              Object.keys(saisieSec).forEach(c => { if (art[c] !== undefined) saisieSec[c] = String(Math.max(0, num(art[c]))); });
+            }
+          } catch (e) { /* stock illisible : on garde le comptage affiché */ }
           if (partie === 'froid') ouvertFroid = true; else ouvertSec = true;
           dessiner();
         });
@@ -1663,6 +1679,11 @@ V.inventaire = async function () {
     const cptes = Object.keys(saisie);
     if (!cptes.length) return toast('Saisissez au moins une quantité', 'erreur');
 
+    /* Un bac, une boîte, un paquet se comptent en entiers positifs : « -3 » ou
+       « 1.5 » passaient, et le stock affichait des bacs négatifs. */
+    const faux = cptes.filter(c => { const q = num(saisie[c]); return q < 0 || q % 1 !== 0; })[0];
+    if (faux) return toast(libelleArticle(faux) + ' : nombre entier et positif attendu', 'erreur');
+
     const lignes = {};
     cptes.forEach(c => { lignes[c] = num(saisie[c]); });
     const t = totauxStock(lignes);
@@ -1682,7 +1703,11 @@ V.inventaire = async function () {
        signés laissait 2 bacs manquants et 2 en trop s'annuler en
        « correspond exactement ». */
     let manq = 0, trop = 0;
+    /* En bacs seulement (clés avec une taille) : boîtes et paquets s'ajoutaient
+       aux bacs (« 9 bacs comptés … 16 en trop »). */
+    const premier = !Object.keys(avant).length;
     new Set(Object.keys(avant).concat(Object.keys(lignes))).forEach(c => {
+      if (!litArticle(c).taille) return;
       const d = num(lignes[c] || 0) - num(avant[c] || 0);
       if (d < 0) manq += -d; else trop += d;
     });
@@ -1690,8 +1715,9 @@ V.inventaire = async function () {
     confirmer('Valider la chambre froide ?',
       t.bacs + ' ' + accord(t.bacs, 'bac compté', 'bacs comptés') + ' sur ' + cptes.length + ' ' + accord(cptes.length, 'référence') + ', soit ' +
       n1(t.kg) + ' kg. ' +
-      (manq === 0 && trop === 0 ? 'Cela correspond exactement au stock attendu.'
-       : manq + ' ' + accord(manq, 'manquant') + ', ' + trop + ' en trop par rapport au stock attendu.' +
+      (premier ? 'Premier comptage : il devient la référence du stock.'
+       : manq === 0 && trop === 0 ? 'Cela correspond exactement au stock attendu.'
+       : manq + ' ' + accord(manq, 'bac manquant', 'bacs manquants') + ', ' + trop + ' en trop par rapport au stock attendu.' +
          (manq ? ' Des ouvertures non tracées ?' : '') +
          (trop ? (manq ? ' Et' : ' Peut-être') + ' une réception non saisie ?' : '')),
       'Valider', async () => {
@@ -1712,6 +1738,18 @@ V.inventaire = async function () {
   async function validerSec() {
     const cptes = Object.keys(saisieSec);
     if (!cptes.length) return toast('Saisissez au moins une quantité', 'erreur');
+    /* Positif, entier si la référence l'exige, par demis sinon (2,5). */
+    const cat = catalogueSec();
+    const faux = cptes.filter(k => {
+      const q = num(saisieSec[k]);
+      const r = cat.filter(x => typeof x === 'object' && x.id === k.split('|')[1])[0];
+      return q < 0 || (r && r.decimal === false ? q % 1 !== 0 : (q * 2) % 1 !== 0);
+    })[0];
+    if (faux) {
+      const p = faux.split('|');
+      const r = cat.filter(x => typeof x === 'object' && x.id === p[1])[0];
+      return toast((r ? r.nom : p[1]) + (p[2] ? ' ' + p[2] : '') + ' : quantité impossible', 'erreur');
+    }
     const lignes = {};
     cptes.forEach(k => { lignes[k] = num(saisieSec[k]); });
 

@@ -239,7 +239,7 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
            '<span class="c w">Qté</span><span class="c ww">DLC</span></div><div class="dense-scroll">' +
            ferme.slice().sort((a, b) => String(a.dlc).localeCompare(String(b.dlc))).map(a =>
              '<div class="dl"><span class="c1">' + esc(a.produit) + (a.lot ? ' · ' + esc(a.lot) : '') + '</span>' +
-             '<span class="c w num">' + a.qte + ' ' + esc(a.unite || '') + '</span>' +
+             '<span class="c w num">' + a.qte + ' ' + esc(a.unite ? accord(a.qte, a.unite) : '') + '</span>' +
              '<span class="c ww">' + (a.dlc ? fmtDC(a.dlc) : '—') + '</span></div>').join('') + '</div></div>'
          : vide('📦', 'Aucun article en stock fermé.'));
    
@@ -315,7 +315,7 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
 
      function lignesReception(bl) {
        const lignes = (bl.lignes || []).map(l => ({
-         produit:l.parfum || l.ref || '', qte:l.bacs || 1, unite:'bac', lot:'', dlc:''
+         produit:l.parfum || l.ref || '', qte:l.bacs || 1, unite:'bac', lot:'', dlc:'', taille:l.taille || ''
        }));
        if (!lignes.length) lignes.push({ produit:'', qte:1, unite:'bac', lot:'', dlc:'' });
    
@@ -335,8 +335,14 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
              '<div class="champ"><label class="f">Unité</label><select data-r="' + i + '.unite">' +
              STOCK.unites.map(u => '<option' + (u === l.unite ? ' selected' : '') + '>' + u + '</option>').join('') + '</select></div>' +
              '<div class="champ"><label class="f">N° de lot</label><input type="text" data-r="' + i + '.lot" value="' + esc(l.lot) + '"></div></div>' +
-             '<div class="champ" style="margin-top:10px"><label class="f">DLC / DLUO</label>' +
+             '<div class="grid g2" style="margin-top:10px">' +
+             '<div class="champ"><label class="f">DLC / DLUO</label>' +
              '<input type="date" data-r="' + i + '.dlc" value="' + l.dlc + '"></div>' +
+             /* Sans ce choix, tout bac de glace reçu était compté en 5 L. */
+             '<div class="champ"><label class="f">Taille du bac (glace)</label><select data-r="' + i + '.taille">' +
+             '<option value="">Lue dans le nom, sinon ' + FOURNISSEUR.tailleParDefaut + ' L</option>' +
+             FOURNISSEUR.taillesBac.map(t => '<option value="' + t + '"' + (String(l.taille) === String(t) ? ' selected' : '') + '>' + t + ' L</option>').join('') +
+             '</select></div></div>' +
              '<button class="btn clair sm bloc" data-scandlc="' + i + '" style="margin-top:10px">Scanner la DLC</button>' +
              '</div>').join('') + '</div>' +
            '<button class="btn clair bloc" id="rl-plus" style="margin-top:12px">+ Ajouter un produit</button>' +
@@ -382,6 +388,9 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
        async function enregistrer1() {
          const valides = lignes.filter(l => l.produit.trim());
          if (!valides.length) return toast('Saisissez au moins un produit', 'erreur');
+         /* « 0 » enregistrait 1 bac (num(0) || 1). */
+         const aZero = valides.filter(l => !(num(l.qte) > 0)).length;
+         if (aZero) return toast(aZero + ' ' + accord(aZero, 'produit') + ' sans quantité : indiquez au moins 1', 'erreur');
          const sansDlc = valides.filter(l => !l.dlc).length;
          if (sansDlc) return toast(sansDlc + ' ' + accord(sansDlc, 'produit') + ' sans DLC : elle est obligatoire', 'erreur');
    
@@ -400,7 +409,16 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
              alimenter glace|Pistache|3, pas un article fantôme en 5 L que
              l'inventaire ne compte jamais. Seules les glaces ont une taille. */
           const glace = fam.id === 'glace';
-          let parfum = glace ? (parfumDepuisDesignation(l.produit) || l.produit.trim()) : l.produit.trim();
+          /* Glace : parfum du catalogue seulement, sans tenir compte de la casse
+             ni des accents (« chocolat noir » créait un 2e article). Un libellé
+             qui n'est aucun parfum (lait, cornets…) n'entre pas dans les bacs de
+             la chambre froide, sauf s'il est saisi en bacs : la réception reste
+             tracée pour sa DLC. */
+          const nrmP = x => String(x || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/\s+/g, ' ').trim();
+          const connu = glace ? (parfumDepuisDesignation(l.produit) ||
+            PARFUMS.filter(p => nrmP(p) === nrmP(l.produit.replace(/\d+(?:[.,]\d+)?\s*(?:litres?|lt|l)\b/i, '')))[0] || null) : null;
+          if (glace && !connu && l.unite !== 'bac') continue;
+          let parfum = glace ? (connu || l.produit.trim()) : l.produit.trim();
           /* Macarons, gianduiotti, coulis, toppings : la saveur est retrouvée
              dans fam.saveurs avec la même normalisation que confirmerOuverture
              (sans accent ni casse, cinq premières lettres), pour tomber sur la
@@ -413,7 +431,7 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
           const cle = cleArticle(fam.id, fam.parfums ? parfum : '',
                                  glace ? (num(l.taille) || tailleDepuisDesignation(l.produit) ||
                                           FOURNISSEUR.tailleParDefaut) : '');
-          await ajouterMouvement('reception', cle, num(l.qte) || 1,
+          await ajouterMouvement('reception', cle, num(l.qte),
             { lot:l.lot, bl:bl.numero, dlc:l.dlc, famille:fam.id });
         }
       }

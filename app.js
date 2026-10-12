@@ -1799,8 +1799,8 @@ function renderNav() {
          ['fi', 'ff', 'cb', 'esp', 'tpe'].every(c => k[c] !== undefined && k[c] !== null && k[c] !== ''))))),
        /* La veille fournit le fond initial quand le matin n'a pas été saisi. */
        caisseEcart: k ? caisseResume(k, await DB.get('caisse:' + addD(jour, -1), null)).ecart : 0,
-       reassort:REASSORT.filter(x => reassortFait(x, r)).length,
-       reassortTotal:REASSORT.length, ruptures:rupt
+       reassort:reassortListe().filter(x => reassortFait(x, r)).length,
+       reassortTotal:reassortListe().length, ruptures:rupt
      };
    }
    
@@ -2203,9 +2203,27 @@ async function purgerLocalAncien() {
      if (!dc.length) return !!(rec[r.id] && rec[r.id].ok);
      return dc.every(x => (rec[r.id + '|' + x] || {}).ok);
    }
+   /* Liste du réassort selon le catalogue du manager : une référence retirée
+      du catalogue n'est plus à vérifier, une référence ajoutée le devient.
+      Avant, REASSORT restait figé alors que l'écran Catalogue promettait le
+      contraire. Appeler chargerCatalogueSec() avant pour lire la version à jour. */
+   function reassortListe() {
+     if (typeof catalogueSec !== 'function') return REASSORT;
+     const cat = catalogueSec();
+     const masque = id => cat.some(x => typeof x === 'object' && x.id === id && x.masque);
+     const base = REASSORT.filter(r => !r.ref || !masque(r.ref));
+     /* Références ajoutées par le manager (identifiant « m_… », stock.js). */
+     const ajouts = cat.filter(x => typeof x === 'object' && !x.masque && /^m_/.test(x.id))
+       .map(x => ({ id:'c_' + x.id, ref:x.id, cat:'Sec', nom:x.nom, unite:x.unite || 'unité' }));
+     return base.concat(ajouts);
+   }
 
    V.reas = async function () {
      const j = STATE.jour;
+     /* Déclinaisons et références du catalogue à jour, même ouvert en premier
+        après un rechargement (sinon : déclinaisons d'usine affichées). */
+     if (typeof chargerCatalogueSec === 'function') await chargerCatalogueSec();
+     const REASSORT = reassortListe();
      const rec = await DB.get('reassort:' + j, {});
      const faits = REASSORT.filter(r => reassortFait(r, rec)).length;
      const rupt  = REASSORT.filter(r => rec[r.id] && rec[r.id].rupture);
@@ -4860,9 +4878,12 @@ function modifierPeriode(per) {
          lignes.push([fmtD(j), f + ' ' + accord(f, 'tâche'), f ? 'Fait' : 'Rien', '—', f ? 'ok' : 'bad']);
        }
        else if (onglet === 'reassort') {
-         const f = Object.keys(v).filter(k => v[k] && v[k].ok).length;
+         /* Références faites (déclinaisons comprises), pas cases cochées :
+            « 23 / 17 » s'affichait quand on cochait les déclinaisons. */
+         const liste = reassortListe();
+         const f = liste.filter(x => reassortFait(x, v)).length;
          const r = Object.keys(v).filter(k => v[k] && v[k].rupture).length;
-         lignes.push([fmtD(j), f + ' / ' + REASSORT.length, r ? r + ' ' + accord(r, 'rupture') : 'Aucune', '—', r ? 'bad' : 'ok']);
+         lignes.push([fmtD(j), f + ' / ' + liste.length, r ? r + ' ' + accord(r, 'rupture') : 'Aucune', '—', r ? 'bad' : 'ok']);
        }
        else if (onglet === 'pertes') {
          if (!v.length) continue;
