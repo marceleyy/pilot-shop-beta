@@ -543,33 +543,79 @@ V.controle = async function () {
    rattacher avec les identifiants de l'autre — jamais tant qu'une saisie
    attend d'être envoyée, elle serait perdue.
    -------------------------------------------------------------------------- */
-function changerDeBoutique() {
-  /* Un iPad partagé détaché par erreur bloquerait toute l'équipe. */
-  if (!STATE.user || STATE.user.role !== 'manager') return;
+/* Ce qui empêche de quitter la boutique sans rien perdre. Rend le motif, ou null. */
+function obstacleChangement() {
   /* Hors ligne, l'application vidée de son cache ne se rechargerait plus. */
-  if (!STATE.enLigne || !navigator.onLine) {
-    toast('Connexion nécessaire pour changer de boutique', 'erreur');
-    return;
-  }
+  if (!STATE.enLigne || !navigator.onLine) return 'Connexion nécessaire pour changer de boutique';
   /* Ce qui n'existe que sur l'appareil : brouillon d'inventaire, saisies trop lourdes pour la base. */
   let brouillon = false;
   try { brouillon = !!localStorage.getItem(OFFLINE.storeLocal + ':brouillon:inventaire'); } catch (e) {}
-  if (brouillon || Object.keys(DB._gros || {}).length) {
-    toast('Un inventaire en cours ou des photos restent sur cet appareil : terminez-les avant de changer de boutique', 'erreur');
-    return;
-  }
+  if (brouillon || Object.keys(DB._gros || {}).length)
+    return 'Un inventaire en cours ou des photos restent sur cet appareil : terminez-les avant de changer de boutique';
   const enAttente = fileLire().length;
-  if (enAttente) {
-    toast(enAttente + ' ' + accord(enAttente, 'saisie attend', 'saisies attendent') +
-          ' d’être envoyée' + (enAttente > 1 ? 's' : '') + '. Reconnectez le Wi-Fi, puis réessayez.', 'erreur');
-    return;
-  }
-  confirmer('Changer de boutique ?',
-    'L’appareil quitte la boutique ' + APP.site + '. Tout ce qui a été saisi est déjà dans la base et y reste. ' +
-    'Il faudra ensuite saisir les identifiants de l’autre boutique.',
-    'Changer de boutique', async () => {
-      await viderAppareil(false);
-      if (typeof enregistrerSession === 'function') enregistrerSession(null);
-      location.reload();
-    });
+  if (enAttente) return enAttente + ' ' + accord(enAttente, 'saisie attend', 'saisies attendent') +
+    ' d’être envoyée' + (enAttente > 1 ? 's' : '') + '. Reconnectez le Wi-Fi, puis réessayez.';
+  return null;
 }
+
+/* On demande les identifiants de l'autre boutique AVANT de quitter celle-ci :
+   des identifiants faux ou une boutique injoignable laissent l'appareil
+   tel quel, au lieu de le laisser détaché. Depuis l'écran des prénoms, il
+   faut ces identifiants pour aller où que ce soit : un équipier ne peut pas
+   détacher l'iPad par erreur. Dans l'application, réservé au manager. */
+function changerDeBoutique() {
+  if (STATE.user && STATE.user.role !== 'manager') return;
+  const obstacle = obstacleChangement();
+  if (obstacle) { toast(obstacle, 'erreur'); return; }
+  showSheet(
+    '<h2 id="sheet-titre">Changer de boutique</h2>' +
+    '<p class="sub">Cet appareil est sur ' + esc(APP.site) + '. Saisissez le compte de l’autre boutique : ' +
+    'tout ce qui a été saisi ici est déjà dans la base et y reste.</p>' +
+    '<form id="cb-form" novalidate>' +
+    '<div class="champ" style="margin-top:14px"><label class="f" for="cb-mail">Compte de la boutique</label>' +
+    '<input type="email" id="cb-mail" autocapitalize="none" autocomplete="username" spellcheck="false"></div>' +
+    '<div class="champ" style="margin-top:12px"><label class="f" for="cb-mdp">Mot de passe</label>' +
+    '<input type="password" id="cb-mdp" autocomplete="current-password"></div>' +
+    '<div class="actions"><button type="button" class="btn clair" data-fermer>Annuler</button>' +
+    '<button type="submit" class="btn menthe" id="cb-ok">Changer</button></div></form>' +
+    '<p class="mini" id="cb-etat" role="status" style="text-align:center;margin-top:10px"></p>');
+  const etat = m => { const e = $('#cb-etat'); if (e) e.textContent = m; };
+  $('#cb-form').onsubmit = async ev => {
+    ev.preventDefault();
+    const bouton = $('#cb-ok');
+    if (bouton.disabled) return;
+    const mail = $('#cb-mail').value.trim(), mdp = $('#cb-mdp').value;
+    if (!mail || !mdp) return etat('Renseignez les deux champs.');
+    bouton.disabled = true;
+    etat('Connexion…');
+    try {
+      const d = await appelAuth('/token?grant_type=password', { email:mail, password:mdp });
+      const site = d.user && d.user.app_metadata ? d.user.app_metadata.site : null;
+      if (!site) throw new Error('Ce compte n’a pas de boutique attribuée.');
+      if (site === APP.site) throw new Error('Cet appareil est déjà sur ' + site + '.');
+      const obstacle2 = obstacleChangement();
+      if (obstacle2) throw new Error(obstacle2);
+      etat('Passage sur ' + site + '…');
+      await viderAppareil(false);
+      memoriser(d);
+      /* recharger() (app.js) annule un retour arrière différé qui annulerait
+         le rechargement ; ici aucune feuille n'a été fermée avant. */
+      if (typeof recharger === 'function') recharger(); else location.reload();
+    } catch (e) {
+      bouton.disabled = false;
+      etat(e.statut === 400 ? 'Identifiants refusés.'
+         : e.statut === 429 ? 'Trop d’essais : patientez une minute.'
+         : e.statut ? 'La base refuse la connexion (erreur ' + e.statut + ').'
+         : e.message && !/fetch|abort/i.test(e.message) ? e.message
+         : 'Base injoignable. Vérifiez le Wi-Fi, puis réessayez.');
+    }
+  };
+}
+
+/* Sur l'écran des prénoms : seulement si l'appareil est rattaché à une base. */
+(function () {
+  const b = document.getElementById('lg-boutique');
+  if (!b) return;
+  if (!SUPABASE.url || !SUPABASE.anonKey) { b.hidden = true; return; }
+  b.onclick = changerDeBoutique;
+})();

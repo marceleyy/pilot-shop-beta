@@ -3,17 +3,14 @@
    « Mes boutiques » : un franchisé compare ses boutiques côte à côte.
 
    La base ne laisse un compte voir que SA boutique (RLS sur le site inscrit
-   dans le jeton). Pour comparer, on ne touche pas à cette barrière :
+   dans le jeton). On n'ouvre pas cette barrière :
    - chaque boutique calcule ses propres indicateurs, avec ses propres
      données, et les range sous la clé « franchise:indicateurs » ;
-   - le manager lie à son appareil les autres boutiques, avec leurs
-     identifiants (une seule fois), et l'appareil lit cette seule ligne
-     dans chacune.
-   Un compte ne lit donc jamais les registres d'une autre boutique : seulement
-   son résumé, et seulement si l'on a ses identifiants.
-
-   Les jetons des boutiques liées restent sur l'appareil, sous le même préfixe
-   que le reste : « Changer de boutique » et la remise à zéro les effacent.
+   - la fonction resumes_franchise (base, SECURITY DEFINER) rend ce seul
+     résumé pour les boutiques listées dans app_metadata.franchise du compte,
+     liste que seul l'administrateur peut écrire.
+   Un compte ne lit donc jamais les registres d'une autre boutique, et aucun
+   jeton d'une autre boutique n'est gardé sur l'appareil.
 
    Chargé après guide.js.
    ============================================================================= */
@@ -25,7 +22,6 @@ if (MENU_PLUS.manager.indexOf('boutiques') < 0) MENU_PLUS.manager.unshift('bouti
 
 const FRANCHISE = {
   cle: 'franchise:indicateurs',
-  cleLiees: OFFLINE.storeLocal + ':franchise-liees',
   jours: 7,                       // fenêtre glissante des indicateurs
   rafraichirMs: 3600000           // au plus une mise à jour par heure, hors écran « Mes boutiques »
 };
@@ -45,13 +41,16 @@ async function calculerIndicateurs() {
   const jours = [];
   for (let i = 0; i < FRANCHISE.jours; i++) jours.push(addD(auj, -i));
   const ouverts = HORAIRES.joursOuverture || [1, 2, 3, 4, 5, 6, 7];
-  /* Rien n'est « en retard » avant le début de la première période : une
-     boutique ouverte hier n'a pas manqué les relevés de la semaine dernière. */
-  const per = await DB.get('periode:courante', null).catch(() => null);
-  const depart = per && per.debut ? per.debut : auj;
+  /* Rien n'est « en retard » avant la mise en service : une boutique ouverte
+     hier n'a pas manqué les relevés de la semaine dernière. Une boutique sans
+     mise en route guidée (Paccard) est suivie sur toute la fenêtre. */
+  const b = await DB.get('boutique', null).catch(() => null);
+  const depart = b && b.debut ? String(b.debut).slice(0, 10) : addD(auj, -FRANCHISE.jours);
 
-  /* Une journée : lectures en parallèle, sinon 7 × 4 allers-retours en file. */
-  const parJour = await Promise.all(jours.map(async d => {
+  /* Jour après jour, trois lectures à la fois : sept jours lancés ensemble
+     encombraient le Wi-Fi au moment où le manager ouvrait un autre écran. */
+  const parJour = [];
+  for (const d of jours) parJour.push(await (async () => {
     const [pertes, temp, net] = await Promise.all([
       DB.get('pertes:' + d, []).catch(() => []),
       DB.get('temp:' + d, {}).catch(() => ({})),
@@ -64,27 +63,22 @@ async function calculerIndicateurs() {
     const aSuivre = d < auj && d >= depart;
     if (aSuivre && ouverts.indexOf(jourSemaineIso(d)) >= 0) {
       const v = t.valide || {};
-      relevesManquants = (v.m ? 0 : 1) + (v.s ? 0 : 1);
+      /* Validé ET mesuré, comme pour l'état de la journée. */
+      relevesManquants = (v.m && releveMesure(t, 'm') ? 0 : 1) + (v.s && releveMesure(t, 's') ? 0 : 1);
     }
     const litres = (Array.isArray(pertes) ? pertes : []).reduce((s, w) => s + litresPerte(w), 0);
     return { crit:crit, relevesManquants:relevesManquants,
              tachesManquantes:net && net.total ? Math.max(0, net.total - net.faits) : 0, litres:litres };
-  }));
+  })());
 
   const somme = k => parJour.reduce((s, x) => s + x[k], 0);
   const litres = somme('litres');
 
-  /* Dernier calcul d'écart clôturé (calcul.js). */
+  /* Dernier calcul d'écart clôturé, avec la règle de calcul.js (essais exclus). */
   let ecart = null;
   try {
-    const cles = (await DB.list('calcul:')).filter(k => /^calcul:\d{4}-\d{2}-\d{2}:/.test(k)).sort().reverse();
-    for (const c of cles.slice(0, 8)) {
-      const r = await DB.get(c, null);
-      if (r && r.statut === 'clos' && r.resultat && !r.resultat.incoherent) {
-        ecart = { pct:+r.resultat.pct, fin:r.fin || null };
-        break;
-      }
-    }
+    const c = derniereCloture(await lireCalculs());
+    if (c && c.resultat && !c.resultat.incoherent) ecart = { pct:+c.resultat.pct, fin:c.fin };
   } catch (e) { /* pas de calcul */ }
 
   const [preaudit, anomalies, ruptures] = await Promise.all([
@@ -109,89 +103,56 @@ async function calculerIndicateurs() {
 }
 
 /* Calcule et range le résumé. Hors ligne, rien n'est écrit : un résumé fait
-   sur une copie locale incomplète passerait pour la vérité. */
-let _dernierResume = 0;
+   sur une copie locale incomplète passerait pour la vérité. La limite d'une
+   fois par heure se lit sur le résumé déjà rangé : elle tient d'un
+   rechargement à l'autre et d'un iPad à l'autre. */
 async function publierIndicateurs(force) {
   if (!STATE.user || !STATE.enLigne || !DB.configure) return null;
-  if (!force && Date.now() - _dernierResume < FRANCHISE.rafraichirMs) return null;
-  _dernierResume = Date.now();
+  if (!force) {
+    try {
+      const prec = JSON.parse(DB._lire(FRANCHISE.cle) || 'null');
+      if (prec && prec.at && Date.now() - new Date(prec.at).getTime() < FRANCHISE.rafraichirMs) return null;
+    } catch (e) {}
+  }
   try {
     const r = await calculerIndicateurs();
+    /* Le réseau a pu tomber pendant le calcul : les lectures sont alors
+       revenues du cache. On n'écrit rien. */
+    if (!STATE.enLigne) return r;
     await DB.set(FRANCHISE.cle, r);
     return r;
   } catch (e) { return null; }
 }
 
-/* Les boutiques liées lisent ce résumé : on le tient à jour quand un manager
-   ouvre la tour de contrôle, après son affichage, sans la ralentir. */
+/* Les autres boutiques lisent ce résumé : on le tient à jour quand un manager
+   ouvre la tour de contrôle, une fois l'écran affiché et le Wi-Fi libre. */
 const V_controle_avantFranchise = V.controle;
 V.controle = async function () {
   await V_controle_avantFranchise.apply(this, arguments);
-  if (STATE.user && STATE.user.role === 'manager') setTimeout(() => publierIndicateurs(false), 4000);
+  if (!STATE.user || STATE.user.role !== 'manager') return;
+  const lancer = () => publierIndicateurs(false);
+  setTimeout(() => (window.requestIdleCallback ? requestIdleCallback(lancer, { timeout:20000 }) : lancer()), 6000);
 };
 
 /* -----------------------------------------------------------------------------
-   BOUTIQUES LIÉES À CET APPAREIL
-   [{ site, compte, access_token, refresh_token, expires_at, expire }]
+   RÉSUMÉS DES AUTRES BOUTIQUES
+   La fonction resumes_franchise (base) rend la ligne « franchise:indicateurs »
+   des boutiques listées dans app_metadata.franchise du compte de l'appareil,
+   et rien d'autre. Cette liste, seul l'administrateur l'écrit : aucun jeton
+   d'une autre boutique n'est gardé sur l'appareil.
    -------------------------------------------------------------------------- */
-function boutiquesLiees() {
-  try {
-    const l = JSON.parse(localStorage.getItem(FRANCHISE.cleLiees) || '[]');
-    return Array.isArray(l) ? l.filter(b => b && b.site && b.refresh_token) : [];
-  } catch (e) { return []; }
-}
-function enregistrerLiees(l) {
-  try { localStorage.setItem(FRANCHISE.cleLiees, JSON.stringify(l)); } catch (e) {}
-}
-function majLiee(site, modif) {
-  enregistrerLiees(boutiquesLiees().map(b => b.site === site ? Object.assign({}, b, modif) : b));
-}
-
-function sessionDepuis(d) {
-  return {
-    access_token: d.access_token, refresh_token: d.refresh_token,
-    expires_at: Date.now() + ((d.expires_in || 3600) * 1000),
-    site: d.user && d.user.app_metadata ? d.user.app_metadata.site : null,
-    compte: d.user ? d.user.email : null, expire: false
-  };
-}
-
-async function lierBoutique(email, mdp) {
-  const d = await appelAuth('/token?grant_type=password', { email:email, password:mdp });
-  const s = sessionDepuis(d);
-  if (!s.site) throw new Error('Ce compte n’a pas de boutique attribuée.');
-  if (s.site === APP.site) throw new Error('C’est la boutique de cet appareil : elle est déjà comparée.');
-  const l = boutiquesLiees().filter(b => b.site !== s.site);
-  l.push(s);
-  enregistrerLiees(l);
-  return s;
-}
-
-/* Jeton valide d'une boutique liée, renouvelé si besoin. Le jeton de
-   renouvellement change à chaque usage : on garde toujours le dernier. */
-async function jetonLiee(b) {
-  if (b.access_token && b.expires_at - Date.now() > 300000) return b.access_token;
-  try {
-    const d = await appelAuth('/token?grant_type=refresh_token', { refresh_token:b.refresh_token });
-    const s = sessionDepuis(d);
-    majLiee(b.site, s);
-    return s.access_token;
-  } catch (e) {
-    if (e.statut === 400 || e.statut === 401) majLiee(b.site, { expire:true });
-    throw e;
-  }
-}
-
-async function resumeLiee(b) {
-  const jeton = await jetonLiee(b);
-  const r = await fetch(SUPABASE.url + '/rest/v1/reglages?id=eq.' + encodeURIComponent(FRANCHISE.cle) +
-    '&select=data&limit=1', {
-    headers: { apikey: SUPABASE.anonKey, Authorization: 'Bearer ' + jeton },
+async function resumesFranchise() {
+  const jeton = await jetonValide();
+  if (!jeton) { const e = new Error('non rattaché'); e.statut = 401; throw e; }
+  const r = await fetch(SUPABASE.url + '/rest/v1/rpc/resumes_franchise', {
+    method: 'POST',
+    headers: { apikey: SUPABASE.anonKey, Authorization: 'Bearer ' + jeton, 'Content-Type': 'application/json' },
+    body: '{}',
     signal: signalDelai()
   });
   if (!r.ok) { const e = new Error('HTTP ' + r.status); e.statut = r.status; throw e; }
   const l = await r.json();
-  return (l && l.length) ? l[0].data : null;
+  return Array.isArray(l) ? l.filter(x => x && x.site) : [];
 }
 
 /* -----------------------------------------------------------------------------
@@ -238,41 +199,39 @@ V.boutiques = async function () {
     $('#page').innerHTML = carte(entete('', 'Réservé au manager', ''));
     return;
   }
-  $('#vue-actions').innerHTML = '<button class="btn menthe sm" id="fr-ajout">+ Ajouter</button>';
-  $('#fr-ajout').onclick = feuilleLierBoutique;
-
-  const liees = boutiquesLiees();
-  /* La boutique de l'appareil : calcul frais. Les autres : leur dernier résumé. */
-  const ici = STATE.enLigne && DB.configure
-    ? (await publierIndicateurs(true)) || await calculerIndicateurs()
-    : await calculerIndicateurs();
-  if (STATE.view !== 'boutiques') return;
-  const autres = await Promise.all(liees.map(b => resumeLiee(b)
-    .then(r => ({ b:b, r:r }), e => ({ b:b, erreur:e }))));
+  /* Les deux en même temps : la boutique d'ici se calcule pendant que la
+     base rend les résumés des autres. */
+  const [ici, autres] = await Promise.all([
+    STATE.enLigne && DB.configure ? publierIndicateurs(true).then(r => r || calculerIndicateurs())
+                                  : calculerIndicateurs(),
+    STATE.enLigne && DB.configure ? resumesFranchise().catch(e => ({ erreur:e })) : Promise.resolve({ erreur:'horsligne' })
+  ]);
   if (STATE.view !== 'boutiques') return;
 
-  const colonnes = [{ site:APP.site, r:ici, ici:true }].concat(autres.map(x => ({
-    site:x.b.site, r:x.r, erreur:x.erreur, expire:boutiquesLiees().some(b => b.site === x.b.site && b.expire)
-  })));
+  const erreur = autres && autres.erreur;
+  const liste = Array.isArray(autres) ? autres.filter(x => x.site !== APP.site) : [];
+  const colonnes = [{ site:APP.site, r:ici, ici:true }].concat(liste.map(x => ({ site:x.site, r:x.data })));
 
   const cellule = (col, l) => {
     if (!col.r) return '<span class="mini">—</span>';
     const v = l.val(col.r);
     return v === null ? '<span class="pill n">—</span>' : pastille(l.c(col.r), v);
   };
-
   const etatColonne = col => col.ici ? 'Cet appareil · à l’instant'
-    : col.expire ? 'Connexion expirée'
-    : col.erreur ? (STATE.enLigne ? 'Injoignable' : 'Hors ligne')
     : !col.r ? 'Pas encore de chiffres'
     : 'Mis à jour ' + depuis(col.r.at);
 
   $('#page').innerHTML =
     carte(entete('', 'Vos boutiques côte à côte',
-      liees.length ? 'Les chiffres de chaque boutique sont calculés par la boutique elle-même, sur les 7 derniers jours.'
-        : 'Ajoutez votre autre boutique avec ses identifiants pour la comparer à celle-ci.') +
-      (liees.length ? '' :
-        '<button class="btn menthe bloc" id="fr-ajout2" style="margin-top:12px">Ajouter une boutique</button>'), 'solide') +
+      'Chaque boutique calcule ses chiffres elle-même, sur les 7 derniers jours. ' +
+      'Les autres boutiques ne voient que ce résumé, jamais les registres.'), 'solide') +
+
+    (erreur ? carte('<p class="mini">' + (erreur === 'horsligne'
+        ? 'Hors ligne : seule cette boutique est affichée.'
+        : 'Les autres boutiques n’ont pas pu être lues. Réessayez dans un instant.') + '</p>', 'ambre')
+      : !liste.length ? carte('<b>Aucune autre boutique rattachée</b><p class="mini" style="margin-top:4px">' +
+        'La comparaison s’active pour le compte de cette boutique depuis l’administration de Pilot-Shop. ' +
+        'Demandez-la à votre contact Pilot-Shop.</p>', 'ambre') : '') +
 
     '<div style="overflow-x:auto;margin-top:14px">' +
     '<table class="fr-table" style="width:100%;border-collapse:collapse;min-width:' + (180 + colonnes.length * 140) + 'px">' +
@@ -287,69 +246,6 @@ V.boutiques = async function () {
       colonnes.map(col => '<td style="padding:10px 8px">' + cellule(col, l) + '</td>').join('') +
       '</tr>').join('') + '</tbody></table></div>' +
 
-    colonnes.filter(c => !c.ici && (!c.r || c.expire || c.erreur)).map(c => carte(
-      '<b>' + esc(c.site) + '</b><p class="mini" style="margin-top:4px">' +
-      (c.expire ? 'La connexion à cette boutique a expiré : reconnectez-la avec ses identifiants.'
-        : c.erreur ? 'La boutique n’a pas répondu. Réessayez quand l’appareil est en ligne.'
-        : 'Cette boutique n’a encore publié aucun chiffre. Il suffit qu’un manager y ouvre la tour de contrôle une fois.') +
-      '</p>', c.expire || c.erreur ? 'ambre' : '')).join('') +
-
-    (liees.length ? '<div class="entete"><h3>Boutiques liées à cet appareil</h3></div>' +
-      '<div class="stack">' + liees.map(b => carte('<div class="rang"><div style="flex:1;min-width:0"><b>' + esc(b.site) + '</b>' +
-        '<p class="mini">' + esc(b.compte || '') + '</p></div>' +
-        (b.expire ? '<button class="btn clair sm" data-fr-recon="' + esc(b.site) + '">Reconnecter</button>' : '') +
-        '<button class="btn fantome sm" data-fr-retirer="' + esc(b.site) + '">Retirer</button></div>')).join('') +
-      '</div>' : '');
-
-  const a2 = $('#fr-ajout2');
-  if (a2) a2.onclick = feuilleLierBoutique;
-  $$('#page [data-fr-recon]').forEach(b => b.onclick = () => feuilleLierBoutique(b.dataset.frRecon));
-  $$('#page [data-fr-retirer]').forEach(b => b.onclick = () => confirmer('Retirer ' + b.dataset.frRetirer + ' ?',
-    'Elle ne sera plus comparée sur cet appareil. Rien n’est effacé dans la boutique elle-même.',
-    'Retirer', () => {
-      enregistrerLiees(boutiquesLiees().filter(x => x.site !== b.dataset.frRetirer));
-      rendre('boutiques');
-    }));
+    colonnes.filter(c => !c.ici && !c.r).map(c => carte('<b>' + esc(c.site) + '</b><p class="mini" style="margin-top:4px">' +
+      'Cette boutique n’a encore publié aucun chiffre. Il suffit qu’un manager y ouvre la tour de contrôle une fois.</p>')).join('');
 };
-
-function feuilleLierBoutique(siteAttendu) {
-  if (typeof siteAttendu !== 'string') siteAttendu = '';
-  showSheet(
-    '<h2 id="sheet-titre">' + (siteAttendu ? 'Reconnecter ' + esc(siteAttendu) : 'Ajouter une boutique') + '</h2>' +
-    '<p class="sub">Les identifiants du compte de l’autre boutique, ceux qui servent à rattacher ses appareils. ' +
-    'Ils ne sont saisis qu’une fois ; cet appareil ne lira que son résumé.</p>' +
-    '<form id="fr-form" novalidate>' +
-    '<div class="champ" style="margin-top:14px"><label class="f" for="fr-mail">Compte de la boutique</label>' +
-    '<input type="email" id="fr-mail" autocapitalize="none" autocomplete="off" spellcheck="false"></div>' +
-    '<div class="champ" style="margin-top:12px"><label class="f" for="fr-mdp">Mot de passe</label>' +
-    '<input type="password" id="fr-mdp" autocomplete="off"></div>' +
-    '<div class="actions"><button type="button" class="btn clair" data-fermer>Annuler</button>' +
-    '<button type="submit" class="btn menthe" id="fr-ok">Ajouter</button></div></form>' +
-    '<p class="mini" id="fr-etat" role="status" style="text-align:center;margin-top:10px"></p>');
-
-  const etat = m => { const e = $('#fr-etat'); if (e) e.textContent = m; };
-  $('#fr-form').onsubmit = async ev => {
-    ev.preventDefault();
-    const bouton = $('#fr-ok');
-    if (bouton.disabled) return;
-    const mail = $('#fr-mail').value.trim(), mdp = $('#fr-mdp').value;
-    if (!mail || !mdp) return etat('Renseignez les deux champs.');
-    if (!STATE.enLigne) return etat('Connexion nécessaire.');
-    bouton.disabled = true;
-    etat('Connexion…');
-    try {
-      const s = await lierBoutique(mail, mdp);
-      closeSheet();
-      toast(s.site + ' est maintenant comparée');
-      await feed('ok', STATE.user.prenom + ' a lié la boutique ' + s.site + ' à cet appareil');
-      rendre('boutiques');
-    } catch (e) {
-      bouton.disabled = false;
-      etat(e.statut === 400 ? 'Identifiants refusés.'
-         : e.statut === 429 ? 'Trop d’essais : patientez une minute.'
-         : e.statut ? 'La base refuse la connexion (erreur ' + e.statut + ').'
-         : e.message && !/fetch|abort/i.test(e.message) ? e.message
-         : 'Base injoignable. Vérifiez le Wi-Fi, puis réessayez.');
-    }
-  };
-}
