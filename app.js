@@ -772,6 +772,9 @@
          if (!STATE.enLigne) return empiler('del', cle, null);
          try { await appel(table(cle) + '?id=eq.' + encodeURIComponent(cle), { method:'DELETE' }); }
          catch (e) { await empiler('del', cle, null); }
+         /* Comme set et patch : une lecture partie pendant la suppression
+            garderait sinon la ligne supprimée pour le reste du dessin. */
+         finally { oublier(cle); }
        },
    
        /* Exposés pour la file d'attente et l'écran de réglages */
