@@ -88,7 +88,7 @@ const OFFLINE = {
 
 const PWA = {
   nomCourt:      'Pilot-Shop',
-  nomComplet:    'Pilot-Shop — Chamonix',
+  nomComplet:    'Pilot-Shop · Chamonix',
   description:   'Registres et pilotage du point de vente',
   display:       'standalone',
   orientation:   'any',              // l'iPad tourne pendant le rush
@@ -99,7 +99,7 @@ const PWA = {
   serviceWorker: '/sw.js',
   precache:      ['/', '/index.html', '/style.css', '/config.js', '/app.js'],
   /* Réveil visuel quand l'app repart après une coupure */
-  bannerOffline: 'Hors ligne — vos saisies sont gardées et partiront toutes seules'
+  bannerOffline: 'Hors ligne, vos saisies sont gardées et partiront toutes seules'
 };
 
 /* -----------------------------------------------------------------------------
@@ -234,7 +234,7 @@ const NETTOYAGE = {
         { id: 'b08', nom: 'Frigo sous comptoir 1',            phase: 'fermeture', jours: [2] },
         { id: 'b09', nom: 'Frigo sous comptoir 2',            phase: 'fermeture', jours: [3] },
         { id: 'b10', nom: 'Frigo sous comptoir 3',            phase: 'fermeture', jours: [4] },
-        { id: 'b11', nom: 'Machine à chantilly — démontage complet', phase: 'fermeture', jours: [3] },
+        { id: 'b11', nom: 'Machine à chantilly, démontage complet', phase: 'fermeture', jours: [3] },
         { id: 'b12', nom: 'Machine à gaufres',                phase: 'fermeture', jours: [5] },
         { id: 'b13', nom: 'Crêpière',                         phase: 'fermeture', jours: [5] },
         { id: 'b14', nom: 'Bain-marie',                       phase: 'fermeture', jours: [2] },
@@ -263,7 +263,7 @@ const NETTOYAGE = {
         { id: 'a09', nom: 'Armoire froide 2',                 phase: 'fermeture', mensuel: true },
         { id: 'a10', nom: 'Armoire froide 3',                 phase: 'fermeture', mensuel: true },
         { id: 'a11', nom: 'Filtre clim et extracteur',        phase: 'fermeture', mensuel: true },
-        { id: 'a12', nom: 'Chambre froide — décontamination', phase: 'fermeture', annuel: true },
+        { id: 'a12', nom: 'Chambre froide, décontamination', phase: 'fermeture', annuel: true },
         { id: 'a13', nom: 'Sol réserve',                      phase: 'fermeture' }
       ]
     },
@@ -273,7 +273,7 @@ const NETTOYAGE = {
         { id: 'x01', nom: 'Façade et porte vitrée',           phase: 'ouverture' },
         { id: 'x02', nom: 'Enseigne et lambrequin',           phase: 'ouverture', jours: [1] },
         { id: 'x03', nom: 'Stoppeur et affichage extérieur',  phase: 'ouverture' },
-        { id: 'x04', nom: 'Terrasse — tables et chaises',     phase: 'ouverture' },
+        { id: 'x04', nom: 'Terrasse, tables et chaises',     phase: 'ouverture' },
         { id: 'x05', nom: 'Poubelles extérieures',            phase: 'fermeture' }
       ]
     }
@@ -283,7 +283,7 @@ const NETTOYAGE = {
   asynchrones: [
     {
       id: 'lavettes',
-      nom: 'Lavettes — lavage et rotation',
+      nom: 'Lavettes, lavage et rotation',
       icone: '🧽',
       type: 'jours-fixes',
       jours: [2, 5, 7],                    // mardi, vendredi, dimanche
@@ -293,7 +293,7 @@ const NETTOYAGE = {
     },
     {
       id: 'biberons_topping',
-      nom: 'Biberons topping — vidage et désinfection',
+      nom: 'Biberons topping, vidage et désinfection',
       icone: '🍯',
       type: 'intervalle',
       intervalleJours: 5,                  // tous les 5 jours, glissant
@@ -411,7 +411,7 @@ const RELEVE = {
    -------------------------------------------------------------------------- */
 const FICHES = [
   {
-    id: 'f01', cat: 'Hygiène', titre: 'Bactalim — dilution 1 %', icone: '🧴', duree: '2 min',
+    id: 'f01', cat: 'Hygiène', titre: 'Bactalim, dilution à 1 %', icone: '🧴', duree: '2 min',
     resume: 'Désinfectant surfaces et matériel en contact alimentaire.',
     etapes: [
       'Remplir le seau ou le pulvérisateur avec 1 L d’eau froide.',
@@ -424,7 +424,7 @@ const FICHES = [
     validite: 'Solution à renouveler chaque jour.'
   },
   {
-    id: 'f02', cat: 'Hygiène', titre: 'Biberons topping — désinfection', icone: '🍯', duree: '10 min',
+    id: 'f02', cat: 'Hygiène', titre: 'Désinfection des biberons topping', icone: '🍯', duree: '10 min',
     resume: 'À faire tous les 5 jours ou à chaque changement de parfum.',
     etapes: [
       'Vider le reste de topping, ne jamais recompléter un biberon entamé.',
@@ -438,7 +438,7 @@ const FICHES = [
     validite: 'Traçabilité dans le registre nettoyage.'
   },
   {
-    id: 'f03', cat: 'Produit', titre: 'Chantilly — montage et conservation', icone: '🥛', duree: '5 min',
+    id: 'f03', cat: 'Produit', titre: 'Chantilly : montage et conservation', icone: '🥛', duree: '5 min',
     resume: 'Durée de vie 48 h après ouverture, sans exception.',
     etapes: [
       'Vérifier la température de la machine, entre 0 et +4 °C.',
@@ -706,7 +706,7 @@ const VOIX = {
    -------------------------------------------------------------------------- */
 const SCANNER = {
   simulation: true,
-  banniere: 'MODE DÉMONSTRATION — valeurs fictives, vérifiez sur l’étiquette',
+  banniere: 'Mode démonstration : valeurs fictives, vérifiez sur l’étiquette',
   delaiSimuleMs: 900,
   types: {
     etiquette: {
@@ -878,9 +878,9 @@ const ANOMALIES = {
     { id:'autre',     libelle:'Autre',                       icone:'💬' }
   ],
   gravites: [
-    { id:'bloquant', libelle:'Bloquant — la boutique ne peut pas fonctionner', couleur:'bad' },
-    { id:'gene',     libelle:'Gênant — on travaille mais mal',                couleur:'warn' },
-    { id:'signale',  libelle:'À signaler — sans urgence',                     couleur:'ok' }
+    { id:'bloquant', libelle:'Bloquant : la boutique ne peut pas fonctionner', couleur:'bad' },
+    { id:'gene',     libelle:'Gênant : on travaille, mais mal',                couleur:'warn' },
+    { id:'signale',  libelle:'À signaler, sans urgence',                     couleur:'ok' }
   ],
   photoConseillee: true
 };
@@ -1025,7 +1025,7 @@ const TACHES_HEBDO_DEF = [
   { id:'r07', jours:[], rang:7, libelle:'Passer le balai et la serpillière', procedure:'ouverture' },
   { id:'r08', jours:[], rang:8, libelle:'Nettoyer les poubelles de la boutique', procedure:'fermeture' },
 
-  { id:'r10', jours:[], rang:10, libelle:'Nettoyer la machine à chantilly — démontage complet' },
+  { id:'r10', jours:[], rang:10, libelle:'Nettoyer la machine à chantilly (démontage complet)' },
   { id:'r11', jours:[], rang:11, libelle:'Nettoyer la crêpière' },
   { id:'r12', jours:[], rang:12, libelle:'Nettoyer le bain-marie' },
   { id:'r13', jours:[], rang:13, libelle:'Nettoyer la vitrine d’exposition' },
@@ -1048,7 +1048,7 @@ let TACHES_HEBDO = TACHES_HEBDO_DEF.map(t => Object.assign({}, t));
 const RESPONSABLES = [
   { id:'r_linge',  libelle:'Responsable du linge, deux fois par semaine', icone:'🧺' },
   { id:'r_trace',  libelle:'Responsable du contrôle de la traçabilité',   icone:'📋' },
-  { id:'r_fifo',   libelle:'Responsable du contrôle FIFO — alerter si un produit approche de sa DLC', icone:'🧊' }
+  { id:'r_fifo',   libelle:'Responsable du contrôle FIFO : alerter si un produit approche de sa DLC', icone:'🧊' }
 ];
 
 const HEBDO = {

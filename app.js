@@ -34,6 +34,10 @@
    const n1  = v => (Number(v) || 0).toLocaleString('fr-FR',
      { minimumFractionDigits: 1, maximumFractionDigits: 1 });
    const n2  = v => (Number(v) || 0).toFixed(2);
+   /* Accord en nombre : « 1 rupture », « 3 ruptures ». Remplace les
+      « rupture(s) » qui faisaient formulaire administratif. On passe le
+      pluriel en entier dès qu'il n'est pas le singulier suivi d'un s. */
+   const accord = (n, un, plusieurs) => (Math.abs(Number(n)) >= 2 ? (plusieurs || un + 's') : un);
    /* Signal qui coupe une requête au bout du délai réseau. Sans lui, un Wi-Fi
       connecté mais sans Internet laisse la requête pendue sans fin. */
    const signalDelai = () => { const c = new AbortController();
@@ -461,7 +465,7 @@
              }
              const rattache = (typeof appareilRattache === 'function') ? appareilRattache() : true;
              STATE.erreurBase = rattache
-               ? 'Session expirée — rattachez cet appareil'
+               ? 'Session expirée : rattachez cet appareil'
                : 'Appareil non rattaché';
              if (!rattache) STATE.refusJusqua = Date.now() + 30000;
            }
@@ -535,7 +539,7 @@
          let horsMemoire = false;
          try { ecrire(cle, JSON.stringify(valeur)); }
          catch (e) { horsMemoire = true; }
-         const memoirePleine = () => { toast('Mémoire pleine — libérez de l’espace sur l’iPad', 'erreur'); return false; };
+         const memoirePleine = () => { toast('Mémoire pleine : libérez de l’espace sur l’iPad', 'erreur'); return false; };
 
          if (!distant(cle)) return horsMemoire ? memoirePleine() : true;
 
@@ -617,7 +621,7 @@
          let horsMemoire = false;
          try { ecrire(cle, JSON.stringify(o)); }
          catch (e) { horsMemoire = true; }
-         const memoirePleine = () => { toast('Mémoire pleine — libérez de l’espace sur l’iPad', 'erreur'); return o; };
+         const memoirePleine = () => { toast('Mémoire pleine : libérez de l’espace sur l’iPad', 'erreur'); return o; };
          if (!distant(cle)) return horsMemoire ? memoirePleine() : o;
          if (!STATE.enLigne) {
            if (horsMemoire) return memoirePleine();
@@ -699,7 +703,7 @@
       pas encore. */
    function messageEnvoi(cle, envoye) {
      try {
-       if (fileLire().some(x => x.cle === cle)) return 'Enregistré sur l’iPad — envoi dès le retour du réseau';
+       if (fileLire().some(x => x.cle === cle)) return 'Enregistré sur l’iPad, envoi dès le retour du réseau';
      } catch (e) {}
      return envoye;
    }
@@ -730,7 +734,7 @@
         sur la file réellement enregistrée. */
      try { DB._ecrire(OFFLINE.fileAttente, JSON.stringify(f)); }
      catch (e) {
-       toast('Saisie non mise en file — mémoire pleine', 'erreur');
+       toast('Mémoire pleine : la saisie n’a pas pu être gardée', 'erreur');
        return false;
      }
      STATE.fileAttente = f.length;
@@ -862,7 +866,7 @@
      const partis = envoyes;
      if (partis > 0) {
        derniereSync = nowISO();
-       if (STATE.user) toast(partis + ' saisie(s) synchronisée(s)');
+       if (STATE.user) toast(partis + ' ' + accord(partis, 'saisie synchronisée', 'saisies synchronisées'));
      }
    }
    
@@ -1057,14 +1061,14 @@
      if (STATE.erreurBase) {
        b.classList.add('on');
        if (msg) msg.textContent = besoinRattachement
-         ? STATE.erreurBase + ' — touchez ici'
-         : STATE.erreurBase + ' — vos saisies restent sur l’iPad';
+         ? STATE.erreurBase + '. Touchez ici'
+         : STATE.erreurBase + '. Vos saisies restent sur l’iPad';
      } else if (!STATE.enLigne) {
        b.classList.add('on');
        /* Le message ne parle de saisies en attente que s'il y en a vraiment. */
        if (msg) msg.textContent = STATE.fileAttente
-         ? 'Hors ligne — vos saisies partiront toutes seules'
-         : 'Hors ligne — vous pouvez continuer normalement';
+         ? 'Hors ligne, vos saisies partiront toutes seules'
+         : 'Hors ligne, vous pouvez continuer normalement';
      } else {
        b.classList.remove('on');
      }
@@ -1273,7 +1277,7 @@
      const reste = pinBloqueMs();
      const aide = $('#pin-aide');
      if (!reste) { if (aide) aide.textContent = 'Composez votre code à 4 chiffres'; return; }
-     if (aide) aide.textContent = 'Trop d’essais — réessayez dans ' + Math.ceil(reste / 1000) + ' s';
+     if (aide) aide.textContent = 'Trop d’essais. Réessayez dans ' + Math.ceil(reste / 1000) + ' s';
      afficherBlocagePin._t = setTimeout(afficherBlocagePin, 1000);
    }
 
@@ -1861,7 +1865,7 @@ function renderNav() {
    function alerteCritique(e, v) {
      showSheet(
        '<h2 id="sheet-titre">' + esc(e.nom) + ' à ' + v + ' °C</h2>' +
-       '<p class="sub">Limite critique dépassée — cible ' + esc(e.cible) + '.</p>' +
+       '<p class="sub">Limite critique dépassée (cible ' + esc(e.cible) + ').</p>' +
        '<div class="alerte bad" style="margin-top:14px"><span class="ai">•</span>' +
        '<div><b>Appelez ' + esc(nomManager()) + '</b><p>En attendant, transférez les produits dans une ' +
        'enceinte conforme et notez l’action corrective en bas de l’écran.</p></div></div>' +
@@ -1907,7 +1911,7 @@ async function purgerPreuves() {
       DB._oter(cle);
     }
   } catch (e) { /* purge sans conséquence si elle échoue */ }
-  if (effaces) console.info('Purge locale : ' + effaces + ' photo(s) de plus de ' + PREUVE_LOCAL_JOURS + ' jours (copie serveur conservée)');
+  if (effaces) console.info('Purge locale : ' + effaces + ' ' + accord(effaces, 'photo') + ' de plus de ' + PREUVE_LOCAL_JOURS + ' jours (copie serveur conservée)');
   return effaces;
 }
 
@@ -1973,7 +1977,7 @@ async function purgerLocalAncien() {
     const enFileMaintenant = new Set(fileLire().map(x => x.cle));
     aEffacer.filter(c => !enFileMaintenant.has(c)).forEach(c => { DB._oter(c); n++; });
   } catch (e) { /* purge sans conséquence si elle échoue */ }
-  if (n) console.info('Purge locale : ' + n + ' clé(s) ancienne(s) ' +
+  if (n) console.info('Purge locale : ' + n + ' ' + accord(n, 'clé ancienne', 'clés anciennes') + ' ' +
                       (base ? 'de plus de ' + jours + ' jours (copie serveur conservée)' : '(durées de conservation)'));
   return n;
 }
@@ -2053,7 +2057,7 @@ async function purgerLocalAncien() {
            motif = d.motif;
            $$('#pm .chip').forEach(x => x.classList.toggle('on', x.dataset.m === d.motif));
          }
-         $('#mtx').innerHTML = 'Entendu : « ' + esc(txt) + ' » — vérifiez avant d’enregistrer.';
+         $('#mtx').innerHTML = 'Entendu : « ' + esc(txt) + ' ». Vérifiez avant d’enregistrer.';
          vibrer(UI.vibration.ok);
        };
        r.onerror = ev => {
@@ -2211,7 +2215,7 @@ async function purgerLocalAncien() {
        carte(entete('📦', 'Réassort du ' + fmtD(j), REASSORT.length + ' points à vérifier. Signalez ce qui manque.') +
          '<div class="rang"><b class="num" style="font-size:26px">' + faits + '</b>' +
          '<span class="mini">sur ' + REASSORT.length + '</span>' +
-         (rupt.length ? '<span class="pousse">' + pastille('bad', rupt.length + ' rupture(s)') + '</span>' : '') + '</div>' +
+         (rupt.length ? '<span class="pousse">' + pastille('bad', rupt.length + ' ' + accord(rupt.length, 'rupture')) + '</span>' : '') + '</div>' +
          '<div class="jauge" style="margin-top:10px"><i style="width:' +
          Math.round(faits / REASSORT.length * 100) + '%"></i></div>', 'solide') +
    
@@ -2243,8 +2247,8 @@ async function purgerLocalAncien() {
                '<div style="flex:1;min-width:0">' +
                '<b>' + esc(r.nom) + '</b>' +
                '<div class="mini">' + (
-                 rupt.length ? esc(rupt.join(', ')) + ' — en rupture'
-                 : v.rupture ? 'Reste ' + v.reste + ' ' + esc(r.unite) + ' — signalé'
+                 rupt.length ? esc(rupt.join(', ')) + ' : en rupture'
+                 : v.rupture ? 'Reste ' + v.reste + ' ' + esc(r.unite) + ', signalé'
                  : fait && !dc.length ? 'Vérifié par ' + esc(v.par || '') + ' · ' + heure(v.at)
                  : dc.length ? faites + '/' + dc.length + ' · ' + esc(r.detail || ('en ' + r.unite))
                  : esc(r.detail || ('en ' + r.unite))) + '</div></div>' +
@@ -2576,7 +2580,7 @@ function ecranRemiseAZero(auto) {
      tout effacer sans code. */
   showSheet(
     '<h2 id="sheet-titre">Réinitialiser cet appareil</h2>' +
-    '<p class="sub">' + n + ' élément(s) enregistré(s) sur cet appareil</p>' +
+    '<p class="sub">' + n + ' ' + accord(n, 'élément enregistré', 'éléments enregistrés') + ' sur cet appareil</p>' +
 
     '<div class="alerte warn"><span class="ai">●</span><div><b>Ce qui va être effacé</b>' +
     '<p>Les saisies gardées en local, la session ouverte, et la version en cache de ' +
@@ -2618,11 +2622,11 @@ function ecranRemiseAZero(auto) {
     zone.innerHTML = nb
       ? (perdues
         ? '<div class="alerte bad" style="margin-top:10px"><span class="ai">▲</span><div>' +
-          '<b>' + nb + ' saisie(s) jamais envoyée(s) à la base</b><p>Détacher l’appareil les efface : elles n’existent que sur cet ' +
+          '<b>' + nb + ' ' + accord(nb, 'saisie jamais envoyée', 'saisies jamais envoyées') + ' à la base</b><p>Détacher l’appareil les efface : elles n’existent que sur cet ' +
           'appareil et seront perdues.' + (DB.configure ? ' Reconnectez-le au réseau puis touchez « Envoyer d’abord ».' : '') +
           '</p></div></div>'
         : '<div class="alerte warn" style="margin-top:10px"><span class="ai">●</span><div>' +
-          '<b>' + nb + ' saisie(s) pas encore envoyée(s) à la base</b><p>Elles restent sur l’appareil : ' +
+          '<b>' + nb + ' ' + accord(nb, 'saisie pas encore envoyée', 'saisies pas encore envoyées') + ' à la base</b><p>Elles restent sur l’appareil : ' +
           'il les enverra de lui-même dès que la base répondra.</p></div></div>') +
         (DB.configure ? '<button class="btn clair bloc" id="rz-sync" style="margin-top:10px">Envoyer d’abord</button>' : '')
       : '';
@@ -2631,7 +2635,7 @@ function ecranRemiseAZero(auto) {
       b.disabled = true; b.textContent = 'Envoi…';
       try { await journaliserSync(); } catch (e) {}
       majFile();
-      if (fileLire().length) toast('Envoi impossible pour l’instant — réseau ou base injoignable', 'erreur');
+      if (fileLire().length) toast('Envoi impossible pour l’instant : pas de réseau, ou la base ne répond pas', 'erreur');
     };
   };
   majFile();
@@ -2655,9 +2659,9 @@ function ecranRemiseAZero(auto) {
     const gardees = detacher ? 0 : fileLire().length;
     $('#sheet-corps').innerHTML =
       '<h2>Appareil remis à zéro</h2>' +
-      '<p class="sub">' + r.cles + ' saisie(s), ' + r.sw + ' service worker, ' +
-      r.caches + ' cache(s) effacés' + (rattache && !detacher ? ' · appareil toujours rattaché' : '') +
-      (gardees ? ' · ' + gardees + ' envoi(s) en attente gardé(s)' : '') + '.</p>' +
+      '<p class="sub">Effacés : ' + r.cles + ' ' + accord(r.cles, 'saisie') + ', ' + r.sw + ' ' + accord(r.sw, 'service worker') + ', ' +
+      r.caches + ' ' + accord(r.caches, 'cache') + (rattache && !detacher ? ' · appareil toujours rattaché' : '') +
+      (gardees ? ' · ' + gardees + ' ' + accord(gardees, 'envoi en attente gardé', 'envois en attente gardés') : '') + '.</p>' +
       '<div class="alerte ok" style="margin-top:12px"><span class="ai">•</span><div>' +
       '<b>Redémarrage…</b><p>L’application va se recharger sur sa dernière version.</p></div></div>';
     setTimeout(function () { location.replace(location.pathname); }, 1500);
@@ -2778,7 +2782,7 @@ function navJour(jour) {
       '<button type="button" class="btn clair bloc sm" data-nj="' + today() + '" ' +
       'style="margin:-4px 0 12px">Revenir à aujourd’hui</button>') +
     (peutModifier(jour) ? '' :
-      '<div class="lecture">Consultation seule — ' + (jour > today()
+      '<div class="lecture">Consultation seule : ' + (jour > today()
         ? 'un jour à venir ne se remplit pas d’avance.' : 'seul le jour en cours est modifiable.') + '</div>');
 }
 
@@ -3210,7 +3214,7 @@ function ecranAmorcage() {
 
       d.remove();
       if (typeof initLogin === 'function') initLogin();
-      toast(equipe.length + ' personne(s) enregistrée(s)');
+      toast(equipe.length + ' ' + accord(equipe.length, 'personne enregistrée', 'personnes enregistrées'));
     };
   };
 
@@ -3243,7 +3247,7 @@ window.addEventListener('unhandledrejection', function (ev) {
 
   console.error('Incident non traité :', STATE.view, e);
   if (typeof toast === 'function') {
-    toast('L’action n’a pas abouti — réessayez', 'erreur');
+    toast('L’action n’a pas abouti. Réessayez', 'erreur');
   }
   ev.preventDefault();
 });
@@ -3276,7 +3280,7 @@ window.addEventListener('error', function (ev) {
            if (!sw) return;
            sw.addEventListener('statechange', () => {
              if (sw.state === 'installed' && navigator.serviceWorker.controller) {
-               toast('Nouvelle version prête — rouvrez l’application');
+               toast('Nouvelle version prête : rouvrez l’application');
              }
            });
          });
@@ -3299,7 +3303,7 @@ window.addEventListener('error', function (ev) {
   if (!$('#sheet').hidden) closeSheet();
   $('#login').hidden = true;
   $('#app').hidden = false;
-  document.title = APP.nom + ' — ' + APP.site;
+  document.title = APP.nom + ' · ' + APP.site;
   STATE.jour = today();       // chaque connexion repart du jour en cours
   STATE.phase = phaseCourante();
   /* Le compteur de file part de la réalité, pas de zéro : sans ça il restait
@@ -3582,7 +3586,7 @@ function ouvrirPremierePeriode() {
       const n = joursEntre($('#pp-d').value, $('#pp-f').value).length;
       const ok = n > 0;
       $('#pp-info').textContent = ok
-        ? 'Fenêtre de ' + n + ' jour(s), du ' + fmtD($('#pp-d').value) + ' au ' + fmtD($('#pp-f').value) + '.'
+        ? 'Fenêtre de ' + n + ' ' + accord(n, 'jour') + ', du ' + fmtD($('#pp-d').value) + ' au ' + fmtD($('#pp-f').value) + '.'
         : 'La date de fin doit être égale ou postérieure à la date de début.';
       $('#pp-info').style.color = ok ? '' : 'var(--corail-d)';
       $('#pp-ok').disabled = !ok;
@@ -3761,7 +3765,7 @@ function ouvrirPremierePeriode() {
         saisies s'y rattachent et l'écart de la semaine suivante ne peut pas
         se calculer. Trois jours sans que personne ne le voie, c'est arrivé. */
      if (per && per.echue) {
-       A.push(['bad', 'Période terminée depuis ' + per.joursDepuisFin + ' jour(s)',
+       A.push(['bad', 'Période terminée depuis ' + per.joursDepuisFin + ' ' + accord(per.joursDepuisFin, 'jour'),
          'La semaine du ' + fmtD(per.debut) + ' au ' + fmtD(per.fin) + ' attend sa clôture. ' +
          'Les saisies d’aujourd’hui s’y rattachent encore.', 'periodes']);
      }
@@ -3775,16 +3779,16 @@ function ouvrirPremierePeriode() {
         de lait — et donc s'il doit appeler le fournisseur maintenant. */
      if (ruptures.length) {
        const noms = [...new Set(ruptures.map(r => r.article).filter(Boolean))];
-       A.push(['bad', ruptures.length + ' rupture(s) non traitée(s)',
+       A.push(['bad', ruptures.length + ' ' + accord(ruptures.length, 'rupture non traitée', 'ruptures non traitées'),
          noms.length
-           ? noms.slice(0, 4).join(', ') + (noms.length > 4 ? ' et ' + (noms.length - 4) + ' autre(s)' : '') + '.'
+           ? noms.slice(0, 4).join(', ') + (noms.length > 4 ? ' et ' + (noms.length - 4) + ' ' + accord(noms.length - 4, 'autre') : '') + '.'
            : 'Signalées par l’équipe lors du réassort.',
          '#urgences']);   // « Ouvrir » renvoyait vers cette même vue : on descend à la liste
      }
      if (perimes) {
        const quoi = [...new Set((fifo || []).filter(x => x.c === 'rouge')
          .map(x => x.nom).filter(Boolean))];
-       A.push(['bad', perimes + ' produit(s) dépassé(s)',
+       A.push(['bad', perimes + ' ' + accord(perimes, 'produit dépassé', 'produits dépassés'),
          (quoi.length ? quoi.slice(0, 4).join(', ') + '. ' : '') +
          'À retirer de la vitrine immédiatement.', 'frigo']);
      }
@@ -3802,16 +3806,16 @@ function ouvrirPremierePeriode() {
        'Relevé à faire dès l’ouverture (' + horaires.ouverture + '), avant la mise en vitrine.', 'temp', 'm']);
      if (soirDu && !e.tempS) A.push(['warn', 'Frigos du soir non relevés',
        'Relevé à faire avant la fermeture (' + horaires.fermeture + ').', 'temp', 's']);
-     if (tempCrit) A.push(['bad', tempCrit + ' relevé(s) en limite critique',
+     if (tempCrit) A.push(['bad', tempCrit + ' ' + accord(tempCrit, 'relevé') + ' en limite critique',
        (enceintesCrit.length ? enceintesCrit.slice(0, 3).join(', ') + '. ' : '') +
        'Chaque dépassement doit avoir une action corrective écrite.', 'temp',
        dernierCrit && dernierCrit.moment, dernierCrit && dernierCrit.jour]);
      if (Math.abs(cumulCaisse) > SEUILS.caisseCumulEur) A.push(['warn', 'Écart de caisse cumulé : ' + eur(cumulCaisse), 'Au-delà de ' + eur(SEUILS.caisseCumulEur) + ' sur la période.', 'caisse']);
-     if (sansNet >= SEUILS.joursSansNettoyage) A.push(['warn', sansNet + ' jour(s) sans nettoyage validé', 'À reprendre avec l’équipe.', 'clean']);
+     if (sansNet >= SEUILS.joursSansNettoyage) A.push(['warn', sansNet + ' ' + accord(sansNet, 'jour') + ' sans nettoyage validé', 'À reprendre avec l’équipe.', 'clean']);
      if (bientot) {
        const quoi = [...new Set((fifo || []).filter(x => x.c === 'orange')
          .map(x => x.nom).filter(Boolean))];
-       A.push(['warn', bientot + ' produit(s) à écouler vite',
+       A.push(['warn', bientot + ' ' + accord(bientot, 'produit') + ' à écouler vite',
          (quoi.length ? quoi.slice(0, 4).join(', ') + '. ' : '') +
          'Moins de 48 h de vie restante.', 'frigo']);
      }
@@ -3886,7 +3890,7 @@ function ouvrirPremierePeriode() {
 
      const tt = $('#tout-traite');
      if (tt) tt.onclick = () => confirmer('Tout marquer traité ?',
-       ruptures.length + ' rupture(s) seront classées. L’historique est conservé.', 'Tout traiter', async () => {
+       ruptures.length + ' ' + accord(ruptures.length, 'rupture sera classée', 'ruptures seront classées') + '. L’historique est conservé.', 'Tout traiter', async () => {
          const l = await DB.get('ruptures', []);
          const classees = l.filter(r => !r.traite);
          classees.forEach(r => { r.traite = true; r.traitePar = STATE.user.prenom; r.traiteAt = nowISO(); });
@@ -3895,7 +3899,7 @@ function ouvrirPremierePeriode() {
             sinon le classement en masse ne laissait aucune trace. */
          if (classees.length) {
            const noms = [...new Set(classees.map(r => r.article).filter(Boolean))];
-           await feed('ok', STATE.user.prenom + ' a traité ' + classees.length + ' rupture(s)' +
+           await feed('ok', STATE.user.prenom + ' a traité ' + classees.length + ' ' + accord(classees.length, 'rupture') +
              (noms.length ? ' : ' + noms.slice(0, 6).join(', ') + (noms.length > 6 ? '…' : '') : ''));
          }
          toast('Urgences classées');
@@ -3996,7 +4000,7 @@ function ouvrirPremierePeriode() {
        kpi('À écouler', o.length, o.length ? 'warn' : 'ok', 'Moins de 48 h') +
        kpi('Conformes', v.length, 'ok', 'Rien à signaler') + '</div>' +
    
-       (fifo.length ? [['rouge', 'Périmés — à retirer', r], ['orange', 'À vendre vite', o], ['vert', 'Conformes', v]]
+       (fifo.length ? [['rouge', 'Périmés, à retirer', r], ['orange', 'À vendre vite', o], ['vert', 'Conformes', v]]
          .filter(g => g[2].length).map(g =>
            '<div class="entete"><h3>' + g[1] + '</h3><span class="pousse mini num">' + g[2].length + '</span></div>' +
            '<div class="stack">' + g[2].map(f =>
@@ -4330,7 +4334,7 @@ function ouvrirPremierePeriode() {
          kpi('Coût', eur(Math.abs(c.ecart) < 0.05 ? 0 : c.valeur), st.c, 'à ' + eur(FOURNISSEUR.prixMoyenKg) + '/kg');
      };
      const aiguille = c => 50 + (Math.max(-25, Math.min(25, -c.pct)) / 25) * 50;
-     const achatsTxt = (c, e) => n1(c.achats) + ' kg · ' + ((e.bl || []).length) + ' bon(s) scanné(s)';
+     const achatsTxt = (c, e) => n1(c.achats) + ' kg · ' + ((e.bl || []).length) + ' ' + accord((e.bl || []).length, 'bon scanné', 'bons scannés');
      const venduKpi = (c, e) => kpi('Poids vendu', n1(c.vendu) + '<span class="u">kg</span>',
                                     c.vendu ? 'ok' : 'warn', e.venteSource || 'Aucun import');
    
@@ -4561,11 +4565,11 @@ function ouvrirPremierePeriode() {
    
      $('#page').innerHTML =
        carte(entete('📅', libellePeriode(per),
-         anticipee ? 'Il reste ' + (dur - ecoules) + ' jour(s) avant la fin naturelle.' : 'La période est arrivée à son terme.') +
+         anticipee ? 'Il reste ' + (dur - ecoules) + ' ' + accord(dur - ecoules, 'jour') + ' avant la fin naturelle.' : 'La période est arrivée à son terme.') +
          '<div class="jauge"><i style="width:' + Math.round(ecoules / dur * 100) + '%"></i></div>' +
-         '<div class="rang" style="margin-top:10px"><span class="mini">' + ecoules + ' jour(s) sur ' + dur + '</span>' +
+         '<div class="rang" style="margin-top:10px"><span class="mini">' + ecoules + ' ' + accord(ecoules, 'jour') + ' sur ' + dur + '</span>' +
          '<span class="pousse">' + pastille(B.length ? (bloquants.length ? 'bad' : 'warn') : 'ok',
-           B.length ? B.length + ' point(s) ouverts' : 'Prête à clôturer') + '</span></div>', 'solide') +
+           B.length ? B.length + ' ' + accord(B.length, 'point ouvert', 'points ouverts') : 'Prête à clôturer') + '</span></div>', 'solide') +
    
        (B.length ? '<div class="entete"><h3>Ce qui reste à faire</h3></div><div class="stack">' + B.map(b =>
          '<div class="alerte ' + (b.forcable ? 'warn' : 'bad') + '"><span class="ai">' + (b.forcable ? '●' : '▲') + '</span>' +
@@ -4623,7 +4627,7 @@ function modifierPeriode(per) {
     if (!libre) $('#mp-f').value = finNaturelle(type, d);
     const n = joursEntre($('#mp-d').value, $('#mp-f').value).length;
     $('#mp-info').textContent = n > 0
-      ? 'Fenêtre de ' + n + ' jour(s), du ' + fmtD($('#mp-d').value) + ' au ' + fmtD($('#mp-f').value) + '.'
+      ? 'Fenêtre de ' + n + ' ' + accord(n, 'jour') + ', du ' + fmtD($('#mp-d').value) + ' au ' + fmtD($('#mp-f').value) + '.'
       : 'La date de fin doit suivre la date de début.';
 
     /* Raccourcir une période peut exclure des journées déjà saisies. */
@@ -4672,7 +4676,7 @@ function modifierPeriode(per) {
      if (bloquants.length) {
        showSheet(
          '<h2 id="sheet-titre">Clôture impossible</h2>' +
-         '<p class="sub">' + bloquants.length + ' point(s) ne peuvent pas être contournés.</p>' +
+         '<p class="sub">' + bloquants.length + ' ' + accord(bloquants.length, 'point ne peut pas être contourné', 'points ne peuvent pas être contournés') + '.</p>' +
          '<div class="stack">' + bloquants.map(b =>
            '<div class="alerte bad"><span class="ai">▲</span><div><b>' + esc(b.txt) + '</b></div>' +
            '<span class="go"><button class="btn clair sm" data-saut="' + b.go + '"' + (b.jour ? ' data-jour="' + b.jour + '"' : '') +
@@ -4689,10 +4693,10 @@ function modifierPeriode(per) {
      showSheet(
        '<h2 id="sheet-titre">' + (anticipee ? 'Clôture anticipée' : 'Terminer la période') + '</h2>' +
        '<p class="sub">' + esc(libellePeriode(per)) + (anticipee
-         ? ' — vous fermez avant le terme prévu du ' + fmtD(per.fin) + '.' : '') + '</p>' +
+         ? '. Vous fermez avant le terme prévu du ' + fmtD(per.fin) + '.' : '') + '</p>' +
    
        (forcables.length ? '<div class="alerte warn"><span class="ai">●</span><div><b>' + forcables.length +
-         ' point(s) incomplets</b><p>' + esc(forcables.slice(0, 3).map(b => b.txt).join(' · ')) +
+         ' ' + accord(forcables.length, 'point incomplet', 'points incomplets') + '</b><p>' + esc(forcables.slice(0, 3).map(b => b.txt).join(' · ')) +
          (forcables.length > 3 ? '…' : '') + '</p></div></div>' : '') +
    
        (forcables.length && PERIODES.forcageMotifObligatoire
@@ -4722,7 +4726,7 @@ function modifierPeriode(per) {
          $('#cl-f').value = finNaturelle(type, d);
        }
        const n = joursEntre($('#cl-d').value, $('#cl-f').value).length;
-       $('#cl-info').textContent = 'La nouvelle fenêtre couvrira ' + n + ' jour(s). ' +
+       $('#cl-info').textContent = 'La nouvelle fenêtre couvrira ' + n + ' ' + accord(n, 'jour') + '. ' +
          'Tous les écarts et statistiques se recalculeront dessus.';
        $('#cl-dates').style.opacity = type === 'personnalise' ? '1' : '.85';
        /* Un début choisi après demain laissait des jours hors de toute période,
@@ -4733,7 +4737,7 @@ function modifierPeriode(per) {
        const trou = debut > demain ? joursEntre(demain, addD(debut, -1)) : [];
        $('#cl-trou').innerHTML = trou.length
          ? '<div class="alerte warn" style="margin-top:10px"><span class="ai">●</span><div><b>' + trou.length +
-           ' jour(s) hors de toute période</b><p>Du ' + fmtD(trou[0]) + ' au ' + fmtD(trou[trou.length - 1]) +
+           ' ' + accord(trou.length, 'jour') + ' hors de toute période</b><p>Du ' + fmtD(trou[0]) + ' au ' + fmtD(trou[trou.length - 1]) +
            ' : ces jours ne compteront dans aucun écart ni aucune statistique. ' +
            'Pour enchaîner sans interruption, commencez le ' + fmtD(demain) + '.</p></div></div>'
          : '';
@@ -4771,7 +4775,7 @@ function modifierPeriode(per) {
        await DB.patch('ecart:' + suivante.id, { debut:{ kg:c.reel }, litrageBL:0, jeteL:0, jeteKg:0, ventes:{} });
    
        await feed('ok', STATE.user.prenom + ' a clôturé ' + libellePeriode(per) +
-         (anticipee ? ' (anticipée)' : '') + ' — écart ' + n1(c.pct) + ' %');
+         (anticipee ? ' (anticipée)' : '') + ', écart ' + n1(c.pct) + ' %');
        closeSheet();
        toast('Période clôturée · nouvelle fenêtre ouverte');
        rendre('periodes');
@@ -4803,25 +4807,25 @@ function modifierPeriode(per) {
        else if (onglet === 'temp') {
          const n = ENCEINTES.reduce((s, e) => s + (v['m_' + e.id] ? 1 : 0) + (v['s_' + e.id] ? 1 : 0), 0);
          const cr = ENCEINTES.filter(e => ['m','s'].some(m => etatTemp(e, v[m + '_' + e.id]) === 'crit')).length;
-         lignes.push([fmtD(j), n + ' / ' + (ENCEINTES.length * 2), cr ? cr + ' critique(s)' : 'Conforme', v.par || '—', cr ? 'bad' : 'ok']);
+         lignes.push([fmtD(j), n + ' / ' + (ENCEINTES.length * 2), cr ? cr + ' ' + accord(cr, 'critique') : 'Conforme', v.par || '—', cr ? 'bad' : 'ok']);
        }
        else if (onglet === 'clean') {
          const f = Object.keys(v).filter(k => v[k] && v[k].ok).length;
-         lignes.push([fmtD(j), f + ' tâche(s)', f ? 'Fait' : 'Rien', '—', f ? 'ok' : 'bad']);
+         lignes.push([fmtD(j), f + ' ' + accord(f, 'tâche'), f ? 'Fait' : 'Rien', '—', f ? 'ok' : 'bad']);
        }
        else if (onglet === 'reassort') {
          const f = Object.keys(v).filter(k => v[k] && v[k].ok).length;
          const r = Object.keys(v).filter(k => v[k] && v[k].rupture).length;
-         lignes.push([fmtD(j), f + ' / ' + REASSORT.length, r ? r + ' rupture(s)' : 'Aucune', '—', r ? 'bad' : 'ok']);
+         lignes.push([fmtD(j), f + ' / ' + REASSORT.length, r ? r + ' ' + accord(r, 'rupture') : 'Aucune', '—', r ? 'bad' : 'ok']);
        }
        else if (onglet === 'pertes') {
          if (!v.length) continue;
-         lignes.push([fmtD(j), v.length + ' ligne(s)', n1(v.reduce((s, w) => s + litresPerte(w), 0)) + ' L', v[0].par || '—', 'warn']);
+         lignes.push([fmtD(j), v.length + ' ' + accord(v.length, 'ligne'), n1(v.reduce((s, w) => s + litresPerte(w), 0)) + ' L', v[0].par || '—', 'warn']);
        }
        else if (onglet === 'pointage') {
          if (!v.length) continue;
          const t = v.reduce((s, x) => s + (x.minutes || 0), 0);
-         lignes.push([fmtD(j), v.length + ' session(s)', Math.floor(t / 60) + ' h ' + String(t % 60).padStart(2, '0'),
+         lignes.push([fmtD(j), v.length + ' ' + accord(v.length, 'session'), Math.floor(t / 60) + ' h ' + String(t % 60).padStart(2, '0'),
                       v.map(x => x.prenom).filter((x, i, a) => a.indexOf(x) === i).join(', '), 'ok']);
        }
        else if (onglet === 'feedback') {
@@ -4938,7 +4942,7 @@ function modifierPeriode(per) {
      const per = await periodeCourante();
    
      $('#printview').innerHTML =
-       '<div class="pv-h"><h1>Registre sanitaire — ' + esc(APP.nom) + '</h1>' +
+       '<div class="pv-h"><h1>Registre sanitaire · ' + esc(APP.nom) + '</h1>' +
        '<div>' + esc(APP.site) + ' · du ' + fmtD(debut) + ' au ' + fmtD(fin) +
        ' · période de gestion : ' + esc(libellePeriode(per)) +
        '<br>Édité le ' + new Date().toLocaleString(APP.locale) + ' par ' + esc(STATE.user.prenom) + '</div></div>' +
@@ -5038,10 +5042,10 @@ function modifierPeriode(per) {
          const enCours = p.sessions.filter(s => !s.fin && s.jour === today())[0];
          return carte('<div class="rang">' + avatar(e, 'av') +
            '<div style="flex:1;min-width:0"><b>' + esc(e.prenom) + '</b>' +
-           '<div class="mini">' + ROLES[e.role].label + ' · ' + p.jours + ' journée(s) sur 30' +
+           '<div class="mini">' + ROLES[e.role].label + ' · ' + p.jours + ' ' + accord(p.jours, 'journée') + ' sur 30' +
            (enCours ? ' · en service depuis ' + heure(enCours.debut) : '') + '</div></div>' +
            '<div style="text-align:right"><b class="num">' + h + '</b>' +
-           '<div class="mini">' + (feedTot[e.id] || 0) + ' action(s) / 14 j</div></div></div>' +
+           '<div class="mini">' + (feedTot[e.id] || 0) + ' ' + accord(feedTot[e.id] || 0, 'action') + ' en 14 jours</div></div></div>' +
            (gere ? '<button class="btn clair bloc sm" data-eq="' + esc(e.id) + '" style="margin-top:12px">' +
              'Modifier ' + esc(e.prenom) + '</button>' : ''),
            enCours ? 'menthe' : '');
@@ -5212,7 +5216,7 @@ function modifierPeriode(per) {
                        initiales:prenom.slice(0, 2).toUpperCase() };
            } else {
              const ancienne = liste.filter(x => x.id === cible)[0];
-             if (!ancienne) throw new Error(e.prenom + ' a été retiré(e) de l’équipe sur un autre appareil');
+             if (!ancienne) throw new Error(e.prenom + ' ne fait plus partie de l’équipe (retrait fait sur un autre appareil)');
              fiche = Object.assign({}, ancienne, { prenom:prenom, role:role,
                initiales:prenom === ancienne.prenom ? ancienne.initiales : prenom.slice(0, 2).toUpperCase() });
            }
@@ -5233,7 +5237,7 @@ function modifierPeriode(per) {
          majBoutonCompte();
        }
        closeSheet();
-       toast(neuf ? prenom + ' ajouté(e) à l’équipe' : 'Fiche de ' + prenom + ' enregistrée');
+       toast(neuf ? prenom + ' rejoint l’équipe' : 'Fiche de ' + prenom + ' enregistrée');
        rendre('equipe');
      };
 
@@ -5246,7 +5250,7 @@ function modifierPeriode(per) {
            await modifierEquipe(async liste => liste.filter(x => x.id !== e.id));
          } catch (err) { return toast(err && err.message ? err.message : 'Retrait impossible', 'erreur'); }
          await feed('warn', STATE.user.prenom + ' a retiré ' + e.prenom + ' de l’équipe');
-         toast(e.prenom + ' retiré(e) de l’équipe');
+         toast(e.prenom + ' ne fait plus partie de l’équipe');
          rendre('equipe');
        },
        /* « Annuler » revient à la fiche au lieu de tout fermer. */
@@ -5566,7 +5570,7 @@ function modifierPeriode(per) {
          'l’écart qui en découlera sera indicatif, pas exploitable pour trancher.</p></div></div>') +
    
        '<div class="grid g2" style="margin:14px 0">' +
-       kpi('Poids vendu', n1(r.kg) + '<span class="u">kg</span>', r.fiable ? 'ok' : 'warn', r.lignes + ' ligne(s)') +
+       kpi('Poids vendu', n1(r.kg) + '<span class="u">kg</span>', r.fiable ? 'ok' : 'warn', r.lignes + ' ' + accord(r.lignes, 'ligne')) +
        kpi('Valeur', eur(r.kg * FOURNISSEUR.prixMoyenKg), '', 'à ' + eur(FOURNISSEUR.prixMoyenKg) + '/kg') + '</div>' +
    
        (r.detail.length
@@ -5578,7 +5582,7 @@ function modifierPeriode(per) {
    
        (r.inconnus.length
          ? '<div class="alerte warn" style="margin-top:14px"><span class="ai">•</span>' +
-           '<div><b>' + r.inconnus.length + ' produit(s) sans grammage</b><p>' +
+           '<div><b>' + r.inconnus.length + ' ' + accord(r.inconnus.length, 'produit') + ' sans grammage</b><p>' +
            esc(r.inconnus.slice(0, 8).join(', ')) + (r.inconnus.length > 8 ? '…' : '') +
            '. Leur glace n’est pas comptée dans les ventes, donc elle apparaîtra comme un manque.</p></div></div>'
          : '') +

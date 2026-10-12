@@ -84,7 +84,7 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
      const poidsNouvelle = (p.img || '').length;
 
      if (poidsActuel + poidsNouvelle > POIDS_MAX) {
-       toast('Trop de photos aujourd’hui — celle-ci ne peut pas être ajoutée', 'erreur');
+       toast('Trop de photos aujourd’hui : celle-ci ne peut pas être ajoutée', 'erreur');
        await feed('warn', 'Photo refusée : la journée atteint ' +
          Math.round(poidsActuel / 1024) + ' Ko. Supprimez-en une pour en reprendre.');
        return null;
@@ -227,13 +227,13 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
          ? '<div class="entete"><h3>Reçu aujourd’hui</h3></div><div class="stack">' + recus.map(r =>
              carte('<div class="rang">' +
                '<div style="flex:1;min-width:0"><b>' + esc(r.fournisseur) + ' · ' + esc(r.numero) + '</b>' +
-               '<div class="mini">' + r.lignes.length + ' référence(s) · sonde ' + (r.temp === '' ? '—' : r.temp + ' °C') +
+               '<div class="mini">' + r.lignes.length + ' ' + accord(r.lignes.length, 'référence') + ' · sonde ' + (r.temp === '' ? '—' : r.temp + ' °C') +
                ' · ' + esc(r.par) + ' à ' + heure(r.at) + '</div></div>' +
                pastille(r.refuse ? 'bad' : 'ok', r.refuse ? 'Refusée' : 'Conforme') + '</div>',
                r.refuse ? 'corail' : 'menthe')).join('') + '</div>'
          : '') +
    
-       '<div class="entete"><h3>Stock fermé</h3><span class="pousse mini num">' + ferme.length + ' article(s)</span></div>' +
+       '<div class="entete"><h3>Stock fermé</h3><span class="pousse mini num">' + ferme.length + ' ' + accord(ferme.length, 'article') + '</span></div>' +
        (ferme.length
          ? '<div class="dense"><div class="dense-h"><span class="c1">Produit</span>' +
            '<span class="c w">Qté</span><span class="c ww">DLC</span></div><div class="dense-scroll">' +
@@ -283,7 +283,7 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
          $('#rc-alerte').innerHTML = (tropChaud || nonConf.length)
            ? '<div class="alerte bad" style="margin-top:14px"><span class="ai">▲</span><div><b>Livraison à refuser</b>' +
              '<p>' + (tropChaud ? 'Produit relevé à ' + t + ' °C, au-dessus de ' + RECEPTION.tempMax + ' °C. ' : '') +
-             (nonConf.length ? nonConf.length + ' point(s) de conformité non validés. ' : '') +
+             (nonConf.length ? nonConf.length + ' ' + accord(nonConf.length, 'point de conformité non validé', 'points de conformité non validés') + '. ' : '') +
              'Notez le motif et prévenez le manager.</p></div></div>'
            : '';
        }
@@ -364,8 +364,8 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
            if (dlc) lignes[i].dlc = dlc;
            if (r.lot) lignes[i].lot = r.lot;
            if (r.parfum && !lignes[i].produit) lignes[i].produit = r.parfum;
-           if (dlc) toast('DLC lue : ' + fmtD(dlc) + ' — vérifiez-la sur l’étiquette');
-           else toast('Aucune date lisible — saisissez-la à la main', 'erreur');
+           if (dlc) toast('DLC lue : ' + fmtD(dlc) + '. Vérifiez-la sur l’étiquette');
+           else toast('Aucune date lisible : saisissez-la à la main', 'erreur');
            rendre2();
          });
          $('#rl-plus').onclick = () => { lignes.push({ produit:'', qte:1, unite:'bac', lot:'', dlc:'' }); rendre2(); };
@@ -383,7 +383,7 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
          const valides = lignes.filter(l => l.produit.trim());
          if (!valides.length) return toast('Saisissez au moins un produit', 'erreur');
          const sansDlc = valides.filter(l => !l.dlc).length;
-         if (sansDlc) return toast(sansDlc + ' produit(s) sans DLC — elle est obligatoire', 'erreur');
+         if (sansDlc) return toast(sansDlc + ' ' + accord(sansDlc, 'produit') + ' sans DLC : elle est obligatoire', 'erreur');
    
          const rec = { id:uid(), fournisseur:bl.fournisseur, numero:bl.numero, temp:bl.temp,
                        conf:bl.conf, refuse:bl.refuse, lignes:valides,
@@ -421,7 +421,7 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
            STATE.user.prenom + (bl.refuse ? ' a REFUSÉ la livraison ' : ' a réceptionné ') + bl.numero +
            ' (' + valides.length + ' réf.)');
          closeSheet();
-         toast(bl.refuse ? 'Réception refusée et tracée' : valides.length + ' produit(s) ajouté(s) au stock, DLC suivie');
+         toast(bl.refuse ? 'Réception refusée et tracée' : valides.length + ' ' + accord(valides.length, 'produit ajouté', 'produits ajoutés') + ' au stock, DLC suivie');
          rendre('reception');
        }
    
@@ -474,7 +474,7 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
          if (manque) {
            return confirmer('Ce bac n’est plus au stock',
              'L’application n’a plus de ' + manque.article + ' en réserve' +
-             (manque.reste < 0 ? ' — le compte est déjà à ' + manque.reste + '.' : '.') +
+             (manque.reste < 0 ? ' : le compte est déjà à ' + manque.reste + '.' : '.') +
              ' Soit une ouverture précédente n’a pas été scannée, soit une livraison ' +
              'n’a pas été saisie. Confirmez si le bac est bien là.',
              'Confirmer l’ouverture', async () => { await validerOuverture(lot); });
@@ -572,7 +572,7 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
    
      const R = [];
      if (!e.tempM) R.push(['bad', 'Frigos du matin non relevés', 'À faire dès l’ouverture, avant la mise en vitrine.', 'temp', 'm']);
-     if (e.tempCrit) R.push(['bad', e.tempCrit + ' frigo(s) en limite critique', 'Transférez les produits et prévenez ' + (typeof nomManager === 'function' ? nomManager() : 'le manager') + '.', 'temp',
+     if (e.tempCrit) R.push(['bad', e.tempCrit + ' ' + accord(e.tempCrit, 'frigo') + ' en limite critique', 'Transférez les produits et prévenez ' + (typeof nomManager === 'function' ? nomManager() : 'le manager') + '.', 'temp',
        /* Le moment du dépassement (le soir s'il y en a un), pas celui de l'heure. */
        ENCEINTES.some(en => etatTemp(en, tempJour['s_' + en.id]) === 'crit') ? 's' : 'm']);
      alertes.filter(a => a.niveau !== 'jaune').forEach(a => R.push(['bad',
@@ -729,7 +729,7 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
             blocs.map(b => (blocs.length > 1 ? '<div class="entete"><h3>' + esc(b.bloc) + '</h3></div>' : '') +
               '<div class="stack">' + b.taches.map(t => ligne(t, ++n)).join('') + '</div>').join('') +
             '<button class="btn ' + (vp ? 'clair' : 'menthe') + ' bloc xl" id="valproc" style="margin-top:18px">' +
-            (vp ? '✓ Déjà validée — revalider'
+            (vp ? '✓ Déjà validée, revalider'
                 : 'Valider la procédure' + (faits < total ? ' (' + (total - faits) + ' restante' + (total - faits > 1 ? 's' : '') + ')' : '')) +
             '</button>', 'solide');
         })()) +
@@ -835,7 +835,7 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
         '<h2 id="sheet-titre">Il manque ' + esc(premier.lie.quoi) + '</h2>' +
         '<p class="sub">Cette étape ne peut pas être cochée à la main.</p>' +
         '<div class="alerte bad"><span class="ai">•</span><div>' +
-        '<b>' + manquantes.length + ' étape(s) à faire dans leur écran</b><p>' +
+        '<b>' + manquantes.length + ' ' + accord(manquantes.length, 'étape') + ' à faire dans leur écran</b><p>' +
         esc(manquantes.map(x => x.lie.quoi).join(' · ')) +
         '. Ce sont des pièces du registre sanitaire : elles doivent porter des ' +
         'valeurs réelles et une signature.</p></div></div>' +
@@ -857,7 +857,7 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
       rendre('accueil');
     };
     if (restants.length) {
-      confirmer('Valider avec ' + restants.length + ' tâche(s) non faite(s) ?',
+      confirmer('Valider avec ' + restants.length + ' ' + accord(restants.length, 'tâche non faite', 'tâches non faites') + ' ?',
         'Non faites : ' + restants.map(t => t.t).join(' · ') + '.',
         'Valider quand même', finir);
       return;
@@ -1030,7 +1030,7 @@ V.caisse = async function () {
 
       (verrou ? '' :
       '<button class="btn ' + (valide ? 'clair' : 'menthe') + ' bloc xl" id="cv" style="margin-top:16px">' +
-      (valide ? '✓ Déjà validé — revalider'
+      (valide ? '✓ Déjà validé, revalider'
               : 'Valider le comptage ' + (mom === 'm' ? 'd’ouverture' : 'de fermeture')) + '</button>') +
 
       /* Le manager voit le détail du calcul, pas seulement le verdict.
@@ -1200,7 +1200,7 @@ V.caisse = async function () {
       box.innerHTML = '<p class="verdict n">' + soucis.map(l => esc(l.t)).join('<br>') +
         '<br>Sous le seuil de ' + eur(seuil) + ' : pas de justification demandée.</p>';
     } else {
-      box.innerHTML = '<div class="verdict bad"><b>' + graves.length + ' écart(s) au-delà de ' +
+      box.innerHTML = '<div class="verdict bad"><b>' + graves.length + ' ' + accord(graves.length, 'écart') + ' au-delà de ' +
         eur(seuil) + '</b><span>' + soucis.map(l => esc(l.t)).join('<br>') +
         '<br>Expliquez-le dans le commentaire.</span></div>';
     }
@@ -1308,8 +1308,8 @@ V.caisse = async function () {
         const diffs = champsMoment(mo).filter(change).map(k =>
           k === p + 'com' ? 'commentaire modifié'
             : LIBELLES_CAISSE[k] + ' ' + eur(num(av[k])) + ' → ' + eur(num(apres[k])));
-        correction = ' — déjà validé par ' + (avant.par || '?') + (avant.at ? ' à ' + heure(avant.at) : '') +
-          ' : ' + (diffs.length ? diffs.join(', ') : 'montants inchangés');
+        correction = ' (déjà validé par ' + (avant.par || '?') + (avant.at ? ' à ' + heure(avant.at) : '') +
+          ') : ' + (diffs.length ? diffs.join(', ') : 'montants inchangés');
         r[p + 'corrections'] = (Array.isArray(r[p + 'corrections']) ? r[p + 'corrections'] : []).concat([{
           par:avant.par || null, id:avant.id || null, at:avant.at || null, valeurs:avant.valeurs || {},
           corrigePar:STATE.user.prenom, le:nowISO() }]);
@@ -1363,8 +1363,8 @@ function confirmerHorsStock(produit, lot) {
       'la livraison n’a pas été saisie, le bac vient d’une autre boutique, ou le ' +
       'numéro de lot a été mal lu.</p></div></div>' +
       '<div class="alerte info" style="margin-top:10px"><span class="ai">ℹ️</span><div>' +
-      '<b>Si vous continuez</b><p>L’ouverture sera traçée normalement — c’est ce qui ' +
-      'compte pour un contrôle — mais le stock ne sera pas décrémenté et l’écart de ' +
+      '<b>Si vous continuez</b><p>L’ouverture sera tracée normalement (c’est ce qui ' +
+      'compte pour un contrôle), mais le stock ne sera pas décrémenté et l’écart de ' +
       'période s’en ressentira. ' + esc((m => m.charAt(0).toUpperCase() + m.slice(1))(typeof nomManager === 'function' ? nomManager() : 'le manager')) + ' verra le signalement dans le fil.</p></div></div>' +
       '<div class="actions"><button class="btn clair" id="hs-x">Vérifier le lot</button>' +
       '<button class="btn ambre" id="hs-ok">Tracer quand même</button></div>' +
@@ -1439,7 +1439,7 @@ V.hebdo = async function () {
             (v.ok ? '✓ ' + esc(v.par) + ' · ' + heure(v.at)
                   : (assignee ? 'Attribuée à ' + esc(assignee)
                               : (t.perso ? 'Aucune personne attribuée' : 'À faire aujourd’hui'))) +
-            ' · ' + ph.length + '/' + HEBDO.photosMax + ' photo(s)</div></div>' +
+            ' · ' + ph.length + '/' + HEBDO.photosMax + ' ' + accord(HEBDO.photosMax, 'photo') + '</div></div>' +
             (v.ok ? pastille('ok', 'Fait') : pastille('n', 'À faire')) + '</div>' +
 
             /* Vignettes communes : un appui agrandit la photo et permet de
@@ -1613,7 +1613,7 @@ V.temp = async function () {
         esc(rec.obs || '') + '</textarea>') +
 
       '<button class="btn ' + (vm ? 'clair' : 'menthe') + ' bloc xl" id="tvalider" style="margin-top:16px">' +
-      (vm ? '✓ Déjà validé — revalider'
+      (vm ? '✓ Déjà validé, revalider'
           : reste.length ? 'Valider le ' + mom.label.toLowerCase() + ' (' + reste.length + ' manquante' + (reste.length > 1 ? 's' : '') + ')'
                          : 'Valider le relevé du ' + mom.label.toLowerCase()) +
       '</button>';
@@ -1723,7 +1723,7 @@ V.temp = async function () {
         return toast('Aucune température relevée : relevez au moins une enceinte (ou marquez-la HS)', 'erreur');
       }
       if (reste.length) {
-        confirmer('Valider avec ' + reste.length + ' enceinte(s) non relevée(s) ?',
+        confirmer('Valider avec ' + reste.length + ' ' + accord(reste.length, 'enceinte non relevée', 'enceintes non relevées') + ' ?',
           'Manquantes : ' + reste.map(e => e.nom).join(', ') + '. Un registre incomplet ' +
           'est contestable lors d’un contrôle.',
           'Valider quand même', finir);
@@ -1888,7 +1888,7 @@ async function organiserSemaine() {
         '<button type="button" class="jbtn' + (t.jours.indexOf(k) >= 0 ? ' on' : '') +
         '" data-j="' + esc(t.id) + '.' + k + '">' + JOURS_COURTS[k] + '</button>').join('') + '</div>' +
       '<div class="champ" style="margin-top:10px"><label class="f">Attribuée à</label>' +
-      '<select data-a="' + esc(t.id) + '"><option value="">— toute l’équipe —</option>' +
+      '<select data-a="' + esc(t.id) + '"><option value="">Toute l’équipe</option>' +
       EQUIPE.map(e => '<option value="' + esc(e.id) + '"' +
         (t.assignee === e.id ? ' selected' : '') + '>' + esc(e.prenom) + '</option>').join('') +
       '</select></div></div>';
@@ -1975,7 +1975,7 @@ async function attribuerResponsables() {
     '<p class="sub">Trois rôles à désigner, comme au bas du tableau.</p>' +
     RESPONSABLES.map(r =>
       '<div class="champ" style="margin-top:14px"><label class="f">' + r.icone + ' ' + esc(r.libelle) + '</label>' +
-      '<select data-r="' + esc(r.id) + '"><option value="">— personne —</option>' +
+      '<select data-r="' + esc(r.id) + '"><option value="">Personne</option>' +
       EQUIPE.map(e => '<option value="' + esc(e.id) + '"' +
         (resp[r.id] === e.id ? ' selected' : '') + '>' + esc(e.prenom) + '</option>').join('') +
       '</select></div>').join('') +
@@ -2034,7 +2034,7 @@ V.clean = async function () {
             '<span class="tx"><span class="tn">' + esc(t.libelle) + '</span>' +
             '<span class="tm">' + (v.ok ? esc(v.par) + ' · ' + heure(v.at)
               : (qui ? 'Attribuée à ' + esc(qui) : 'Photo obligatoire')) +
-            (ph.length ? ' · ' + ph.length + ' photo(s)' : '') + '</span></span>' +
+            (ph.length ? ' · ' + ph.length + ' ' + accord(ph.length, 'photo') : '') + '</span></span>' +
             '<button class="btn ' + (ph.length ? 'menthe' : 'clair') + ' sm" data-hbp="' + esc(t.id) + '"' +
             (ph.length >= HEBDO.photosMax ? ' disabled' : '') + '>' +
             (ph.length ? '✓ Photo' : 'Photo') + '</button></div>' +
@@ -2216,7 +2216,7 @@ function formulaireAnomalie() {
         '<span class="mi-fl">' + (gravite === g.id ? '✓' : '') + '</span></button>').join('') + '</div>' +
 
       '<button class="btn ' + (photo ? 'menthe' : 'ciel') + ' bloc" id="an-ph" style="margin-top:14px">' +
-      (photo ? '✓ Photo jointe — en reprendre une' : 'Photographier le problème') + '</button>' +
+      (photo ? '✓ Photo jointe (en reprendre une)' : 'Photographier le problème') + '</button>' +
       /* On peut la voir en grand et la retirer : une photo ratée ne doit pas
          rester attachée à un signalement qu'on transmet au manager. */
       (photo
@@ -2356,7 +2356,7 @@ function formulaireAnomalie() {
          'Un parfum peut exister en plusieurs formats : saisissez chaque taille séparément.') +
          (rec.valide
            ? '<div class="alerte ok"><span class="ai">•</span><div><b>Validé</b><p>' + esc(rec.par) + ' · ' +
-             fmtD(rec.jour) + ' ' + heure(rec.at) + ' — ' + rec.bacs + ' bacs, ' + n1(rec.kg) + ' kg</p></div>' +
+             fmtD(rec.jour) + ' ' + heure(rec.at) + ' · ' + rec.bacs + ' ' + accord(rec.bacs, 'bac') + ', ' + n1(rec.kg) + ' kg</p></div>' +
              '<span class="go"><button class="btn clair sm" id="rouvrir">Rouvrir</button></span></div>'
            : '<div class="grid g3">' +
              kpi('Bacs comptés', '<span id="tb">' + c.bacs + '</span>', '', 'Toutes tailles') +
@@ -2478,7 +2478,7 @@ function formulaireAnomalie() {
          carte('<h2>Réglages</h2><div class="cs">Paramètres de la boutique ' +
            esc(APP.site) + ' · version ' + esc(APP.version) + '.</div>' +
            '<button class="btn clair bloc" data-go="parametres" style="margin-top:14px">' +
-           'Back-office — tâches, horaires et unités froides</button>' +
+           'Back-office : tâches, horaires et unités froides</button>' +
            '<button class="btn clair bloc" data-go="equipe" style="margin-top:8px">Équipe</button>',
            'solide');
        $$('#page [data-go]').forEach(b => b.onclick = () => rendre(b.dataset.go));
@@ -2509,9 +2509,9 @@ function formulaireAnomalie() {
     '</div>' +
     (Object.keys(DB._gros || {}).length
       ? '<div class="alerte warn" style="margin-top:12px"><span class="ai">●</span><div>' +
-        '<b>' + Object.keys(DB._gros).length + ' donnée(s) trop lourde(s) pour la base</b>' +
-        '<p>' + esc(Object.keys(DB._gros).slice(0, 4).join(', ')) + '. Ces éléments — des ' +
-        'journées de photos, en pratique — restent sur cet appareil et ne remonteront pas. ' +
+        '<b>' + Object.keys(DB._gros).length + ' ' + accord(Object.keys(DB._gros).length, 'donnée trop lourde', 'données trop lourdes') + ' pour la base</b>' +
+        '<p>' + esc(Object.keys(DB._gros).slice(0, 4).join(', ')) + '. Ces éléments (des ' +
+        'journées de photos, en pratique) restent sur cet appareil et ne remonteront pas. ' +
         'Le passage à Supabase Storage réglera ce point.</p></div></div>'
       : '') +
        /* Mode local : aucune base, rien à tester — le test envoyait des
@@ -2563,7 +2563,7 @@ function formulaireAnomalie() {
      };
    
      $('#dg-purge').onclick = () => confirmer('Vider la file d’attente ?',
-       STATE.fileAttente + ' écriture(s) en attente seront abandonnées. Les données restent sur cet appareil ' +
+       STATE.fileAttente + ' ' + accord(STATE.fileAttente, 'écriture en attente sera abandonnée', 'écritures en attente seront abandonnées') + '. Les données restent sur cet appareil ' +
        'mais ne remonteront jamais dans la base.', 'Vider', async () => {
          await DB.del(OFFLINE.fileAttente);
          STATE.fileAttente = 0; STATE.erreurBase = null; STATE.dernierEchec = null;

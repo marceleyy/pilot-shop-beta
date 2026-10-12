@@ -304,7 +304,7 @@ const CALCUL = {
      box.innerHTML = '<p class="f" style="margin:16px 0 6px"><b>Proposé par l’appli</b> · réceptions ' + esc(texteDates(debut, fin)) + '</p>' +
        '<div class="dense">' + d.livraisons.map((p, i) =>
          '<div class="dl"><span class="c1">' + esc(p.numero || 'sans numéro') + ' · ' + esc(fmtDC(p.date)) +
-           ' · <span class="mini">' + esc(p.source) + (p.bacs ? ', ' + p.bacs + ' bac(s)' : '') + '</span></span>' +
+           ' · <span class="mini">' + esc(p.source) + (p.bacs ? ', ' + p.bacs + ' ' + accord(p.bacs, 'bac') : '') + '</span></span>' +
          '<span class="c w num">' + n1(p.litres) + ' L</span>' +
          '<span class="c w">' + (dejaCompte(l, p) ? pastille('ok', 'compté')
            : (p.doublon ? '<span class="mini">même livraison que ' + esc(p.doublon) + ' ?</span> ' : '') + '<button type="button" class="btn clair sm" data-lv-prop="' + i + '">Ajouter</button>') + '</span></div>').join('') +
@@ -407,8 +407,8 @@ const CALCUL = {
        if (r) props.push({ libelle:'Inventaire du ' + fmtDC(inv.jour) + (inv.par ? ' par ' + inv.par : '') +
                              (inv.jour < jour ? ' (dernier inventaire avant le ' + fmtDC(jour) + ')' : ''),
                            zones:r.zones, sansRangement:!r.rangement, rangement:r.rangement, compte:inv.jour === jour,
-                           pourquoi:'Cet inventaire date du ' + fmtDC(inv.jour) + (depuis ? ', avec ' + depuis +
-                             ' mouvement(s) de glace tracé(s) depuis (réceptions, ouvertures, pertes).' : '.') });
+                           pourquoi:'Cet inventaire date du ' + fmtDC(inv.jour) + (depuis ? ', avec ' + depuis + ' ' +
+                             accord(depuis, 'mouvement de glace tracé', 'mouvements de glace tracés') + ' depuis (réceptions, ouvertures, pertes).' : '.') });
      } catch (e) {}
      if (jour === today() && typeof stockReel === 'function') {
        try {
@@ -526,7 +526,7 @@ const CALCUL = {
        return carte(
          '<div class="rang"><div style="flex:1"><h2>' + (c.essai ? 'Essai' : 'Calcul en cours') +
            ' depuis le ' + esc(fmtD(c.debut)) + '</h2>' +
-         '<div class="cs">Départ ' + kgTxt(r.debut) + ' · ' + livraisonsDe(c).length + ' livraison(s), ' +
+         '<div class="cs">Départ ' + kgTxt(r.debut) + ' · ' + livraisonsDe(c).length + ' ' + accord(livraisonsDe(c).length, 'livraison') + ', ' +
            n1(r.livreL) + ' L' + (c.brouillon ? ' · clôture commencée' : '') + '</div>' +
          (c.essai ? '' : '<div class="mini" data-cg-suivi="' + esc(c.id) + '" style="margin-top:6px"></div>') + '</div>' +
          (c.essai ? pastille('ciel', 'ESSAI') : pastille('ok', 'OUVERT')) + '</div>' +
@@ -577,7 +577,7 @@ const CALCUL = {
        const recL = d.livraisons.reduce((t, x) => t + (x.doublon ? 0 : x.litres), 0);
        const manque = d.livraisons.filter(p => !dejaCompte(livraisonsDe(c), p));
        el.innerHTML = '<b>Suivi</b> · jour ' + jours + ' · réceptions dans l’appli : ' + n1(recL) + ' L' +
-         (manque.length ? ' (' + manque.length + ' pas encore comptée(s) ici)' : '') +
+         (manque.length ? ' (' + manque.length + ' ' + accord(manque.length, 'pas encore comptée', 'pas encore comptées') + ' ici)' : '') +
          ' · pertes au registre : ' + n1(d.pertesL) + ' L';
      });
 
@@ -946,7 +946,7 @@ const CALCUL = {
            const libres = d.livraisons.filter(p => !p.doublon);
            const box = $('#lv-indice');
            if (box && libres.length) box.innerHTML = '<p class="mini" style="margin-top:8px">L’appli a enregistré ' +
-             libres.length + ' réception(s) sur ces dates, ' + n1(libres.reduce((t, p) => t + p.litres, 0)) + ' L au total.</p>';
+             libres.length + ' ' + accord(libres.length, 'réception') + ' sur ces dates, ' + n1(libres.reduce((t, p) => t + p.litres, 0)) + ' L au total.</p>';
          }).catch(() => {});
          $('#lv-ret').onclick = () => eA();
          $('#lv-non').onclick = () => { w.livraisonRecue = false; eC(); };
@@ -1029,7 +1029,7 @@ const CALCUL = {
        const fichierActif = (v.mode === 'produits' && v.fichierLu) || (v.mode === 'fichier' && v.fichier);
        const horsPeriode = fichierActif && joursPer > 0 && num(v.joursFichier) > 0 && num(v.joursFichier) !== joursPer
          ? '<div class="alerte warn" style="margin-top:12px"><span class="ai">●</span><div><b>Ce fichier couvre ' + num(v.joursFichier) +
-           ' jour(s), la période en compte ' + joursPer + '</b><p>Vérifiez les dates de l’export de caisse : il doit couvrir ' +
+           ' ' + accord(num(v.joursFichier), 'jour') + ', la période en compte ' + joursPer + '</b><p>Vérifiez les dates de l’export de caisse : il doit couvrir ' +
            esc(texteDates(debutFlux(c), w.fin)) + '.</p></div></div>' : '';
        showSheet(
          '<h2 id="sheet-titre">Ventes de la période</h2>' +
@@ -1076,7 +1076,7 @@ const CALCUL = {
          else if (v.mode === 'total') v.kg = Math.max(0, num($('#cv-kg').value));
          const sansG = v.mode === 'produits' ? v.lignes.filter(l => num(l.q) > 0 && !(num(l.g) > 0)).length : 0;
          $('#cv-total').textContent = 'Vendu : ' + kgTxt(v.kg) +
-           (sansG ? ' · ' + sansG + ' produit(s) vendu(s) sans grammage, non comptés' : '');
+           (sansG ? ' · ' + sansG + ' ' + accord(sansG, 'produit vendu sans grammage, non compté', 'produits vendus sans grammage, non comptés') : '');
        };
        $$('#cv-corps input').forEach(i => i.oninput = () => { lireLignes(); calcule(); });
        calcule();
@@ -1119,13 +1119,13 @@ const CALCUL = {
              delete v.fichier; delete v.methode; delete v.detail;
              eD();
              toast(r.produits.length + ' produits de caisse rangés dans les colonnes du classeur' +
-               (r.inconnus.length ? ' : ' + r.inconnus.length + ' grammage(s) à compléter' : ''), r.inconnus.length ? 'erreur' : undefined);
+               (r.inconnus.length ? ' : ' + r.inconnus.length + ' ' + accord(r.inconnus.length, 'grammage') + ' à compléter' : ''), r.inconnus.length ? 'erreur' : undefined);
              return;
            }
            v.kg = +num(r.kg).toFixed(3);
            v.fichier = f.name;
            v.methode = r.methode + (r.fiable ? '' : ' · approximatif') +
-             (r.inconnus && r.inconnus.length ? ' · ' + r.inconnus.length + ' produit(s) sans glace connue ignoré(s) (boissons, crêpes nature…)' : '');
+             (r.inconnus && r.inconnus.length ? ' · ' + r.inconnus.length + ' ' + accord(r.inconnus.length, 'produit sans glace connue ignoré', 'produits sans glace connue ignorés') + ' (boissons, crêpes nature…)' : '');
            v.detail = (r.detail || []).slice(0, 8);
            $('#cv-lu').textContent = v.fichier + ' · ' + v.methode + ' · ' + kgTxt(v.kg);
            if ($('#cv-detail')) $('#cv-detail').innerHTML = detailVentes(v.detail);
@@ -1182,7 +1182,7 @@ const CALCUL = {
          '<p class="sub">' + (c.essai ? 'Essai · ' : '') + esc(fmtD(c.debut)) + ' → ' + esc(fmtD(w.fin)) + '</p>' +
          blocResultat(r) + blocComparaison(r, fini) +
          (horsPeriode.length ? '<div class="alerte warn" style="margin-top:12px"><span class="ai">●</span><div>' +
-           '<b>' + horsPeriode.length + ' livraison(s) datée(s) hors de la période</b><p>' +
+           '<b>' + horsPeriode.length + ' ' + accord(horsPeriode.length, 'livraison datée', 'livraisons datées') + ' hors de la période</b><p>' +
            esc(horsPeriode.map(x => (x.numero || 'sans numéro') + ' du ' + fmtDC(x.date)).join(', ')) +
            '. Elles sont comptées : retirez-les à l’étape 1 si elles n’ont rien à faire ici.</p></div></div>' : '') +
          (STATE.enLigne ? '' : '<div class="alerte warn" style="margin-top:12px"><span class="ai">●</span><div>' +

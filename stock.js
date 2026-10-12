@@ -589,7 +589,7 @@ function anomaliesStock(articles) {
     const pire = negatifs.reduce((a, c) => num(articles[c]) < num(articles[a]) ? c : a, negatifs[0]);
     out.push({
       niveau: 'warn',
-      titre: negatifs.length + ' article(s) en stock négatif',
+      titre: negatifs.length + ' ' + accord(negatifs.length, 'article') + ' en stock négatif',
       detail: 'Le plus bas : ' + libelleArticle(pire) + ' à ' + articles[pire] + '. ' +
         'Des bacs ont été ouverts sans avoir été reçus dans l’application. ' +
         'Un inventaire remet les compteurs à plat.',
@@ -676,12 +676,12 @@ async function tacheRecomptage() {
      La chantilly est au sec ; un bac de vanille est en chambre froide. */
   const noms = d.articles.map(c => libelleArticle(c).split(' · ')[0]);
   const liste = noms.length <= 3 ? noms.join(', ')
-    : noms.slice(0, 2).join(', ') + ' et ' + (noms.length - 2) + ' autre(s)';
+    : noms.slice(0, 2).join(', ') + ' et ' + (noms.length - 2) + ' ' + accord(noms.length - 2, 'autre');
   const ou = d.froid ? 'Chambre froide' : 'Sec';
 
   return {
     id: 'recomptage',
-    t: 'Recompter ' + liste + ' — inventaire ' + ou.toLowerCase(),
+    t: 'Recompter ' + liste + ' (inventaire ' + ou.toLowerCase() + ')',
     lien: 'inventaire',
     partie: d.froid ? 'froid' : 'sec',
     urgent: true,
@@ -747,7 +747,7 @@ V.stock = async function () {
       ? Object.keys(parFamille).map(fid => {
           const fam = FAMILLES_PRODUIT.filter(x => x.id === fid)[0];
           const sous = parFamille[fid].reduce((s, c) => s + num(articles[c]), 0);
-          const u = fam ? (Math.abs(sous) > 1 ? fam.unites : fam.unite) : 'unité(s)';
+          const u = fam ? (Math.abs(sous) > 1 ? fam.unites : fam.unite) : accord(sous, 'unité');
           const lignes = (fid === 'glace')
             ? (function () {
                 const parParfum = {};
@@ -1209,7 +1209,7 @@ function voirInventaire(h, partie) {
     '<h2 id="sheet-titre">Inventaire ' + (partie === 'froid' ? 'chambre froide' : 'sec') +
     ' du ' + esc(fmtD(h.jour)) + '</h2>' +
     '<p class="cs">' + esc(h.par || '—') + (h.at ? ' · ' + heure(h.at) : '') + ' · ' +
-    nbSaisis + ' produit(s) saisi(s). Les produits non saisis sont à 0, en grisé.</p>' +
+    nbSaisis + ' ' + accord(nbSaisis, 'produit saisi', 'produits saisis') + '. Les produits non saisis sont à 0, en grisé.</p>' +
     (h.note ? '<div class="rappel" style="margin-top:10px">' + esc(h.note) + '</div>' : '') +
     groupes.filter(g => g.lignes.length).map(g =>
       '<div class="entete" style="margin-top:16px"><h3>' + esc(g.titre) + '</h3></div>' +
@@ -1530,7 +1530,7 @@ V.inventaire = async function () {
 
       (partie === 'froid' && nbArmoire
         ? '<div class="rappel" style="margin-top:12px"><b>Comptez aussi l’armoire −13</b> : ' +
-          nbArmoire + ' bac(s) y sont notés et font toujours partie du stock.</div>'
+          nbArmoire + ' ' + accord(nbArmoire, 'bac y est noté et fait', 'bacs y sont notés et font') + ' toujours partie du stock.</div>'
         : '') +
       (partie === 'froid' ? blocFroid() : blocSec()) +
 
@@ -1553,19 +1553,19 @@ V.inventaire = async function () {
          nulle part. */
       (partie === 'froid'
         ? (historique.length
-          ? '<div class="entete" style="margin-top:22px"><h3>Inventaires précédents — chambre froide</h3></div>' +
+          ? '<div class="entete" style="margin-top:22px"><h3>Inventaires précédents de la chambre froide</h3></div>' +
             '<div class="stack">' + historique.slice().reverse().map((h, i) => {
               const t = totauxStock(h.lignes || {});
               return '<div class="invl">' +
                 '<span class="invn">' + esc(fmtD(h.jour)) +
                 '<small>' + esc(h.par || '—') + ' · ' + heure(h.at) +
-                (h.manquants ? ' · ' + h.manquants + ' manquant(s)' : '') + '</small></span>' +
+                (h.manquants ? ' · ' + h.manquants + ' ' + accord(h.manquants, 'manquant') : '') + '</small></span>' +
                 '<span class="invc">' + t.bacs + ' bacs · ' + n1(t.kg) + ' kg<br>' +
                 '<button type="button" class="btn clair sm" data-hist="froid|' + i + '">Voir tout</button></span></div>';
             }).join('') + '</div>'
           : '')
         : (historiqueSec.length
-          ? '<div class="entete" style="margin-top:22px"><h3>Inventaires précédents — sec</h3></div>' +
+          ? '<div class="entete" style="margin-top:22px"><h3>Inventaires précédents du sec</h3></div>' +
             '<div class="stack">' + historiqueSec.slice().reverse().map((h, i) => {
               const l = h.lignes || {};
               const refs = Object.keys(l).length;
@@ -1662,12 +1662,12 @@ V.inventaire = async function () {
     });
 
     confirmer('Valider la chambre froide ?',
-      t.bacs + ' bacs comptés sur ' + cptes.length + ' référence(s), soit ' +
+      t.bacs + ' ' + accord(t.bacs, 'bac compté', 'bacs comptés') + ' sur ' + cptes.length + ' ' + accord(cptes.length, 'référence') + ', soit ' +
       n1(t.kg) + ' kg. ' +
       (manq === 0 && trop === 0 ? 'Cela correspond exactement au stock attendu.'
-       : manq + ' manquant(s), ' + trop + ' en trop par rapport au stock attendu' +
-         (manq ? ' — des ouvertures non tracées ?' : '') +
-         (trop ? (manq ? ' Et' : ' —') + ' une réception non saisie ?' : '')),
+       : manq + ' ' + accord(manq, 'manquant') + ', ' + trop + ' en trop par rapport au stock attendu.' +
+         (manq ? ' Des ouvertures non tracées ?' : '') +
+         (trop ? (manq ? ' Et' : ' Peut-être') + ' une réception non saisie ?' : '')),
       'Valider', async () => {
         const inv = await enregistrerInventaire(lignes,
           $('#inv-note') ? $('#inv-note').value : '', avant);
@@ -1676,8 +1676,8 @@ V.inventaire = async function () {
            l'écran doit montrer les quantités enregistrées. Celui du sec reste. */
         oublierBrouillon('froid');
         await feed(inv.manquants ? 'warn' : 'ok',
-          STATE.user.prenom + ' a compté la chambre froide — ' + t.bacs + ' bacs, ' + n1(t.kg) + ' kg' +
-          (inv.manquants ? ' · ' + inv.manquants + ' bac(s) manquant(s)' : ''));
+          STATE.user.prenom + ' a compté la chambre froide : ' + t.bacs + ' ' + accord(t.bacs, 'bac') + ', ' + n1(t.kg) + ' kg' +
+          (inv.manquants ? ' · ' + inv.manquants + ' ' + accord(inv.manquants, 'bac manquant', 'bacs manquants') : ''));
         toast('Chambre froide enregistrée');
         rendre('stock');
       });
@@ -1690,7 +1690,7 @@ V.inventaire = async function () {
     cptes.forEach(k => { lignes[k] = num(saisieSec[k]); });
 
     confirmer('Valider le sec ?',
-      cptes.length + ' référence(s) comptée(s). Ce relevé remplace le précédent.',
+      cptes.length + ' ' + accord(cptes.length, 'référence comptée', 'références comptées') + '. Ce relevé remplace le précédent.',
       'Valider', async () => {
         const inv = {
           jour: today(), at: nowISO(),
@@ -1707,7 +1707,7 @@ V.inventaire = async function () {
         if (i >= 0) hist[i] = inv; else hist.push(inv);
         await DB.set('stock:secs', hist.slice(-36));
         oublierBrouillon('sec');
-        await feed('ok', STATE.user.prenom + ' a compté le sec — ' + cptes.length + ' références');
+        await feed('ok', STATE.user.prenom + ' a compté le sec : ' + cptes.length + ' ' + accord(cptes.length, 'référence'));
         toast('Inventaire du sec enregistré');
         rendre('stock');
       });
@@ -1977,8 +1977,8 @@ function confirmerOuverture(r) {
                   'indiquez la date écrite sur le bac.</p></div>')
             : '') +
           (dest === 'vitrine' && orig === 'cf' && cands.length
-            ? '<div class="rappel" style="margin-top:12px">' + cands.length + ' bac(s) de ce parfum ' +
-              'attendent déjà à l’armoire −13, depuis le ' + esc(fmtDC(cands[0].jour)) +
+            ? '<div class="rappel" style="margin-top:12px">' + cands.length + ' ' + accord(cands.length, 'bac de ce parfum attend', 'bacs de ce parfum attendent') +
+              ' déjà à l’armoire −13, depuis le ' + esc(fmtDC(cands[0].jour)) +
               '. Le plus ancien part d’abord.</div>'
             : '');
       const sousTitre = !glace ? 'Ce produit est ouvert et part en service.'
@@ -2107,7 +2107,7 @@ function confirmerOuverture(r) {
       if (manque) {
         return confirmer('Ce bac n’est plus au stock',
           'L’application n’a plus de ' + manque.article + ' en réserve' +
-          (manque.reste < 0 ? ' — le compte est déjà à ' + manque.reste + '.' : '.') +
+          (manque.reste < 0 ? ' : le compte est déjà à ' + manque.reste + '.' : '.') +
           ' Soit une ouverture précédente n’a pas été scannée, soit une livraison ' +
           'n’a pas été saisie. Confirmez si le bac est bien là : un recomptage ' +
           'sera proposé pour remettre les compteurs à plat.',
@@ -2131,7 +2131,7 @@ function confirmerOuverture(r) {
         closeSheet();
         resolve(true);
         feed('ok', STATE.user.prenom + ' a mis ' + parfum + ' à l’armoire −13' +
-          (lot ? ' — lot ' + lot : '')).catch(() => {});
+          (lot ? ' · lot ' + lot : '')).catch(() => {});
         return;
       }
 
@@ -2191,7 +2191,7 @@ function confirmerOuverture(r) {
       await feed('ok', STATE.user.prenom +
         (fam.id === 'glace' ? ' a mis en vitrine ' : ' a ouvert ') +
         (parfum || fam.libelle) + (bA || orig === 'm13' ? ' (depuis l’armoire −13)' : '') +
-        ' — lot ' + lot);
+        ' · lot ' + lot);
       fini = true;
       closeSheet();
       resolve(true);
