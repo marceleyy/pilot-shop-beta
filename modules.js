@@ -2488,7 +2488,7 @@ function formulaireAnomalie() {
    
      const bloc = document.createElement('div');
      bloc.innerHTML = carte(entete('🩺', 'Diagnostic de la base',
-       'Pour vérifier que cet iPad communique bien avec la base. Utile surtout quand quelque chose ne s’enregistre pas.') +
+       'Pour vérifier que cet appareil communique bien avec la base. Utile surtout quand quelque chose ne s’enregistre pas.') +
        '<div class="dense"><div class="dl"><span class="c1">Base connectée</span>' +
        '<span class="c ww">' + esc(String(SUPABASE.url).replace('https://', '').split('.')[0] || 'non configuré') + '</span></div>' +
        /* Présence seulement : le début de la clé n'aide pas au diagnostic et
