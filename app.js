@@ -1707,6 +1707,10 @@ function renderNav() {
        const recouvert = _dernierRenduFini > n;
        _dernierRenduFini = Math.max(_dernierRenduFini, n);
        if (recouvert) rendre(STATE.view, true);
+       /* L'écran précédent vient de se dessiner sous le titre du nouveau, qui
+          charge encore : ses boutons restaient actifs sous le mauvais titre. */
+       else if (_dernierRenduFini < _rendusLances)
+         $('#page').innerHTML = '<div class="vide"><span class="vi">⏳</span>Un instant…</div>';
        return;
      }
      _dernierRenduFini = n;
