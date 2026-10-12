@@ -1998,8 +1998,7 @@ async function purgerLocalAncien() {
    
      $('#page').innerHTML =
        carte(entete('🎙️', 'Dicter la perte', SPEECH
-           /* RGPD : la voix quitte l'iPad, il faut le dire avant le premier mot. */
-           ? 'Appuyez, parlez normalement : « J’ai jeté 2 bacs de vanille ». La voix est transcrite par le service de dictée de l’appareil (Apple ou Google).'
+           ? 'Appuyez, parlez normalement : « J’ai jeté 2 bacs de vanille ».'
            : 'La dictée n’est pas disponible sur ce navigateur. Utilisez la saisie ci-dessous.') +
          '<button class="btn corail bloc xl mic" id="mic"' + (SPEECH ? '' : ' disabled') + '>' +
          'Dicter la perte</button>' +

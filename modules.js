@@ -2488,14 +2488,14 @@ function formulaireAnomalie() {
    
      const bloc = document.createElement('div');
      bloc.innerHTML = carte(entete('🩺', 'Diagnostic de la base',
-       'Ce que l’application a réellement envoyé et reçu.') +
-       '<div class="dense"><div class="dl"><span class="c1">Projet</span>' +
+       'Pour vérifier que cet iPad communique bien avec la base. Utile surtout quand quelque chose ne s’enregistre pas.') +
+       '<div class="dense"><div class="dl"><span class="c1">Base connectée</span>' +
        '<span class="c ww">' + esc(String(SUPABASE.url).replace('https://', '').split('.')[0] || 'non configuré') + '</span></div>' +
        /* Présence seulement : le début de la clé n'aide pas au diagnostic et
           s'affichait à quiconque regardait l'écran. */
-       '<div class="dl"><span class="c1">Clé</span><span class="c ww">' +
+       '<div class="dl"><span class="c1">Clé d’accès</span><span class="c ww">' +
        (SUPABASE.anonKey ? 'présente (masquée)' : 'absente') + '</span></div>' +
-       '<div class="dl"><span class="c1">File d’attente</span><span class="c ww num">' + STATE.fileAttente + '</span></div>' +
+       '<div class="dl"><span class="c1">Saisies pas encore envoyées</span><span class="c ww num">' + STATE.fileAttente + '</span></div>' +
        '<div class="dl"><span class="c1">Dernière erreur</span><span class="c ww">' +
        (STATE.erreurBase ? esc(STATE.erreurBase) : 'aucune') + '</span></div>' +
        (STATE.dernierEchec
