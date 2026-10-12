@@ -20,6 +20,9 @@
 PAGES.boutiques = { titre:'Mes boutiques', sous:'Vos boutiques comparées côte à côte' };
 if (MENU_PLUS.manager.indexOf('boutiques') < 0) MENU_PLUS.manager.unshift('boutiques');
 
+/* Ancienne version de cet écran (jamais publiée) : jetons d'autres boutiques. */
+try { localStorage.removeItem(OFFLINE.storeLocal + ':franchise-liees'); } catch (e) {}
+
 const FRANCHISE = {
   cle: 'franchise:indicateurs',
   jours: 7,                       // fenêtre glissante des indicateurs
@@ -36,7 +39,19 @@ function jourSemaineIso(jour) {
   return new Date(+p[0], +p[1] - 1, +p[2]).getDay() || 7;
 }
 
+/* Lecture qui SIGNALE un échec au lieu de rendre la copie locale : un relevé
+   illisible ne doit pas devenir « relevé manquant » chez les autres boutiques. */
+let _lectureRatee = false;
+async function lireStrict(cle, defaut) {
+  if (!DB.configure || !STATE.enLigne || fileLire().some(x => x.cle === cle)) return DB.get(cle, defaut);
+  try {
+    const l = await DB._appel(DB._table(cle) + '?id=eq.' + encodeURIComponent(cle) + '&select=data&limit=1');
+    return (l && l.length && l[0].data !== null) ? l[0].data : defaut;
+  } catch (e) { _lectureRatee = true; return DB.get(cle, defaut); }
+}
+
 async function calculerIndicateurs() {
+  _lectureRatee = false;
   const auj = today();
   const jours = [];
   for (let i = 0; i < FRANCHISE.jours; i++) jours.push(addD(auj, -i));
@@ -45,15 +60,17 @@ async function calculerIndicateurs() {
      hier n'a pas manqué les relevés de la semaine dernière. Une boutique sans
      mise en route guidée (Paccard) est suivie sur toute la fenêtre. */
   const b = await DB.get('boutique', null).catch(() => null);
-  const depart = b && b.debut ? String(b.debut).slice(0, 10) : addD(auj, -FRANCHISE.jours);
+  /* Le lendemain de la mise en service, en heure locale : le jour même, le
+     relevé du matin n'avait pas lieu d'être. */
+  const depart = b && b.debut ? addD(isoOf(new Date(b.debut)), 1) : addD(auj, -FRANCHISE.jours);
 
   /* Jour après jour, trois lectures à la fois : sept jours lancés ensemble
      encombraient le Wi-Fi au moment où le manager ouvrait un autre écran. */
   const parJour = [];
   for (const d of jours) parJour.push(await (async () => {
     const [pertes, temp, net] = await Promise.all([
-      DB.get('pertes:' + d, []).catch(() => []),
-      DB.get('temp:' + d, {}).catch(() => ({})),
+      lireStrict('pertes:' + d, []),
+      lireStrict('temp:' + d, {}),
       (d < auj && d >= depart ? etatNettoyage(d) : Promise.resolve(null)).catch(() => null)
     ]);
     const t = temp || {};
@@ -78,7 +95,7 @@ async function calculerIndicateurs() {
   let ecart = null;
   try {
     const c = derniereCloture(await lireCalculs());
-    if (c && c.resultat && !c.resultat.incoherent) ecart = { pct:+c.resultat.pct, fin:c.fin };
+    if (c && c.resultat) ecart = { pct:+c.resultat.pct, fin:c.fin, incoherent:!!c.resultat.incoherent };
   } catch (e) { /* pas de calcul */ }
 
   const [preaudit, anomalies, ruptures] = await Promise.all([
@@ -89,7 +106,8 @@ async function calculerIndicateurs() {
 
   return {
     site: APP.site, at: nowISO(), jours: FRANCHISE.jours,
-    ecartPct: ecart ? ecart.pct : null, ecartFin: ecart ? ecart.fin : null,
+    ecartPct: ecart && !ecart.incoherent ? ecart.pct : null, ecartFin: ecart ? ecart.fin : null,
+    ecartIncoherent: !!(ecart && ecart.incoherent),
     pertesL: +litres.toFixed(2),
     pertesEur: +(litres * FOURNISSEUR.poidsMoyenLitre * FOURNISSEUR.prixMoyenKg).toFixed(2),
     frigosCrit: somme('crit'),
@@ -104,8 +122,8 @@ async function calculerIndicateurs() {
 
 /* Calcule et range le résumé. Hors ligne, rien n'est écrit : un résumé fait
    sur une copie locale incomplète passerait pour la vérité. La limite d'une
-   fois par heure se lit sur le résumé déjà rangé : elle tient d'un
-   rechargement à l'autre et d'un iPad à l'autre. */
+   fois par heure se lit sur la copie locale du résumé : elle tient d'un
+   rechargement à l'autre sur un même appareil. */
 async function publierIndicateurs(force) {
   if (!STATE.user || !STATE.enLigne || !DB.configure) return null;
   if (!force) {
@@ -115,10 +133,11 @@ async function publierIndicateurs(force) {
     } catch (e) {}
   }
   try {
+    const avant = STATE.dernierEchec;
     const r = await calculerIndicateurs();
-    /* Le réseau a pu tomber pendant le calcul : les lectures sont alors
-       revenues du cache. On n'écrit rien. */
-    if (!STATE.enLigne) return r;
+    /* Une lecture a pu échouer pendant le calcul (délai, erreur serveur) :
+       elle est alors revenue du cache ou vide, et le résumé serait faux. */
+    if (!STATE.enLigne || _lectureRatee || STATE.dernierEchec !== avant) return r;
     await DB.set(FRANCHISE.cle, r);
     return r;
   } catch (e) { return null; }
@@ -174,9 +193,9 @@ function depuis(iso) {
 /* Une ligne d'indicateur : libellé, valeur, et la couleur qui dit s'il faut agir. */
 const LIGNES_FRANCHISE = [
   { id:'ecart', libelle:'Écart glace', aide:'dernier calcul clôturé',
-    val:r => r.ecartPct === null || r.ecartPct === undefined ? null
+    val:r => r.ecartIncoherent ? 'incohérent' : r.ecartPct === null || r.ecartPct === undefined ? null
       : (Math.abs(r.ecartPct) < 0.05 ? '' : r.ecartPct > 0 ? '−' : '+') + n1(Math.abs(r.ecartPct)) + ' %',
-    c:r => r.ecartPct === null || r.ecartPct === undefined ? 'n' : etatEcart(r.ecartPct).c },
+    c:r => r.ecartIncoherent ? 'bad' : r.ecartPct === null || r.ecartPct === undefined ? 'n' : etatEcart(r.ecartPct).c },
   { id:'pertes', libelle:'Pertes glace', aide:'7 derniers jours',
     val:r => fmtEur(r.pertesEur) + ' · ' + n1(r.pertesL) + ' L',
     c:r => r.pertesEur > 50 ? 'bad' : r.pertesEur > 15 ? 'warn' : 'ok' },

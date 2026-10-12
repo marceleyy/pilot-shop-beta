@@ -552,7 +552,8 @@ function obstacleChangement() {
   try { brouillon = !!localStorage.getItem(OFFLINE.storeLocal + ':brouillon:inventaire'); } catch (e) {}
   if (brouillon || Object.keys(DB._gros || {}).length)
     return 'Un inventaire en cours ou des photos restent sur cet appareil : terminez-les avant de changer de boutique';
-  const enAttente = fileLire().length;
+  /* Le résumé franchise se recalcule de lui-même : il ne retient rien. */
+  const enAttente = fileLire().filter(x => String(x.cle).indexOf('franchise:') !== 0).length;
   if (enAttente) return enAttente + ' ' + accord(enAttente, 'saisie attend', 'saisies attendent') +
     ' d’être envoyée' + (enAttente > 1 ? 's' : '') + '. Reconnectez le Wi-Fi, puis réessayez.';
   return null;
@@ -573,9 +574,11 @@ function changerDeBoutique() {
     'tout ce qui a été saisi ici est déjà dans la base et y reste.</p>' +
     '<form id="cb-form" novalidate>' +
     '<div class="champ" style="margin-top:14px"><label class="f" for="cb-mail">Compte de la boutique</label>' +
-    '<input type="email" id="cb-mail" autocapitalize="none" autocomplete="username" spellcheck="false"></div>' +
+    /* Pas de mot de passe proposé par Safari sur un iPad partagé : n'importe
+       qui pourrait sinon sortir l'appareil de sa boutique. */
+    '<input type="email" id="cb-mail" autocapitalize="none" autocomplete="off" spellcheck="false"></div>' +
     '<div class="champ" style="margin-top:12px"><label class="f" for="cb-mdp">Mot de passe</label>' +
-    '<input type="password" id="cb-mdp" autocomplete="current-password"></div>' +
+    '<input type="password" id="cb-mdp" autocomplete="new-password"></div>' +
     '<div class="actions"><button type="button" class="btn clair" data-fermer>Annuler</button>' +
     '<button type="submit" class="btn menthe" id="cb-ok">Changer</button></div></form>' +
     '<p class="mini" id="cb-etat" role="status" style="text-align:center;margin-top:10px"></p>');
@@ -598,8 +601,8 @@ function changerDeBoutique() {
       etat('Passage sur ' + site + '…');
       await viderAppareil(false);
       memoriser(d);
-      /* recharger() (app.js) annule un retour arrière différé qui annulerait
-         le rechargement ; ici aucune feuille n'a été fermée avant. */
+      /* recharger() : livré par la branche d'audit (annule le retour arrière
+         différé de closeSheet). Ici aucune feuille n'a été fermée avant. */
       if (typeof recharger === 'function') recharger(); else location.reload();
     } catch (e) {
       bouton.disabled = false;

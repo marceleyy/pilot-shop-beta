@@ -20,7 +20,8 @@ as $$
   select r.site, r.data
     from public.reglages r
    where r.id = 'franchise:indicateurs'
-     and r.site in (select jsonb_array_elements_text(coalesce(auth.jwt() -> 'app_metadata' -> 'franchise', '[]'::jsonb)))
+     and r.site in (select jsonb_array_elements_text(case when jsonb_typeof(auth.jwt() -> 'app_metadata' -> 'franchise') = 'array'
+                                                    then auth.jwt() -> 'app_metadata' -> 'franchise' else '[]'::jsonb end))
 $$;
 revoke all on function public.resumes_franchise() from public, anon;
 grant execute on function public.resumes_franchise() to authenticated;
