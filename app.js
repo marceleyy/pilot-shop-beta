@@ -130,8 +130,14 @@
      ['hebdo:plan',   'reglages'],
      ['hebdo:responsables', 'reglages'],
      ['hebdo:',       'checklists'],
+     /* Pré-audit Amorino (preaudit.js) : un document par pré-audit. */
+     ['preaudit:',    'checklists'],
      ['hebdo',        'reglages'],
      ['catalogue:',   'reglages'],
+     /* Mise en route d'une nouvelle boutique (guide.js). */
+     ['boutique',     'reglages'],
+     /* Résumé lu par les autres boutiques du franchisé (franchise.js). */
+     ['franchise:',   'reglages'],
      ['async:',       'reglages']
    ].filter(function (r) {
      /* Une route dont la table est introuvable est retirée dès le chargement :
@@ -158,7 +164,10 @@
       iPad disparaissaient (vérifié : ventes et imports effacés). */
    const FUSIONNER = ['checklist:', 'hebdo:', 'temp:', 'caisse:', 'reassort:',
                       'preuves:', 'ruptures', 'releve', 'lots:', 'clean:',
-                      'anomalies', 'reception:', 'stock:mv:', 'stock:m13:', 'pointage:', 'ecart:'];
+                      'anomalies', 'reception:', 'stock:mv:', 'stock:m13:', 'pointage:', 'ecart:',
+                      /* Deux iPads qui ajoutent une ligne au même moment : sans fusion,
+                         la seconde écriture effaçait la ligne de l'autre. */
+                      'feed:', 'pertes:'];
    const aFusionner = cle => FUSIONNER.some(p => cle.indexOf(p) === 0);
 
    /* Fusion superficielle, champ par champ. Suffisante : chaque personne
@@ -176,9 +185,12 @@
       ajoutent chacun leur session ; sans union, la seconde effaçait la première. */
    /* « stock:m13: » : entrées et sorties de l'armoire −13, en ajout seul. Deux
       iPads qui y posent chacun un bac ne doivent pas s'effacer. */
-   const UNIR = ['ruptures', 'releve', 'anomalies', 'reception:', 'stock:mv:', 'stock:m13:', 'pointage:', 'preuves:'];
+   /* « pertes: » : une perte retirée est marquée « supprime », comme une preuve. */
+   const UNIR = ['ruptures', 'releve', 'anomalies', 'reception:', 'stock:mv:', 'stock:m13:', 'pointage:', 'preuves:',
+                 'feed:', 'pertes:'];
    const ts = x => (x && (x.a || x.at)) || '';
-   const idLigne = x => x && (x.id || [ts(x), x.c || x.cle, x.t || x.type, x.e || x.employe || '',
+   /* « k » : identifiant de ligne du journal, dont « id » est celui de la personne. */
+   const idLigne = x => x && (x.k || (typeof x.x === 'string' && x.par !== undefined ? 'f|' + ts(x) + '|' + x.x : x.id) || [ts(x), x.c || x.cle, x.t || x.type, x.e || x.employe || '',
                                        x.q !== undefined ? x.q : x.qte, x.l || x.lot || ''].join('|'));
    /* Éléments trop anciens des listes soumises à une durée de conservation
       (CONSERVATION.listes). Même règle que la purge nocturne de la base :
@@ -193,6 +205,7 @@
        if (!x || typeof x !== 'object') return true;
        if (x.epingle === true) return true;
        if (cle === 'anomalies' && x.resolue !== true) return true;
+       if (cle === 'ruptures' && x.traite !== true) return true;
        const j = jourDe(x);
        return !j || j >= limite;
      });
@@ -207,11 +220,11 @@
        try { const inv = JSON.parse(DB._lire('stock:inventaire') || 'null'); borne = (inv && inv.at) || ''; } catch (e) {}
      }
      const parId = {};
-     distant.forEach(x => { if (x && x.id) parId[x.id] = x; });
+     distant.forEach(x => { if (x && idLigne(x)) parId[idLigne(x)] = x; });
      /* Même ligne des deux côtés : la locale fait foi (une photo retirée ne
         revient pas), mais une case cochée sur un autre iPad reste cochée. */
      const fusion = local.map(l => {
-       const d = l && l.id && parId[l.id];
+       const d = l && idLigne(l) && parId[idLigne(l)];
        if (!d) return l;
        const m = Object.assign({}, l);
        ['traite', 'resolue'].forEach(f => {
@@ -231,7 +244,9 @@
      const ajout = distant.filter(x => x && !vus.has(idLigne(x)) && !(borne && ts(x) && ts(x) <= borne));
      if (!ajout.length) return rognerAncien(cle, fusion);
      const out = fusion.concat(ajout);
-     return rognerAncien(cle, out.every(x => ts(x)) ? out.sort((p, q) => ts(p) < ts(q) ? -1 : ts(p) > ts(q) ? 1 : 0) : out);
+     const trie = rognerAncien(cle, out.every(x => ts(x)) ? out.sort((p, q) => ts(p) < ts(q) ? -1 : ts(p) > ts(q) ? 1 : 0) : out);
+     /* Le journal du jour garde ses 400 dernières lignes, union comprise. */
+     return cle.indexOf('feed:') === 0 ? trie.slice(-400) : trie;
    }
 
    /* Listes d'un écart de période qui ne font que grandir : chaque import de
@@ -395,7 +410,34 @@
      const estLocale = cle => LOCALES.some(l => cle === l || cle.indexOf(l) === 0);
      const configuré = () => !!(SUPABASE.url && SUPABASE.anonKey);
      const distant = cle => configuré() && !estLocale(cle) && !!table(cle);
-   
+
+     /* Lectures d'un même écran. La Tour de contrôle lisait une à une cinq clés
+        par jour de période (caisse, frigos, nettoyage…), en série : 60 allers-
+        retours vers la base pour douze jours, 150 en fin de mois, et « Un
+        instant… » pendant 10 à 40 s. Le temps du dessin d'un écran (voir
+        rendre), une clé n'est demandée qu'une fois, et prelire() en demande
+        plusieurs en une seule requête. Rien n'est gardé au-delà : un bouton
+        qui relit avant d'écrire, après le dessin, relit toujours la base. */
+     let lot = null;   // { n, at, m: Map cle -> Promise<{ data } | null> }
+     let lotN = 0;
+     const lotActif = () => (lot && Date.now() - lot.at < 30000) ? lot.m : null;
+     const oublier = cle => { if (lot) lot.m.delete(cle); };
+     /* Paquet refusé par la base (voir prelire) : la clé se relit seule. */
+     const RELIRE = {};
+     /* frais : lecture d'avant écriture (push), jamais servie par le lot. */
+     function lireServeur(cle, frais) {
+       const m = frais ? null : lotActif();
+       if (m && m.has(cle)) return m.get(cle);
+       const p = appel(table(cle) + '?id=eq.' + encodeURIComponent(cle) + '&select=data&limit=1')
+         .then(l => (l && l.length) ? { data: l[0].data } : null);
+       if (m) {
+         m.set(cle, p);
+         /* Échec : la lecture suivante retentera le réseau. */
+         p.catch(() => { if (m.get(cle) === p) m.delete(cle); });
+       }
+       return p;
+     }
+
      async function appel(chemin, options, secondeChance) {
        /* Base qui refuse un appareil non rattaché : inutile d'insister. Chaque
           lecture retentait le réseau — une rafale de 401 (52 en 25 s) sans
@@ -439,6 +481,8 @@
          /* Le réseau a répondu : on est en ligne, même si le serveur refuse. */
          STATE.delaisDepasses = 0;
          if (!STATE.enLigne) { STATE.enLigne = true; STATE.erreurBase = null; majBandeau(); }
+         /* Le diagnostic montrait encore le 401 d'avant le rattachement. */
+         if (r.ok) STATE.dernierEchec = null;
          if (!r.ok) {
            const err = new Error('HTTP ' + r.status);
            err.http = r.status;
@@ -501,8 +545,12 @@
             et la sonde rétablit l'état en ligne dès que la base répond. */
          const estAbandon = e && (e.name === 'AbortError' ||
                                   /abort/i.test(String(e.message || '')));
-         const dejaCompte = !!(e && e._delaiCompte);
+         /* Les paquets d'un même prelire partent ensemble : leurs délais
+            dépassés ne comptent que pour un (voir options._groupe). */
+         const groupe = options && options._groupe;
+         const dejaCompte = !!(e && e._delaiCompte) || !!(estAbandon && groupe && groupe.compte);
          if (estAbandon && e && typeof e === 'object') e._delaiCompte = true;
+         if (estAbandon && groupe) groupe.compte = true;
          const muet = estAbandon && !dejaCompte && STATE.enLigne && ++STATE.delaisDepasses >= 2;
          if (STATE.enLigne && ((!e.http && !estAbandon) || muet)) {
            STATE.enLigne = false; STATE.delaisDepasses = 0; majBandeau();
@@ -516,22 +564,75 @@
        get local() { return dispo ? 'local' : 'memoire'; },
        get configure() { return configuré(); },
    
-       async get(cle, defaut) {
+       async get(cle, defaut, frais) {
          if (defaut === undefined) defaut = null;
          const cache = () => { try { const v = lire(cle); return v === null ? defaut : JSON.parse(v); } catch (e) { return defaut; } };
          if (!distant(cle) || !STATE.enLigne) return cache();
          /* Une saisie encore en file d'attente est plus récente que la copie du
             serveur : on garde la locale, sinon elle disparaît de l'écran. */
-         if (fileLire().some(x => x.cle === cle)) return cache();
+         if (fileLire().some(x => ici(x) && x.cle === cle)) return cache();
          try {
-           const l = await appel(table(cle) + '?id=eq.' + encodeURIComponent(cle) + '&select=data&limit=1');
-           if (!l || !l.length) return cache();
-           ecrire(cle, JSON.stringify(l[0].data));
-           return l[0].data === null ? defaut : l[0].data;
+           let l = await lireServeur(cle, frais);
+           if (l === RELIRE) { oublier(cle); l = await lireServeur(cle); }
+           if (!l) return cache();
+           /* Une copie à chaque lecture : deux lectures de la même clé ne
+              partagent pas le même objet, l'une ne modifie pas l'autre. */
+           const brut = JSON.stringify(l.data);
+           ecrire(cle, brut);
+           return l.data === null ? defaut : JSON.parse(brut);
          } catch (e) { return cache(); }
+       },
+
+       /* Début et fin du dessin d'un écran (voir lireServeur). Un nouveau
+          dessin repart d'un lot vide ; seule la fin du dernier le ferme. */
+       ouvrirLot() { lot = { n: ++lotN, at: Date.now(), m: new Map() }; return lotN; },
+       fermerLot(n) { if (lot && lot.n === n) lot = null; },
+
+       /* Demande en une requête par table (par paquets de 40) les clés qu'un
+          écran va lire une à une. Sans effet hors d'un dessin, hors ligne,
+          ou pour une clé dont une saisie attend dans la file : DB.get garde
+          alors la copie locale, comme avant. N'échoue jamais. */
+       prelire(cles) {
+         const m = lotActif();
+         if (!m || !configuré() || !STATE.enLigne) return Promise.resolve();
+         const enFile = new Set(fileLire().map(x => x.cle));
+         const parTable = {};
+         cles.forEach(c => {
+           if (!c || m.has(c) || enFile.has(c) || !distant(c)) return;
+           const t = table(c);
+           if ((parTable[t] = parTable[t] || []).indexOf(c) < 0) parTable[t].push(c);
+         });
+         const envois = [], groupe = { compte: false };
+         Object.keys(parTable).forEach(t => {
+           for (let i = 0; i < parTable[t].length; i += 40) {
+             const paquet = parTable[t].slice(i, i + 40);
+             const liste = '(' + paquet.map(c => '"' + c.replace(/\\/g, '\\\\').replace(/"/g, '\\"') + '"').join(',') + ')';
+             const req = appel(t + '?id=in.' + encodeURIComponent(liste) + '&select=id,data',
+                               { _groupe: groupe });
+             paquet.forEach(c => {
+               /* La base a répondu par une erreur (requête refusée) : chaque clé
+                  est relue seule, comme avant. Panne réseau : copie locale. */
+               const p = req.then(l => {
+                 const r = (l || []).filter(x => x && x.id === c)[0];
+                 return r ? { data: r.data } : null;
+               }, e => {
+                 /* Requête groupée refusée (400, 414, panne serveur) : chaque
+                    clé lue par l'écran sera relue seule, comme avant. Un refus
+                    d'accès (401, 403) se répéterait à l'identique. */
+                 if (e && (e.http === 400 || e.http === 414 || e.http >= 500)) return RELIRE;
+                 throw e;
+               });
+               m.set(c, p);
+               p.catch(() => { if (m.get(c) === p) m.delete(c); });
+             });
+             envois.push(req.catch(() => {}));
+           }
+         });
+         return Promise.all(envois).then(() => {});
        },
    
        async set(cle, valeur) {
+         oublier(cle);
          /* Mémoire locale pleine : on n'abandonne plus la saisie pour autant.
             En ligne, elle part quand même au serveur ; l'alerte « Mémoire
             pleine » ne s'affiche que si cet envoi échoue aussi (ou s'il est
@@ -555,6 +656,7 @@
            }
            return horsMemoire ? memoirePleine() : true;
          }
+         delete DB._gros[cle];
 
          /* Hors ligne et mémoire pleine : la file d'attente vit elle aussi en
             mémoire locale, elle ne peut rien garder. */
@@ -591,7 +693,7 @@
              /* La valeur envoyée remplace toute écriture plus ancienne encore en
                 file : la rejouer ensuite écraserait cette saisie plus récente. */
              const f = fileLire();
-             const perimee = x => x.cle === cle && x.at <= t0;   // pas une saisie empilée depuis
+             const perimee = x => ici(x) && x.cle === cle && x.at <= t0;   // pas une saisie empilée depuis
              if (f.some(perimee)) fileEcrire(f.filter(x => !perimee(x)));
              return true;
            } catch (e) {
@@ -599,11 +701,13 @@
              await empiler('set', cle, valeur); return true;
            }
          };
-         return aFusionner(cle) ? enFile(cle, envoyer) : envoyer();
+         /* Oubliée aussi à la fin : une lecture partie pendant l'envoi
+            garderait sinon la valeur d'avant pour le reste du dessin. */
+         return (aFusionner(cle) ? enFile(cle, envoyer) : envoyer()).finally(() => oublier(cle));
        },
    
        async push(cle, element) {
-         const l = rognerAncien(cle, await this.get(cle, []));
+         const l = rognerAncien(cle, await this.get(cle, [], true));
          l.push(element);
          await this.set(cle, l);
          return l;
@@ -618,6 +722,7 @@
        async patch(cle, champs, ajouts, plus) {
          const op = { champs:champs || {}, ajouts:ajouts || {}, plus:plus || {} };
          const o = appliquerPatch(await this.get(cle, {}), op);
+         oublier(cle);
          let horsMemoire = false;
          try { ecrire(cle, JSON.stringify(o)); }
          catch (e) { horsMemoire = true; }
@@ -630,7 +735,7 @@
          return enFile(cle, async () => {
            /* Des écritures plus anciennes de cette clé attendent encore : la
               nouvelle passe derrière elles, sinon leur rejeu l'écraserait. */
-           if (fileLire().some(x => x.cle === cle)) {
+           if (fileLire().some(x => ici(x) && x.cle === cle)) {
              await empiler('patch', cle, op);
              setTimeout(journaliserSync, 0);
              return o;
@@ -651,7 +756,7 @@
              if (horsMemoire) return memoirePleine();
              await empiler('patch', cle, op); return o;
            }
-         });
+         }).finally(() => oublier(cle));
        },
    
        async list(prefixe) {
@@ -679,16 +784,20 @@
        },
    
        async del(cle) {
+         oublier(cle);
          try { oter(cle); } catch (e) {}
          if (!distant(cle)) return;
          if (!STATE.enLigne) return empiler('del', cle, null);
          try { await appel(table(cle) + '?id=eq.' + encodeURIComponent(cle), { method:'DELETE' }); }
          catch (e) { await empiler('del', cle, null); }
+         /* Comme set et patch : une lecture partie pendant la suppression
+            garderait sinon la ligne supprimée pour le reste du dessin. */
+         finally { oublier(cle); }
        },
    
        /* Exposés pour la file d'attente et l'écran de réglages */
        _appel: appel, _table: table, _distant: distant, _clesLocales: clesLocales,
-       _lire: lire, _ecrire: ecrire, _oter: oter, _gros: {}
+       _lire: lire, _ecrire: ecrire, _oter: oter, _oublier: oublier, _gros: {}
      };
    })();
    
@@ -701,9 +810,16 @@
    /* « Transmis » seulement si c'est vrai : hors ligne, l'envoi attend dans la
       file de l'iPad (bandeau « saisies en attente ») et le manager ne le voit
       pas encore. */
+   /* Saisie en file de la boutique courante. Les clés sont datées, donc
+      identiques d'une boutique à l'autre le même jour : sans ce filtre, une
+      saisie d'une boutique remplaçait ou effaçait celle de l'autre. */
+   function ici(x) { return !x.site || x.site === APP.site; }
+
    function messageEnvoi(cle, envoye) {
+     /* Trop lourd pour la base : gardé sur l'iPad seulement. Annoncer « transmis » trompait. */
+     if (DB._gros && DB._gros[cle]) return 'Gardé sur l’iPad seulement : trop lourd pour être envoyé';
      try {
-       if (fileLire().some(x => x.cle === cle)) return 'Enregistré sur l’iPad, envoi dès le retour du réseau';
+       if (fileLire().some(x => ici(x) && x.cle === cle)) return 'Enregistré sur l’iPad, envoi dès le retour du réseau';
      } catch (e) {}
      return envoye;
    }
@@ -721,8 +837,11 @@
        /* Le compteur suit TOUJOURS la file. Sans cette ligne, une purge
           silencieuse laissait « 2 en attente » affiché alors que la file était
           vide — un reproche permanent pour un travail déjà fait. */
-       if (STATE.fileAttente !== propres.length) {
-         STATE.fileAttente = propres.length;
+       /* Les saisies d'une autre boutique (appareil rattaché ailleurs entre-temps)
+          attendent leur boutique : elles ne comptent pas ici. */
+       const ici = propres.filter(x => !x.site || x.site === APP.site).length;
+       if (STATE.fileAttente !== ici) {
+         STATE.fileAttente = ici;
          majBandeau();
        }
        return propres;
@@ -737,7 +856,7 @@
        toast('Mémoire pleine : la saisie n’a pas pu être gardée', 'erreur');
        return false;
      }
-     STATE.fileAttente = f.length;
+     STATE.fileAttente = f.filter(x => !x.site || x.site === APP.site).length;
      majBandeau();
      return true;
    }
@@ -745,8 +864,10 @@
    async function empiler(op, cle, valeur) {
      /* Une écriture partielle ne remplace pas la précédente : chacune ne porte
         que ses propres champs, toutes sont rejouées dans l'ordre. */
-     const f = op === 'patch' ? fileLire() : fileLire().filter(x => !(x.cle === cle && x.op === op));
-     f.push({ op:op, cle:cle, valeur:valeur, at:nowISO(), n:uid(), essais:0 });
+     const f = op === 'patch' ? fileLire() : fileLire().filter(x => !(ici(x) && x.cle === cle && x.op === op));
+     /* La boutique est retenue : rejouée après un rattachement à une autre
+        boutique, la saisie partait dans la base de celle-ci. */
+     f.push({ op:op, cle:cle, valeur:valeur, at:nowISO(), n:uid(), essais:0, site:APP.site });
      fileEcrire(f);
    }
    
@@ -774,6 +895,7 @@
           valeur périmée par-dessus une plus récente. */
        if (!fileLire().some(x => id(x) === id(item))) continue;
        if (bloquees.has(item.cle)) { restants.push(item); continue; }
+       if (item.site && item.site !== APP.site) { restants.push(item); continue; }
        /* Une clé sans table ne peut pas partir : on l'abandonne au lieu
           d'appeler /rest/v1/undefined en boucle. La donnée reste en local. */
        if (!DB._table(item.cle)) {
@@ -833,6 +955,7 @@
            });
            if (!parti) continue;
          }
+         DB._oublier(item.cle);   // le dessin en cours relira la valeur rejouée
          envoyes++;
        } catch (e) {
          /* Échec définitif — table absente : on n'insiste pas, la donnée reste
@@ -966,6 +1089,14 @@
      if (_roleARedessiner) setTimeout(appliquerNouveauRole, 0);
    }
 
+   /* Rechargement après la fermeture d'une feuille (« Se déconnecter », par
+      exemple) : le history.back() programmé par closeSheet partait juste après
+      location.reload() et l'annulait. On restait connecté sous le même prénom. */
+   function recharger() {
+     if (_retourPrevu) { clearTimeout(_retourPrevu); _retourPrevu = null; }
+     location.reload();
+   }
+
    /* Tout champ touché par l'utilisateur marque la feuille comme modifiée.
       Une valeur posée par le code ne déclenche pas « input » : seul un vrai
       geste compte. */
@@ -1035,7 +1166,7 @@
        '<div class="actions"><button class="btn clair" data-fermer>' + esc(libelleNon || 'Annuler') + '</button>' +
        '<button class="btn corail" id="cf-oui">' + esc(libelle) + '</button></div>'
      );
-     $('#cf-oui').onclick = () => { closeSheet(); onOui(); };
+     $('#cf-oui').onclick = () => { closeSheet(); return onOui(); };
      if (typeof onNon === 'function') {
        const non = $('#sheet-corps [data-fermer]');
        if (non) non.onclick = onNon;
@@ -1069,9 +1200,17 @@
        if (msg) msg.textContent = STATE.fileAttente
          ? 'Hors ligne, vos saisies partiront toutes seules'
          : 'Hors ligne, vous pouvez continuer normalement';
+     } else if (STATE.fileAttente && (typeof appareilRattache !== 'function' || appareilRattache())) {
+       /* De retour en ligne, des saisies attendent encore : le bandeau
+          s'éteignait une dizaine de secondes avant leur envoi. */
+       b.classList.add('on');
+       if (msg) msg.textContent = 'Envoi en cours';
      } else {
        b.classList.remove('on');
+       /* Hors écran mais encore lu par VoiceOver : on le vide. */
+       if (msg) msg.textContent = '';
      }
+     b.setAttribute('aria-hidden', b.classList.contains('on') ? 'false' : 'true');
      $('#offline-n').textContent = STATE.fileAttente
        ? '· ' + STATE.fileAttente + (STATE.fileAttente > 1 ? ' saisies' : ' saisie') + ' en attente'
        : '';
@@ -1154,8 +1293,17 @@
       faisait appeler quelqu'un qui n'y travaille pas. Texte brut : à passer
       par esc() avant tout innerHTML. */
    function nomManager() {
-     const m = (typeof EQUIPE !== 'undefined' ? EQUIPE : []).filter(e => e && e.role === 'manager')[0];
+     /* Un autre manager que soi quand il y en a un. */
+     const moi = STATE.user && STATE.user.id;
+     const ms = (typeof EQUIPE !== 'undefined' ? EQUIPE : []).filter(e => e && e.role === 'manager');
+     const m = ms.filter(e => e.id !== moi)[0] || ms[0];
      return (m && m.prenom) || 'le manager';
+   }
+   /* Destinataire d'un « Signaler un souci » : un manager qui écrit lisait
+      « transmis à Marc » sous sa propre plume. */
+   function destinataireSouci() {
+     const n = nomManager();
+     return (STATE.user && STATE.user.role === 'manager' && STATE.user.prenom === n) ? 'l’équipe Pilot-Shop' : n;
    }
    /* Même chose en début de phrase. */
    const NomManager = () => { const n = nomManager(); return n.charAt(0).toUpperCase() + n.slice(1); };
@@ -1364,7 +1512,15 @@
      STATE.service = ouverte || null;
    }
    
+   /* Double appui sur « Début de service » : deux sessions ouvertes, dont
+      une restait « en cours » après la fin de service. */
+   let _pointageEnCours = false;
    async function pointer(entree) {
+     if (_pointageEnCours) return;
+     _pointageEnCours = true;
+     try { await pointer1(entree); } finally { _pointageEnCours = false; }
+   }
+   async function pointer1(entree) {
      /* La clôture se range sous le jour de DÉBUT du service. Avec today(), un
         service commencé à 22 h et terminé à 0 h 30 cherchait sa session dans
         le mauvais jour : la fin n'était jamais enregistrée. */
@@ -1393,14 +1549,27 @@
      confirmer('Se déconnecter ?', 'Votre pointage reste enregistré. L’appareil reviendra à l’écran des prénoms.',
        'Se déconnecter', async () => {
          await DB.del('session');
-         location.reload();
+         recharger();
        });
    }
    
    /* =============================================================================
       5. JOURNAL D'ACTIVITÉ
       ========================================================================== */
-   async function feed(niveau, texte) {
+   /* Le journal ne retarde plus l'action : chaque ligne part en tâche de fond,
+      dans l'ordre (sa fusion entre iPads coûte une relecture de la base). */
+   let _feedSuite = Promise.resolve();
+   function feed(niveau, texte) {
+     /* Auteur et heure pris à l'appel : une déconnexion juste après écrivait « — ». */
+     const at = nowISO(), u = STATE.user ? { prenom:STATE.user.prenom, id:STATE.user.id } : null;
+     const f = () => feed1(niveau, texte, at, u);
+     _feedSuite = _feedSuite.then(f, f);
+     return Promise.resolve();
+   }
+   /* Pour les traces qui ne doivent pas se perdre (retrait d'une perte,
+      livraison refusée) : attendre que le journal soit écrit. */
+   function feedEcrit() { return _feedSuite; }
+   async function feed1(niveau, texte, at, u) {
      try {
        const cle = 'feed:' + today();
        const l = await DB.get(cle, []);
@@ -1408,8 +1577,8 @@
        const dernier = l[l.length - 1];
        if (dernier && dernier.x === texte &&
            (Date.now() - new Date(dernier.at)) < 60000) return;
-       l.push({ n:niveau, x:texte, par:STATE.user ? STATE.user.prenom : '—',
-                id:STATE.user ? STATE.user.id : null, at:nowISO() });
+       l.push({ n:niveau, x:texte, par:u ? u.prenom : '—',
+                id:u ? u.id : null, at:at, k:uid() });
        await DB.set(cle, l.slice(-400));
      } catch (e) {}
    }
@@ -1496,7 +1665,12 @@ function renderNav() {
           le contenu, il couvrait « HS » et « + » des frigos sur téléphone. */
        (APP.beta ? '<button type="button" class="menu-item" id="mp-retour">' +
          '<span class="mi-tx"><span class="mi-t">Signaler un souci</span>' +
-         '<span class="mi-s">Un bug, un chiffre faux, une idée : c’est transmis à ' + esc(nomManager()) + '</span></span>' +
+         '<span class="mi-s">Un bug, un chiffre faux, une idée : c’est transmis à ' + esc(destinataireSouci()) + '</span></span>' +
+         '<span class="mi-fl">›</span></button>' : '') +
+       /* Une personne qui travaille dans deux boutiques (guide.js). */
+       (typeof changerDeBoutique === 'function' && STATE.user.role === 'manager' ? '<button type="button" class="menu-item" id="mp-boutique">' +
+         '<span class="mi-tx"><span class="mi-t">Changer de boutique</span>' +
+         '<span class="mi-s">Rattacher cet appareil à une autre boutique</span></span>' +
          '<span class="mi-fl">›</span></button>' : '') +
        '</div>' +
        '<div class="actions"><button class="btn clair" data-fermer>Fermer</button>' +
@@ -1507,6 +1681,8 @@ function renderNav() {
      $$('[data-plus]').forEach(b => b.onclick = () => { closeSheet(); rendre(b.dataset.plus); });
      const rb = $('#mp-retour');
      if (rb) rb.onclick = ouvrirRetour;
+     const cb = $('#mp-boutique');
+     if (cb) cb.onclick = () => { closeSheet(); changerDeBoutique(); };
      $('#mp-out').onclick = () => { closeSheet(); deconnexion(); };
    }
    
@@ -1519,7 +1695,22 @@ function renderNav() {
    /* Écrans à barre de dates : un lien peut les ouvrir sur un jour donné. */
    const VUES_DATEES = ['temp', 'clean', 'caisse', 'hebdo'];
 
+   /* Deux écrans demandés coup sur coup (onglet touché pendant le chargement) :
+      le premier, plus lent, finissait après le second et écrasait sa page, ou
+      ne trouvait plus ses boutons (« Cette page ne s'est pas ouverte »). On
+      numérote les rendus : un rendu dépassé n'affiche rien de plus, et s'il a
+      recouvert l'écran le plus récent, celui-ci est redessiné. */
+   let _rendusLances = 0, _dernierRenduFini = 0;
+
+   /* Chaque dessin d'écran ouvre un lot de lectures (voir DB.prelire) : une
+      clé lue dix fois pendant le dessin ne part qu'une fois vers la base. */
    async function rendre(id, viaHistorique, jour, moment) {
+     const n = DB.ouvrirLot();
+     try { return await rendreVue(id, viaHistorique, jour, moment); }
+     finally { DB.fermerLot(n); }
+   }
+
+   async function rendreVue(id, viaHistorique, jour, moment) {
    if (!V[id]) { toast('Vue indisponible'); return; }
    if (!vueAutorisee(id)) id = vueAccueil();
    /* Rôle changé pendant qu'une feuille était ouverte, et la feuille se ferme
@@ -1622,8 +1813,22 @@ function renderNav() {
          return;
        }
      }
-     try { await V[id](); }
-     catch (err) {
+     const n = ++_rendusLances;
+     let echec = null;
+     try { await V[id](); } catch (err) { echec = err; }
+     if (n !== _rendusLances) {
+       const recouvert = _dernierRenduFini > n;
+       _dernierRenduFini = Math.max(_dernierRenduFini, n);
+       if (recouvert) rendre(STATE.view, true);
+       /* L'écran précédent vient de se dessiner sous le titre du nouveau, qui
+          charge encore : ses boutons restaient actifs sous le mauvais titre. */
+       else if (_dernierRenduFini < _rendusLances)
+         $('#page').innerHTML = '<div class="vide"><span class="vi">⏳</span>Un instant…</div>';
+       return;
+     }
+     _dernierRenduFini = n;
+     if (echec) {
+       const err = echec;
        $('#page').innerHTML = carte(
          entete('⚠️', 'Cette page ne s’est pas ouverte', String(err && err.message || err)) +
          '<button class="btn clair bloc" id="rt">Réessayer</button>');
@@ -1799,9 +2004,15 @@ function renderNav() {
          ['fi', 'ff', 'cb', 'esp', 'tpe'].every(c => k[c] !== undefined && k[c] !== null && k[c] !== ''))))),
        /* La veille fournit le fond initial quand le matin n'a pas été saisi. */
        caisseEcart: k ? caisseResume(k, await DB.get('caisse:' + addD(jour, -1), null)).ecart : 0,
-       reassort:REASSORT.filter(x => reassortFait(x, r)).length,
-       reassortTotal:REASSORT.length, ruptures:rupt
+       reassort:reassortListe().filter(x => reassortFait(x, r)).length,
+       reassortTotal:reassortListe().length, ruptures:rupt
      };
+   }
+
+   /* Les clés que lit etatJour(jour), à demander d'un coup (DB.prelire). */
+   function clesEtatJour(jour) {
+     return ['temp:' + jour, 'hebdo:' + jour, 'clean:' + jour, 'caisse:' + jour,
+             'reassort:' + jour, 'caisse:' + addD(jour, -1), 'hebdo:plan'];
    }
    
    function etatTemp(e, v) {
@@ -1995,6 +2206,7 @@ async function purgerLocalAncien() {
    V.pertes = async function () {
      const j = STATE.jour;
      const liste = await DB.get('pertes:' + j, []);
+     const visibles = liste.filter(w => w && !w.supprime);
    
      $('#page').innerHTML =
        carte(entete('🎙️', 'Dicter la perte', SPEECH
@@ -2017,16 +2229,16 @@ async function purgerLocalAncien() {
          '<button class="btn menthe bloc" id="pa" style="margin-top:18px">Enregistrer la perte</button>') +
    
        '<div class="entete"><h3>Jetés aujourd’hui</h3>' +
-       '<span class="pousse mini num">' + n1(liste.reduce((s, w) => s + litresPerte(w), 0)) + ' L</span></div>' +
+       '<span class="pousse mini num">' + n1(visibles.reduce((s, w) => s + litresPerte(w), 0)) + ' L</span></div>' +
    
-       (liste.length ? '<div class="stack">' + liste.map((w, i) => {
+       (visibles.length ? '<div class="stack">' + visibles.map(w => {
          const m = MOTIFS_PERTE.filter(x => x.id === w.motif)[0] || MOTIFS_PERTE[0];
          return carte('<div class="rang">' +
            '<div style="flex:1"><b>' + esc(w.produit) + '</b>' +
            '<div class="mini">' + w.nombre + ' × · ' + (w.litrage ? n1(w.litrage) + ' L · ' : '') +
            esc(w.par) + ' · ' + heure(w.at) + '</div></div>' +
            pastille('bad', m.label) +
-           '<button class="btn fantome sm" data-del="' + i + '">Retirer</button></div>');
+           '<button class="btn fantome sm" data-del="' + esc(w.id || ('@' + liste.indexOf(w))) + '">Retirer</button></div>');
        }).join('') + '</div>' : vide('🗑️', 'Aucune perte déclarée aujourd’hui.'));
    
      let motif = MOTIFS_PERTE[0].id;
@@ -2074,11 +2286,18 @@ async function purgerLocalAncien() {
           prévenir. On le dit au lieu de deviner. */
        const nombre = num($('#pn').value);
        if (!(nombre > 0)) { toast('Indiquez un nombre supérieur à 0', 'erreur'); return $('#pn').focus(); }
-       if (num($('#pl').value) < 0) { toast('Le litrage ne peut pas être négatif', 'erreur'); return $('#pl').focus(); }
+       const litrage = num($('#pl').value);
+       if (litrage < 0) { toast('Le litrage ne peut pas être négatif', 'erreur'); return $('#pl').focus(); }
+       /* Perte d'une glace (bac, ou taille « N L » dans le nom) enregistrée à
+          0 L : elle ne comptait nulle part — ni « jetés du jour », ni écart
+          glace, ni « Mes boutiques » — sans rien dire (F-14). On exige le
+          litrage pour une glace ; les autres pertes (cornets…) restent à 0. */
+       const estGlace = /\bbac\b/i.test(p) || /\d+(?:[.,]\d+)?\s*L\b/i.test(p);
+       if (estGlace && !(litrage > 0)) { toast('Indiquez le litrage de glace jeté (en L)', 'erreur'); return $('#pl').focus(); }
        /* parUnite : le litrage est saisi par unité (saisie manuelle comme
           dictée, qui remplit ce même formulaire). Les anciennes lignes, sans
           ce marqueur, gardent leur calcul d'origine. */
-       liste.push({ id:uid(), produit:p, nombre:nombre, litrage:num($('#pl').value),
+       liste.push({ id:uid(), produit:p, nombre:nombre, litrage:litrage,
                     parUnite:true,
                     motif:motif, par:STATE.user.prenom, employe:STATE.user.id, at:nowISO() });
        await DB.set('pertes:' + j, liste);
@@ -2090,14 +2309,19 @@ async function purgerLocalAncien() {
    
      $$('[data-del]').forEach(b => b.onclick = () => {
        confirmer('Retirer cette ligne ?', 'La perte sera supprimée du registre du jour. Le retrait est noté au journal.', 'Retirer', async () => {
-         const w = liste.splice(+b.dataset.del, 1)[0];
+         /* Par identifiant, et marquée plutôt qu'ôtée : la fusion entre iPads
+            la ferait revenir, et un index d'une liste périmée visait la mauvaise. */
+         const cle = b.dataset.del;
+         const w = cle.charAt(0) === '@' ? liste[+cle.slice(1)] : liste.filter(x => x && x.id === cle)[0];
+         if (w) { w.supprime = nowISO(); w.supprimePar = STATE.user.prenom; }
          await DB.set('pertes:' + j, liste);
          await cumulerPertesMois(j);
          /* La création d'une perte est journalisée ; son retrait ne l'était pas :
             une trace pouvait disparaître sans laisser de ligne (DON-06). */
-         if (w) await feed('warn', STATE.user.prenom + ' a retiré une perte : ' + w.produit + ' (' +
+         if (w) feed('warn', STATE.user.prenom + ' a retiré une perte : ' + w.produit + ' (' +
            w.nombre + ' ×' + (w.litrage ? ', ' + n1(litresPerte(w)) + ' L' : '') + ', déclarée par ' +
            (w.par || '?') + (w.at ? ' à ' + heure(w.at) : '') + ')');
+         await feedEcrit();
          rendre('pertes');
        });
      });
@@ -2109,9 +2333,9 @@ async function purgerLocalAncien() {
    /* Seules les lignes marquées « parUnite » sont multipliées : les anciennes
       saisies étaient peut-être en litres totaux, on ne les recalcule pas
       rétroactivement. */
-   const litresPerte = w => (w && w.parUnite)
+   const litresPerte = w => (!w || w.supprime) ? 0 : w.parUnite
      ? num(w.nombre || 1) * num(w.litrage)
-     : num(w && w.litrage);
+     : num(w.litrage);
 
    /* Reporte le litrage détruit dans la période d'écart en cours. L'écart est
       rangé sous l'identifiant de la période (ecart:<id>), pas sous le mois :
@@ -2203,10 +2427,30 @@ async function purgerLocalAncien() {
      if (!dc.length) return !!(rec[r.id] && rec[r.id].ok);
      return dc.every(x => (rec[r.id + '|' + x] || {}).ok);
    }
+   /* Liste du réassort selon le catalogue du manager : une référence retirée
+      du catalogue n'est plus à vérifier, une référence ajoutée le devient.
+      Avant, REASSORT restait figé alors que l'écran Catalogue promettait le
+      contraire. Appeler chargerCatalogueSec() avant pour lire la version à jour. */
+   function reassortListe() {
+     if (typeof catalogueSec !== 'function') return REASSORT;
+     const cat = catalogueSec();
+     const masque = id => cat.some(x => typeof x === 'object' && x.id === id && x.masque);
+     const base = REASSORT.filter(r => !r.ref || !masque(r.ref));
+     /* Références ajoutées par le manager (identifiant « m_… », stock.js). */
+     const ajouts = cat.filter(x => typeof x === 'object' && !x.masque && /^m_/.test(x.id))
+       .map(x => ({ id:'c_' + x.id, ref:x.id, cat:'Sec', nom:x.nom, unite:x.unite || 'unité' }));
+     return base.concat(ajouts);
+   }
 
    V.reas = async function () {
      const j = STATE.jour;
-     const rec = await DB.get('reassort:' + j, {});
+     /* Déclinaisons et références du catalogue à jour, même ouvert en premier
+        après un rechargement (sinon : déclinaisons d'usine affichées). */
+     const [, rec] = await Promise.all([
+       typeof chargerCatalogueSec === 'function' ? chargerCatalogueSec().catch(() => null) : null,
+       DB.get('reassort:' + j, {})
+     ]);
+     const REASSORT = reassortListe();
      const faits = REASSORT.filter(r => reassortFait(r, rec)).length;
      const rupt  = REASSORT.filter(r => rec[r.id] && rec[r.id].rupture);
    
@@ -2247,7 +2491,7 @@ async function purgerLocalAncien() {
                '<b>' + esc(r.nom) + '</b>' +
                '<div class="mini">' + (
                  rupt.length ? esc(rupt.join(', ')) + ' : en rupture'
-                 : v.rupture ? 'Reste ' + v.reste + ' ' + esc(r.unite) + ', signalé'
+                 : v.rupture ? 'Reste ' + v.reste + ' ' + esc(accord(v.reste, r.unite)) + ', signalé'
                  : fait && !dc.length ? 'Vérifié par ' + esc(v.par || '') + ' · ' + heure(v.at)
                  : dc.length ? faites + '/' + dc.length + ' · ' + esc(r.detail || ('en ' + r.unite))
                  : esc(r.detail || ('en ' + r.unite))) + '</div></div>' +
@@ -2305,6 +2549,15 @@ async function purgerLocalAncien() {
        if (!art) return toast('Article introuvable', 'erreur');
        if (rec[cle] && rec[cle].rupture) {
          rec[cle] = { ok:0, rupture:0 };
+         /* L'alerte envoyée au manager est classée aussi : elle restait ouverte
+            pour une rupture qui n'existait plus. */
+         const nomR = art.nom + (decl ? ' — ' + decl : '');
+         DB.get('ruptures', []).then(l => {
+           const ouvertes = l.filter(x => x && !x.traite && x.jour === j && x.article === nomR);
+           if (!ouvertes.length) return;
+           ouvertes.forEach(x => { x.traite = true; x.annulee = true; x.traitePar = STATE.user.prenom; x.traiteAt = nowISO(); });
+           return DB.set('ruptures', l);
+         }).catch(() => {});
          DB.set('reassort:' + j, rec).then(() => rendre('reas'));
          return;
        }
@@ -2319,7 +2572,7 @@ async function purgerLocalAncien() {
          '<p class="sub">Combien en reste-t-il ? ' + esc(NomManager()) + ' reçoit l’alerte immédiatement.</p>' +
          '<div class="chips" id="qt">' + RUPTURE.unitesRapides.map(q =>
            '<button type="button" class="chip corail" data-q="' + q + '">' +
-           (q === 0 ? 'Plus rien' : q + ' ' + art.unite) + '</button>').join('') + '</div>' +
+           (q === 0 ? 'Plus rien' : q + ' ' + accord(q, art.unite)) + '</button>').join('') + '</div>' +
          '<div class="champ" style="margin-top:16px"><label class="f">Autre quantité</label>' +
          '<input type="number" id="qa" min="0" step="1" placeholder="Nombre de ' + esc(art.unite) + '"></div>' +
          '<div class="champ" style="margin-top:14px"><label class="f">Précision (facultatif)</label>' +
@@ -2332,7 +2585,7 @@ async function purgerLocalAncien() {
          $$('#qt .chip').forEach(x => x.classList.remove('on'));
          b.classList.add('on'); reste = +b.dataset.q; $('#qa').value = '';
        });
-       $('#qa').oninput = () => { $$('#qt .chip').forEach(x => x.classList.remove('on')); reste = num($('#qa').value); };
+       $('#qa').oninput = () => { $$('#qt .chip').forEach(x => x.classList.remove('on')); reste = $('#qa').value === '' ? null : num($('#qa').value); };
    
        $('#qv').onclick = async () => {
          if (reste === null) return toast('Indiquez ce qu’il reste', 'erreur');
@@ -2346,7 +2599,7 @@ async function purgerLocalAncien() {
                                      reste:reste, niveau:niveau.id, note:rec[cle].note,
                                      par:STATE.user.prenom, at:nowISO(), traite:false });
          await feed('bad', STATE.user.prenom + ' signale une rupture : ' + nomComplet +
-                    (reste === 0 ? ' (plus rien)' : ' (reste ' + reste + ' ' + art.unite + ')'));
+                    (reste === 0 ? ' (plus rien)' : ' (reste ' + reste + ' ' + accord(reste, art.unite) + ')'));
          closeSheet();
          toast(messageEnvoi('ruptures', 'Alerte transmise à ' + nomManager()));
          rendre('reas');
@@ -2517,7 +2770,7 @@ async function purgerLocalAncien() {
                                    par:STATE.user.prenom, at:nowISO(), version:APP.version });
        await feed('warn', STATE.user.prenom + ' a signalé un souci sur « ' + (PAGES[STATE.view] || {}).titre + ' »');
        closeSheet();
-       toast(messageEnvoi('feedback', 'Merci, c’est transmis à ' + nomManager()));
+       toast(messageEnvoi('feedback', 'Merci, c’est transmis à ' + destinataireSouci()));
      };
    }
    
@@ -2538,6 +2791,23 @@ async function purgerLocalAncien() {
    La copie locale des clés encore en file reste aussi : sans elle, une
    nouvelle saisie hors ligne sur la même fiche repartait de zéro et
    remplaçait, dans la file, celle qu'on venait de garder. */
+/* L'appareil vient d'être rattaché à une AUTRE boutique que la précédente
+   (bandeau « Appareil non rattaché », ou session perdue) sans passer par
+   « Changer de boutique » : on efface tout ce qui appartient à l'ancienne
+   (équipe, copies locales, session ouverte), sauf le nouveau jeton et la file.
+   Les saisies en attente gardent leur boutique et ne partiront que chez elle. */
+function quitterAncienneBoutique(ancienne) {
+  try {
+    const p = OFFLINE.storeLocal + ':';
+    const f = fileLire().map(x => x.site ? x : Object.assign({}, x, { site:ancienne }));
+    const garder = [AUTH.cle, p + OFFLINE.fileAttente, p + 'boutique-rattachee', p + 'pinEchecs'];
+    Object.keys(localStorage).filter(k => k.indexOf(p) === 0 && garder.indexOf(k) < 0)
+      .forEach(k => localStorage.removeItem(k));
+    fileEcrire(f);
+    return f.filter(x => x.site === ancienne).length;
+  } catch (e) { return 0; }
+}
+
 async function viderAppareil(garderRattachement) {
   let cles = 0, cachesEff = 0, sw = 0;
   try {
@@ -2694,6 +2964,37 @@ function utilisateurDeSession(s) {
   if (!e) return null;
   return { id:e.id, prenom:e.prenom, role:e.role, couleur:e.couleur, initiales:e.initiales };
 }
+
+/* iPad resté ouvert : la règle des 8 h et le changement de jour n'étaient
+   vérifiés qu'au rechargement ou au prochain écran. Une session de manager
+   restait ouverte toute la nuit, et la tâche cochée le matin, sans changer
+   d'écran, partait dans la journée de la veille. */
+function surveillerVeille() {
+  if (!STATE.user) return;
+  let s = null;
+  try { s = JSON.parse(DB._lire('session') || 'null'); } catch (e) {}
+  if (s && s.vu > 0 && Date.now() - s.vu > SESSION_INACTIVITE_MS) {
+    Promise.resolve(DB.del('session')).catch(() => {}).then(() => recharger());
+    return;
+  }
+  const saisie = document.activeElement && /^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement.tagName);
+  /* Pas en pleine saisie : seulement après 20 min sans geste (iPad resté
+     ouvert la nuit), ou au retour sur l'application. */
+  const repos = document.visibilityState === 'visible' && Date.now() - _dernierGeste > 20 * 60000;
+  if (today() !== _jourDernierRendu && $('#sheet').hidden && !saisie && (repos || surveillerVeille._retour)) {
+    if (typeof phaseCourante === 'function') STATE.phase = phaseCourante();
+    rendre(STATE.view || vueAccueil());
+  }
+}
+let _dernierGeste = Date.now();
+document.addEventListener('pointerdown', () => { _dernierGeste = Date.now(); }, { passive:true });
+document.addEventListener('keydown', () => { _dernierGeste = Date.now(); }, { passive:true });
+setInterval(surveillerVeille, 60000);
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) return;
+  surveillerVeille._retour = true;
+  try { surveillerVeille(); } finally { surveillerVeille._retour = false; }
+});
 
 /* -----------------------------------------------------------------------------
    BOUTON RETOUR DU TÉLÉPHONE
@@ -2951,7 +3252,7 @@ async function lireEquipeBase() {
   if (!DB.configure || !DB._distant('equipe')) return { etat:'base', data:null };
   /* Une équipe saisie hors ligne attend encore dans la file : la copie locale
      est la plus récente, la base ne fait pas foi. */
-  if (fileLire().some(x => x.cle === 'equipe')) {
+  if (fileLire().some(x => ici(x) && x.cle === 'equipe')) {
     try { return { etat:'base', data:JSON.parse(DB._lire('equipe') || 'null') }; }
     catch (e) { return { etat:'base', data:null }; }
   }
@@ -3062,7 +3363,7 @@ function revaliderSession() {
   if (!STATE.user) return;
   const e = EQUIPE.filter(x => x.id === STATE.user.id)[0];
   if (!e) {
-    DB.del('session').then(() => location.reload(), () => location.reload());
+    DB.del('session').then(() => recharger(), () => recharger());
     return;
   }
   if (e.role !== STATE.user.role) _roleARedessiner = true;
@@ -3210,6 +3511,8 @@ function ecranAmorcage() {
       EQUIPE.splice(0, EQUIPE.length, ...equipe);
       try { localStorage.setItem('pilotshop.v3:equipe', JSON.stringify(equipe)); } catch (e) {}
       try { await DB.set('equipe', equipe); } catch (e) { /* partira avec la file */ }
+      /* Boutique qui démarre de zéro : le manager sera guidé (guide.js). */
+      try { await DB.set('boutique', { guide:'a-faire', etapes:{}, debut:nowISO() }); } catch (e) {}
 
       d.remove();
       if (typeof initLogin === 'function') initLogin();
@@ -3232,6 +3535,43 @@ function ecranAmorcage() {
    pour le diagnostic.
    -------------------------------------------------------------------------- */
 STATE.incidents = [];
+
+/* DOUBLE APPUI
+   Un second appui pendant qu'un gestionnaire asynchrone travaille encore
+   enregistrait tout deux fois : deux pertes (20 L au lieu de 10), deux
+   ruptures, deux messages au carnet, deux anomalies. Plutôt qu'un verrou
+   écrit à la main dans chaque écran, tout « onclick » qui rend une promesse
+   ignore les appuis suivants jusqu'à ce qu'elle soit tenue (15 s au plus,
+   pour qu'un bouton ne reste jamais muet). Un appel direct (bouton.onclick())
+   n'est pas concerné. */
+(function () {
+  const d = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'onclick');
+  if (!d || !d.set || !d.get) return;
+  Object.defineProperty(HTMLElement.prototype, 'onclick', {
+    configurable: true, enumerable: d.enumerable,
+    get: function () { return this.__clicOrigine !== undefined ? this.__clicOrigine : d.get.call(this); },
+    set: function (fn) {
+      this.__clicOrigine = fn;
+      if (typeof fn !== 'function') { d.set.call(this, fn); return; }
+      d.set.call(this, function (ev) {
+        const el = this;
+        /* Flèches ± des températures : les appuis rapides s'additionnent exprès. */
+        if (el.dataset && (el.dataset.pas !== undefined || el.dataset.repetable !== undefined)) return fn.apply(el, arguments);
+        if (el.__occupe) { if (ev && ev.preventDefault) ev.preventDefault(); return; }
+        const r = fn.apply(el, arguments);
+        if (r && typeof r.then === 'function') {
+          el.__occupe = true;
+          const fin = () => { clearTimeout(t); el.__occupe = false; };
+          const t = setTimeout(fin, 15000);
+          /* finally, pas then(fin, fin) : un échec doit rester « non traité »
+             pour que l'alerte « L'action n'a pas abouti » s'affiche. */
+          r.finally(fin);
+        }
+        return r;
+      });
+    }
+  });
+})();
 
 window.addEventListener('unhandledrejection', function (ev) {
   const e = ev.reason || {};
@@ -3653,7 +3993,8 @@ function ouvrirPremierePeriode() {
      /* Échec récent : pas de nouvel essai avant 10 minutes. Sans ce frein,
         chaque redessin de Ma journée (phase, onglet, retour après une photo
         ou une validation) attendait de nouveau 8 s qu'open-meteo réponde. */
-     const repli = () => cache || { t:'—', code:3, max:'—', pluie:'—', at:nowISO(), source:'indisponible' };
+     /* Sans donnée : pas de « Couvert » inventé (l'écran le montrait sans météo). */
+     const repli = () => cache || { t:'—', code:null, max:'—', pluie:'—', at:nowISO(), source:'indisponible' };
      if (Date.now() - _meteoEchec < 10 * 60e3) return repli();
      try {
        const u = METEO.endpoint + '?latitude=' + METEO.lat + '&longitude=' + METEO.lon +
@@ -3695,7 +4036,7 @@ function ouvrirPremierePeriode() {
      return { m:await DB.get('meteo', null), suite:p };
    }
    function widgetMeteo(m) {
-     if (!m) return '';
+     if (!m || m.source === 'indisponible') return '';
      const c = METEO.codes[m.code] || METEO.codes[3];
      return carte(
        '<div class="meteo"><span class="mi">' + c.i + '</span>' +
@@ -3712,6 +4053,13 @@ function ouvrirPremierePeriode() {
    V.controle = async function () {
      const j = today();
      const per = await periodeCourante();
+     const jours = joursEntre(per.debut, j > per.fin ? per.fin : j);
+     /* Tout ce que l'écran lit, demandé d'un coup : une requête par table au
+        lieu de cinq allers-retours par jour de période. */
+     const cles = ['ruptures', 'horaires', 'anomalies', 'pointage:' + j].concat(...clesEtatJour(j));
+     for (let i = 0; i < 3; i++) cles.push('feed:' + addD(j, -i));
+     jours.forEach(d => cles.push(...clesEtatJour(d)));
+     DB.prelire(cles);
      const mt = await meteoRapide();
      const m = mt.m;
      const e = await etatJour(j);
@@ -3728,7 +4076,6 @@ function ouvrirPremierePeriode() {
      const perimes = fifo.filter(f => f.c === 'rouge').length;
      const bientot = fifo.filter(f => f.c === 'orange').length;
    
-     const jours = joursEntre(per.debut, j > per.fin ? per.fin : j);
      let cumulCaisse = 0, sansNet = 0, tempCrit = 0;
      /* On retient QUELLES enceintes ont dépassé, pas seulement combien :
         une vitrine et une chambre froide n'appellent pas la même réaction. */
@@ -3772,6 +4119,11 @@ function ouvrirPremierePeriode() {
      if (typeof alerteCalculMensuel === 'function') {
        const ac = await alerteCalculMensuel();
        if (ac) A.push(ac);
+     }
+     /* Actions de pré-audit en retard, pré-audit à refaire (preaudit.js). */
+     if (typeof alertePreAudit === 'function') {
+       const ap = await alertePreAudit();
+       if (ap) A.push(ap);
      }
      /* Une alerte doit nommer le produit. « 2 ruptures non traitées » oblige le
         manager à ouvrir un autre écran pour savoir s'il s'agit de cornets ou
@@ -3963,9 +4315,16 @@ function ouvrirPremierePeriode() {
           est ouvert sous la même clé : la marque ne vaut donc que pour le lot
           jeté — même numéro, ouvert avant le jet. */
        if (v.jete && (!v.jeteLot || v.jeteLot === v.lot) && (!v.at || v.at <= v.jete)) return;
+       /* Ancienne entrée « a_<règle> » (sans saveur) : remplacée par une
+          ouverture plus récente « a_<règle>|<saveur> », elle ne l'était plus. */
+       if (cle.indexOf('a_') === 0 && cle.indexOf('|') < 0 &&
+           Object.keys(rec).some(k => k.indexOf(cle + '|') === 0 && rec[k] && String(rec[k].at || '') >= String(v.at || ''))) return;
        const type = cle.slice(0, 1);
-       const nom = type === 'g' ? cle.slice(2) : (DLC_RULES[cle.slice(2)] || DLC_RULES.defaut).label;
-       const regle = regleDLC(nom, type);
+       /* « a_<règle>|<saveur> » : une entrée par saveur ouverte. */
+       const [rg, saveur] = cle.slice(2).split('|');
+       const nom = type === 'g' ? cle.slice(2)
+                 : (DLC_RULES[rg] || DLC_RULES.defaut).label + (saveur ? ' · ' + saveur : '');
+       const regle = regleDLC(type === 'g' ? nom : (DLC_RULES[rg] || DLC_RULES.defaut).label, type);
        const heures = DLC_RULES[regle].h;
        const limite = new Date(new Date(v.ouv + 'T08:00:00').getTime() + heures * 3600e3);
        const resteH = Math.round((limite - Date.now()) / 3600e3);
@@ -4304,10 +4663,19 @@ function ouvrirPremierePeriode() {
    
      const theo = debutKg + achats - jete - vendu;
      const ecart = finKg - theo;
-     const pct = theo ? ((theo - finKg) / theo) * 100 : 0;
+     /* Théorique nul ou négatif (départ manquant, ventes plus fortes que le
+        stock) : aucun pourcentage n'a de sens. Il s'affichait « Dans la
+        fourchette » en vert, ou changeait de signe. Même règle que calcul.js. */
+     /* Rien de saisi encore (période neuve) : pas d'alerte rouge au premier jour. */
+     const incoherent = !(theo > 0) && (finKg > 0 || vendu > 0);
+     const pct = (incoherent || !(theo > 0)) ? 0 : ((theo - finKg) / theo) * 100;
      return { debutKg, finKg, achats, jete, vendu, theo, reel:finKg, ecart:ecart,
-              pct:pct, valeur:ecart * FOURNISSEUR.prixMoyenKg, invValide:finAncien || kgFinInv !== null };
+              pct:pct, incoherent:incoherent, valeur:ecart * FOURNISSEUR.prixMoyenKg, invValide:finAncien || kgFinInv !== null };
    }
+   /* Même convention que le calcul guidé et la jauge : « −x % » = glace manquante.
+      pct (théorique − réel) est positif quand il en manque : affiché brut, le
+      signe était inversé dans Périodes clôturées et au journal. */
+   const pctEcartTxt = p => (p > 0.05 ? '−' : p < -0.05 ? '+' : '') + n1(Math.abs(p)) + ' %';
    const etatEcart = p => {
      const a = Math.abs(p);
      return a <= SEUILS.ecartGlacePct ? { c:'ok', t:'Dans la fourchette' }
@@ -4325,7 +4693,7 @@ function ouvrirPremierePeriode() {
      /* Synthèse et jauge en fonctions : la saisie d'un champ les met à jour
         en place, sans redessiner la vue (voir plus bas). */
      const kpis = c => {
-       const st = etatEcart(c.pct);
+       const st = c.incoherent ? { c:'bad', t:'Calcul incohérent : vérifiez le départ et les ventes' } : etatEcart(c.pct);
        return kpi('Stock réel', n1(c.reel) + '<span class="u">kg</span>', '', c.invValide ? 'Inventaire validé' : 'Inventaire manquant') +
          kpi('Stock théorique', n1(c.theo) + '<span class="u">kg</span>', '', 'Calculé') +
          /* Écart arrondi à zéro : ni + ni −. « −0,0 kg » laissait croire à un manque. */
@@ -4418,6 +4786,8 @@ function ouvrirPremierePeriode() {
      Object.keys(champs).forEach(x => {
        const el = $(x);
        if (el) el.oninput = debounce(async () => {
+         /* Un litrage d'achats négatif réduisait le stock théorique. */
+         if (el.value !== '' && num(el.value) < 0) return toast('Une quantité ne peut pas être négative', 'erreur');
          await DB.patch('ecart:' + per.id, champs[x](el.value));
          await majSynthese();
        }, 700);
@@ -4467,7 +4837,9 @@ function ouvrirPremierePeriode() {
      let annulations = 0, pertesTotal = 0;
    
      let caisseVeille = null;
-     for (const d of joursEntre(debut, fin)) {
+     const jours = joursEntre(debut, fin);
+     DB.prelire([].concat(...jours.map(d => ['caisse:' + d, 'pertes:' + d])));
+     for (const d of jours) {
        const k = await DB.get('caisse:' + d, null);
        const veille = caisseVeille;
        caisseVeille = k;
@@ -4513,6 +4885,9 @@ function ouvrirPremierePeriode() {
       ========================================================================== */
    async function blocagesCloture(per) {
      const B = [];
+     const jours = joursEntre(per.debut, today() < per.fin ? today() : per.fin);
+     DB.prelire(['ecart:' + per.id, 'stock:inventaire', 'stock:sec']
+       .concat(...jours.map(clesEtatJour)));
      const e = await DB.get('ecart:' + per.id, {});
 
      /* L'inventaire est la condition première : sans comptage réel de fin, le
@@ -4541,7 +4916,7 @@ function ouvrirPremierePeriode() {
      }
      if (!num(e.litrageBL))     B.push({ id:'achats', txt:'Achats de la période non saisis', go:'ecarts' });
    
-     for (const d of joursEntre(per.debut, today() < per.fin ? today() : per.fin)) {
+     for (const d of jours) {
        const st = await etatJour(d);
        if (!st.tempM || !st.tempS) B.push({ id:'temp', txt:'Températures incomplètes le ' + fmtDC(d), go:'temp', jour:d,
                                             moment:st.tempM ? 's' : 'm' });
@@ -4593,7 +4968,7 @@ function ouvrirPremierePeriode() {
          historique.map(p =>
            '<div class="dl"><span class="c1">' + esc(libellePeriode(p)) +
            (p.anticipee ? ' · anticipée' : '') + '</span>' +
-           '<span class="c w num">' + (p.ecartPct === undefined ? '—' : n1(p.ecartPct) + ' %') + '</span>' +
+           '<span class="c w num">' + (p.ecartPct === undefined ? '—' : pctEcartTxt(p.ecartPct)) + '</span>' +
            '<span class="c ww">' + esc(p.par) + ' ' + fmtDC(p.jour) + '</span></div>').join('') + '</div>' : '');
    
      $('#clo').onclick = () => ouvrirCloture(per, B, anticipee);
@@ -4661,6 +5036,14 @@ function modifierPeriode(per) {
   $('#mp-ok').onclick = async () => {
     const d1 = $('#mp-d').value, d2 = $('#mp-f').value;
     if (!d1 || !d2 || d2 < d1) return toast('Dates incohérentes', 'erreur');
+    /* Ni chevauchement avec la période clôturée (jours comptés deux fois), ni
+       début futur (les saisies du jour sortiraient de toute période). */
+    /* Fin réelle : une clôture anticipée ancienne garde sa fin prévue. */
+    const finReelle = p => (p.anticipee && p.jour && p.jour < p.fin) ? p.jour : p.fin;
+    const closes = (await DB.get('periodes', [])).filter(p => p && p.fin && p.id !== per.id);
+    const derniere = closes.sort((a, b) => String(finReelle(a)).localeCompare(String(finReelle(b)))).pop();
+    if (derniere && d1 <= finReelle(derniere)) return toast('La période précédente finit le ' + fmtD(finReelle(derniere)) + ' : commencez après', 'erreur');
+    if (d1 !== per.debut && d1 > addD(today(), 1)) return toast('Le début ne peut pas être après demain', 'erreur');
     const avant = libellePeriode(per);
     Object.assign(per, { type:type, debut:d1, fin:d2,
                          modifiee:nowISO(), modifieePar:STATE.user.prenom });
@@ -4771,6 +5154,11 @@ function modifierPeriode(per) {
        $$('#cl-ecart [data-e]').forEach(x => { x.classList.toggle('on', x === b); x.setAttribute('aria-pressed', x === b); });
      });
    
+     /* Jusqu'à la clôture, mais jamais au-delà de la veille de la suivante. */
+     const finTardive = (fin, d1) => {
+       const f = addD(d1, -1) < today() ? addD(d1, -1) : today();
+       return f > fin ? f : null;
+     };
      $('#cl-ok').onclick = async () => {
        const motif = $('#cl-motif') ? $('#cl-motif').value.trim() : '';
        if (forcables.length && PERIODES.forcageMotifObligatoire && !motif) {
@@ -4780,13 +5168,22 @@ function modifierPeriode(per) {
        if (avecEcart === null) return toast('Choisissez si vous calculez l’écart de cette période', 'erreur');
        const d1 = $('#cl-d').value, d2 = $('#cl-f').value;
        if (!d1 || !d2 || d2 < d1) return toast('Dates de période incohérentes', 'erreur');
+       /* Jusqu'à aujourd'hui, saisies et pertes vont dans la période qu'on ferme :
+          une suivante qui commencerait avant demain les compterait deux fois. */
+       if (d1 <= today()) return toast('La nouvelle période commence au plus tôt demain', 'erreur');
    
        const c = await calculEcart(per);
        const close = Object.assign({}, per, {
          ouverte:false, anticipee:anticipee, par:STATE.user.prenom, jour:today(), at:nowISO(),
          motif:motif, forces:forcables.map(f => f.txt)
-       }, avecEcart
-         ? { ecartKg:+n2(c.ecart), ecartPct:+n2(c.pct), stockFin:+n2(c.reel), valeur:+n2(c.valeur) }
+       /* Fermée avant terme : elle s'arrête à la veille de la suivante, sans la chevaucher.
+          Fermée après terme : elle va jusqu'au jour de la clôture, que son écart
+          a couvert (pertes, ventes, stock compté ce jour). Sinon les jours entre
+          la fin prévue et la clôture n'étaient dans aucune période. */
+       }, anticipee && d1 <= per.fin ? { fin:addD(d1, -1) < per.debut ? per.debut : addD(d1, -1), finPrevue:per.fin }
+        : finTardive(per.fin, d1) ? { fin:finTardive(per.fin, d1), finPrevue:per.fin } : {}, avecEcart
+         ? Object.assign({ ecartKg:+n2(c.ecart), stockFin:+n2(c.reel), valeur:+n2(c.valeur) },
+                         c.incoherent ? { ecartIncoherent:true } : { ecartPct:+n2(c.pct) })
          : { sansEcart:true });
        await DB.push('periodes', close);
    
@@ -4800,7 +5197,7 @@ function modifierPeriode(per) {
          avecEcart ? { debut:{ kg:c.reel } } : {}));
    
        await feed('ok', STATE.user.prenom + ' a clôturé ' + libellePeriode(per) +
-         (anticipee ? ' (anticipée)' : '') + (avecEcart ? ', écart ' + n1(c.pct) + ' %' : ', sans écart'));
+         (anticipee ? ' (anticipée)' : '') + (avecEcart ? (c.incoherent ? ', écart incohérent' : ', écart ' + pctEcartTxt(c.pct)) : ', sans écart'));
        closeSheet();
        toast('Période clôturée · nouvelle fenêtre ouverte');
        rendre('periodes');
@@ -4821,7 +5218,14 @@ function modifierPeriode(per) {
      /* Les inventaires ne sont pas rangés par jour mais dans deux listes
         (chambre froide, sec) : on les lit à part. Chaque ligne s'ouvre sur le
         comptage complet (voirInventaire, stock.js). */
-     const cles = defs[onglet].p ? (await DB.list(defs[onglet].p)).reverse() : [];
+     let cles = defs[onglet].p ? (await DB.list(defs[onglet].p)).reverse() : [];
+     /* Nettoyage : l'écran écrit « hebdo:<jour> », l'ancien registre « clean:<jour> ».
+        Ne lire que le second laissait l'onglet vide. */
+     if (onglet === 'clean') {
+       const jours = new Set(cles.map(c => c.slice(6)));
+       (await DB.list('hebdo:')).map(c => c.slice(6)).filter(j => /^\d{4}-\d{2}-\d{2}$/.test(j)).forEach(j => jours.add(j));
+       cles = Array.from(jours).sort().reverse().map(j => 'clean:' + j);
+     }
      const lignes = [];
      const invs = [];
      if (onglet === 'inventaires') {
@@ -4842,7 +5246,10 @@ function modifierPeriode(per) {
      }
    
      for (const c of cles) {
-       const j = c.replace(defs[onglet].p, ''), v = await DB.get(c);
+       const j = c.replace(defs[onglet].p, '');
+       const v = onglet === 'clean'
+         ? Object.assign({}, await DB.get(c, {}), await DB.get('hebdo:' + j, {}))
+         : await DB.get(c);
        if (!v) continue;
        if (onglet === 'caisse') {
          /* Même calcul qu'ailleurs : la veille donne le fond initial manquant. */
@@ -4860,13 +5267,17 @@ function modifierPeriode(per) {
          lignes.push([fmtD(j), f + ' ' + accord(f, 'tâche'), f ? 'Fait' : 'Rien', '—', f ? 'ok' : 'bad']);
        }
        else if (onglet === 'reassort') {
-         const f = Object.keys(v).filter(k => v[k] && v[k].ok).length;
+         /* Références faites (déclinaisons comprises), pas cases cochées :
+            « 23 / 17 » s'affichait quand on cochait les déclinaisons. */
+         const liste = reassortListe();
+         const f = liste.filter(x => reassortFait(x, v)).length;
          const r = Object.keys(v).filter(k => v[k] && v[k].rupture).length;
-         lignes.push([fmtD(j), f + ' / ' + REASSORT.length, r ? r + ' ' + accord(r, 'rupture') : 'Aucune', '—', r ? 'bad' : 'ok']);
+         lignes.push([fmtD(j), f + ' / ' + liste.length, r ? r + ' ' + accord(r, 'rupture') : 'Aucune', '—', r ? 'bad' : 'ok']);
        }
        else if (onglet === 'pertes') {
-         if (!v.length) continue;
-         lignes.push([fmtD(j), v.length + ' ' + accord(v.length, 'ligne'), n1(v.reduce((s, w) => s + litresPerte(w), 0)) + ' L', v[0].par || '—', 'warn']);
+         const vv = v.filter(w => w && !w.supprime);
+         if (!vv.length) continue;
+         lignes.push([fmtD(j), vv.length + ' ' + accord(vv.length, 'ligne'), n1(vv.reduce((s, w) => s + litresPerte(w), 0)) + ' L', vv[0].par || '—', 'warn']);
        }
        else if (onglet === 'pointage') {
          if (!v.length) continue;
@@ -5010,7 +5421,8 @@ function modifierPeriode(per) {
                const bad = etatTemp(e, m) === 'crit' || etatTemp(e, s) === 'crit';
                return '<td' + (bad ? ' style="font-weight:700"' : '') + '>' +
                  (m === undefined || m === '' ? '—' : esc(m)) + ' / ' + (s === undefined || s === '' ? '—' : esc(s)) + '</td>';
-             }).join('') + '<td>' + esc(L.t.obs || '') + '</td></tr>').join('') + '</tbody></table>' +
+             }).join('') + '<td>' + esc([L.t.obs_m !== undefined ? L.t.obs_m : L.t.obs, L.t.obs_s]
+               .filter(Boolean).join(' / ')) + '</td></tr>').join('') + '</tbody></table>' +
            '<div style="font-size:9.5px">Valeurs en °C, matin / soir. Les dépassements de limite critique sont en gras. ' +
            'Cibles : ' + ENCEINTES.map(e => esc(e.nom) + ' ' + esc(e.cible)).join(' · ') + '.</div>'
          : '<div>Aucun relevé enregistré sur la période.</div>') +
@@ -5062,6 +5474,9 @@ function modifierPeriode(per) {
       ========================================================================== */
    V.equipe = async function () {
      const cles = (await DB.list('pointage:')).reverse().slice(0, 30);
+     const feedCles = [];
+     for (let i = 0; i < 14; i++) feedCles.push('feed:' + addD(today(), -i));
+     DB.prelire(cles.concat(feedCles));
      const parPersonne = {};
      EQUIPE.forEach(e => parPersonne[e.id] = { e:e, min:0, jours:0, sessions:[] });
    
@@ -5077,8 +5492,8 @@ function modifierPeriode(per) {
      }
    
      const feedTot = {};
-     for (let i = 0; i < 14; i++) {
-       (await DB.get('feed:' + addD(today(), -i), [])).forEach(x => {
+     for (const c of feedCles) {
+       (await DB.get(c, [])).forEach(x => {
          if (x.id) feedTot[x.id] = (feedTot[x.id] || 0) + 1;
        });
      }
@@ -5147,7 +5562,7 @@ function modifierPeriode(per) {
        EQUIPE.splice(0, EQUIPE.length, ...liste.filter(ficheValide));
        return liste;
      };
-     if (!DB.configure || !DB._distant('equipe') || fileLire().some(x => x.cle === 'equipe')) return sansVersion();
+     if (!DB.configure || !DB._distant('equipe') || fileLire().some(x => ici(x) && x.cle === 'equipe')) return sansVersion();
      const chemin = DB._table('equipe') + '?id=eq.' + encodeURIComponent('equipe');
      const lire = async () => {
        const l = await DB._appel(chemin + '&select=data,updated_at&limit=1');
@@ -5469,6 +5884,10 @@ function modifierPeriode(per) {
            for (let j = 0; j < brut[i].length; j++) {
              const cel = String(brut[i][j]).toLowerCase();
              if (!/total\s*(kg|poids)|poids\s*total/.test(cel)) continue;
+             /* En-tête d'une colonne de poids par ligne (plusieurs nombres
+                dessous) : ce n'est pas un total. Seule la 1re ligne comptait. */
+             const dessous = brut.slice(i + 1).filter(l => num(l[j]) > 0).length;
+             if (dessous >= 2) continue;
              const voisins = [brut[i][j + 1], brut[i][j + 2], (brut[i + 1] || [])[j]];
              const v = voisins.map(num).filter(x => x > 0)[0];
              if (v) return resolve({ kg:v, lignes:1, methode:'Cellule « Total Kg » du fichier',
@@ -5511,6 +5930,7 @@ function modifierPeriode(per) {
                                         fiable:true, detail:[[n + ' lignes additionnées', n1(kg) + ' kg']], inconnus:[] });
          }
    
+         if (!cQte && !cNom && !cSku) return reject(new Error(IMPORT_ILLISIBLE));
          if (!cQte) {
            return reject(new Error('Aucune colonne de quantité trouvée. Colonnes lues : ' + cols.slice(0, 6).join(', ')));
          }

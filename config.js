@@ -1142,7 +1142,9 @@ const CONSIGNE_TEXTE_LIBRE = 'Pas d’information de santé ni d’avis sur une 
    venait d'effacer. */
 const CONSERVATION = {
   listesJours: 365,               // retours, anomalies résolues, passation
-  listes: ['feedback', 'anomalies', 'releve']
+  /* « ruptures » : une seule ligne en base, qui grossissait sans fin et
+     n'était plus envoyée passé 900 Ko. Les ruptures non traitées restent. */
+  listes: ['feedback', 'anomalies', 'releve', 'ruptures']
 };
 
 /* Codes PIN : la lecture accepte déjà les codes hachés. L'ÉCRITURE hachée

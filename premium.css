@@ -961,7 +961,7 @@ select,select:focus{
 #pin-retour{margin-top:12px}
 #login-etat{color:var(--noisette)}
 #login-etat:empty{display:none}
-#lg-reset{min-height:48px;margin-top:8px;color:var(--noisette);text-underline-offset:3px}
+#lg-reset,#lg-boutique{min-height:48px;margin-top:8px;color:var(--noisette);text-underline-offset:3px}
 
 /* Paysage iPad : le code se compose à droite, l'identité reste à gauche.
    Le pavé tient sans défilement dans 768 px de haut. */
@@ -1186,3 +1186,7 @@ select,select:focus{
        bord de champ et points PIN 3,6 · anneau du segment actif 13,8
        anneau de puce choisie 16,4 · repère or de l'onglet 4,9.
    ========================================================================== */
+
+/* Calcul guidé, ventes par produit : trois colonnes à toute largeur
+   (la grille .g3 s'empilait sur téléphone et mélangeait les champs). */
+.cv-g{display:grid;grid-template-columns:minmax(0,2fr) minmax(0,1fr) minmax(0,1fr);gap:8px;align-items:center}
