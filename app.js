@@ -4548,9 +4548,10 @@ function ouvrirPremierePeriode() {
        if (st.netTotal && st.net === 0) B.push({ id:'nettoyage', txt:'Aucun nettoyage validé le ' + fmtDC(d), go:'clean', jour:d });
        if (!st.caisse) B.push({ id:'caisse', txt:'Fermeture de caisse non validée le ' + fmtDC(d), go:'caisse', jour:d, moment:'s' });
      }
-     return B.map(b => Object.assign(b, {
-       forcable: (PERIODES.blocages.filter(x => x.id === b.id)[0] || { forcable:false }).forcable
-     }));
+     return B.map(b => {
+       const def = PERIODES.blocages.filter(x => x.id === b.id)[0] || { forcable:false };
+       return Object.assign(b, { forcable:!!def.forcable, pourEcart:!!def.pourEcart });
+     });
    }
    
    V.periodes = async function () {
@@ -4559,8 +4560,12 @@ function ouvrirPremierePeriode() {
      const dur = joursEntre(per.debut, per.fin).length;
      const ecoules = joursEntre(per.debut, today() < per.fin ? today() : per.fin).length;
      const anticipee = today() < per.fin;
-     const bloquants = B.filter(b => !b.forcable);
+     const bloquants = B.filter(b => !b.forcable && !b.pourEcart);
      const historique = (await DB.get('periodes', [])).slice().reverse().slice(0, 12);
+     /* Ce qui ne sert qu'à l'écart n'empêche pas de terminer la période. */
+     const niveau = b => b.pourEcart ? 'info' : b.forcable ? 'warn' : 'bad';
+     const aide = b => b.pourEcart ? 'Pour l’écart seulement : pas obligatoire pour terminer la période.'
+       : b.forcable ? 'Peut être forcé avec un motif écrit.' : 'Bloquant : la clôture est impossible sans cela.';
    
      $('#page').innerHTML =
        carte(entete('📅', libellePeriode(per),
@@ -4571,8 +4576,8 @@ function ouvrirPremierePeriode() {
            B.length ? B.length + ' ' + accord(B.length, 'point ouvert', 'points ouverts') : 'Prête à clôturer') + '</span></div>', 'solide') +
    
        (B.length ? '<div class="entete"><h3>Ce qui reste à faire</h3></div><div class="stack">' + B.map(b =>
-         '<div class="alerte ' + (b.forcable ? 'warn' : 'bad') + '"><span class="ai">' + (b.forcable ? '●' : '▲') + '</span>' +
-         '<div><b>' + esc(b.txt) + '</b><p>' + (b.forcable ? 'Peut être forcé avec un motif écrit.' : 'Bloquant : la clôture est impossible sans cela.') + '</p></div>' +
+         '<div class="alerte ' + niveau(b) + '"><span class="ai">' + (niveau(b) === 'bad' ? '▲' : '●') + '</span>' +
+         '<div><b>' + esc(b.txt) + '</b><p>' + aide(b) + '</p></div>' +
          '<span class="go"><button class="btn clair sm" data-go="' + b.go + '"' + (b.jour ? ' data-jour="' + b.jour + '"' : '') +
          (b.moment ? ' data-moment="' + b.moment + '"' : '') + '>Ouvrir</button></span></div>').join('') + '</div>'
          : carte('<div class="alerte ok"><span class="ai">•</span><div><b>Tout est en ordre</b>' +
@@ -4669,8 +4674,9 @@ function modifierPeriode(per) {
 }
    
    function ouvrirCloture(per, B, anticipee) {
-     const bloquants = B.filter(b => !b.forcable);
+     const bloquants = B.filter(b => !b.forcable && !b.pourEcart);
      const forcables = B.filter(b => b.forcable);
+     const pourEcart = B.filter(b => b.pourEcart);
    
      if (bloquants.length) {
        showSheet(
@@ -4681,8 +4687,7 @@ function modifierPeriode(per) {
            '<span class="go"><button class="btn clair sm" data-saut="' + b.go + '"' + (b.jour ? ' data-jour="' + b.jour + '"' : '') +
            (b.moment ? ' data-moment="' + b.moment + '"' : '') + '>Ouvrir</button></span></div>').join('') + '</div>' +
          '<div class="alerte info" style="margin-top:14px"><span class="ai">ℹ️</span><div><b>Pourquoi c’est bloquant</b>' +
-         '<p>Sans inventaire de glace réel et sans achats saisis, le stock de fin est une invention : ' +
-         'l’écart calculé serait faux et toute la période suivante partirait de travers.</p></div></div>' +
+         '<p>Ces points ne peuvent pas être forcés : réglez-les, puis revenez terminer la période.</p></div></div>' +
          '<div class="actions"><button class="btn clair" data-fermer>Fermer</button></div>');
        $$('[data-saut]').forEach(b => b.onclick = () => { closeSheet(); rendre(b.dataset.saut, false, b.dataset.jour, b.dataset.moment); });
        return;
@@ -4702,6 +4707,16 @@ function modifierPeriode(per) {
          ? '<div class="champ" style="margin-top:14px"><label class="f">Motif du forçage (obligatoire)</label>' +
            '<input type="text" id="cl-motif" data-autofocus placeholder="Ex. boutique fermée le 14, relevés sans objet"></div>' : '') +
    
+       /* L'écart n'est plus imposé : l'appli le propose, le manager choisit. */
+       '<div class="entete"><h3>Écart de la période</h3></div>' +
+       '<p class="mini">Voulez-vous calculer l’écart de glace de cette période ?</p>' +
+       (pourEcart.length ? '<div class="alerte warn" style="margin-top:8px"><span class="ai">●</span><div><b>Il manque ' +
+         pourEcart.length + ' ' + accord(pourEcart.length, 'élément') + ' pour l’écart</b><p>' + esc(pourEcart.map(b => b.txt).join(' · ')) +
+         '. Un écart calculé sans cela serait faux.</p></div></div>' : '') +
+       '<div class="chips" id="cl-ecart" style="margin-top:8px">' +
+         '<button type="button" class="chip" data-e="oui" aria-pressed="false">Calculer l’écart</button>' +
+         '<button type="button" class="chip" data-e="non" aria-pressed="false">Sans écart</button></div>' +
+
        '<div class="entete"><h3>Nouvelle période</h3></div>' +
        '<div class="chips" id="cl-type">' + PERIODES.types.map((t, i) =>
          '<button type="button" class="chip' + (t.id === per.type ? ' on' : '') + '" data-t="' + t.id + '">' +
@@ -4749,6 +4764,12 @@ function modifierPeriode(per) {
      $('#cl-d').onchange = maj;
      $('#cl-f').onchange = maj;
      maj();
+     /* Aucun choix par défaut : c'est au manager de dire s'il veut l'écart. */
+     let avecEcart = null;
+     $$('#cl-ecart [data-e]').forEach(b => b.onclick = () => {
+       avecEcart = b.dataset.e === 'oui';
+       $$('#cl-ecart [data-e]').forEach(x => { x.classList.toggle('on', x === b); x.setAttribute('aria-pressed', x === b); });
+     });
    
      $('#cl-ok').onclick = async () => {
        const motif = $('#cl-motif') ? $('#cl-motif').value.trim() : '';
@@ -4756,25 +4777,30 @@ function modifierPeriode(per) {
          toast('Indiquez le motif du forçage', 'erreur');
          return $('#cl-motif').focus();
        }
+       if (avecEcart === null) return toast('Choisissez si vous calculez l’écart de cette période', 'erreur');
        const d1 = $('#cl-d').value, d2 = $('#cl-f').value;
        if (!d1 || !d2 || d2 < d1) return toast('Dates de période incohérentes', 'erreur');
    
        const c = await calculEcart(per);
        const close = Object.assign({}, per, {
          ouverte:false, anticipee:anticipee, par:STATE.user.prenom, jour:today(), at:nowISO(),
-         motif:motif, forces:forcables.map(f => f.txt),
-         ecartKg:+n2(c.ecart), ecartPct:+n2(c.pct), stockFin:+n2(c.reel), valeur:+n2(c.valeur)
-       });
+         motif:motif, forces:forcables.map(f => f.txt)
+       }, avecEcart
+         ? { ecartKg:+n2(c.ecart), ecartPct:+n2(c.pct), stockFin:+n2(c.reel), valeur:+n2(c.valeur) }
+         : { sansEcart:true });
        await DB.push('periodes', close);
    
        const suivante = { id:uid(), type:type, debut:d1, fin:d2, ouverte:true,
                           precedente:per.id, creee:nowISO(), creeePar:STATE.user.prenom };
        await DB.set('periode:courante', suivante);
        oublierPeriode();
-       await DB.patch('ecart:' + suivante.id, { debut:{ kg:c.reel }, litrageBL:0, jeteL:0, jeteKg:0, ventes:{} });
+       /* Sans écart, aucun stock de départ n'est posé sur la période suivante :
+          elle reprendra le comptage fait, s'il y en a un. */
+       await DB.patch('ecart:' + suivante.id, Object.assign({ litrageBL:0, jeteL:0, jeteKg:0, ventes:{} },
+         avecEcart ? { debut:{ kg:c.reel } } : {}));
    
        await feed('ok', STATE.user.prenom + ' a clôturé ' + libellePeriode(per) +
-         (anticipee ? ' (anticipée)' : '') + ', écart ' + n1(c.pct) + ' %');
+         (anticipee ? ' (anticipée)' : '') + (avecEcart ? ', écart ' + n1(c.pct) + ' %' : ', sans écart'));
        closeSheet();
        toast('Période clôturée · nouvelle fenêtre ouverte');
        rendre('periodes');
