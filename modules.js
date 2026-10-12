@@ -548,6 +548,9 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
    V.accueil = async function () {
    const j = STATE.jour;
    STATE.phase = STATE.phase || phaseCourante();
+   /* Toutes les lectures de l'écran en une fois (voir DB.prelire). */
+   DB.prelire(clesEtatJour(j).concat(['checklist:' + j, 'preuves:' + j, 'releve',
+     'stock:inventaire', 'stock:mois', 'stock:sec']));
    const e = await etatJour(j);
    const rec = await DB.get('checklist:' + j, {});
    const preuves = (await DB.get('preuves:' + j, [])).filter(p => !p.supprime);
