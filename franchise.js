@@ -207,7 +207,7 @@ const LIGNES_FRANCHISE = [
          : (r.relevesManquants || 0) + (r.tachesManquantes || 0) ? 'warn' : 'ok' },
   { id:'preaudit', libelle:'Score pré-audit', aide:'dernier pré-audit',
     val:r => r.preaudit ? Math.round(r.preaudit.score) + ' / 100' : null,
-    c:r => !r.preaudit ? 'n' : r.preaudit.score >= 80 ? 'ok' : r.preaudit.score >= 60 ? 'warn' : 'bad' },
+    c:r => !r.preaudit ? 'n' : r.preaudit.score >= 85 ? 'ok' : r.preaudit.score >= 70 ? 'warn' : 'bad' },
   { id:'signal', libelle:'Signalements ouverts', aide:'anomalies et ruptures',
     val:r => String((r.anomalies || 0) + (r.ruptures || 0)),
     c:r => (r.anomalies || 0) + (r.ruptures || 0) ? 'warn' : 'ok' }
