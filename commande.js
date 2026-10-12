@@ -102,67 +102,74 @@ function calculerCommande(o) {
    -------------------------------------------------------------------------- */
 const estBacGlace = c => litArticle(c).famille === 'glace' && !!litArticle(c).parfum;
 
-/* Litres de glace par parfum, toutes tailles confondues. */
+/* Litres de glace par parfum, toutes tailles confondues. Un article négatif
+   compte pour zéro : il ne doit pas effacer les bacs bien comptés d'une
+   autre taille du même parfum. */
 function litresParParfum(articles) {
   const out = {};
   Object.keys(articles || {}).forEach(c => {
     if (!estBacGlace(c)) return;
     const a = litArticle(c);
-    out[a.parfum] = (out[a.parfum] || 0) + num(articles[c]) * num(a.taille);
+    out[a.parfum] = (out[a.parfum] || 0) + Math.max(0, num(articles[c])) * num(a.taille);
   });
   return out;
 }
 
-/* Consommation par parfum, en litres, et la durée sur laquelle on l'a mesurée.
+/* Consommation par parfum, en litres, et la période sur laquelle on l'a
+   mesurée ([depuis, fin[, en jours).
 
-   Avec un inventaire de référence (le plus ancien d'au moins sept jours dans
-   la fenêtre) : ce qui a disparu entre lui et le dernier inventaire, réceptions
-   comprises, plus les ouvertures tracées depuis le dernier inventaire.
-   Sans : les ouvertures tracées sur la fenêtre. */
+   Avec deux inventaires espacés d'au moins sept jours, le plus récent datant
+   de moins de quatre semaines : ce qui a disparu entre les deux, réceptions
+   comprises. Le débit est pris sur cet intervalle seulement : les jours qui
+   suivent le dernier comptage ne reposent que sur les scans, et les bacs
+   ouverts sans scan y manqueraient.
+   Sans : les ouvertures (et pertes) tracées sur les quatre dernières semaines,
+   qui mesurent la même chose que le comptage, la vigilance du scan en moins. */
 async function consommationGlace(jour) {
   const debutFenetre = addD(jour, -COMMANDE.fenetreJours);
   const [hist, mouvBruts] = await Promise.all([
     DB.get('stock:inventaires', []).catch(() => []),
-    tousMouvements(debutFenetre)
+    tousMouvements(addD(jour, -2 * COMMANDE.fenetreJours))
   ]);
   const mouv = mouvBruts.map(litMouvement).filter(m => m.cle && estBacGlace(m.cle) && m.at);
   const invs = (Array.isArray(hist) ? hist : [])
-    .filter(h => h && h.at && h.lignes)
+    .filter(h => h && h.at && h.jour && h.lignes)
     .sort((a, b) => String(a.at).localeCompare(String(b.at)));
   const dernier = invs[invs.length - 1] || null;
-  const ref = invs.filter(h => h !== dernier && h.jour >= debutFenetre &&
-                               ecartJours(h.jour, jour) >= COMMANDE.inventaireMinJours)[0] || null;
+  const ref = (dernier && dernier.jour >= debutFenetre)
+    ? invs.filter(h => h !== dernier && h.jour >= addD(dernier.jour, -COMMANDE.fenetreJours) &&
+                       ecartJours(h.jour, dernier.jour) >= COMMANDE.inventaireMinJours)[0] || null
+    : null;
 
   const ajoute = (o, cle, litres) => { const p = litArticle(cle).parfum; o[p] = (o[p] || 0) + litres; };
   const conso = {};
 
-  if (ref && dernier) {
+  if (ref) {
     const avant = litresParParfum(ref.lignes);
     const apres = litresParParfum(dernier.lignes);
     Object.keys(avant).forEach(p => { conso[p] = (conso[p] || 0) + avant[p]; });
     Object.keys(apres).forEach(p => { conso[p] = (conso[p] || 0) - apres[p]; });
     mouv.forEach(m => {
-      const litres = m.qte * num(litArticle(m.cle).taille);
-      if (m.type === 'reception' && m.at > ref.at && m.at <= dernier.at) ajoute(conso, m.cle, litres);
-      if (m.type === 'ouverture' && m.at > dernier.at) ajoute(conso, m.cle, litres);
+      if (m.type === 'reception' && m.at > ref.at && m.at <= dernier.at)
+        ajoute(conso, m.cle, m.qte * num(litArticle(m.cle).taille));
     });
     /* Un parfum compté en hausse sans réception saisie donnerait une
        consommation négative : on la ramène à zéro plutôt que de la déduire. */
     Object.keys(conso).forEach(p => { if (conso[p] < 0) conso[p] = 0; });
-    return { conso: conso, jours: Math.max(1, ecartJours(ref.jour, jour)),
-             source: 'inventaires', depuis: ref.jour, mouv: mouv, dernier: dernier };
+    return { conso: conso, jours: ecartJours(ref.jour, dernier.jour), source: 'inventaires',
+             depuis: ref.jour, fin: dernier.jour, mouv: mouv, dernier: dernier };
   }
 
-  mouv.forEach(m => {
-    if (m.type === 'ouverture' && m.jour >= debutFenetre) ajoute(conso, m.cle, m.qte * num(litArticle(m.cle).taille));
-  });
+  /* Quatre semaines pleines : d'il y a 27 jours à aujourd'hui inclus. */
+  const debut = addD(jour, -(COMMANDE.fenetreJours - 1));
+  const sorties = mouv.filter(m => (m.type === 'ouverture' || m.type === 'perte') && m.jour >= debut);
+  sorties.forEach(m => ajoute(conso, m.cle, m.qte * num(litArticle(m.cle).taille)));
   /* Moins de quatre semaines d'historique : on divise par ce qui existe, pas
      par 28 jours, sinon une appli mise en service hier sous-commande. */
-  const premier = mouv.filter(m => m.type === 'ouverture')[0];
-  const jours = premier ? Math.max(1, Math.min(COMMANDE.fenetreJours, ecartJours(premier.jour, jour) + 1))
-                        : COMMANDE.fenetreJours;
-  return { conso: conso, jours: jours, source: 'ouvertures',
-           depuis: addD(jour, -jours), mouv: mouv, dernier: dernier };
+  const premiere = mouv.filter(m => m.type === 'ouverture' || m.type === 'perte')[0];
+  const depuis = (premiere && premiere.jour > debut) ? premiere.jour : debut;
+  return { conso: conso, jours: ecartJours(depuis, jour) + 1, source: 'ouvertures',
+           depuis: depuis, fin: addD(jour, 1), mouv: mouv, dernier: dernier };
 }
 
 /* Taille de bac la plus souvent reçue pour chaque parfum. Un parfum sans
@@ -192,7 +199,7 @@ function taillesHabituelles(mouv, inventaire) {
    comparée à celle de la fenêtre de mesure. Une seule requête open-meteo
    donne les deux (past_days + forecast_days). Hors ligne : sans effet. */
 let _meteoCommande = { cle: null, at: 0, valeur: null };
-async function facteurMeteo(depuis, jour, jusqua) {
+async function facteurMeteo(depuis, fin, jour, jusqua) {
   const neutre = { facteur: 1, passe: null, prevu: null };
   if (!METEO.actif || !STATE.enLigne) return neutre;
   const passe = Math.min(92, Math.max(1, ecartJours(depuis, jour)));
@@ -215,7 +222,7 @@ async function facteurMeteo(depuis, jour, jusqua) {
     const v = jours.map((j, i) => filtre(j) ? tmax[i] : null).filter(x => typeof x === 'number');
     return v.length ? v.reduce((a, b) => a + b, 0) / v.length : null;
   };
-  const tPasse = moyenne(j => j >= depuis && j < jour);
+  const tPasse = moyenne(j => j >= depuis && j < fin && j <= jour);
   const tPrevu = moyenne(j => j >= jour && j <= jusqua);
   if (tPasse === null || tPrevu === null) return neutre;
   const f = 1 + COMMANDE.meteoParDegre * (tPrevu - tPasse);
@@ -228,10 +235,10 @@ async function facteurMeteo(depuis, jour, jusqua) {
    -------------------------------------------------------------------------- */
 V.commande = async function () {
   const jour = today();
-  const reglages = Object.assign({}, COMMANDE, await DB.get('commande:reglages', {}).catch(() => ({})));
+  const reglages = Object.assign({}, COMMANDE, await DB.get('catalogue:commande', {}).catch(() => ({})));
   const cal = calendrierCommande(jour, reglages.jourCommande, reglages.jourLivraison);
   const [{ articles }, mesure] = await Promise.all([stockReel(), consommationGlace(jour)]);
-  const meteoC = await facteurMeteo(mesure.depuis, jour, cal.suivante);
+  const meteoC = await facteurMeteo(mesure.depuis, mesure.fin, jour, cal.suivante);
 
   const lignes = calculerCommande({
     stock: litresParParfum(articles),
@@ -248,10 +255,14 @@ V.commande = async function () {
   const totalBacs = aCommander.reduce((s, l) => s + l.bacs, 0);
   const negatifs = Object.keys(articles).filter(c => estBacGlace(c) && num(articles[c]) < 0);
   const dernierInv = mesure.dernier;
+  /* Sans aucune sortie mesurée, « rien à commander » serait un mensonge :
+     l'écran le dit et ne propose pas de liste. */
+  const sansMesure = !Object.keys(mesure.conso).some(p => mesure.conso[p] > 0);
   const invVieux = !dernierInv || ecartJours(dernierInv.jour, jour) > 7;
   /* Entre la commande précédente et sa livraison, les bacs déjà commandés ne
      sont pas encore au stock : la liste les redemanderait. */
-  const enRoute = jour > addD(cal.commande, -7) && jour <= addD(cal.livraison, -7);
+  const enRoute = ecartJours(cal.commande, cal.livraison) < 7 &&
+                  jour > addD(cal.commande, -7) && jour <= addD(cal.livraison, -7);
 
   const texteCopie = () =>
     'Commande Orly du ' + fmtJour(cal.commande) + ', livraison ' + fmtJour(cal.livraison) + '\n' +
@@ -284,15 +295,16 @@ V.commande = async function () {
       kpi('Livraison', fmtDC(cal.livraison), '', JOURS_CMD[jourSemaine(cal.livraison)] + ', doit tenir au ' + fmtDC(cal.suivante)) + '</div>' +
       '<p class="rappel" style="margin-top:14px">Consommation mesurée ' +
       (mesure.source === 'inventaires'
-        ? 'entre l’inventaire du ' + fmtDC(mesure.depuis) + ' et aujourd’hui (' + mesure.jours + ' jours).'
-        : 'sur les bacs ouverts et scannés depuis le ' + fmtDC(mesure.depuis) + ' (' + mesure.jours + ' jours). ' +
+        ? 'entre les inventaires du ' + esc(fmtDC(mesure.depuis)) + ' et du ' + esc(fmtDC(mesure.fin)) +
+          ' (' + mesure.jours + ' jours).'
+        : 'sur les bacs ouverts et scannés depuis le ' + esc(fmtDC(mesure.depuis)) + ' (' + mesure.jours + ' jours). ' +
           'Deux inventaires à une semaine d’écart rendent le calcul plus juste.') +
       ' ' + esc(lMeteo) + ' Réserve : ' + num(reglages.joursSecurite) + ' ' + accord(num(reglages.joursSecurite), 'jour') + '.</p>',
       'solide') +
 
     (invVieux
       ? '<div class="alerte warn" style="margin-top:12px"><span class="ai">•</span><div><b>' +
-        (dernierInv ? 'Dernier inventaire le ' + fmtD(dernierInv.jour) : 'Aucun inventaire') + '</b>' +
+        (dernierInv ? 'Dernier inventaire le ' + esc(fmtD(dernierInv.jour)) : 'Aucun inventaire') + '</b>' +
         '<p>Le stock compté sert de base à la commande. Un inventaire de la chambre froide avant de commander ' +
         'évite de commander sur des bacs ouverts sans scan.</p></div></div>'
       : '') +
@@ -308,7 +320,13 @@ V.commande = async function () {
         '<p>Ils sont comptés à zéro. Un inventaire remet les compteurs à plat.</p></div></div>'
       : '') +
 
-    (aCommander.length
+    (sansMesure
+      ? '<div class="alerte bad" style="margin-top:12px"><span class="ai">•</span><div><b>' +
+        'Aucune consommation mesurée</b><p>Ni deux inventaires à une semaine d’écart, ni bacs scannés à ' +
+        'l’ouverture sur les quatre dernières semaines : l’appli ne peut pas encore proposer de commande. ' +
+        'Faites un inventaire aujourd’hui et un autre dans une semaine, ou scannez chaque bac ouvert.</p></div></div>'
+      : '') +
+    (sansMesure ? '' : aCommander.length
       ? '<button class="btn menthe bloc xl" id="cm-copier" style="margin-top:16px">Copier la liste</button>' +
         '<div class="entete"><h3>À commander</h3><span class="pousse mini num">' + aCommander.length + ' ' +
         accord(aCommander.length, 'parfum') + '</span></div>' +
@@ -316,7 +334,7 @@ V.commande = async function () {
       : vide('', lignes.length ? 'Le stock tient jusqu’au ' + fmtD(cal.suivante) + ' : rien à commander.'
                                : 'Pas encore de stock ni de consommation. Commencez par un inventaire.')) +
 
-    (couverts.length
+    (couverts.length && !sansMesure
       ? '<div class="entete"><h3>Stock suffisant</h3><span class="pousse mini num">' + couverts.length + '</span></div>' +
         '<div class="stack">' + couverts.map(ligne).join('') + '</div>'
       : '') +
@@ -350,7 +368,7 @@ V.commande = async function () {
   ['cm-jc', 'cm-jl', 'cm-js'].forEach(id => {
     const s = $('#' + id);
     if (s) s.onchange = async () => {
-      await DB.set('commande:reglages', {
+      await DB.set('catalogue:commande', {
         jourCommande: num($('#cm-jc').value),
         jourLivraison: num($('#cm-jl').value),
         joursSecurite: num($('#cm-js').value)
