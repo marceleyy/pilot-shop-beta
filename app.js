@@ -4684,8 +4684,7 @@ function modifierPeriode(per) {
            '<span class="go"><button class="btn clair sm" data-saut="' + b.go + '"' + (b.jour ? ' data-jour="' + b.jour + '"' : '') +
            (b.moment ? ' data-moment="' + b.moment + '"' : '') + '>Ouvrir</button></span></div>').join('') + '</div>' +
          '<div class="alerte info" style="margin-top:14px"><span class="ai">ℹ️</span><div><b>Pourquoi c’est bloquant</b>' +
-         '<p>Sans inventaire de glace réel et sans achats saisis, le stock de fin est une invention : ' +
-         'l’écart calculé serait faux et toute la période suivante partirait de travers.</p></div></div>' +
+         '<p>Ces points ne peuvent pas être forcés : réglez-les, puis revenez terminer la période.</p></div></div>' +
          '<div class="actions"><button class="btn clair" data-fermer>Fermer</button></div>');
        $$('[data-saut]').forEach(b => b.onclick = () => { closeSheet(); rendre(b.dataset.saut, false, b.dataset.jour, b.dataset.moment); });
        return;
