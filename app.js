@@ -2286,11 +2286,18 @@ async function purgerLocalAncien() {
           prévenir. On le dit au lieu de deviner. */
        const nombre = num($('#pn').value);
        if (!(nombre > 0)) { toast('Indiquez un nombre supérieur à 0', 'erreur'); return $('#pn').focus(); }
-       if (num($('#pl').value) < 0) { toast('Le litrage ne peut pas être négatif', 'erreur'); return $('#pl').focus(); }
+       const litrage = num($('#pl').value);
+       if (litrage < 0) { toast('Le litrage ne peut pas être négatif', 'erreur'); return $('#pl').focus(); }
+       /* Perte d'une glace (bac, ou taille « N L » dans le nom) enregistrée à
+          0 L : elle ne comptait nulle part — ni « jetés du jour », ni écart
+          glace, ni « Mes boutiques » — sans rien dire (F-14). On exige le
+          litrage pour une glace ; les autres pertes (cornets…) restent à 0. */
+       const estGlace = /\bbac\b/i.test(p) || /\d+(?:[.,]\d+)?\s*L\b/i.test(p);
+       if (estGlace && !(litrage > 0)) { toast('Indiquez le litrage de glace jeté (en L)', 'erreur'); return $('#pl').focus(); }
        /* parUnite : le litrage est saisi par unité (saisie manuelle comme
           dictée, qui remplit ce même formulaire). Les anciennes lignes, sans
           ce marqueur, gardent leur calcul d'origine. */
-       liste.push({ id:uid(), produit:p, nombre:nombre, litrage:num($('#pl').value),
+       liste.push({ id:uid(), produit:p, nombre:nombre, litrage:litrage,
                     parUnite:true,
                     motif:motif, par:STATE.user.prenom, employe:STATE.user.id, at:nowISO() });
        await DB.set('pertes:' + j, liste);

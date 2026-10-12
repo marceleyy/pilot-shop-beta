@@ -164,8 +164,15 @@ V.miseenroute = async function () {
   $('#vue-titre').textContent = PAGES.miseenroute.titre;
   $('#vue-sous').textContent = PAGES.miseenroute.sous;
   const { fait, inventaireFait } = await etatEtapes();
-  const n = ETAPES_GUIDE.filter(e => fait[e.id]).length;
-  const prochaine = ETAPES_GUIDE.filter(e => !fait[e.id])[0];
+  /* Étape « parfums » verrouillée parce que la glace est déjà comptée : la liste
+     ne change plus, le catalogue Amorino en place est de fait accepté. On la
+     compte alors comme satisfaite. Sans ça, compter la glace avant d'ouvrir les
+     parfums figeait la mise en route à 9/10 — « Terminer » jamais actif, bandeau
+     « Mise en route en cours » collé sur la tour de contrôle (CF-01). */
+  const verrouille = e => e.id === 'parfums' && inventaireFait;
+  const estFait = e => !!fait[e.id] || verrouille(e);
+  const n = ETAPES_GUIDE.filter(estFait).length;
+  const prochaine = ETAPES_GUIDE.filter(e => !estFait(e))[0];
   const termine = !!(_guide && _guide.guide === 'fait');
 
   $('#page').innerHTML =
@@ -180,9 +187,9 @@ V.miseenroute = async function () {
       'solide') +
     '<div class="stack" style="margin-top:14px">' +
     ETAPES_GUIDE.map((e, i) => {
-      const ok = !!fait[e.id];
-      const courante = prochaine && prochaine.id === e.id;
       const verrou = e.id === 'parfums' && inventaireFait;
+      const ok = estFait(e);
+      const courante = prochaine && prochaine.id === e.id;
       return carte(
         '<div class="rang" style="align-items:flex-start;flex-wrap:nowrap">' +
         '<span class="num" style="flex:0 0 auto;width:28px;height:28px;border-radius:50%;display:inline-flex;' +
@@ -479,6 +486,9 @@ async function feuilleProduits() {
       const g = num($('#gc-g').value);
       if (!nom) return toast('Écrivez le nom du produit', 'erreur');
       if (!(g > 0)) return toast('Indiquez le poids de glace en grammes', 'erreur');
+      /* Le champ est plafonné à 2000 g : une saisie hors bornes (99 999 g,
+         doigt qui glisse) fausserait le calcul d'écart glace (F-13). */
+      if (g > 2000) return toast('Poids trop élevé (2000 g max par produit)', 'erreur');
       if (tous.some(p => p.nom.toLowerCase() === nom.toLowerCase())) return toast('« ' + nom + ' » est déjà dans la liste', 'erreur');
       tous.push({ nom:nom, g:g });
       coches.add(nom);
@@ -490,6 +500,8 @@ async function feuilleProduits() {
       if (!choix.length) return toast('Cochez au moins un produit', 'erreur');
       const sansPoids = choix.filter(p => !(p.g > 0))[0];
       if (sansPoids) return toast(sansPoids.nom + ' : indiquez le poids de glace', 'erreur');
+      const horsBornes = choix.filter(p => p.g > 2000)[0];
+      if (horsBornes) return toast(horsBornes.nom + ' : poids trop élevé (2000 g max)', 'erreur');
       $('#gc-ok').disabled = true;
       await DB.set(CALCUL.cleProduits, choix.map(p => ({ nom:p.nom, g:p.g })));
       await cocherEtape('produits');
@@ -547,15 +559,29 @@ V.controle = async function () {
 function obstacleChangement() {
   /* Hors ligne, l'application vidée de son cache ne se rechargerait plus. */
   if (!STATE.enLigne || !navigator.onLine) return 'Connexion nécessaire pour changer de boutique';
-  /* Ce qui n'existe que sur l'appareil : brouillon d'inventaire, saisies trop lourdes pour la base. */
-  let brouillon = false;
-  try { brouillon = !!localStorage.getItem(OFFLINE.storeLocal + ':brouillon:inventaire'); } catch (e) {}
-  if (brouillon || Object.keys(DB._gros || {}).length)
+  /* Ce qui n'existe que sur l'appareil : brouillon d'inventaire, saisies trop lourdes pour la base.
+     Un brouillon ne gêne que s'il est DU JOUR et contient des lignes : un
+     brouillon de la veille, invisible à l'écran Inventaire (repris seulement
+     s'il est du jour), bloquait sinon le changement à vie, sans rien à
+     « terminer » (F-08). Un brouillon périmé est nettoyé au passage. */
+  let brouillonActif = false;
+  try {
+    const b = JSON.parse(localStorage.getItem(OFFLINE.storeLocal + ':brouillon:inventaire') || 'null');
+    if (b && b.jour === today() &&
+        (Object.keys(b.lignes || {}).length || Object.keys(b.sec || {}).length)) brouillonActif = true;
+    else if (b) localStorage.removeItem(OFFLINE.storeLocal + ':brouillon:inventaire');
+  } catch (e) {}
+  if (brouillonActif || Object.keys(DB._gros || {}).length)
     return 'Un inventaire en cours ou des photos restent sur cet appareil : terminez-les avant de changer de boutique';
-  /* Le résumé franchise se recalcule de lui-même : il ne retient rien. */
-  const enAttente = fileLire().filter(x => String(x.cle).indexOf('franchise:') !== 0).length;
+  /* Seules les saisies de CETTE boutique bloquent. Une saisie en attente d'une
+     AUTRE boutique (déjà étiquetée de son site) ne part que chez elle : elle ne
+     doit ni interdire le changement, ni être effacée, et le message « Reconnectez
+     le Wi-Fi » était faux puisque l'appareil est en ligne (F-06). Le résumé
+     franchise, lui, se recalcule tout seul. */
+  const enAttente = fileLire().filter(x => ici(x) && String(x.cle).indexOf('franchise:') !== 0).length;
   if (enAttente) return enAttente + ' ' + accord(enAttente, 'saisie attend', 'saisies attendent') +
-    ' d’être envoyée' + (enAttente > 1 ? 's' : '') + '. Reconnectez le Wi-Fi, puis réessayez.';
+    ' d’être envoyée' + (enAttente > 1 ? 's' : '') + ' pour cette boutique. Patientez qu’' +
+    (enAttente > 1 ? 'elles partent' : 'elle parte') + ', puis réessayez.';
   return null;
 }
 
@@ -599,7 +625,14 @@ function changerDeBoutique() {
       const obstacle2 = obstacleChangement();
       if (obstacle2) throw new Error(obstacle2);
       etat('Passage sur ' + site + '…');
+      /* On garde les saisies en attente, étiquetées de leur boutique, à travers
+         le vidage. Une saisie d'une autre boutique repartira chez elle ; une
+         saisie de l'ancienne boutique (cas limite) ne doit pas disparaître.
+         viderAppareil efface la file : on la réécrit juste après (F-06). */
+      const ancienSite = APP.site;
+      const fileGardee = fileLire().map(x => x.site ? x : Object.assign({}, x, { site: ancienSite }));
       await viderAppareil(false);
+      try { if (fileGardee.length) fileEcrire(fileGardee); } catch (e) {}
       memoriser(d);
       /* recharger() : livré par la branche d'audit (annule le retour arrière
          différé de closeSheet). Ici aucune feuille n'a été fermée avant. */

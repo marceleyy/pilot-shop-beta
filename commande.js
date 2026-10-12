@@ -84,8 +84,11 @@ function calculerCommande(o) {
     const besoin = parJourCorrige * (o.joursCouvrir + o.joursSecurite);
     const manque = besoin - stock;
     /* Un reste de moins d'un dixième de bac ne déclenche pas un bac de plus :
-       c'est en dessous de la précision de la mesure. */
-    const bacs = manque > 0 ? Math.max(1, Math.ceil(manque / taille - 0.1)) : 0;
+       c'est en dessous de la précision de la mesure. Le Math.max(1, …) forçait
+       auparavant un bac entier même pour un manque de 0,05 L, ce que la
+       tolérance de 0,1 était censée éviter (F-12). */
+    const n = Math.ceil(manque / taille - 0.1);
+    const bacs = manque > 0 ? Math.max(0, n) : 0;
     lignes.push({
       parfum: p, stock: stock, parJour: parJourCorrige, taille: taille,
       bacs: bacs,
@@ -147,17 +150,25 @@ async function consommationGlace(jour) {
   if (ref) {
     const avant = litresParParfum(ref.lignes);
     const apres = litresParParfum(dernier.lignes);
-    Object.keys(avant).forEach(p => { conso[p] = (conso[p] || 0) + avant[p]; });
-    Object.keys(apres).forEach(p => { conso[p] = (conso[p] || 0) - apres[p]; });
+    /* Un parfum présent au comptage de référence mais ABSENT du dernier
+       inventaire (retiré de la carte, ou simplement pas recompté) donnait
+       conso = tout son stock de départ : il était alors proposé à la commande
+       comme entièrement consommé (F-05). On ne calcule la consommation que pour
+       les parfums encore comptés au dernier inventaire ; un parfum vendu jusqu'à
+       zéro mais toujours compté y figure avec 0 et reste donc pris en compte.
+       Les parfums disparus sont signalés à part, sans être commandés. */
+    const nonComptes = Object.keys(avant).filter(p => !(p in apres));
+    Object.keys(apres).forEach(p => { conso[p] = (conso[p] || 0) + (avant[p] || 0) - apres[p]; });
     mouv.forEach(m => {
-      if (m.type === 'reception' && m.at > ref.at && m.at <= dernier.at)
+      const p = litArticle(m.cle).parfum;
+      if (m.type === 'reception' && m.at > ref.at && m.at <= dernier.at && (p in apres))
         ajoute(conso, m.cle, m.qte * num(litArticle(m.cle).taille));
     });
     /* Un parfum compté en hausse sans réception saisie donnerait une
        consommation négative : on la ramène à zéro plutôt que de la déduire. */
     Object.keys(conso).forEach(p => { if (conso[p] < 0) conso[p] = 0; });
     return { conso: conso, jours: ecartJours(ref.jour, dernier.jour), source: 'inventaires',
-             depuis: ref.jour, fin: dernier.jour, mouv: mouv, dernier: dernier };
+             depuis: ref.jour, fin: dernier.jour, mouv: mouv, dernier: dernier, nonComptes: nonComptes };
   }
 
   /* Quatre semaines pleines : d'il y a 27 jours à aujourd'hui inclus. */
@@ -182,10 +193,15 @@ function taillesHabituelles(mouv, inventaire) {
     const t = compte[a.parfum] = compte[a.parfum] || {};
     t[a.taille] = (t[a.taille] || 0) + q;
   };
-  mouv.forEach(m => { if (m.type === 'reception') note(m.cle, m.qte); });
+  const avecReception = new Set();
+  mouv.forEach(m => { if (m.type === 'reception') { note(m.cle, m.qte); avecReception.add(litArticle(m.cle).parfum); } });
   const lignes = (inventaire && inventaire.lignes) || {};
+  /* Pour un parfum sans réception, on retient TOUTES les tailles comptées, pas
+     seulement la première lue : sinon Vanille comptée 2 × 3 L puis 3 × 5 L
+     passait en 3 L (la première clé notée bloquait les suivantes du même
+     parfum) et la commande changeait de format de bac (F-04). */
   Object.keys(lignes).forEach(c => {
-    if (estBacGlace(c) && num(lignes[c]) > 0 && !compte[litArticle(c).parfum]) note(c, num(lignes[c]));
+    if (estBacGlace(c) && num(lignes[c]) > 0 && !avecReception.has(litArticle(c).parfum)) note(c, num(lignes[c]));
   });
   const out = {};
   Object.keys(compte).forEach(p => {
@@ -199,6 +215,32 @@ function taillesHabituelles(mouv, inventaire) {
    comparée à celle de la fenêtre de mesure. Une seule requête open-meteo
    donne les deux (past_days + forecast_days). Hors ligne : sans effet. */
 let _meteoCommande = { cle: null, at: 0, valeur: null };
+let _meteoCmdEchec = 0;    // dernier échec open-meteo (frein de 10 min, comme meteo() #49)
+let _meteoCmdEnCours = null;
+/* Une requête open-meteo, partagée et bornée : l'écran ne doit JAMAIS attendre
+   la météo pour son premier affichage (jusqu'à 8 s sur un Wi-Fi muet), comme la
+   tour de contrôle depuis #49 (CF-02). On rend tout de suite avec ce qui est là
+   — la réponse si elle arrive en moins de 300 ms, sinon la dernière réponse
+   gardée ; la requête lancée remplit le cache pour la prochaine ouverture, et
+   un échec est retenu 10 min pour ne pas réessayer à chaque ouverture. */
+function chargerMeteoCmd(cle, passe) {
+  if (_meteoCmdEnCours) return _meteoCmdEnCours;
+  const p = (async () => {
+    try {
+      const u = METEO.endpoint + '?latitude=' + METEO.lat + '&longitude=' + METEO.lon +
+        '&daily=temperature_2m_max&past_days=' + passe + '&forecast_days=16' +
+        '&timezone=' + encodeURIComponent(METEO.parametres.timezone);
+      const r = await fetch(u, { signal: signalDelai() });
+      if (!r.ok) throw new Error('http');
+      const d = await r.json();
+      _meteoCommande = { cle: cle, at: Date.now(), valeur: d };
+      return d;
+    } catch (e) { _meteoCmdEchec = Date.now(); return null; }
+  })();
+  _meteoCmdEnCours = p;
+  p.then(() => { if (_meteoCmdEnCours === p) _meteoCmdEnCours = null; });
+  return p;
+}
 async function facteurMeteo(depuis, fin, jour, jusqua) {
   const neutre = { facteur: 1, passe: null, prevu: null };
   if (!METEO.actif || !STATE.enLigne) return neutre;
@@ -206,15 +248,13 @@ async function facteurMeteo(depuis, fin, jour, jusqua) {
   const cle = jour + '|' + passe;
   let d = (_meteoCommande.cle === cle && Date.now() - _meteoCommande.at < 3600e3) ? _meteoCommande.valeur : null;
   if (!d) {
-    try {
-      const u = METEO.endpoint + '?latitude=' + METEO.lat + '&longitude=' + METEO.lon +
-        '&daily=temperature_2m_max&past_days=' + passe + '&forecast_days=16' +
-        '&timezone=' + encodeURIComponent(METEO.parametres.timezone);
-      const r = await fetch(u, { signal: signalDelai() });
-      if (!r.ok) return neutre;
-      d = await r.json();
-      _meteoCommande = { cle: cle, at: Date.now(), valeur: d };
-    } catch (e) { return neutre; }
+    /* Échec récent : pas de nouvel essai avant 10 min, on rend sans correction. */
+    if (Date.now() - _meteoCmdEchec < 10 * 60e3) return neutre;
+    const p = chargerMeteoCmd(cle, passe);
+    /* Au plus 300 ms d'attente : au-delà, on rend sans correction et la requête
+       finit en arrière-plan (cache chaud pour la prochaine ouverture). */
+    d = await Promise.race([p, new Promise(r => setTimeout(() => r(null), 300))]);
+    if (!d) return neutre;
   }
   const jours = (d.daily && d.daily.time) || [];
   const tmax = (d.daily && d.daily.temperature_2m_max) || [];
@@ -293,12 +333,18 @@ V.commande = async function () {
       kpi('À commander', totalBacs, '', accord(totalBacs, 'bac')) +
       kpi('Commande', fmtDC(cal.commande), '', JOURS_CMD[jourSemaine(cal.commande)] + ', sur le portail') +
       kpi('Livraison', fmtDC(cal.livraison), '', JOURS_CMD[jourSemaine(cal.livraison)] + ', doit tenir au ' + fmtDC(cal.suivante)) + '</div>' +
-      '<p class="rappel" style="margin-top:14px">Consommation mesurée ' +
-      (mesure.source === 'inventaires'
-        ? 'entre les inventaires du ' + esc(fmtDC(mesure.depuis)) + ' et du ' + esc(fmtDC(mesure.fin)) +
-          ' (' + mesure.jours + ' jours).'
-        : 'sur les bacs ouverts et scannés depuis le ' + esc(fmtDC(mesure.depuis)) + ' (' + mesure.jours + ' jours). ' +
-          'Deux inventaires à une semaine d’écart rendent le calcul plus juste.') +
+      '<p class="rappel" style="margin-top:14px">' +
+      /* Sans aucune sortie mesurée, l'en-tête ne doit pas prétendre qu'une
+         consommation a été mesurée alors que l'alerte dessous dit le contraire
+         (CF-03). On affiche alors une phrase neutre. */
+      (sansMesure
+        ? 'Pas encore de consommation mesurable : faites un inventaire ou scannez les bacs ouverts.'
+        : 'Consommation mesurée ' +
+          (mesure.source === 'inventaires'
+            ? 'entre les inventaires du ' + esc(fmtDC(mesure.depuis)) + ' et du ' + esc(fmtDC(mesure.fin)) +
+              ' (' + mesure.jours + ' jours).'
+            : 'sur les bacs ouverts et scannés depuis le ' + esc(fmtDC(mesure.depuis)) + ' (' + mesure.jours + ' jours). ' +
+              'Deux inventaires à une semaine d’écart rendent le calcul plus juste.')) +
       ' ' + esc(lMeteo) + ' Réserve : ' + num(reglages.joursSecurite) + ' ' + accord(num(reglages.joursSecurite), 'jour') + '.</p>',
       'solide') +
 
@@ -318,6 +364,14 @@ V.commande = async function () {
       ? '<div class="alerte warn" style="margin-top:12px"><span class="ai">•</span><div><b>' +
         negatifs.length + ' ' + accord(negatifs.length, 'article') + ' en stock négatif</b>' +
         '<p>Ils sont comptés à zéro. Un inventaire remet les compteurs à plat.</p></div></div>'
+      : '') +
+    ((mesure.nonComptes && mesure.nonComptes.length)
+      ? '<div class="alerte warn" style="margin-top:12px"><span class="ai">•</span><div><b>' +
+        mesure.nonComptes.length + ' ' + accord(mesure.nonComptes.length, 'parfum') +
+        ' non ' + accord(mesure.nonComptes.length, 'compté') + ' au dernier inventaire</b>' +
+        '<p>' + esc(mesure.nonComptes.join(', ')) + ' : ' +
+        (mesure.nonComptes.length > 1 ? 'présents' : 'présent') + ' au comptage précédent mais plus au dernier. ' +
+        'Pas de commande proposée sans recomptage. Recomptez-les s’ils sont toujours à la carte.</p></div></div>'
       : '') +
 
     (sansMesure

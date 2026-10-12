@@ -111,6 +111,26 @@ function paNormaliser(d) {
   return a;
 }
 async function paEcrire(a, champs) {
+  /* Un pré-audit figé (clôturé ou supprimé) n'accepte plus de RÉPONSE : seules
+     les actions restent à suivre après la clôture. On regarde d'abord le statut
+     local ; puis, pour une écriture de réponse en ligne, on relit le statut
+     FRAIS en base : un 2e iPad dont la copie mémoire est encore « en cours »
+     n'écrit alors plus sa réponse sur un audit clôturé entre-temps sur un autre
+     appareil. Sans ça, le score et le PDF divergeaient de la grille (F-02). La
+     clôture elle-même passe (a.statut vaut encore « en cours » à cet instant). */
+  const aDesReponses = Object.keys(champs).some(k => k.indexOf('r:') === 0);
+  let fige = !!(a.statut && a.statut !== 'en cours');
+  if (!fige && aDesReponses && STATE.enLigne) {
+    try {
+      const frais = paNormaliser(await DB.get(a.id, null, true));
+      if (frais && frais.statut && frais.statut !== 'en cours') { fige = true; Object.assign(a, frais); }
+    } catch (e) { /* relecture impossible : on laisse la garde locale décider */ }
+  }
+  if (fige) {
+    champs = Object.assign({}, champs);
+    Object.keys(champs).forEach(k => { if (k.indexOf('r:') === 0) delete champs[k]; });
+    if (!Object.keys(champs).length) return a;   // plus rien à écrire : on n'écrit pas sur un audit figé
+  }
   const n = paNormaliser(await DB.patch(a.id, champs));
   /* La copie relue ne porte pas encore les écritures qui attendent derrière
      celle-ci (une réponse touchée juste après) : pour les réponses et les
@@ -508,7 +528,13 @@ async function ecranGrille(id) {
     V.preaudit._preuves = P; V.preaudit._preuvesDe = a.id + '|' + today();
   }
 
-  const s = scoresAudit(a);
+  /* Un pré-audit clôturé affiche son score FIGÉ (a.score / a.scores), jamais un
+     recalcul : dans la course à deux iPad, l'écran recalculait 97 % alors que la
+     liste, « Mes boutiques » et le PDF gardaient le 100 % figé à la clôture (F-02). */
+  const sCalc = scoresAudit(a);
+  const s = (clos && a.score != null)
+    ? { global:a.score, themes:a.scores || sCalc.themes, notes:sCalc.total, total:sCalc.total }
+    : sCalc;
   const parPoint = {};
   paActions(a).forEach(x => { (parPoint[x.point] = parPoint[x.point] || []).push(x); });
 
@@ -572,6 +598,14 @@ async function ecranGrille(id) {
 /* Une réponse : écrite aussitôt, sans attendre. Un point à reprendre ou non
    conforme ouvre la feuille d'action, une seule fois par point. */
 function repondre(a, pid, rid) {
+  /* Pré-audit clôturé ou supprimé : ses réponses sont figées (les actions, elles,
+     restent à suivre). On refuse et on le dit, plutôt que d'écrire une réponse
+     qui ne compterait pas dans le score figé (F-02). */
+  if (a.statut && a.statut !== 'en cours') {
+    toast('Ce pré-audit est ' + (a.statut === 'clos' ? 'clôturé' : 'supprimé') +
+      ' : les réponses ne changent plus.', 'erreur');
+    return;
+  }
   const avant = a.reponses[pid] || {};
   /* Toucher la réponse déjà choisie la retire. */
   const r = avant.r === rid ? null : rid;
@@ -681,8 +715,16 @@ function cloturerPreAudit(a) {
    Export PDF (fenêtre d'impression, comme le registre sanitaire)
    ------------------------------------------------------------------------ */
 async function imprimerPreAudit(a, P) {
-  const s = scoresAudit(a);
   const clos = a.statut === 'clos';
+  const sCalc = scoresAudit(a);
+  /* Un pré-audit clôturé imprime son score FIGÉ (a.score / a.scores enregistrés
+     à la clôture), jamais un recalcul : sinon une réponse écrite par erreur
+     après la clôture faisait afficher 97 % au PDF alors que la liste et « Mes
+     boutiques » gardaient 100 % (F-02). Tous les points étant notés à la
+     clôture, « points notés » vaut le total. */
+  const s = (clos && a.score != null)
+    ? { global:a.score, themes:a.scores || sCalc.themes, notes:sCalc.total, total:sCalc.total }
+    : sCalc;
   const acts = paActions(a);
   const rep = id => paReponse((a.reponses[id] || {}).r);
   $('#printview').innerHTML =

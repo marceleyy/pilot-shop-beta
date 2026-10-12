@@ -164,7 +164,8 @@ function allLireRecherche(texte) {
   for (let i = 0; i < t.length; ) {
     const w = t[i];
     if (ALL_VEGAN.indexOf(w) >= 0) { vegan = true; i++; continue; }
-    if (w === 'sans' || (w === 'pas' && t[i + 1] === 'de')) { exclure = true; i++; continue; }
+    /* « sans », « pas de », et l'élision « pas d'arachide » (→ pas d arachide). */
+    if (w === 'sans' || (w === 'pas' && (t[i + 1] === 'de' || t[i + 1] === 'd'))) { exclure = true; i++; continue; }
     const a = exclure ? lire(i) : null;
     if (a) { if (sans.indexOf(a.id) < 0) sans.push(a.id); i += a.n; continue; }
     if (ALL_LIAISON.indexOf(w) >= 0) { i++; continue; }
@@ -175,16 +176,58 @@ function allLireRecherche(texte) {
   return { sans, vegan, mots };
 }
 
+/* Nom du parfum tel qu'il apparaît AILLEURS dans l'appli (liste PARFUMS,
+   inventaire, traçabilité, réassort) pour chaque fiche Amorino. Au comptoir on
+   tape « Chocolat noir », « Yogurt » ou « Caramel au beurre salé », pas le
+   libellé exact du document Amorino (« Chocolat Amorino », « Yaourt 0 % … »,
+   « Caramel au beurre demi-sel »). Sans ce pont, la recherche tombait sur un
+   nappage du même nom, avec moins d'allergènes, ou ne trouvait rien (F-01). */
+const ALL_PARFUM = {
+  'Amarena (cerise griotte et son coulis)': 'Amarena',
+  'Café 100 % arabica':                     'Café',
+  'Caramel au beurre demi-sel':             'Caramel au beurre salé',
+  'Chocolat Amorino':                       'Chocolat noir',
+  'Chocolat Équateur pure origine':         'Chocolat équateur',
+  'L’Inimitable crème chocolat noisette':   'Inimitable',
+  'Noix de coco du Sri Lanka':              'Noix de coco',
+  'Pistache Mawardi':                       'Pistache',
+  'Tiramisu sans gluten':                   'Tiramisu',
+  'Vanille Bourbon de Madagascar':          'Vanille',
+  'Yaourt 0 % de matière grasse':           'Yogurt',
+  'Banane Nanica du Brésil':                'Banane',
+  'Chocolat biologique':                    'Chocolat bio (sorbet)',
+  'Citron bio Femminello de Syracuse':      'Citron bio',
+  'Mangue Alphonso d’Inde':                 'Mangue'
+};
+
+/* Allergènes à montrer en « traces » : jamais ceux déjà listés en « contient »,
+   sinon un même allergène apparaissait deux fois (ex. Crème à la pistache :
+   Fruits à coque en contenu ET en traces) — F-11. */
+function allTraces(p) { return (p.t || []).filter(id => p.a.indexOf(id) < 0); }
+
 function allFiltrer(r) {
   return ALLERGENES.produits.filter(p => {
     if (r.vegan && !p.vegan) return false;
     for (const id of r.sans) if (p.a.indexOf(id) >= 0 || (p.t || []).indexOf(id) >= 0) return false;
     if (!r.mots.length) return true;
     const fam = ALLERGENES.familles.filter(x => x.id === p.f)[0];
-    const cible = allNorm(p.nom + ' ' + (fam ? fam.libelle : '') + ' ' + p.f);
+    const parfum = ALL_PARFUM[p.nom] || '';
+    const alias = (parfum && typeof PARFUMS_ALIAS !== 'undefined' && PARFUMS_ALIAS[parfum]) || [];
+    const cible = allNorm(p.nom + ' ' + parfum + ' ' + alias.join(' ') + ' ' + (fam ? fam.libelle : '') + ' ' + p.f);
     return r.mots.every(m => cible.indexOf(m) >= 0);
   });
 }
+
+/* Garde-fou de maintenance : à chaque mise à jour du catalogue ou du document
+   Amorino, signale en console les parfums de la boutique sans fiche allergènes
+   (ni par nom, ni par le pont ci-dessus). N'affecte pas l'affichage. */
+try {
+  if (typeof PARFUMS !== 'undefined') {
+    const couverts = ALLERGENES.produits.map(p => allNorm((ALL_PARFUM[p.nom] || p.nom)));
+    const manquants = PARFUMS.filter(nom => couverts.indexOf(allNorm(nom)) < 0);
+    if (manquants.length) console.warn('Allergènes : parfums sans fiche :', manquants.join(', '));
+  }
+} catch (e) {}
 
 /* =============================================================================
    VUE — ALLERGÈNES
@@ -238,7 +281,7 @@ V.allergenes = async function () {
           const pills = (p.a.length
             ? p.a.map(id => pastille('bad', allLibelle(id))).join('')
             : pastille('ok', 'Aucun allergène majeur')) +
-            (p.t && p.t.length ? pastille('warn', 'Traces') : '') +
+            (allTraces(p).length ? pastille('warn', 'Traces') : '') +
             (p.vegan ? pastille('ok', 'Vegan') : '');
           return '<div class="card tap" data-al="' + i + '" role="button" tabindex="0">' +
             '<b>' + esc(p.nom) + '</b><div class="pastilles">' + pills + '</div></div>';
@@ -284,7 +327,7 @@ function allFiche(p) {
       (p.a.length
         ? ligne('Contient', p.a.map(allLibelle).join(', '), 'bad')
         : ligne('Contient', 'Aucun des 14 allergènes majeurs.', 'ok')) +
-      (p.t && p.t.length ? ligne('Peut contenir des traces de', p.t.map(allLibelle).join(', '), 'warn') : '') +
+      (allTraces(p).length ? ligne('Peut contenir des traces de', allTraces(p).map(allLibelle).join(', '), 'warn') : '') +
       (parfum
         ? ligne('Gluten', 'Le parfum n’en contient pas. Le cornet, le choco-cône, la gaufre, la crêpe et la ' +
             'brioche en contiennent : servir en pot ou dans le cornet sans gluten.', 'info') +
