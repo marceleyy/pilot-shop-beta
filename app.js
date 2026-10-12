@@ -5010,6 +5010,11 @@ function modifierPeriode(per) {
        $$('#cl-ecart [data-e]').forEach(x => { x.classList.toggle('on', x === b); x.setAttribute('aria-pressed', x === b); });
      });
    
+     /* Jusqu'à la clôture, mais jamais au-delà de la veille de la suivante. */
+     const finTardive = (fin, d1) => {
+       const f = addD(d1, -1) < today() ? addD(d1, -1) : today();
+       return f > fin ? f : null;
+     };
      $('#cl-ok').onclick = async () => {
        const motif = $('#cl-motif') ? $('#cl-motif').value.trim() : '';
        if (forcables.length && PERIODES.forcageMotifObligatoire && !motif) {
@@ -5019,13 +5024,20 @@ function modifierPeriode(per) {
        if (avecEcart === null) return toast('Choisissez si vous calculez l’écart de cette période', 'erreur');
        const d1 = $('#cl-d').value, d2 = $('#cl-f').value;
        if (!d1 || !d2 || d2 < d1) return toast('Dates de période incohérentes', 'erreur');
+       /* Jusqu'à aujourd'hui, saisies et pertes vont dans la période qu'on ferme :
+          une suivante qui commencerait avant demain les compterait deux fois. */
+       if (d1 <= today()) return toast('La nouvelle période commence au plus tôt demain', 'erreur');
    
        const c = await calculEcart(per);
        const close = Object.assign({}, per, {
          ouverte:false, anticipee:anticipee, par:STATE.user.prenom, jour:today(), at:nowISO(),
          motif:motif, forces:forcables.map(f => f.txt)
-       /* Fermée avant terme : elle s'arrête à la veille de la suivante, sans la chevaucher. */
-       }, anticipee && d1 <= per.fin ? { fin:addD(d1, -1) < per.debut ? per.debut : addD(d1, -1), finPrevue:per.fin } : {}, avecEcart
+       /* Fermée avant terme : elle s'arrête à la veille de la suivante, sans la chevaucher.
+          Fermée après terme : elle va jusqu'au jour de la clôture, que son écart
+          a couvert (pertes, ventes, stock compté ce jour). Sinon les jours entre
+          la fin prévue et la clôture n'étaient dans aucune période. */
+       }, anticipee && d1 <= per.fin ? { fin:addD(d1, -1) < per.debut ? per.debut : addD(d1, -1), finPrevue:per.fin }
+        : finTardive(per.fin, d1) ? { fin:finTardive(per.fin, d1), finPrevue:per.fin } : {}, avecEcart
          ? Object.assign({ ecartKg:+n2(c.ecart), stockFin:+n2(c.reel), valeur:+n2(c.valeur) },
                          c.incoherent ? { ecartIncoherent:true } : { ecartPct:+n2(c.pct) })
          : { sansEcart:true });
