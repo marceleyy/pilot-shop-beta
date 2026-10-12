@@ -322,6 +322,8 @@ async function tousMouvements(depuisJour, connusDejaLus) {
     ? attendus.filter(c => connus.indexOf(c) >= 0)
     : attendus;
 
+  /* Une requête pour tous les mois plutôt qu'une par mois (voir DB.prelire). */
+  DB.prelire(['stock:mouvements'].concat(cles));
   const blocs = await Promise.all(
     ['stock:mouvements'].concat(cles).map(c => DB.get(c, []).catch(() => [])));
 

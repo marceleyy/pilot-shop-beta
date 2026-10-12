@@ -395,7 +395,31 @@
      const estLocale = cle => LOCALES.some(l => cle === l || cle.indexOf(l) === 0);
      const configuré = () => !!(SUPABASE.url && SUPABASE.anonKey);
      const distant = cle => configuré() && !estLocale(cle) && !!table(cle);
-   
+
+     /* Lectures d'un même écran. La Tour de contrôle lisait une à une cinq clés
+        par jour de période (caisse, frigos, nettoyage…), en série : 60 allers-
+        retours vers la base pour douze jours, 150 en fin de mois, et « Un
+        instant… » pendant 10 à 40 s. Le temps du dessin d'un écran (voir
+        rendre), une clé n'est demandée qu'une fois, et prelire() en demande
+        plusieurs en une seule requête. Rien n'est gardé au-delà : un bouton
+        qui relit avant d'écrire, après le dessin, relit toujours la base. */
+     let lot = null;   // { n, at, m: Map cle -> Promise<{ data } | null> }
+     let lotN = 0;
+     const lotActif = () => (lot && Date.now() - lot.at < 30000) ? lot.m : null;
+     const oublier = cle => { if (lot) lot.m.delete(cle); };
+     function lireServeur(cle) {
+       const m = lotActif();
+       if (m && m.has(cle)) return m.get(cle);
+       const p = appel(table(cle) + '?id=eq.' + encodeURIComponent(cle) + '&select=data&limit=1')
+         .then(l => (l && l.length) ? { data: l[0].data } : null);
+       if (m) {
+         m.set(cle, p);
+         /* Échec : la lecture suivante retentera le réseau. */
+         p.catch(() => { if (m.get(cle) === p) m.delete(cle); });
+       }
+       return p;
+     }
+
      async function appel(chemin, options, secondeChance) {
        /* Base qui refuse un appareil non rattaché : inutile d'insister. Chaque
           lecture retentait le réseau — une rafale de 401 (52 en 25 s) sans
@@ -524,14 +548,63 @@
             serveur : on garde la locale, sinon elle disparaît de l'écran. */
          if (fileLire().some(x => x.cle === cle)) return cache();
          try {
-           const l = await appel(table(cle) + '?id=eq.' + encodeURIComponent(cle) + '&select=data&limit=1');
-           if (!l || !l.length) return cache();
-           ecrire(cle, JSON.stringify(l[0].data));
-           return l[0].data === null ? defaut : l[0].data;
+           const l = await lireServeur(cle);
+           if (!l) return cache();
+           /* Une copie à chaque lecture : deux lectures de la même clé ne
+              partagent pas le même objet, l'une ne modifie pas l'autre. */
+           const brut = JSON.stringify(l.data);
+           ecrire(cle, brut);
+           return l.data === null ? defaut : JSON.parse(brut);
          } catch (e) { return cache(); }
+       },
+
+       /* Début et fin du dessin d'un écran (voir lireServeur). Un nouveau
+          dessin repart d'un lot vide ; seule la fin du dernier le ferme. */
+       ouvrirLot() { lot = { n: ++lotN, at: Date.now(), m: new Map() }; return lotN; },
+       fermerLot(n) { if (lot && lot.n === n) lot = null; },
+
+       /* Demande en une requête par table (par paquets de 40) les clés qu'un
+          écran va lire une à une. Sans effet hors d'un dessin, hors ligne,
+          ou pour une clé dont une saisie attend dans la file : DB.get garde
+          alors la copie locale, comme avant. N'échoue jamais. */
+       prelire(cles) {
+         const m = lotActif();
+         if (!m || !configuré() || !STATE.enLigne) return Promise.resolve();
+         const enFile = new Set(fileLire().map(x => x.cle));
+         const parTable = {};
+         cles.forEach(c => {
+           if (!c || m.has(c) || enFile.has(c) || !distant(c)) return;
+           const t = table(c);
+           if ((parTable[t] = parTable[t] || []).indexOf(c) < 0) parTable[t].push(c);
+         });
+         const envois = [];
+         Object.keys(parTable).forEach(t => {
+           for (let i = 0; i < parTable[t].length; i += 40) {
+             const paquet = parTable[t].slice(i, i + 40);
+             const liste = '(' + paquet.map(c => '"' + c.replace(/\\/g, '\\\\').replace(/"/g, '\\"') + '"').join(',') + ')';
+             const req = appel(t + '?id=in.' + encodeURIComponent(liste) + '&select=id,data');
+             paquet.forEach(c => {
+               /* La base a répondu par une erreur (requête refusée) : chaque clé
+                  est relue seule, comme avant. Panne réseau : copie locale. */
+               const p = req.then(l => {
+                 const r = (l || []).filter(x => x && x.id === c)[0];
+                 return r ? { data: r.data } : null;
+               }, e => {
+                 if (!e || !e.http) throw e;
+                 return appel(t + '?id=eq.' + encodeURIComponent(c) + '&select=data&limit=1')
+                   .then(l => (l && l.length) ? { data: l[0].data } : null);
+               });
+               m.set(c, p);
+               p.catch(() => { if (m.get(c) === p) m.delete(c); });
+             });
+             envois.push(req.catch(() => {}));
+           }
+         });
+         return Promise.all(envois).then(() => {});
        },
    
        async set(cle, valeur) {
+         oublier(cle);
          /* Mémoire locale pleine : on n'abandonne plus la saisie pour autant.
             En ligne, elle part quand même au serveur ; l'alerte « Mémoire
             pleine » ne s'affiche que si cet envoi échoue aussi (ou s'il est
@@ -618,6 +691,7 @@
        async patch(cle, champs, ajouts, plus) {
          const op = { champs:champs || {}, ajouts:ajouts || {}, plus:plus || {} };
          const o = appliquerPatch(await this.get(cle, {}), op);
+         oublier(cle);
          let horsMemoire = false;
          try { ecrire(cle, JSON.stringify(o)); }
          catch (e) { horsMemoire = true; }
@@ -679,6 +753,7 @@
        },
    
        async del(cle) {
+         oublier(cle);
          try { oter(cle); } catch (e) {}
          if (!distant(cle)) return;
          if (!STATE.enLigne) return empiler('del', cle, null);
@@ -1519,7 +1594,15 @@ function renderNav() {
    /* Écrans à barre de dates : un lien peut les ouvrir sur un jour donné. */
    const VUES_DATEES = ['temp', 'clean', 'caisse', 'hebdo'];
 
+   /* Chaque dessin d'écran ouvre un lot de lectures (voir DB.prelire) : une
+      clé lue dix fois pendant le dessin ne part qu'une fois vers la base. */
    async function rendre(id, viaHistorique, jour, moment) {
+     const n = DB.ouvrirLot();
+     try { return await rendreVue(id, viaHistorique, jour, moment); }
+     finally { DB.fermerLot(n); }
+   }
+
+   async function rendreVue(id, viaHistorique, jour, moment) {
    if (!V[id]) { toast('Vue indisponible'); return; }
    if (!vueAutorisee(id)) id = vueAccueil();
    /* Rôle changé pendant qu'une feuille était ouverte, et la feuille se ferme
@@ -1802,6 +1885,12 @@ function renderNav() {
        reassort:REASSORT.filter(x => reassortFait(x, r)).length,
        reassortTotal:REASSORT.length, ruptures:rupt
      };
+   }
+
+   /* Les clés que lit etatJour(jour), à demander d'un coup (DB.prelire). */
+   function clesEtatJour(jour) {
+     return ['temp:' + jour, 'hebdo:' + jour, 'clean:' + jour, 'caisse:' + jour,
+             'reassort:' + jour, 'caisse:' + addD(jour, -1), 'hebdo:plan'];
    }
    
    function etatTemp(e, v) {
@@ -3712,6 +3801,13 @@ function ouvrirPremierePeriode() {
    V.controle = async function () {
      const j = today();
      const per = await periodeCourante();
+     const jours = joursEntre(per.debut, j > per.fin ? per.fin : j);
+     /* Tout ce que l'écran lit, demandé d'un coup : une requête par table au
+        lieu de cinq allers-retours par jour de période. */
+     const cles = ['ruptures', 'horaires', 'anomalies', 'pointage:' + j].concat(...clesEtatJour(j));
+     for (let i = 0; i < 3; i++) cles.push('feed:' + addD(j, -i));
+     jours.forEach(d => cles.push(...clesEtatJour(d)));
+     DB.prelire(cles);
      const mt = await meteoRapide();
      const m = mt.m;
      const e = await etatJour(j);
@@ -3728,7 +3824,6 @@ function ouvrirPremierePeriode() {
      const perimes = fifo.filter(f => f.c === 'rouge').length;
      const bientot = fifo.filter(f => f.c === 'orange').length;
    
-     const jours = joursEntre(per.debut, j > per.fin ? per.fin : j);
      let cumulCaisse = 0, sansNet = 0, tempCrit = 0;
      /* On retient QUELLES enceintes ont dépassé, pas seulement combien :
         une vitrine et une chambre froide n'appellent pas la même réaction. */
@@ -4467,7 +4562,9 @@ function ouvrirPremierePeriode() {
      let annulations = 0, pertesTotal = 0;
    
      let caisseVeille = null;
-     for (const d of joursEntre(debut, fin)) {
+     const jours = joursEntre(debut, fin);
+     DB.prelire([].concat(...jours.map(d => ['caisse:' + d, 'pertes:' + d])));
+     for (const d of jours) {
        const k = await DB.get('caisse:' + d, null);
        const veille = caisseVeille;
        caisseVeille = k;
@@ -4513,6 +4610,9 @@ function ouvrirPremierePeriode() {
       ========================================================================== */
    async function blocagesCloture(per) {
      const B = [];
+     const jours = joursEntre(per.debut, today() < per.fin ? today() : per.fin);
+     DB.prelire(['ecart:' + per.id, 'stock:inventaire', 'stock:sec']
+       .concat(...jours.map(clesEtatJour)));
      const e = await DB.get('ecart:' + per.id, {});
 
      /* L'inventaire est la condition première : sans comptage réel de fin, le
@@ -4541,7 +4641,7 @@ function ouvrirPremierePeriode() {
      }
      if (!num(e.litrageBL))     B.push({ id:'achats', txt:'Achats de la période non saisis', go:'ecarts' });
    
-     for (const d of joursEntre(per.debut, today() < per.fin ? today() : per.fin)) {
+     for (const d of jours) {
        const st = await etatJour(d);
        if (!st.tempM || !st.tempS) B.push({ id:'temp', txt:'Températures incomplètes le ' + fmtDC(d), go:'temp', jour:d,
                                             moment:st.tempM ? 's' : 'm' });
@@ -5062,6 +5162,9 @@ function modifierPeriode(per) {
       ========================================================================== */
    V.equipe = async function () {
      const cles = (await DB.list('pointage:')).reverse().slice(0, 30);
+     const feedCles = [];
+     for (let i = 0; i < 14; i++) feedCles.push('feed:' + addD(today(), -i));
+     DB.prelire(cles.concat(feedCles));
      const parPersonne = {};
      EQUIPE.forEach(e => parPersonne[e.id] = { e:e, min:0, jours:0, sessions:[] });
    
@@ -5077,8 +5180,8 @@ function modifierPeriode(per) {
      }
    
      const feedTot = {};
-     for (let i = 0; i < 14; i++) {
-       (await DB.get('feed:' + addD(today(), -i), [])).forEach(x => {
+     for (const c of feedCles) {
+       (await DB.get(c, [])).forEach(x => {
          if (x.id) feedTot[x.id] = (feedTot[x.id] || 0) + 1;
        });
      }
