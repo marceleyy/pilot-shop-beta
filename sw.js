@@ -37,6 +37,7 @@ const PRECACHE = [
   /* Fiche allergènes : elle doit répondre au comptoir, réseau ou pas. */
   '/allergenes.js',
   '/commande.js',
+  '/preaudit.js',
   /* Reconnaissance de texte embarquée : sans elle, le scan ne marche pas
      hors ligne, alors que c'est là qu'on en a le plus besoin. */
   '/vendor/tesseract.min.js',
