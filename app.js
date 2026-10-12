@@ -1102,7 +1102,7 @@
        if (msg) msg.textContent = STATE.fileAttente
          ? 'Hors ligne, vos saisies partiront toutes seules'
          : 'Hors ligne, vous pouvez continuer normalement';
-     } else if (STATE.fileAttente && appareilRattache()) {
+     } else if (STATE.fileAttente && (typeof appareilRattache !== 'function' || appareilRattache())) {
        /* De retour en ligne, des saisies attendent encore : le bandeau
           s'éteignait une dizaine de secondes avant leur envoi. */
        b.classList.add('on');
