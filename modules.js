@@ -53,6 +53,8 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
      return new Promise(resolve => {
        const cam = document.getElementById('cam');
        cam.value = '';
+       /* Appareil photo annulé : sans réponse, le bouton restait occupé. */
+       cam.oncancel = () => resolve(null);
        cam.onchange = async () => {
          const f = cam.files && cam.files[0];
          if (!f) return resolve(null);

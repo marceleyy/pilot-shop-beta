@@ -238,7 +238,9 @@
      const ajout = distant.filter(x => x && !vus.has(idLigne(x)) && !(borne && ts(x) && ts(x) <= borne));
      if (!ajout.length) return rognerAncien(cle, fusion);
      const out = fusion.concat(ajout);
-     return rognerAncien(cle, out.every(x => ts(x)) ? out.sort((p, q) => ts(p) < ts(q) ? -1 : ts(p) > ts(q) ? 1 : 0) : out);
+     const trie = rognerAncien(cle, out.every(x => ts(x)) ? out.sort((p, q) => ts(p) < ts(q) ? -1 : ts(p) > ts(q) ? 1 : 0) : out);
+     /* Le journal du jour garde ses 400 dernières lignes, union comprise. */
+     return cle.indexOf('feed:') === 0 ? trie.slice(-400) : trie;
    }
 
    /* Listes d'un écart de période qui ne font que grandir : chaque import de
@@ -531,7 +533,7 @@
          if (!distant(cle) || !STATE.enLigne) return cache();
          /* Une saisie encore en file d'attente est plus récente que la copie du
             serveur : on garde la locale, sinon elle disparaît de l'écran. */
-         if (fileLire().some(x => x.cle === cle)) return cache();
+         if (fileLire().some(x => ici(x) && x.cle === cle)) return cache();
          try {
            const l = await appel(table(cle) + '?id=eq.' + encodeURIComponent(cle) + '&select=data&limit=1');
            if (!l || !l.length) return cache();
@@ -601,7 +603,7 @@
              /* La valeur envoyée remplace toute écriture plus ancienne encore en
                 file : la rejouer ensuite écraserait cette saisie plus récente. */
              const f = fileLire();
-             const perimee = x => x.cle === cle && x.at <= t0;   // pas une saisie empilée depuis
+             const perimee = x => ici(x) && x.cle === cle && x.at <= t0;   // pas une saisie empilée depuis
              if (f.some(perimee)) fileEcrire(f.filter(x => !perimee(x)));
              return true;
            } catch (e) {
@@ -640,7 +642,7 @@
          return enFile(cle, async () => {
            /* Des écritures plus anciennes de cette clé attendent encore : la
               nouvelle passe derrière elles, sinon leur rejeu l'écraserait. */
-           if (fileLire().some(x => x.cle === cle)) {
+           if (fileLire().some(x => ici(x) && x.cle === cle)) {
              await empiler('patch', cle, op);
              setTimeout(journaliserSync, 0);
              return o;
@@ -711,11 +713,16 @@
    /* « Transmis » seulement si c'est vrai : hors ligne, l'envoi attend dans la
       file de l'iPad (bandeau « saisies en attente ») et le manager ne le voit
       pas encore. */
+   /* Saisie en file de la boutique courante. Les clés sont datées, donc
+      identiques d'une boutique à l'autre le même jour : sans ce filtre, une
+      saisie d'une boutique remplaçait ou effaçait celle de l'autre. */
+   function ici(x) { return !x.site || x.site === APP.site; }
+
    function messageEnvoi(cle, envoye) {
      /* Trop lourd pour la base : gardé sur l'iPad seulement. Annoncer « transmis » trompait. */
      if (DB._gros && DB._gros[cle]) return 'Gardé sur l’iPad seulement : trop lourd pour être envoyé';
      try {
-       if (fileLire().some(x => x.cle === cle)) return 'Enregistré sur l’iPad, envoi dès le retour du réseau';
+       if (fileLire().some(x => ici(x) && x.cle === cle)) return 'Enregistré sur l’iPad, envoi dès le retour du réseau';
      } catch (e) {}
      return envoye;
    }
@@ -760,7 +767,7 @@
    async function empiler(op, cle, valeur) {
      /* Une écriture partielle ne remplace pas la précédente : chacune ne porte
         que ses propres champs, toutes sont rejouées dans l'ordre. */
-     const f = op === 'patch' ? fileLire() : fileLire().filter(x => !(x.cle === cle && x.op === op));
+     const f = op === 'patch' ? fileLire() : fileLire().filter(x => !(ici(x) && x.cle === cle && x.op === op));
      /* La boutique est retenue : rejouée après un rattachement à une autre
         boutique, la saisie partait dans la base de celle-ci. */
      f.push({ op:op, cle:cle, valeur:valeur, at:nowISO(), n:uid(), essais:0, site:APP.site });
@@ -1061,7 +1068,7 @@
        '<div class="actions"><button class="btn clair" data-fermer>' + esc(libelleNon || 'Annuler') + '</button>' +
        '<button class="btn corail" id="cf-oui">' + esc(libelle) + '</button></div>'
      );
-     $('#cf-oui').onclick = () => { closeSheet(); onOui(); };
+     $('#cf-oui').onclick = () => { closeSheet(); return onOui(); };
      if (typeof onNon === 'function') {
        const non = $('#sheet-corps [data-fermer]');
        if (non) non.onclick = onNon;
@@ -1451,7 +1458,15 @@
    /* =============================================================================
       5. JOURNAL D'ACTIVITÉ
       ========================================================================== */
-   async function feed(niveau, texte) {
+   /* Le journal ne retarde plus l'action : chaque ligne part en tâche de fond,
+      dans l'ordre (sa fusion entre iPads coûte une relecture de la base). */
+   let _feedSuite = Promise.resolve();
+   function feed(niveau, texte) {
+     const at = nowISO();
+     _feedSuite = _feedSuite.then(() => feed1(niveau, texte, at), () => feed1(niveau, texte, at));
+     return Promise.resolve();
+   }
+   async function feed1(niveau, texte, at) {
      try {
        const cle = 'feed:' + today();
        const l = await DB.get(cle, []);
@@ -1460,7 +1475,7 @@
        if (dernier && dernier.x === texte &&
            (Date.now() - new Date(dernier.at)) < 60000) return;
        l.push({ n:niveau, x:texte, par:STATE.user ? STATE.user.prenom : '—',
-                id:STATE.user ? STATE.user.id : null, at:nowISO(), k:uid() });
+                id:STATE.user ? STATE.user.id : null, at:at, k:uid() });
        await DB.set(cle, l.slice(-400));
      } catch (e) {}
    }
@@ -2295,9 +2310,11 @@ async function purgerLocalAncien() {
      const j = STATE.jour;
      /* Déclinaisons et références du catalogue à jour, même ouvert en premier
         après un rechargement (sinon : déclinaisons d'usine affichées). */
-     if (typeof chargerCatalogueSec === 'function') await chargerCatalogueSec();
+     const [, rec] = await Promise.all([
+       typeof chargerCatalogueSec === 'function' ? chargerCatalogueSec().catch(() => null) : null,
+       DB.get('reassort:' + j, {})
+     ]);
      const REASSORT = reassortListe();
-     const rec = await DB.get('reassort:' + j, {});
      const faits = REASSORT.filter(r => reassortFait(r, rec)).length;
      const rupt  = REASSORT.filter(r => rec[r.id] && rec[r.id].rupture);
    
@@ -2825,13 +2842,23 @@ function surveillerVeille() {
     return;
   }
   const saisie = document.activeElement && /^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement.tagName);
-  if (today() !== _jourDernierRendu && $('#sheet').hidden && !saisie) {
+  /* Pas en pleine saisie : seulement après 20 min sans geste (iPad resté
+     ouvert la nuit), ou au retour sur l'application. */
+  const repos = document.visibilityState === 'visible' && Date.now() - _dernierGeste > 20 * 60000;
+  if (today() !== _jourDernierRendu && $('#sheet').hidden && !saisie && (repos || surveillerVeille._retour)) {
     if (typeof phaseCourante === 'function') STATE.phase = phaseCourante();
     rendre(STATE.view || vueAccueil());
   }
 }
+let _dernierGeste = Date.now();
+document.addEventListener('pointerdown', () => { _dernierGeste = Date.now(); }, { passive:true });
+document.addEventListener('keydown', () => { _dernierGeste = Date.now(); }, { passive:true });
 setInterval(surveillerVeille, 60000);
-document.addEventListener('visibilitychange', () => { if (!document.hidden) surveillerVeille(); });
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) return;
+  surveillerVeille._retour = true;
+  try { surveillerVeille(); } finally { surveillerVeille._retour = false; }
+});
 
 /* -----------------------------------------------------------------------------
    BOUTON RETOUR DU TÉLÉPHONE
@@ -3089,7 +3116,7 @@ async function lireEquipeBase() {
   if (!DB.configure || !DB._distant('equipe')) return { etat:'base', data:null };
   /* Une équipe saisie hors ligne attend encore dans la file : la copie locale
      est la plus récente, la base ne fait pas foi. */
-  if (fileLire().some(x => x.cle === 'equipe')) {
+  if (fileLire().some(x => ici(x) && x.cle === 'equipe')) {
     try { return { etat:'base', data:JSON.parse(DB._lire('equipe') || 'null') }; }
     catch (e) { return { etat:'base', data:null }; }
   }
@@ -3398,7 +3425,9 @@ STATE.incidents = [];
           el.__occupe = true;
           const fin = () => { clearTimeout(t); el.__occupe = false; };
           const t = setTimeout(fin, 15000);
-          r.then(fin, fin);
+          /* finally, pas then(fin, fin) : un échec doit rester « non traité »
+             pour que l'alerte « L'action n'a pas abouti » s'affiche. */
+          r.finally(fin);
         }
         return r;
       });
@@ -3940,7 +3969,7 @@ function ouvrirPremierePeriode() {
      if (per && per.echue) {
        A.push(['bad', 'Période terminée depuis ' + per.joursDepuisFin + ' ' + accord(per.joursDepuisFin, 'jour'),
          'La semaine du ' + fmtD(per.debut) + ' au ' + fmtD(per.fin) + ' attend sa clôture. ' +
-         'Clôturez-la : la période suivante reprendra au ' + fmtD(addD(per.fin, 1)) + '.', 'periodes']);
+         'Les saisies d’aujourd’hui s’y rattachent encore.', 'periodes']);
      }
      /* Un calcul d'écart clôturé au moins une fois par mois (calcul.js). */
      if (typeof alerteCalculMensuel === 'function') {
@@ -4137,6 +4166,10 @@ function ouvrirPremierePeriode() {
           est ouvert sous la même clé : la marque ne vaut donc que pour le lot
           jeté — même numéro, ouvert avant le jet. */
        if (v.jete && (!v.jeteLot || v.jeteLot === v.lot) && (!v.at || v.at <= v.jete)) return;
+       /* Ancienne entrée « a_<règle> » (sans saveur) : remplacée par une
+          ouverture plus récente « a_<règle>|<saveur> », elle ne l'était plus. */
+       if (cle.indexOf('a_') === 0 && cle.indexOf('|') < 0 &&
+           Object.keys(rec).some(k => k.indexOf(cle + '|') === 0 && rec[k] && String(rec[k].at || '') >= String(v.at || ''))) return;
        const type = cle.slice(0, 1);
        /* « a_<règle>|<saveur> » : une entrée par saveur ouverte. */
        const [rg, saveur] = cle.slice(2).split('|');
@@ -4484,8 +4517,9 @@ function ouvrirPremierePeriode() {
      /* Théorique nul ou négatif (départ manquant, ventes plus fortes que le
         stock) : aucun pourcentage n'a de sens. Il s'affichait « Dans la
         fourchette » en vert, ou changeait de signe. Même règle que calcul.js. */
-     const incoherent = !(theo > 0);
-     const pct = incoherent ? 0 : ((theo - finKg) / theo) * 100;
+     /* Rien de saisi encore (période neuve) : pas d'alerte rouge au premier jour. */
+     const incoherent = !(theo > 0) && (finKg > 0 || vendu > 0);
+     const pct = (incoherent || !(theo > 0)) ? 0 : ((theo - finKg) / theo) * 100;
      return { debutKg, finKg, achats, jete, vendu, theo, reel:finKg, ecart:ecart,
               pct:pct, incoherent:incoherent, valeur:ecart * FOURNISSEUR.prixMoyenKg, invValide:finAncien || kgFinInv !== null };
    }
@@ -4855,7 +4889,7 @@ function modifierPeriode(per) {
     const closes = (await DB.get('periodes', [])).filter(p => p && p.fin && p.id !== per.id);
     const derniere = closes.sort((a, b) => String(finReelle(a)).localeCompare(String(finReelle(b)))).pop();
     if (derniere && d1 <= finReelle(derniere)) return toast('La période précédente finit le ' + fmtD(finReelle(derniere)) + ' : commencez après', 'erreur');
-    if (d1 > today()) return toast('Le début ne peut pas être dans le futur', 'erreur');
+    if (d1 !== per.debut && d1 > addD(today(), 1)) return toast('Le début ne peut pas être après demain', 'erreur');
     const avant = libellePeriode(per);
     Object.assign(per, { type:type, debut:d1, fin:d2,
                          modifiee:nowISO(), modifieePar:STATE.user.prenom });
@@ -4888,9 +4922,7 @@ function modifierPeriode(per) {
        return;
      }
    
-     /* Période échue : la suivante reprend au lendemain de sa fin, sinon les
-        jours écoulés depuis ne comptaient dans aucune période, sans avertissement. */
-     const demain = per.fin && per.fin < today() ? addD(per.fin, 1) : addD(today(), 1);
+     const demain = addD(today(), 1);
      showSheet(
        '<h2 id="sheet-titre">' + (anticipee ? 'Clôture anticipée' : 'Terminer la période') + '</h2>' +
        '<p class="sub">' + esc(libellePeriode(per)) + (anticipee
@@ -5361,7 +5393,7 @@ function modifierPeriode(per) {
        EQUIPE.splice(0, EQUIPE.length, ...liste.filter(ficheValide));
        return liste;
      };
-     if (!DB.configure || !DB._distant('equipe') || fileLire().some(x => x.cle === 'equipe')) return sansVersion();
+     if (!DB.configure || !DB._distant('equipe') || fileLire().some(x => ici(x) && x.cle === 'equipe')) return sansVersion();
      const chemin = DB._table('equipe') + '?id=eq.' + encodeURIComponent('equipe');
      const lire = async () => {
        const l = await DB._appel(chemin + '&select=data,updated_at&limit=1');

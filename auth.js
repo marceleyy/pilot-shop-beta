@@ -218,6 +218,8 @@ function ecranRattachement() {
       try {
         let avant = null;
         try { avant = localStorage.getItem('pilotshop.v3:boutique-rattachee'); } catch (x) {}
+        /* Appareil rattaché avant cette version : la boutique est dans la session. */
+        if (!avant) try { avant = (JSON.parse(localStorage.getItem(AUTH.cle) || 'null') || {}).site || null; } catch (x) {}
         const s = await rattacherAppareil(mail, mdp);
         /* Autre boutique que la précédente : rien de l'ancienne ne doit rester
            (équipe, copies locales, personne connectée). On repart d'une page

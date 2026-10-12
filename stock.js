@@ -1628,6 +1628,7 @@ V.inventaire = async function () {
              avec l'heure de la correction, l'ancien comptage effaçait les
              ouvertures et réceptions tracées depuis (Vanille 3 redevenait 4). */
           try {
+            if (typeof invaliderStock === 'function') invaliderStock();
             const art = (await stockReel()).articles || {};
             const famDe = c => FAMILLES_PRODUIT.filter(f => f.id === litArticle(c).famille)[0];
             const auSec = f => !!(f && (f.lieu === 'sec' || f.stock === 'sec'));
