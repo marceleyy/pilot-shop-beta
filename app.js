@@ -4454,18 +4454,21 @@ function ouvrirPremierePeriode() {
      /* L'OCR ne sait pas lire les lignes d'un bon de livraison. Enregistrer ici
         ajouterait 0 litre aux achats : le stock théorique serait amputé de toute
         la livraison et l'écart accuserait l'équipe d'un manque qui n'existe pas. */
-     if (!r.lignes || !r.lignes.length) {
+     /* Bon lu par la caméra : les quantités entourées au stylo se lisent mal,
+        on ne calcule pas les litres ligne à ligne. On reprend le total du bon
+        (« Total Litres = 456,00 »), que la personne vérifie. */
+     if (!r.lignes || !r.lignes.length || r.source === 'ocr') {
        /* Le scan lit le numéro du bon, pas son tableau : on demande le total
           livré au lieu de s'arrêter. Avant, l'écran aboutissait toujours ici et
           le bouton « Scanner BL » ne pouvait ajouter aucun achat. */
        showSheet(
          '<h2 id="sheet-titre">Bon de livraison</h2>' +
-         '<p class="sub">Les lignes du bon ne se lisent pas automatiquement : indiquez le total livré.</p>' +
+         '<p class="sub">' + (r.total ? 'Total lu sur le bon : vérifiez-le avant d’ajouter.' : 'Indiquez le total livré, en bas du bon.') + '</p>' +
          '<div class="grid g2">' +
          '<div class="champ"><label class="f">N° de bon</label>' +
          '<input type="text" id="bl-num" value="' + esc(r.numero || '') + '" autocapitalize="characters" spellcheck="false"></div>' +
          '<div class="champ"><label class="f">Litres livrés (total du bon)</label>' +
-         '<input type="number" id="bl-litres" min="0" step="0.5" inputmode="decimal" placeholder="Ex. 120"></div></div>' +
+         '<input type="number" id="bl-litres" min="0" step="0.5" inputmode="decimal" placeholder="Ex. 120" value="' + (r.total > 0 ? r.total : '') + '"></div></div>' +
          '<div class="alerte info" style="margin-top:14px"><span class="ai">•</span><div><b>Ce que fait la validation</b>' +
          '<p>Les litres s’ajoutent aux achats de la période en cours, base du calcul d’écart. ' +
          'Un oubli ici se lit ensuite comme un manque de glace.</p></div></div>' +

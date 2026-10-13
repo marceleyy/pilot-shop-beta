@@ -317,7 +317,9 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
 
      function lignesReception(bl) {
        const lignes = (bl.lignes || []).map(l => ({
-         produit:l.parfum || l.ref || '', qte:l.bacs || 1, unite:'bac', lot:'', dlc:'', taille:l.taille || ''
+         /* Lot et unité lus sur le bon ; quantité illisible laissée vide, pour
+            qu'elle soit saisie plutôt qu'enregistrée à 1 par défaut. */
+         produit:l.parfum || l.ref || '', qte:l.bacs || '', unite:l.unite || 'bac', lot:l.lot || '', dlc:'', taille:l.taille || ''
        }));
        if (!lignes.length) lignes.push({ produit:'', qte:1, unite:'bac', lot:'', dlc:'' });
    
