@@ -24,7 +24,10 @@ const CALCUL = {
      bacs entamés (vitrine, congélateur −13). */
   zones: [
     { id:'froid',   label:'Chambre froide',  bacs:true },
-    { id:'congel',  label:'Congélateur −13', bacs:true, entames:true },
+    { id:'congel',  label:'Congélateur −13', bacs:true, entames:true,
+      /* Vocabulaire du classeur : « Vitrine + Quarts », les quarts étant les
+         bacs entamés rangés au −13. */
+      labelEntames:'Quarts', ariaEntames:'Quarts du congélateur −13' },
     { id:'vitrine', label:'Vitrine',         entames:true }
   ],
   ordreEntames: ['vitrine', 'congel'],
@@ -32,9 +35,11 @@ const CALCUL = {
   jourAlerteMois: 20,
   /* Produits vendus et leur grammage, retenus d'un calcul à l'autre. */
   cleProduits: 'catalogue:ventes',
-  /* Tailles du classeur Amorino : le 4 L y a sa colonne. */
-  taillesBac: [3, 4, 5, 7],
-  /* Taille proposée pour estimer les entamés au quart de bac. */
+  /* Tailles comptées : 3 L et 5 L, les seules de la boutique. Un ancien
+     calcul qui a des bacs 4 L ou 7 L garde leur champ (taillesToutes). */
+  taillesBac: [3, 5],
+  taillesToutes: [3, 4, 5, 7],
+  /* Taille des bacs entamés estimés au quart. */
   tailleQuarts: 5,
   /* Produits et grammages du classeur Amorino (poids de glace théorique, cornet
      ou coque déduit), proposés tant qu'aucun catalogue n'a été retenu. */
@@ -71,16 +76,19 @@ const CALCUL = {
   ]
 };
 
-   /* Poids d'un litre de glace. Un calcul réel prend la valeur mesurée ; un
-      essai, qui rejoue l'ancien classeur, prend la sienne pour retrouver ses
-      chiffres. Retenue sur le calcul à sa création. */
-   /* Un calcul créé avant cette règle n'a pas de poids retenu : ses kg ont été
-      enregistrés avec la valeur mesurée, il la garde. */
+   /* Poids d'un litre de glace. Un calcul réel prend celui de config.js ; un
+      essai, qui rejoue le classeur, prend le sien. Les deux valent aujourd'hui
+      la même valeur, au dernier chiffre près. Retenu sur le calcul à sa création. */
+   /* Un calcul créé avant cette règle n'a pas de poids retenu : il prend celui
+      de config.js, donc ses kg tirés de litres (livraisons) suivent un
+      changement de cette valeur. */
    const poidsLitre = c => (c && num(c.poidsLitre) > 0) ? num(c.poidsLitre) : FOURNISSEUR.poidsMoyenLitre;
    const poidsNeuf = w => (w.essai && FOURNISSEUR.poidsMoyenLitreClasseur) ? FOURNISSEUR.poidsMoyenLitreClasseur
      : FOURNISSEUR.poidsMoyenLitre;
    const kgDeLitres = (l, pl) => num(l) * (pl || FOURNISSEUR.poidsMoyenLitre);
    const kgTxt = v => n1(v) + ' kg';
+   /* « Calcul d’octobre », « Calcul de mars » : élision devant une voyelle. */
+   const deMois = m => (/^[aeiouyhéè]/i.test(m) ? 'd’' : 'de ') + esc(m);
    /* Pourcentage d'écart avec le vrai signe moins, comme l'écart en kg. */
    const pctTxt = r => r.incoherent ? 'incohérent' :
      (Math.abs(r.pct) < 0.05 ? '' : r.pct > 0 ? '−' : '+') + n1(Math.abs(r.pct)) + ' %';
@@ -106,32 +114,29 @@ const CALCUL = {
         chambre froide) garde son champ, pour ne rien perdre. */
      const aBacs = x => x.bacs || Object.keys(zs(x.id).bacs || {}).some(t => num(zs(x.id).bacs[t]) > 0);
      const aEntames = x => x.entames || entames(zs(x.id)) > 0;
+     const tailles = x => CALCUL.taillesToutes.filter(t => CALCUL.taillesBac.indexOf(t) >= 0 || num((zs(x.id).bacs || {})[t]) > 0);
      const entiers = CALCUL.zones.filter(aBacs).map(x =>
        '<p class="f" style="margin:16px 0 6px"><b>' + esc(x.label) + '</b> · bacs entiers</p>' +
-       '<div class="grid g4">' + CALCUL.taillesBac.map(t =>
+       '<div class="grid ' + (tailles(x).length > 2 ? 'g4' : 'g2') + '">' + tailles(x).map(t =>
          '<div class="champ"><label class="f">Bacs ' + t + ' L</label>' +
          '<input type="number" min="0" step="1" inputmode="numeric" data-zone="' + x.id + '" data-taille="' + t + '" ' +
          'id="' + p + '-' + x.id + '-' + t + '" value="' + esc(v((zs(x.id).bacs || {})[t])) + '" placeholder="0"></div>').join('') +
        '</div>').join('');
      const ordre = CALCUL.ordreEntames.concat(CALCUL.zones.map(x => x.id).filter(id => CALCUL.ordreEntames.indexOf(id) < 0));
      const entam = ordre.map(id => CALCUL.zones.find(x => x.id === id)).filter(x => x && aEntames(x)).map(x =>
-       '<div class="champ"><label class="f">' + esc(x.label) + ' (litres approx.)</label>' +
+       '<div class="champ"><label class="f">' + esc(x.labelEntames || x.label) + ' (litres approx.)</label>' +
        '<input type="number" min="0" step="0.25" inputmode="decimal" data-zone="' + x.id + '" data-entames ' +
        'id="' + p + '-' + x.id + '-el" value="' + esc(v(entames(zs(x.id)))) + '" placeholder="0">' +
        /* Estimation au quart de bac, comme en boutique : chaque touche ajoute
-          ¼, ½ ou ¾ d'un bac de la taille choisie. */
-       '<div class="chips" style="margin-top:8px" data-quarts="' + p + '-' + x.id + '">' +
-         CALCUL.taillesBac.map(t => '<button type="button" class="chip' + (t === CALCUL.tailleQuarts ? ' on' : '') +
-           '" data-qt="' + t + '" aria-pressed="' + (t === CALCUL.tailleQuarts) + '" aria-label="Bac de ' + t + ' L pour ' + esc(x.label) + '">' +
-           t + ' L</button>').join('') + '</div>' +
-       '<div class="chips" style="margin-top:6px">' +
+          ¼, ½ ou ¾ d'un bac de 5 L. */
+       '<div class="chips" style="margin-top:8px">' +
          [[0.25, '+ ¼'], [0.5, '+ ½'], [0.75, '+ ¾']].map(q =>
            '<button type="button" class="chip" data-qa="' + p + '-' + x.id + '" data-qf="' + q[0] + '" aria-label="Ajouter ' +
-             q[1].slice(2) + ' de bac à ' + esc(x.label) + '">' + q[1] + '</button>').join('') +
-         '<button type="button" class="chip" data-qz="' + p + '-' + x.id + '" aria-label="Effacer les entamés de ' + esc(x.label) + '">Effacer</button></div></div>').join('');
+             q[1].slice(2) + ' de bac de ' + CALCUL.tailleQuarts + ' L dans ' + esc(x.ariaEntames || x.labelEntames || x.label) + '">' + q[1] + '</button>').join('') +
+         '<button type="button" class="chip" data-qz="' + p + '-' + x.id + '" aria-label="Effacer les entamés de ' + esc(x.ariaEntames || x.labelEntames || x.label) + '">Effacer</button></div></div>').join('');
      return '<div id="' + p + '-prop"></div>' + entiers +
-       '<p class="f" style="margin:20px 0 6px"><b>Bacs déjà entamés</b></p>' +
-       '<p class="mini">Estimez chaque bac entamé au quart : choisissez sa taille, puis touchez ¼, ½ ou ¾.</p>' +
+       '<p class="f" style="margin:20px 0 6px"><b>Vitrine + Quarts</b> · bacs déjà entamés</p>' +
+       '<p class="mini">Saisissez les litres, ou touchez ¼, ½ ou ¾ pour chaque bac de ' + CALCUL.tailleQuarts + ' L entamé.</p>' +
        '<div class="grid g2" style="margin-top:8px">' + entam + '</div>' +
        '<p class="mini" id="' + p + '-total" style="margin-top:12px"></p>';
    }
@@ -139,7 +144,7 @@ const CALCUL = {
      const z = {};
      CALCUL.zones.forEach(x => {
        const bacs = {};
-       CALCUL.taillesBac.forEach(t => { const el = $('#' + p + '-' + x.id + '-' + t); bacs[t] = el ? Math.max(0, num(el.value)) : 0; });
+       CALCUL.taillesToutes.forEach(t => { const el = $('#' + p + '-' + x.id + '-' + t); bacs[t] = el ? Math.max(0, num(el.value)) : 0; });
        const el = $('#' + p + '-' + x.id + '-el');
        z[x.id] = { bacs:bacs, entamesL:el ? Math.max(0, num(el.value)) : 0 };
      });
@@ -154,19 +159,11 @@ const CALCUL = {
          .concat('Total ' + kgTxt(kgZones(z, pl))).join(' · ');
      };
      $$('#sheet-corps [data-zone]').forEach(i => i.oninput = maj);
-     /* Quarts de bac : taille choisie par zone, chaque touche ajoute au champ. */
-     const taille = {};
-     $$('#sheet-corps [data-quarts]').forEach(g => {
-       taille[g.dataset.quarts] = CALCUL.tailleQuarts;
-       $$('[data-qt]', g).forEach(b => b.onclick = () => {
-         taille[g.dataset.quarts] = +b.dataset.qt;
-         $$('[data-qt]', g).forEach(x => { x.classList.toggle('on', x === b); x.setAttribute('aria-pressed', x === b); });
-       });
-     });
+     /* Quarts de bac : chaque touche ajoute au champ. */
      $$('#sheet-corps [data-qa]').forEach(b => b.onclick = () => {
        const el = $('#' + b.dataset.qa + '-el');
        if (!el) return;
-       el.value = +(Math.max(0, num(el.value)) + num(b.dataset.qf) * (taille[b.dataset.qa] || CALCUL.tailleQuarts)).toFixed(2);
+       el.value = +(Math.max(0, num(el.value)) + num(b.dataset.qf) * CALCUL.tailleQuarts).toFixed(2);
        /* Comme une frappe : total recalculé et feuille marquée modifiée. */
        el.dispatchEvent(new Event('input', { bubbles:true }));
      });
@@ -206,8 +203,9 @@ const CALCUL = {
    }
    /* Départ repris d'une clôture : le stock a été compté ce jour-là, en fin de
       journée. Les pertes et les ventes de ce jour appartiennent au calcul
-      précédent ; le nouveau les prend à partir du lendemain. */
-   const debutFlux = c => (c.depart && c.depart.source === 'precedent') ? addD(c.debut, 1) : c.debut;
+      précédent ; le nouveau les prend à partir du lendemain. Pareil pour un
+      départ recompté le jour de cette clôture (apresCloture). */
+   const debutFlux = c => (c.depart && (c.depart.source === 'precedent' || c.depart.apresCloture)) ? addD(c.debut, 1) : c.debut;
 
    function resultatCalcul(c) {
      const debut  = num(c.depart && c.depart.kg);
@@ -308,7 +306,7 @@ const CALCUL = {
      box.innerHTML = '<p class="f" style="margin:16px 0 6px"><b>Proposé par l’appli</b> · réceptions ' + esc(texteDates(debut, fin)) + '</p>' +
        '<div class="dense">' + d.livraisons.map((p, i) =>
          '<div class="dl"><span class="c1">' + esc(p.numero || 'sans numéro') + ' · ' + esc(fmtDC(p.date)) +
-           ' · <span class="mini">' + esc(p.source) + (p.bacs ? ', ' + p.bacs + ' bac(s)' : '') + '</span></span>' +
+           ' · <span class="mini">' + esc(p.source) + (p.bacs ? ', ' + p.bacs + ' ' + accord(p.bacs, 'bac') : '') + '</span></span>' +
          '<span class="c w num">' + n1(p.litres) + ' L</span>' +
          '<span class="c w">' + (dejaCompte(l, p) ? pastille('ok', 'compté')
            : (p.doublon ? '<span class="mini">même livraison que ' + esc(p.doublon) + ' ?</span> ' : '') + '<button type="button" class="btn clair sm" data-lv-prop="' + i + '">Ajouter</button>') + '</span></div>').join('') +
@@ -355,9 +353,9 @@ const CALCUL = {
        (await lireCalculs()).forEach(c => {
          if (c.essai || c.id === sauf) return;
          if (c.statut === 'clos' && c.fin === jour && c.arrivee && c.arrivee.zones)
-           props.push({ libelle:'Stock de fin du calcul clôturé le ' + fmtDC(c.fin), zones:c.arrivee.zones, kg:num(c.arrivee.kg) });
+           props.push({ libelle:'Stock de fin du calcul clôturé le ' + fmtDC(c.fin), zones:c.arrivee.zones, kg:num(c.arrivee.kg), compte:true });
          else if (c.debut === jour && c.depart && c.depart.zones)
-           props.push({ libelle:'Stock de départ du calcul du ' + fmtDC(c.debut), zones:c.depart.zones, kg:num(c.depart.kg) });
+           props.push({ libelle:'Stock de départ du calcul du ' + fmtDC(c.debut), zones:c.depart.zones, kg:num(c.depart.kg), compte:true });
        });
      } catch (e) {}
      /* Bacs fermés par taille (glace seulement). */
@@ -410,16 +408,17 @@ const CALCUL = {
        }
        if (r) props.push({ libelle:'Inventaire du ' + fmtDC(inv.jour) + (inv.par ? ' par ' + inv.par : '') +
                              (inv.jour < jour ? ' (dernier inventaire avant le ' + fmtDC(jour) + ')' : ''),
-                           avis:depuis ? depuis + ' mouvement(s) de glace tracé(s) depuis (réceptions, ouvertures, pertes) : ' +
-                             'ce comptage n’est plus exact, recomptez ce qui a bougé.' : '',
-                           zones:r.zones, sansRangement:!r.rangement, rangement:r.rangement });
+                           zones:r.zones, sansRangement:!r.rangement, rangement:r.rangement, compte:inv.jour === jour,
+                           pourquoi:'Cet inventaire date du ' + fmtDC(inv.jour) + (depuis ? ', avec ' + depuis + ' ' +
+                             accord(depuis, 'mouvement de glace tracé', 'mouvements de glace tracés') + ' depuis (réceptions, ouvertures, pertes).' : '.') });
      } catch (e) {}
      if (jour === today() && typeof stockReel === 'function') {
        try {
          const sr = await stockReel();
          const r = sr && repartir(sr.articles, armoire);
          if (r) props.push({ libelle:'Stock tracé aujourd’hui' + (sr.depuis ? ' (inventaire du ' + fmtDC(sr.depuis) + ' + mouvements)' : ''),
-                             zones:r.zones, sansRangement:!r.rangement, rangement:r.rangement });
+                             zones:r.zones, sansRangement:!r.rangement, rangement:r.rangement, compte:false,
+                             pourquoi:'Ce chiffre vient des scans, pas de la chambre froide.' });
        } catch (e) {}
      }
      return props;
@@ -432,23 +431,28 @@ const CALCUL = {
      if (!box) return;
      const props = await stockAppli(jour, sauf);
      if (!box.isConnected) return;
-     if (!props.length) {
-       box.innerHTML = '<p class="mini" style="margin-top:10px">L’appli n’a pas de comptage du ' + esc(fmtDC(jour)) +
-         ' : saisissez-le ci-dessous.</p>';
-       return;
-     }
+     /* Seul un comptage fait ce jour-là peut être repris. Le stock tracé (dernier
+        inventaire + bacs scannés en réception et à l'ouverture) et un inventaire
+        plus ancien ne sont montrés que pour comparer : repris comme stock réel,
+        ils mesuraient l'écart entre scans et ventes, pas la glace qui manque. */
+     const sansComptage = props.some(x => x.compte) ? '' :
+       '<p class="mini" style="margin-top:10px">L’appli n’a pas de comptage du ' + esc(fmtDC(jour)) +
+       ' : comptez les bacs et saisissez-les ci-dessous.</p>';
+     if (!props.length) { box.innerHTML = sansComptage; return; }
      const resume = z => CALCUL.zones.map(x => {
        const s = (z && z[x.id]) || {};
        const b = Object.keys(s.bacs || {}).filter(t => num(s.bacs[t]) > 0).map(t => s.bacs[t] + ' × ' + t + ' L');
-       if (num(s.entamesL) > 0) b.push(n1(s.entamesL) + ' L entamés');
+       if (num(s.entamesL) > 0) b.push(n1(s.entamesL) + (x.labelEntames ? ' L de quarts' : ' L entamés'));
        return b.length ? x.label + ' : ' + b.join(', ') : '';
      }).filter(Boolean).join(' · ');
-     box.innerHTML = props.map((x, i) =>
-       '<div class="alerte info" style="margin-top:12px"><span class="ai">•</span><div>' +
-       '<b>Proposé par l’appli : ' + esc(x.libelle) + '</b><p>' + esc(resume(x.zones)) + ' (' + kgTxt(x.kg || kgZones(x.zones, pl)) + ')' +
-       (x.sansRangement ? '. L’appli ne sait pas où les bacs sont rangés : ils sont repris en chambre froide, déplacez ceux du congélateur −13.' : '.') +
-       (x.avis ? ' <b>' + esc(x.avis) + '</b>' : '') +
-       '</p><button type="button" class="btn clair sm" data-st-prop="' + i + '" style="margin-top:6px">Reprendre ce comptage</button></div></div>').join('');
+     box.innerHTML = sansComptage + props.map((x, i) => x.compte
+       ? '<div class="alerte info" style="margin-top:12px"><span class="ai">•</span><div>' +
+         '<b>Proposé par l’appli : ' + esc(x.libelle) + '</b><p>' + esc(resume(x.zones)) + ' (' + kgTxt(x.kg || kgZones(x.zones, pl)) + ')' +
+         (x.sansRangement ? '. L’appli ne sait pas où les bacs sont rangés : ils sont repris en chambre froide, déplacez ceux du congélateur −13.' : '.') +
+         '</p><button type="button" class="btn clair sm" data-st-prop="' + i + '" style="margin-top:6px">Reprendre ce comptage</button></div></div>'
+       : '<div class="alerte warn" style="margin-top:12px"><span class="ai">●</span><div>' +
+         '<b>Pour comparer, pas un comptage : ' + esc(x.libelle) + '</b><p>' + esc(resume(x.zones)) + ' (' + kgTxt(x.kg || kgZones(x.zones, pl)) + '). ' +
+         esc(x.pourquoi) + ' Comptez les bacs et saisissez votre comptage.</p></div></div>').join('');
      /* Le comptage repris remplace celui de l'étape, qui se redessine : les
         champs suivent alors les zones reprises (anciens entamés en chambre
         froide, bacs pleins en vitrine), rien n'est perdu. */
@@ -524,7 +528,7 @@ const CALCUL = {
        return carte(
          '<div class="rang"><div style="flex:1"><h2>' + (c.essai ? 'Essai' : 'Calcul en cours') +
            ' depuis le ' + esc(fmtD(c.debut)) + '</h2>' +
-         '<div class="cs">Départ ' + kgTxt(r.debut) + ' · ' + livraisonsDe(c).length + ' livraison(s), ' +
+         '<div class="cs">Départ ' + kgTxt(r.debut) + ' · ' + livraisonsDe(c).length + ' ' + accord(livraisonsDe(c).length, 'livraison') + ', ' +
            n1(r.livreL) + ' L' + (c.brouillon ? ' · clôture commencée' : '') + '</div>' +
          (c.essai ? '' : '<div class="mini" data-cg-suivi="' + esc(c.id) + '" style="margin-top:6px"></div>') + '</div>' +
          (c.essai ? pastille('ciel', 'ESSAI') : pastille('ok', 'OUVERT')) + '</div>' +
@@ -537,10 +541,10 @@ const CALCUL = {
 
      $('#page').innerHTML =
        (m.fait
-         ? '<div class="alerte ok"><span class="ai">✓</span><div><b>Calcul de ' + esc(fmtM(today())) + ' fait</b>' +
+         ? '<div class="alerte ok"><span class="ai">✓</span><div><b>Calcul ' + deMois(fmtM(today())) + ' fait</b>' +
            '<p>Clôturé le ' + esc(fmtD(m.fait.fin)) + '. Rien n’empêche d’en faire d’autres en cours de mois.</p></div></div>'
          : '<div class="alerte ' + (+today().slice(8, 10) >= CALCUL.jourAlerteMois ? 'warn' : 'info') + '"><span class="ai">●</span>' +
-           '<div><b>Calcul de ' + esc(fmtM(today())) + ' à faire</b>' +
+           '<div><b>Calcul ' + deMois(fmtM(today())) + ' à faire</b>' +
            '<p>Au moins un calcul clôturé par mois. Les comptages pour l’écart se font ici, pas dans l’inventaire.</p></div></div>') +
 
        '<div class="stack" style="margin-top:12px">' + ouverts.map(carteOuvert).join('') + '</div>' +
@@ -575,7 +579,7 @@ const CALCUL = {
        const recL = d.livraisons.reduce((t, x) => t + (x.doublon ? 0 : x.litres), 0);
        const manque = d.livraisons.filter(p => !dejaCompte(livraisonsDe(c), p));
        el.innerHTML = '<b>Suivi</b> · jour ' + jours + ' · réceptions dans l’appli : ' + n1(recL) + ' L' +
-         (manque.length ? ' (' + manque.length + ' pas encore comptée(s) ici)' : '') +
+         (manque.length ? ' (' + manque.length + ' ' + accord(manque.length, 'pas encore comptée', 'pas encore comptées') + ' ici)' : '') +
          ' · pertes au registre : ' + n1(d.pertesL) + ' L';
      });
 
@@ -603,8 +607,11 @@ const CALCUL = {
    async function demarrerCalcul() {
      const cs = await lireCalculs();
      const prec = derniereCloture(cs);
-     const w = { essai:false, debut:today(), fin:today(), source:prec ? 'precedent' : 'manuel', zones:null, livraisons:[] };
+     /* Rien n'est repris sans que le manager le choisisse : la clôture
+        précédente est proposée, « Compter maintenant » est coché par défaut. */
+     const w = { essai:false, debut:today(), fin:today(), source:'manuel', zones:null, livraisons:[] };
      const debutReel = () => (!w.essai && w.source === 'precedent' && prec) ? prec.fin : w.debut;
+     const apresCloture = () => !w.essai && !!prec && (w.source === 'precedent' || w.debut === prec.fin);
 
      const e1 = () => {
        showSheet(
@@ -641,7 +648,6 @@ const CALCUL = {
          w.fin = $('#cd-fin').value || w.fin;
          w.essai = b.dataset.t === 'essai';
          if (w.essai) w.source = 'manuel';
-         else if (prec) w.source = 'precedent';
          e1();
        });
        $$('#cd-src .chip').forEach(b => b.onclick = () => {
@@ -653,6 +659,8 @@ const CALCUL = {
          const d = $('#cd-debut').value;
          if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) { toast('Indiquez la date de départ', 'erreur'); return; }
          if (d > today()) { toast('La date de départ ne peut pas être dans le futur', 'erreur'); return; }
+         if (!w.essai && prec && d < prec.fin) {
+           toast('Le calcul précédent couvre déjà jusqu’au ' + fmtDC(prec.fin) + ' : partez de cette date ou après, ou supprimez d’abord ce calcul pour le refaire', 'erreur'); return; }
          const f = $('#cd-fin').value;
          if (!/^\d{4}-\d{2}-\d{2}$/.test(f) || f < d) { toast('La fin de la période doit tomber après le départ', 'erreur'); return; }
          w.fin = f;
@@ -709,7 +717,7 @@ const CALCUL = {
          const depart = (!w.essai && w.source === 'precedent' && prec)
            ? { source:'precedent', ref:prec.id, zones:(prec.arrivee && prec.arrivee.zones) || null,
                kg:+num(prec.arrivee && prec.arrivee.kg).toFixed(3) }
-           : { source:'manuel', zones:w.zones, kg:+kgZones(w.zones, poidsNeuf(w)).toFixed(3) };
+           : { source:'manuel', zones:w.zones, kg:+kgZones(w.zones, poidsNeuf(w)).toFixed(3), apresCloture:apresCloture() };
          const c = { id:id, essai:w.essai, debut:w.debut, statut:'ouvert', depart:depart, poidsLitre:poidsNeuf(w),
                      livraisons:w.livraisons, par:STATE.user.prenom, at:nowISO() };
          /* Fin déjà passée : la clôture la reprend. Fin à venir : on clôturera
@@ -728,12 +736,12 @@ const CALCUL = {
          '<h2 id="sheet-titre">Une livraison ?</h2>' +
          '<p class="sub">Étape 3 · Seulement une livraison arrivée après le comptage de départ</p>' +
          listeLivraisons(w.livraisons, true) +
-         formLivraison(w.source === 'precedent' && !w.essai && w.debut < today() ? addD(w.debut, 1) : w.debut) +
+         formLivraison(apresCloture() && w.debut < today() ? addD(w.debut, 1) : w.debut) +
          '<div id="lv-doublon"></div>' +
          '<div class="actions"><button class="btn clair" id="lv-ret">Retour</button>' +
          '<button class="btn menthe" id="lv-suiv">Suivant</button></div>');
        const aj3 = brancherLivraisons(w.livraisons, e3);
-       proposerLivraisons(w.livraisons, w.source === 'precedent' && !w.essai ? addD(w.debut, 1) : w.debut, today(), aj3);
+       proposerLivraisons(w.livraisons, apresCloture() ? addD(w.debut, 1) : w.debut, today(), aj3);
        $('#lv-ret').onclick = () => (!w.essai && w.source === 'precedent' && prec) ? e1() : e2();
        $('#lv-suiv').onclick = () => {
          if (num($('#lv-litres').value) > 0) { toast('Touchez « Ajouter cette livraison » ou videz le champ des litres', 'erreur'); return; }
@@ -940,7 +948,7 @@ const CALCUL = {
            const libres = d.livraisons.filter(p => !p.doublon);
            const box = $('#lv-indice');
            if (box && libres.length) box.innerHTML = '<p class="mini" style="margin-top:8px">L’appli a enregistré ' +
-             libres.length + ' réception(s) sur ces dates, ' + n1(libres.reduce((t, p) => t + p.litres, 0)) + ' L au total.</p>';
+             libres.length + ' ' + accord(libres.length, 'réception') + ' sur ces dates, ' + n1(libres.reduce((t, p) => t + p.litres, 0)) + ' L au total.</p>';
          }).catch(() => {});
          $('#lv-ret').onclick = () => eA();
          $('#lv-non').onclick = () => { w.livraisonRecue = false; eC(); };
@@ -971,16 +979,19 @@ const CALCUL = {
      };
 
      const eC = async () => {
-       /* Calcul réel : pertes reprises du registre, corrigeables. Essai : les
-          chiffres viennent de l'ancien classeur, on part de zéro. */
+       /* Calcul réel : le registre des pertes est montré, et repris seulement
+          si le manager le demande. Essai : les chiffres viennent de l'ancien
+          classeur, on part de zéro. */
        let reg = null;
        const d0 = debutFlux(c);
        if (!c.essai) reg = d0 <= w.fin ? await litresPertesRegistre(d0, w.fin) : 0;
-       if (w.perteL === null) { w.perteL = reg || 0; w.perteSource = c.essai ? 'Saisie' : 'Registre des pertes'; }
+       if (w.perteL === null) { w.perteL = 0; w.perteSource = 'Saisie'; }
        showSheet(
          '<h2 id="sheet-titre">Pertes de la période</h2>' +
          '<p class="sub">Étape 3 sur 4 · Glace jetée ' + esc(texteDates(debutFlux(c), w.fin)) + '</p>' +
-         (reg !== null ? '<p class="mini">Registre des pertes : ' + n1(reg) + ' L sur ces dates.</p>' : '') +
+         (reg !== null ? '<p class="mini">Registre des pertes : ' + n1(reg) + ' L sur ces dates.</p>' +
+           (reg > 0 ? '<button type="button" class="btn clair sm" id="cp-reg" style="margin-top:6px">Reprendre le registre (' +
+             n1(reg) + ' L)</button>' : '') : '') +
          '<div class="champ" style="margin-top:10px"><label class="f">Litres jetés</label>' +
          '<input type="number" id="cp-l" min="0" step="0.1" inputmode="decimal" value="' + (w.perteL || '') + '" placeholder="0"></div>' +
          '<div class="champ" style="margin-top:10px"><label class="f">Et/ou kg jetés (pesés)</label>' +
@@ -991,9 +1002,10 @@ const CALCUL = {
        const maj = () => { $('#cp-kg').textContent = 'Pertes : ' +
          kgTxt(kgDeLitres($('#cp-l').value, poidsLitre(c)) + Math.max(0, num($('#cp-k').value))); };
        $('#cp-l').oninput = maj; $('#cp-k').oninput = maj; maj();
+       if ($('#cp-reg')) $('#cp-reg').onclick = () => { $('#cp-l').value = +num(reg).toFixed(2); maj(); };
        const lire = () => {
          const v = Math.max(0, num($('#cp-l').value));
-         if (reg === null || Math.abs(v - reg) > 0.001) w.perteSource = 'Saisie';
+         if (reg === null || !(reg > 0) || Math.abs(v - reg) > 0.001) w.perteSource = 'Saisie';
          else w.perteSource = 'Registre des pertes';
          w.perteL = v;
          w.perteKg = Math.max(0, num($('#cp-k').value));
@@ -1013,22 +1025,32 @@ const CALCUL = {
        }
        const v = w.ventes;
        const modes = [['produits', 'Par produit'], ['total', 'Total en kg'], ['fichier', 'Fichier de caisse']];
+       /* Export qui ne couvre pas la période : un fichier de deux mois donnait
+          547 kg vendus pour une semaine. Signalé, rien n'est changé. */
+       const joursPer = Math.round((new Date(w.fin) - new Date(debutFlux(c))) / 864e5) + 1;
+       const fichierActif = (v.mode === 'produits' && v.fichierLu) || (v.mode === 'fichier' && v.fichier);
+       const horsPeriode = fichierActif && joursPer > 0 && num(v.joursFichier) > 0 && num(v.joursFichier) !== joursPer
+         ? '<div class="alerte warn" style="margin-top:12px"><span class="ai">●</span><div><b>Ce fichier couvre ' + num(v.joursFichier) +
+           ' ' + accord(num(v.joursFichier), 'jour') + ', la période en compte ' + joursPer + '</b><p>Vérifiez les dates de l’export de caisse : il doit couvrir ' +
+           esc(texteDates(debutFlux(c), w.fin)) + '.</p></div></div>' : '';
        showSheet(
          '<h2 id="sheet-titre">Ventes de la période</h2>' +
          '<p class="sub">Étape 4 sur 4 · Exportez de la caisse les ventes ' + esc(texteDates(debutFlux(c), w.fin)) + '</p>' +
-         '<div id="cv-prop"></div>' +
+         '<div id="cv-prop"></div>' + horsPeriode +
          '<div class="chips" id="cv-mode" style="margin-top:12px">' + modes.map(m =>
            '<button type="button" class="chip' + (v.mode === m[0] ? ' on' : '') + '" data-m="' + m[0] + '">' + m[1] + '</button>').join('') + '</div>' +
          '<div id="cv-corps" style="margin-top:14px">' +
          (v.mode === 'produits'
            ? '<p class="mini">Quantité vendue de chaque produit et grammage de glace par unité. ' +
                'Les produits et grammages sont retenus pour le prochain calcul.</p>' +
-             '<div class="grid g3" style="margin-top:8px"><label class="f">Produit</label><label class="f">Grammes / unité</label><label class="f">Quantité vendue</label></div>' +
+             '<div class="cv-g" style="margin-top:8px" aria-hidden="true"><span class="f">Produit</span><span class="f">g / unité</span><span class="f">Qté vendue</span></div>' +
              v.lignes.map((l, i) =>
-               '<div class="grid g3 cv-l" data-i="' + i + '" style="margin-top:6px">' +
-               '<input type="text" data-k="nom" value="' + esc(l.nom || '') + '" placeholder="Ex. Coupe classique">' +
-               '<input type="number" data-k="g" min="0" step="1" inputmode="numeric" value="' + esc(l.g || '') + '" placeholder="g">' +
-               '<input type="number" data-k="q" min="0" step="1" inputmode="numeric" value="' + esc(l.q || '') + '" placeholder="0"></div>').join('') +
+               /* Grille propre à 3 colonnes : la grille .g3 passait à 2 puis 1
+                  colonne sur téléphone, et la quantité tombait sous le produit suivant. */
+               '<div class="cv-g cv-l" data-i="' + i + '" style="margin-top:6px">' +
+               '<input type="text" data-k="nom" aria-label="Produit" value="' + esc(l.nom || '') + '" placeholder="Ex. Coupe classique">' +
+               '<input type="number" data-k="g" aria-label="Grammes par unité" min="0" step="1" inputmode="numeric" value="' + esc(l.g || '') + '" placeholder="g">' +
+               '<input type="number" data-k="q" aria-label="Quantité vendue" min="0" step="1" inputmode="numeric" value="' + esc(l.q || '') + '" placeholder="qté"></div>').join('') +
              '<button type="button" class="btn clair bloc" id="cv-plus" style="margin-top:10px">Ajouter un produit</button>'
            : v.mode === 'total'
            ? '<div class="champ"><label class="f">Poids de glace vendu (kg)</label>' +
@@ -1058,7 +1080,7 @@ const CALCUL = {
          else if (v.mode === 'total') v.kg = Math.max(0, num($('#cv-kg').value));
          const sansG = v.mode === 'produits' ? v.lignes.filter(l => num(l.q) > 0 && !(num(l.g) > 0)).length : 0;
          $('#cv-total').textContent = 'Vendu : ' + kgTxt(v.kg) +
-           (sansG ? ' · ' + sansG + ' produit(s) vendu(s) sans grammage, non comptés' : '');
+           (sansG ? ' · ' + sansG + ' ' + accord(sansG, 'produit vendu sans grammage, non compté', 'produits vendus sans grammage, non comptés') : '');
        };
        $$('#cv-corps input').forEach(i => i.oninput = () => { lireLignes(); calcule(); });
        calcule();
@@ -1086,6 +1108,7 @@ const CALCUL = {
            try { r = await lireExportCaisse(f, retenus); }
            catch (err) { $('#cv-lu').textContent = 'Aucun fichier lu.'; return toast(err && err.message ? err.message : 'Fichier illisible', 'erreur'); }
            if (!$('#cv-lu')) return;   // feuille fermée entre-temps
+           v.joursFichier = num(r.jours) || 0;
            /* Export par libellés : chaque produit arrive dans « Par produit »,
               où les grammages se vérifient et se complètent. */
            if (r.produits) {
@@ -1100,16 +1123,17 @@ const CALCUL = {
              delete v.fichier; delete v.methode; delete v.detail;
              eD();
              toast(r.produits.length + ' produits de caisse rangés dans les colonnes du classeur' +
-               (r.inconnus.length ? ' : ' + r.inconnus.length + ' grammage(s) à compléter' : ''), r.inconnus.length ? 'erreur' : undefined);
+               (r.inconnus.length ? ' : ' + r.inconnus.length + ' ' + accord(r.inconnus.length, 'grammage') + ' à compléter' : ''), r.inconnus.length ? 'erreur' : undefined);
              return;
            }
            v.kg = +num(r.kg).toFixed(3);
            v.fichier = f.name;
            v.methode = r.methode + (r.fiable ? '' : ' · approximatif') +
-             (r.inconnus && r.inconnus.length ? ' · ' + r.inconnus.length + ' produit(s) sans glace connue ignoré(s) (boissons, crêpes nature…)' : '');
+             (r.inconnus && r.inconnus.length ? ' · ' + r.inconnus.length + ' ' + accord(r.inconnus.length, 'produit sans glace connue ignoré', 'produits sans glace connue ignorés') + ' (boissons, crêpes nature…)' : '');
            v.detail = (r.detail || []).slice(0, 8);
            $('#cv-lu').textContent = v.fichier + ' · ' + v.methode + ' · ' + kgTxt(v.kg);
            if ($('#cv-detail')) $('#cv-detail').innerHTML = detailVentes(v.detail);
+           if (v.joursFichier) { eD(); return; }   // redessine avec l'avis de période
            calcule();
          };
        }
@@ -1162,7 +1186,7 @@ const CALCUL = {
          '<p class="sub">' + (c.essai ? 'Essai · ' : '') + esc(fmtD(c.debut)) + ' → ' + esc(fmtD(w.fin)) + '</p>' +
          blocResultat(r) + blocComparaison(r, fini) +
          (horsPeriode.length ? '<div class="alerte warn" style="margin-top:12px"><span class="ai">●</span><div>' +
-           '<b>' + horsPeriode.length + ' livraison(s) datée(s) hors de la période</b><p>' +
+           '<b>' + horsPeriode.length + ' ' + accord(horsPeriode.length, 'livraison datée', 'livraisons datées') + ' hors de la période</b><p>' +
            esc(horsPeriode.map(x => (x.numero || 'sans numéro') + ' du ' + fmtDC(x.date)).join(', ')) +
            '. Elles sont comptées : retirez-les à l’étape 1 si elles n’ont rien à faire ici.</p></div></div>' : '') +
          (STATE.enLigne ? '' : '<div class="alerte warn" style="margin-top:12px"><span class="ai">●</span><div>' +
@@ -1325,12 +1349,22 @@ const CALCUL = {
          : '') +
        (livraisonsDe(c).length ? '<p class="mini" style="margin-top:14px"><b>Livraisons</b></p>' + listeLivraisons(livraisonsDe(c), false) : '') +
        '<div class="actions"><button class="btn clair" data-fermer>Fermer</button>' +
-       (c.essai ? '<button class="btn corail" id="cv-sup">Supprimer l’essai</button>' : '') + '</div>');
-     if ($('#cv-sup')) $('#cv-sup').onclick = () => confirmer('Supprimer cet essai ?',
-       'Essai du ' + fmtD(c.debut) + ' au ' + fmtD(c.fin) + '.', 'Supprimer', async () => {
-         await DB.patch(c.id, { statut:'supprime', suppPar:STATE.user.prenom, suppAt:nowISO() });
-         rendre('calcul');
-       });
+       '<button class="btn corail" id="cv-sup">' + (c.essai ? 'Supprimer l’essai' : 'Supprimer ce calcul') + '</button></div>');
+     /* Un calcul clôturé se supprime aussi, toujours après confirmation. Le
+        calcul suivant qui part de sa clôture garde son stock de départ. */
+     $('#cv-sup').onclick = async () => {
+       const suivant = c.essai ? null
+         : (await lireCalculs()).filter(x => x.depart && x.depart.source === 'precedent' && x.depart.ref === c.id)[0];
+       confirmer(c.essai ? 'Supprimer cet essai ?' : 'Supprimer ce calcul ?',
+         (c.essai ? 'Essai' : 'Calcul') + ' du ' + fmtD(c.debut) + ' au ' + fmtD(c.fin) + '. ' +
+         (c.essai ? '' : 'Son résultat sera retiré des calculs clôturés.' +
+           (suivant ? ' Le calcul du ' + fmtD(suivant.debut) + ' part de sa clôture : il garde ce stock de départ.' : '')),
+         'Supprimer', async () => {
+           await DB.patch(c.id, { statut:'supprime', suppPar:STATE.user.prenom, suppAt:nowISO() });
+           if (!c.essai) await feed('ok', STATE.user.prenom + ' a supprimé le calcul d’écart du ' + fmtDC(c.debut) + ' au ' + fmtDC(c.fin));
+           rendre('calcul');
+         });
+     };
    }
 
    /* L'écran Écarts mène au calcul guidé. */

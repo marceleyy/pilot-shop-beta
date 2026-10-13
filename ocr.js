@@ -1200,7 +1200,7 @@ function confirmerLecture(type, r, apercu, resolve) {
 
     (type === 'etiquette'
       ? '<div class="champ" style="margin-top:14px"><label class="f">Parfum</label>' +
-        '<select id="oc-parfum"><option value="">— non identifié —</option>' +
+        '<select id="oc-parfum"><option value="">Non identifié</option>' +
         PARFUMS.map(p => '<option value="' + esc(p) + '"' + (p === r.parfum ? ' selected' : '') + '>' +
           esc(p) + '</option>').join('') + '</select></div>' +
         '<div class="champ" style="margin-top:14px"><label class="f">Ouvert le</label>' +
@@ -1265,7 +1265,7 @@ function saisieManuelle(type, raison, resolve) {
     'placeholder="Ex. 13845A" style="font-size:22px;letter-spacing:.14em;text-align:center"></div>' +
     (type === 'etiquette'
       ? '<div class="champ" style="margin-top:14px"><label class="f">Parfum</label>' +
-        '<select id="sm-parfum"><option value="">— choisir —</option>' +
+        '<select id="sm-parfum"><option value="">Choisir…</option>' +
         PARFUMS.map(p => '<option value="' + esc(p) + '">' + esc(p) + '</option>').join('') + '</select></div>'
       : '') +
     '<div class="actions"><button class="btn clair" id="sm-x">Annuler</button>' +
