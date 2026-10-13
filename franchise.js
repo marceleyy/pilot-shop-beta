@@ -83,7 +83,7 @@ async function calculerIndicateurs() {
       /* Validé ET mesuré, comme pour l'état de la journée. */
       relevesManquants = (v.m && releveMesure(t, 'm') ? 0 : 1) + (v.s && releveMesure(t, 's') ? 0 : 1);
     }
-    const litres = (Array.isArray(pertes) ? pertes : []).reduce((s, w) => s + litresPerte(w), 0);
+    const litres = (Array.isArray(pertes) ? pertes : []).reduce((s, w) => s + litresJetes(w), 0);
     return { crit:crit, relevesManquants:relevesManquants,
              tachesManquantes:net && net.total ? Math.max(0, net.total - net.faits) : 0, litres:litres };
   })());

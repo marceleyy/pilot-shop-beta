@@ -453,7 +453,13 @@ async function enregistrerInventaire(lignes, note, avant, meta) {
 const CLE_INV_ATTENTE = 'stock:attente';
 
 async function inventaireEnAttente() {
-  try { return (await DB.get(CLE_INV_ATTENTE, null)) || null; } catch (e) { return null; }
+  try {
+    const [a, inv] = await Promise.all([DB.get(CLE_INV_ATTENTE, null), DB.get('stock:inventaire', null)]);
+    /* Un comptage déjà repris, ou plus ancien que l'inventaire sur le stock
+       (rejoué par un iPad revenu en ligne), n'attend plus rien. */
+    if (!a || (inv && inv.at && a.at && inv.at >= a.at)) return null;
+    return a;
+  } catch (e) { return null; }
 }
 
 /* Article par article : compté, attendu au moment du comptage, écart.
@@ -530,7 +536,8 @@ async function verifierInventaire() {
           '<div class="stack">' + justes.map(rang).join('') + '</div></details>'
         : '') +
       '<div class="actions"><button class="btn clair" data-fermer>Laisser en attente</button>' +
-      '<button class="btn menthe" id="ci-ok">Reprendre sur le stock réel</button></div>');
+      '<button class="btn menthe" id="ci-ok">Reprendre sur le stock réel</button></div>' +
+      '<button type="button" class="btn fantome bloc sm" id="ci-ecarter" style="margin-top:8px">Écarter ce comptage</button>');
 
     if (enCours && justes.some(x => x.c === enCours)) {
       const d = $('#sheet-corps details'); if (d) d.open = true;
@@ -547,21 +554,36 @@ async function verifierInventaire() {
       /* Le recomptage est fait maintenant ; l'inventaire garde l'heure de son
          comptage. On retire donc ce qui a bougé depuis, sinon une ouverture
          tracée entre-temps serait comptée deux fois. */
-      const bouge = num(maintenant[enCours] || 0) - num((a.avant || {})[enCours] || 0);
+      invaliderStock();
+      const art = (await stockReel()).articles || {};
+      const bouge = num(art[enCours] || 0) - num((a.avant || {})[enCours] || 0);
+      if (q - bouge < 0) {
+        return toast('Recomptage incohérent avec les mouvements tracés depuis le comptage', 'erreur');
+      }
       const cur = await inventaireEnAttente();
       if (!cur || cur.at !== a.at) {
         closeSheet(); toast('Cet inventaire a changé entre-temps', 'erreur'); return rendre(STATE.view);
       }
       cur.lignes = cur.lignes || {};
-      cur.lignes[enCours] = Math.max(0, q - bouge);
+      cur.lignes[enCours] = q - bouge;
       cur.corrections = Object.assign({}, cur.corrections, {
         [enCours]: { q: q, par: STATE.user.prenom, at: nowISO() }
       });
       await DB.set(CLE_INV_ATTENTE, cur);
       a = cur; enCours = null;
+      Object.assign(maintenant, art);
       toast('Recomptage noté');
       dessinerV();
     };
+    $('#ci-ecarter').onclick = () => confirmer('Écarter ce comptage ?',
+      'Il est supprimé sans toucher au stock. Il faudra refaire l’inventaire.',
+      'Écarter', async () => {
+        const cur = await DB.get(CLE_INV_ATTENTE, null);
+        if (cur && cur.at === a.at) await DB.del(CLE_INV_ATTENTE);
+        await feed('warn', STATE.user.prenom + ' a écarté l’inventaire du ' + fmtD(a.jour) + ' (' + (a.par || '—') + ')');
+        toast('Comptage écarté');
+        rendre(STATE.view);
+      }, () => dessinerV(), 'Retour');
     $('#ci-ok').onclick = () => confirmer('Reprendre cet inventaire sur le stock réel ?',
       'Le stock prend les quantités comptées le ' + fmtD(a.jour) + '.' +
       (manq ? ' ' + manq + ' ' + accord(manq, 'bac manquant part', 'bacs manquants partent') +
@@ -577,13 +599,6 @@ async function confirmerInventaire(a) {
     toast('Cet inventaire a déjà été confirmé ou remplacé', 'erreur');
     return rendre(STATE.view);
   }
-  /* Un inventaire plus récent déjà sur le stock (un autre iPad hors ligne) :
-     reprendre l'ancien effacerait ce qu'il a fixé. */
-  const actuel = await DB.get('stock:inventaire', null);
-  if (actuel && actuel.at && actuel.at > cur.at) {
-    toast('Un inventaire plus récent est déjà sur le stock', 'erreur');
-    return;
-  }
   const inv = await enregistrerInventaire(cur.lignes || {}, cur.note, cur.avant || {}, {
     jour: cur.jour, at: cur.at, par: cur.par, employe: cur.employe,
     confirmePar: STATE.user.prenom, confirmeAt: nowISO(),
@@ -592,7 +607,7 @@ async function confirmerInventaire(a) {
 
   /* Chaque article manquant devient une perte du jour du comptage. L'id dérive
      du comptage : confirmer deux fois n'en ajoute pas de seconde. */
-  const manquants = Object.keys(inv.ecarts).filter(c => inv.ecarts[c] < 0);
+  const manquants = Object.keys(inv.ecarts).filter(c => inv.ecarts[c] < 0 && litArticle(c).taille);
   if (manquants.length) {
     const cle = 'pertes:' + cur.jour;
     const liste = await DB.get(cle, []);
@@ -608,9 +623,10 @@ async function confirmerInventaire(a) {
     if (typeof cumulerPertesMois === 'function') await cumulerPertesMois(cur.jour);
   }
   await DB.del(CLE_INV_ATTENTE);
-  await feed(inv.manquants ? 'warn' : 'ok',
+  const bacsPerdus = manquants.reduce((s, c) => s - inv.ecarts[c], 0);
+  await feed(bacsPerdus ? 'warn' : 'ok',
     STATE.user.prenom + ' a confirmé l’inventaire du ' + fmtD(cur.jour) + ' (' + (cur.par || '—') + ')' +
-    (inv.manquants ? ' · ' + inv.manquants + ' ' + accord(inv.manquants, 'bac', 'bacs') + ' en perte' : ''));
+    (bacsPerdus ? ' · ' + bacsPerdus + ' ' + accord(bacsPerdus, 'bac', 'bacs') + ' en perte' : ''));
   toast('Inventaire repris sur le stock');
   rendre(STATE.view);
 }
@@ -1835,7 +1851,20 @@ V.inventaire = async function () {
 
     const bRouvrir = $('#inv-rouvrir');
     /* Le comptage en attente n'a pas touché le stock : on le rouvre tel quel. */
-    if (bRouvrir && partie === 'froid' && attenteDuJour) bRouvrir.onclick = () => {
+    if (bRouvrir && partie === 'froid' && attenteDuJour) bRouvrir.onclick = async () => {
+      /* Revalidé, il prendra l'heure de la correction : on ajoute aux chiffres
+         comptés ce qui a été tracé depuis, sinon une ouverture faite entre
+         les deux serait effacée (Vanille 3 redeviendrait 4). */
+      try {
+        invaliderStock();
+        const art = (await stockReel()).articles || {};
+        const av = attente.avant || {};
+        new Set(Object.keys(attente.lignes || {}).concat(Object.keys(av))).forEach(c => {
+          const bouge = num(art[c] || 0) - num(av[c] || 0);
+          if (!bouge) return;
+          saisie[c] = String(Math.max(0, num(saisie[c] || 0) + bouge));
+        });
+      } catch (e) { /* stock illisible : on garde le comptage affiché */ }
       ouvertFroid = true;
       dessiner();
     };
