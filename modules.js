@@ -384,7 +384,7 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
          $('#rl-ok').onclick = enregistrer;
        };
    
-       let enCours = false, sansDlcVu = -1;
+       let enCours = false, sansDlcVu = '';
        async function enregistrer() {
          /* Double appui : une seule réception à la fois. */
          if (enCours) return;
@@ -399,11 +399,12 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
          if (aZero) return toast(aZero + ' ' + accord(aZero, 'produit') + ' sans quantité : indiquez au moins 1', 'erreur');
          /* La DLC n'est pas sur le bon : elle est sur l'étiquette de chaque
             carton. La bloquer obligeait à 24 saisies pour un bon de 24 lignes.
-            Premier appui : rappel ; second appui (même nombre de lignes sans
-            DLC) : on enregistre, ces lignes n'auront pas d'alerte de péremption. */
+            Premier appui : rappel ; second appui (mêmes lignes sans DLC) :
+            on enregistre, ces lignes n'auront pas d'alerte de péremption. */
          const sansDlc = valides.filter(l => !l.dlc).length;
-         if (sansDlc && sansDlcVu !== sansDlc) {
-           sansDlcVu = sansDlc;
+         const signature = valides.map((l, i) => l.dlc ? '' : i + ':' + l.produit).join('|');
+         if (sansDlc && sansDlcVu !== signature) {
+           sansDlcVu = signature;
            return toast(sansDlc + ' ' + accord(sansDlc, 'produit') + ' sans DLC : touchez encore « Enregistrer » pour continuer sans', 'erreur');
          }
    

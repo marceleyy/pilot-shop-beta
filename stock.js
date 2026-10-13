@@ -260,7 +260,10 @@ async function stockFermeJournal() {
   const mouv = await tousMouvements(null);
   const parCle = {};
   mouv.forEach(m => {
-    if ((m.t || m.type) !== 'reception' || !m.d) return;
+    /* Une réception sans DLC (facultative depuis le bon de livraison) reste
+       dans la répartition : sans elle, ses bacs étaient attribués aux lots
+       plus anciens, avec leur DLC, et déclenchaient de fausses alertes. */
+    if ((m.t || m.type) !== 'reception') return;
     const c = m.c || m.cle;
     (parCle[c] = parCle[c] || []).push(m);
   });
@@ -272,6 +275,7 @@ async function stockFermeJournal() {
         if (reste <= 0) return;
         const q = Math.min(reste, num(m.q !== undefined ? m.q : m.qte));
         reste -= q;
+        if (!m.d) return;
         out.push({ id: c + '|' + (m.a || m.at), cle: c, produit: libelleArticle(c), qte: q,
                    unite: litArticle(c).taille ? 'bac' : '', lot: m.l || '', dlc: m.d,
                    recuLe: isoOf(new Date(m.a || m.at)) });
