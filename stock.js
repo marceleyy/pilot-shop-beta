@@ -772,13 +772,16 @@ async function verifierInventaire(partie) {
         toast('Comptage écarté');
         rendre(STATE.view);
       }, () => dessinerV(), 'Retour');
-    $('#ci-ok').onclick = () => th.livraisons.length
-      ? toast('Confirmez d’abord la livraison en attente : une quantité corrigée fausserait les écarts', 'erreur')
-      : confirmer('Reprendre cet inventaire sur le stock réel ?',
+    $('#ci-ok').onclick = async () => {
+      /* Livraison confirmée ailleurs pendant que l'écran était ouvert. */
+      if (!sec && th.livraisons.length) { invaliderStock(); th = await theoriqueAuComptage(a, (await stockReel()).articles || {}); }
+      if (th.livraisons.length) return toast('Confirmez d’abord la livraison en attente : une quantité corrigée fausserait les écarts', 'erreur');
+      confirmer('Reprendre cet inventaire sur le stock réel ?',
       'Le stock prend les quantités comptées le ' + fmtD(a.jour) + '.' +
       (manq ? ' ' + manq + ' ' + accord(manq, 'bac manquant part', 'bacs manquants partent') +
               ' au registre des pertes.' : ''),
       'Reprendre', () => confirmerInventaire(a, partie), () => dessinerV(), 'Retour');
+    };
   };
   dessinerV();
 }
@@ -806,7 +809,7 @@ async function confirmerInventaire(a, partie) {
        précédent, sinon ses ouvertures depuis seraient effacées. */
     const comptes = groupesComptes(cur, 'sec');
     const vivant = (await stockReel()).articles || {};
-    for (const c of Object.keys(lignes)) {
+    for (const c of new Set(Object.keys(lignes).concat(Object.keys(cur.avant || {})))) {
       if (comptes.has(groupeInv('sec', c))) continue;
       const cleV = cleVivanteSec(c, cur.avant);
       if (cleV && vivant[cleV] !== undefined) lignes[c] = Math.max(0, num(vivant[cleV]) - await mouvementsDepuis(cleV, cur.at));
@@ -2101,10 +2104,11 @@ V.inventaire = async function () {
         const art = (await stockReel()).articles || {};
         /* Seulement les articles comptés : une famille non comptée le reste. */
         const { delta, apres } = await theoriqueAuComptage(attente, art);
-        Object.keys(attente.lignes || {}).forEach(c => {
+        const comptees = groupesComptes(attente, 'froid');
+        new Set(Object.keys(delta).concat(Object.keys(apres))).forEach(c => {
           const bouge = num(delta[c] || 0) + num(apres[c] || 0);
-          if (!bouge || saisie[c] === undefined) return;
-          saisie[c] = String(Math.max(0, num(saisie[c]) + bouge));
+          if (!bouge || !comptees.has(litArticle(c).famille)) return;
+          saisie[c] = String(Math.max(0, num(saisie[c] || 0) + bouge));
         });
       } catch (e) { /* stock illisible : on garde le comptage affiché */ }
       ouvertFroid = true;
