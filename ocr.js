@@ -765,7 +765,8 @@ function rappelCadrage(type) {
    7. FONCTION PRINCIPALE
    Contrat de retour inchangé :
      'etiquette' → { lot, ouv, parfum, confiance, texte }
-     'bl'        → { fournisseur, numero, date, lignes, confiance, texte }
+     'bl'        → { fournisseur, numero, date, total, lignes, source:'ocr', confiance, texte }
+                   (lignes : ref, parfum, lot, lotCorrige, bacs, taille, unite) — voir analyserBL
    ========================================================================== */
 async function analyserCanvas(type, canvas, nom, resolve) {
   if (type === 'bl') return analyserBL(canvas, nom, resolve);
@@ -901,8 +902,10 @@ function confirmerBL(r, apercu, resolve) {
       '<pre class="mini" style="white-space:pre-wrap;margin-top:10px">' + esc(r.texte.slice(0, 1500)) + '</pre>' +
       '</details>' : '') +
     '<div class="actions"><button class="btn clair" id="ob-x">Reprendre la photo</button>' +
-    '<button class="btn menthe" id="ob-ok">Continuer</button></div>');
+    '<button class="btn menthe" id="ob-ok">Continuer</button></div>' +
+    '<button class="btn clair bloc" id="ob-annuler" style="margin-top:10px">Annuler</button>');
 
+  document.getElementById('ob-annuler').onclick = () => { closeSheet(); resolve(null); };
   document.getElementById('ob-x').onclick = () => {
     closeSheet();
     scannerPhoto('bl').then(resolve, () => resolve(null));
@@ -1060,12 +1063,22 @@ function extraireLignesBL(texte) {
      s'écrit « Total Litres / Liters / Litro / Litri = 456,00 » : la lecture
      coupe parfois la ligne, on prend aussi le nombre qui suit « Litri = ». */
   const mBL = brut.match(/\bBL\s*(\d{5,8})\b/i);
-  const mTot = brut.match(/Total\s+Litres[^\d\n]*(\d+[.,]?\d*)/i)
-            || brut.match(/Lit(?:ri|ro)\s*=\s*(\d+[.,]?\d*)/i);
-  /* Date d'enlèvement : la première date complète du bon. */
+  /* « 1.456,00 » ou « 1 456,00 » : séparateur de milliers retiré, sinon
+     parseFloat rendait 1,456 L et l'écart accusait un manque de 1 454 L. */
+  const NB = '(\\d{1,3}(?:[ .]\\d{3})+(?:,\\d+)?|\\d+(?:[.,]\\d+)?)';
+  const mTot = brut.match(new RegExp('Total\\s+Litres[^\\d\\n]*' + NB, 'i'))
+            || brut.match(new RegExp('Lit(?:ri|ro)\\s*=\\s*' + NB, 'i'));
+  const nombre = x => parseFloat(String(x).replace(/[ .](?=\d{3}\b)/g, '').replace(',', '.'));
+  /* Date d'enlèvement : la date qui suit le numéro du bon, sinon la première
+     date complète. Une date impossible (31/02) est écartée. */
   let date = null;
-  const mD = brut.match(/\b(\d{2})[\/.](\d{2})[\/.](20\d{2})\b/);
-  if (mD && +mD[2] >= 1 && +mD[2] <= 12 && +mD[1] >= 1 && +mD[1] <= 31) date = mD[3] + '-' + mD[2] + '-' + mD[1];
+  const reD = /\b(\d{2})[\/.](\d{2})[\/.](20\d{2})\b/g;
+  const apresBL = mBL ? brut.slice(mBL.index) : brut;
+  const mD = reD.exec(apresBL) || (reD.lastIndex = 0, reD.exec(brut));
+  if (mD) {
+    const j = new Date(+mD[3], +mD[2] - 1, +mD[1]);
+    if (j.getMonth() === +mD[2] - 1 && j.getDate() === +mD[1]) date = mD[3] + '-' + mD[2] + '-' + mD[1];
+  }
 
   const lignes = [];
   brut.split(/[\r\n]+/).forEach(l => {
@@ -1085,7 +1098,8 @@ function extraireLignesBL(texte) {
     let iLot = -1, lot = '', corrige = false;
     for (let i = jetons.length - 1; i > 0; i--) {
       const c = lotDepuisJeton(jetons[i], glace);
-      if (c) { iLot = i; lot = c.lot; corrige = c.corrige; break; }
+      /* Le numéro du bon lui-même (« BL 221970 ») n'est pas un lot. */
+      if (c && !(mBL && c.lot === mBL[1])) { iLot = i; lot = c.lot; corrige = c.corrige; break; }
     }
 
     /* Quantité : un nombre à deux décimales APRÈS le lot (« 12,00 »). Les
@@ -1093,8 +1107,10 @@ function extraireLignesBL(texte) {
        laisse vide plutôt que d'en inventer une. */
     let qte = null;
     for (let i = jetons.length - 1; i > iLot && i > 0; i--) {
-      const mQ = jetons[i].match(/^(\d{1,3})[.,]\d{2}$/);
-      if (mQ) { qte = +mQ[1] || null; break; }
+      /* Le cercle au stylo se lit parfois en parenthèse : « (12,00) ». */
+      const mQ = jetons[i].replace(/[()[\]{}]/g, '').match(/^\d{1,3}[.,]\d{2}$/);
+      /* Arrondi au demi : « 12,06 » est un 12,00 dont le cercle a mordu un zéro. */
+      if (mQ) { qte = Math.round(parseFloat(mQ[0].replace(',', '.')) * 2) / 2 || null; break; }
     }
 
     const debut = ref ? 1 : 0;
@@ -1111,8 +1127,11 @@ function extraireLignesBL(texte) {
     /* Lignes qui ne sont pas des produits : frais de port, total, sous-total.
        Sans ce filtre, le « Total Litres = 348,00 » devenait une ligne de 348
        unités, et les frais de port un article à réceptionner. */
-    if (/total|frais\s+de\s+port|emballage|palette\s*n|^page\b|forwarder|adresse|t[ée]l[ée]phone|intracom/i.test(t)) return;
+    if (/total|frais\s+de\s+port|emballage|palette\s*n|^page\b|forwarder|adresse|t[ée]l[ée]phone|intracom|\bBL\b|commande|client|siret|\bn[°o]\s/i.test(t)) return;
     const produit = /glace|sorbet|macaron|gaufre|cookie|cr[eê]pe|gianduiotto|biscuit|cornet/i.test(design);
+    /* Une ligne d'en-tête avec un nombre à six chiffres n'est pas un produit :
+       il faut une référence en tête ou un libellé de produit. */
+    if (!(ref || produit)) return;
     if (!lot && !(ref && produit)) return;
 
     /* Contenance : « 3 litres » pour un bac, « (14x6p) » pour un carton. */
@@ -1137,7 +1156,7 @@ function extraireLignesBL(texte) {
   return {
     lignes: lignes,
     bl: mBL ? 'BL' + mBL[1] : null,
-    total: mTot ? parseFloat(mTot[1].replace(',', '.')) : null,
+    total: mTot ? nombre(mTot[1]) : null,
     date: date
   };
 }
@@ -1158,9 +1177,9 @@ function lotDepuisJeton(jeton, glace) {
   const le = c => VERS_LETTRE[c] !== undefined ? VERS_LETTRE[c] : c;
   const c = j.split('');
   /* Macaron : L + quatre chiffres + lettre. */
-  if (/^[L1I]/.test(j)) {
+  if (j[0] === 'L') {
     const m = 'L' + c.slice(1, 5).map(ch).join('') + le(c[5]);
-    if (/^L\d{4}[A-Z]$/.test(m) && j[0] === 'L') return { lot: m, corrige: m !== j };
+    if (/^L\d{4}[A-Z]$/.test(m)) return { lot: m, corrige: m !== j };
   }
   /* Glace : cinq chiffres + lettre. */
   if (glace) {

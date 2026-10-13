@@ -4451,9 +4451,9 @@ function ouvrirPremierePeriode() {
      const r = await scannerPhoto('bl');
      if (!r) return;
 
-     /* L'OCR ne sait pas lire les lignes d'un bon de livraison. Enregistrer ici
-        ajouterait 0 litre aux achats : le stock théorique serait amputé de toute
-        la livraison et l'écart accuserait l'équipe d'un manque qui n'existe pas. */
+     /* Sans lignes exploitables, enregistrer ajouterait 0 litre aux achats : le
+        stock théorique serait amputé de toute la livraison et l'écart
+        accuserait l'équipe d'un manque qui n'existe pas. */
      /* Bon lu par la caméra : les quantités entourées au stylo se lisent mal,
         on ne calcule pas les litres ligne à ligne. On reprend le total du bon
         (« Total Litres = 456,00 »), que la personne vérifie. */
