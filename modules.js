@@ -421,14 +421,24 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
           const nrmP = x => String(x || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/\s+/g, ' ').trim();
           /* Un parfum ajouté par la boutique (« Myrtille ») n'est dans aucun
              libellé fournisseur connu : « Glace Myrtille 5 litres » était
-             rejeté et les bacs livrés n'entraient jamais au stock. On cherche
-             donc aussi le nom du catalogue comme mot entier dans le libellé,
-             le plus long d'abord (« Citron vert basilic » avant « Citron »). */
-          const libre = ' ' + nrmP(l.produit.replace(/\d+(?:[.,]\d+)?\s*(?:litres?|lt|l)\b/i, '')).replace(/[^a-z0-9]+/g, ' ') + ' ';
-          const connu = glace ? (parfumDepuisDesignation(l.produit) ||
-            PARFUMS.filter(p => nrmP(p) === nrmP(l.produit.replace(/\d+(?:[.,]\d+)?\s*(?:litres?|lt|l)\b/i, '')))[0] ||
-            PARFUMS.slice().sort((a, b) => b.length - a.length)
-              .filter(p => { const m = nrmP(p).replace(/[^a-z0-9]+/g, ' ').trim(); return m && libre.indexOf(' ' + m + ' ') >= 0; })[0] ||
+             rejeté et les bacs livrés n'entraient jamais au stock. Ordre :
+             nom exact, puis nom du catalogue comme mot entier (le plus long
+             d'abord, et seulement parmi les parfums ajoutés, pour que « Fraise
+             Basilic » ne devienne pas « Citron vert basilic »), puis les
+             mots-clés d'usine, puis tout nom du catalogue en mot entier. Le mot
+             entier n'est cherché que sur un libellé de bac (glace, sorbet ou
+             taille de bac) : « Lait d'amande 1 L » n'est pas le parfum Amande. */
+          const sansTaille = l.produit.replace(/\d+(?:[.,]\d+)?\s*(?:litres?|lt|l)\b/i, '');
+          const libre = ' ' + nrmP(sansTaille).replace(/[^a-z0-9]+/g, ' ') + ' ';
+          const bac = /\b(glace|sorbet|gelato|creme glacee)\b/.test(libre) || tailleDepuisDesignation(l.produit) != null;
+          const motEntier = liste => bac ? liste.slice().sort((a, b) => b.length - a.length)
+            .filter(p => { const m = nrmP(p).replace(/[^a-z0-9]+/g, ' ').trim(); return m && libre.indexOf(' ' + m + ' ') >= 0; })[0] : null;
+          const usine = typeof PARFUMS_USINE !== 'undefined' ? PARFUMS_USINE : [];
+          const connu = glace ? (
+            PARFUMS.filter(p => nrmP(p) === nrmP(sansTaille))[0] ||
+            motEntier(PARFUMS.filter(p => usine.indexOf(p) < 0)) ||
+            parfumDepuisDesignation(l.produit) ||
+            motEntier(PARFUMS) ||
             null) : null;
           if (glace && !connu) { horsStock.push(l.produit.trim()); continue; }
           auStock++;
