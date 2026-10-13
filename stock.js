@@ -994,6 +994,8 @@ V.stock = async function () {
   const sec = await DB.get('stock:sec', null);
   const attente = await inventaireEnAttente('froid');
   const attenteSec = await inventaireEnAttente('sec');
+  /* Réceptions pas encore confirmées : leurs bacs ne sont pas dans ces chiffres. */
+  const recAttente = typeof receptionsEnAttente === 'function' ? await receptionsEnAttente() : [];
   /* Comptage en attente : affiché, mais pas encore dans les chiffres. */
   const bandeauAttente = (a, p) => !a ? '' :
     '<div class="alerte warn" style="margin-top:12px"><div style="flex:1;min-width:0">' +
@@ -1033,7 +1035,9 @@ V.stock = async function () {
         ? '<p class="rappel" style="margin-top:14px">Dernier inventaire le ' +
           fmtD(inventaire.jour) + (inventaire.par ? ' par ' + esc(inventaire.par) : '') + '.</p>'
         : '<p class="rappel" style="margin-top:14px">Aucun inventaire : le stock part de zéro.</p>') +
-      bandeauAttente(attente, 'froid'),
+      bandeauAttente(attente, 'froid') +
+      (recAttente.length && typeof bandeauReceptions === 'function'
+        ? '<div style="margin-top:12px">' + bandeauReceptions(recAttente) + '</div>' : ''),
       'solide') +
 
     (alertes.length
@@ -1175,6 +1179,8 @@ V.stock = async function () {
     const bi = $('#st-inv');
     if (bi) bi.onclick = () => { STATE.inventairePartie = 'froid'; rendre('inventaire'); };
     $$('[data-verif]').forEach(b => b.onclick = () => verifierInventaire(b.dataset.verif));
+    const rv = document.getElementById('rc-verif');
+    if (rv && typeof verifierReceptions === 'function') rv.onclick = verifierReceptions;
     const bs = $('#st-inv-sec');
     if (bs) bs.onclick = () => { STATE.inventairePartie = 'sec'; rendre('inventaire'); };
   };

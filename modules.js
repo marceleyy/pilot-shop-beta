@@ -214,12 +214,112 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
    /* =============================================================================
       D. RÉCEPTION DE LIVRAISON
       ========================================================================== */
+   /* -----------------------------------------------------------------------------
+      RÉCEPTION À CONFIRMER
+      Comme l'inventaire : ce que l'équipe réceptionne ne touche pas le stock
+      réel tant qu'un manager ne l'a pas confirmé. Un bon mal lu (12 bacs au
+      lieu de 2) ajoutait sinon des bacs fantômes que seul le prochain
+      inventaire révélait, en perte. La réception elle-même (température,
+      conformités, DLC) est tracée tout de suite : c'est le registre sanitaire.
+      Plusieurs réceptions peuvent attendre en même temps (deux livraisons).
+      -------------------------------------------------------------------------- */
+   const CLE_RECEPTION_ATTENTE = 'reception:attente';
+
+   async function receptionsEnAttente() {
+     try { return (await DB.get(CLE_RECEPTION_ATTENTE, [])).filter(r => r && r.id && (r.lignes || []).length); }
+     catch (e) { return []; }
+   }
+
+   function bandeauReceptions(liste) {
+     if (!liste.length) return '';
+     const n = liste.length;
+     return '<div class="alerte warn" style="margin-bottom:14px"><div style="flex:1;min-width:0">' +
+       '<b>' + n + ' ' + accord(n, 'réception', 'réceptions') + ' à confirmer</b>' +
+       '<p>' + liste.map(r => esc(r.fournisseur) + ' · ' + esc(r.numero || 'sans n°') + ' (' + esc(r.par || '—') + ')').join(', ') +
+       '. Le stock ne change qu’après la confirmation d’un manager.</p></div>' +
+       (STATE.user && STATE.user.role === 'manager'
+         ? '<button class="btn menthe sm" id="rc-verif">Vérifier</button>' : '') + '</div>';
+   }
+
+   /* Écran du manager : quantités modifiables, puis confirmer ou écarter. */
+   async function verifierReceptions() {
+     if (!(STATE.user && STATE.user.role === 'manager')) {
+       return toast('Seul un manager peut confirmer une réception', 'erreur');
+     }
+     const liste = await receptionsEnAttente();
+     if (!liste.length) { toast('Aucune réception à confirmer'); return rendre(STATE.view); }
+     const r = liste[0];
+     const qtes = r.lignes.map(l => l.qte);
+     showSheet(
+       '<h2 id="sheet-titre">Réception à confirmer</h2>' +
+       '<p class="sub">' + esc(r.fournisseur) + ' · ' + esc(r.numero || 'sans n°') + ' · saisie par ' + esc(r.par || '—') +
+       ' le ' + esc(fmtD(r.jour)) + (liste.length > 1 ? ' · ' + (liste.length - 1) + ' autre' + (liste.length > 2 ? 's' : '') + ' ensuite' : '') + '</p>' +
+       '<div class="alerte info"><span class="ai">•</span><div><b>Comparez au bon papier</b>' +
+       '<p>Corrigez une quantité si besoin. Mettre 0 retire la ligne. Le stock ne change pas tant que vous ne confirmez pas.</p></div></div>' +
+       '<div class="stack" style="margin-top:14px">' + r.lignes.map((l, i) =>
+         '<div class="rang"><div style="flex:1;min-width:0"><b>' + esc(l.produit) + '</b>' +
+         '<div class="mini">' + (l.lot ? 'lot ' + esc(l.lot) : 'sans lot') + ' · ' + (l.dlc ? 'DLC ' + esc(fmtD(l.dlc)) : 'sans DLC') + '</div></div>' +
+         '<input type="number" min="0" step="1" inputmode="numeric" data-q="' + i + '" value="' + esc(qtes[i]) + '" style="width:76px;text-align:center"></div>').join('') +
+       '</div>' +
+       '<div class="actions"><button class="btn clair" data-fermer>Laisser en attente</button>' +
+       '<button class="btn menthe" id="rv-ok">Confirmer l’entrée en stock</button></div>' +
+       '<button class="btn clair bloc" id="rv-ecarter" style="margin-top:10px">Écarter cette réception</button>');
+     $$('[data-q]').forEach(inp => inp.oninput = () => { qtes[+inp.dataset.q] = inp.value; });
+     $('#rv-ecarter').onclick = () => confirmer('Écarter cette réception ?',
+       'Rien n’entrera au stock pour ce bon. La réception reste tracée au registre.', 'Écarter',
+       async () => {
+         if (!(await retirerReceptionAttente(r.id))) return;
+         await feed('warn', STATE.user.prenom + ' a écarté l’entrée en stock du bon ' + (r.numero || 'sans n°') + ' (' + (r.par || '—') + ')');
+         toast('Réception écartée du stock');
+         rendre(STATE.view);
+       }, verifierReceptions, 'Retour');
+     let enCours = false;
+     $('#rv-ok').onclick = async () => {
+       if (enCours) return;
+       if (qtes.some(q => q === '' || !(num(q) >= 0))) return toast('Quantité invalide', 'erreur');
+       enCours = true;
+       try {
+         /* Retirée d'abord : un second iPad qui confirme en même temps ne
+            trouve plus rien et n'ajoute pas les bacs une seconde fois. */
+         if (!(await retirerReceptionAttente(r.id))) return;
+         let n = 0;
+         for (let i = 0; i < r.lignes.length; i++) {
+           const l = r.lignes[i], q = num(qtes[i]);
+           if (!(q > 0)) continue;
+           await ajouterMouvement('reception', l.cle, q, { lot:l.lot, bl:r.numero, dlc:l.dlc, famille:l.famille });
+           n += q;
+         }
+         const corrige = r.lignes.some((l, i) => num(qtes[i]) !== num(l.qte));
+         await feed('ok', STATE.user.prenom + ' a confirmé l’entrée en stock du bon ' + (r.numero || 'sans n°') +
+           ' (' + (r.par || '—') + ')' + (corrige ? ', quantités corrigées' : ''));
+         closeSheet();
+         toast(n + ' ' + accord(n, 'unité ajoutée', 'unités ajoutées') + ' au stock');
+         if ((await receptionsEnAttente()).length) return verifierReceptions();
+         rendre(STATE.view);
+       } finally { enCours = false; }
+     };
+   }
+
+   /* Retire une réception de l'attente. false si elle n'y est plus
+      (confirmée ou écartée entre-temps sur un autre appareil). */
+   async function retirerReceptionAttente(id) {
+     const liste = await DB.get(CLE_RECEPTION_ATTENTE, []);
+     if (!liste.some(x => x && x.id === id)) {
+       toast('Cette réception a déjà été confirmée ou écartée', 'erreur');
+       rendre(STATE.view);
+       return false;
+     }
+     await DB.set(CLE_RECEPTION_ATTENTE, liste.filter(x => x && x.id !== id));
+     return true;
+   }
    V.reception = async function () {
      const j = STATE.jour;
      const recus = (await DB.get('reception:' + j, []));
      const ferme = await stockFerme();
+     const enAttente = await receptionsEnAttente();
    
      $('#page').innerHTML =
+       bandeauReceptions(enAttente) +
        carte(entete('🚚', 'Réception d’une livraison',
          'Deux scans : le bon de livraison, puis la DLC de chaque produit entrant.') +
          '<button class="btn ciel bloc xl" id="scan-bl">1. Scanner le bon de livraison</button>' +
@@ -231,7 +331,7 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
                '<div style="flex:1;min-width:0"><b>' + esc(r.fournisseur) + ' · ' + esc(r.numero) + '</b>' +
                '<div class="mini">' + r.lignes.length + ' ' + accord(r.lignes.length, 'référence') + ' · sonde ' + (r.temp === '' ? '—' : r.temp + ' °C') +
                ' · ' + esc(r.par) + ' à ' + heure(r.at) + '</div></div>' +
-               pastille(r.refuse ? 'bad' : 'ok', r.refuse ? 'Refusée' : 'Conforme') + '</div>',
+               (r.refuse ? pastille('bad', 'Refusée') : enAttente.some(x => x.id === r.id) ? pastille('warn', 'Stock à confirmer') : pastille('ok', 'Conforme')) + '</div>',
                r.refuse ? 'corail' : 'menthe')).join('') + '</div>'
          : '') +
    
@@ -245,6 +345,7 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
              '<span class="c ww">' + (a.dlc ? fmtDC(a.dlc) : '—') + '</span></div>').join('') + '</div></div>'
          : vide('📦', 'Aucun article en stock fermé.'));
    
+     const bv = $('#rc-verif'); if (bv) bv.onclick = verifierReceptions;
      $('#scan-bl').onclick = async () => {
        const r = await scannerPhoto('bl');
        if (!r) return;
@@ -412,7 +513,9 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
          const rec = { id:uid(), fournisseur:bl.fournisseur, numero:bl.numero, temp:bl.temp,
                        conf:bl.conf, refuse:bl.refuse, lignes:valides,
                        par:STATE.user.prenom, at:nowISO(), jour:today() };
-         await DB.push('reception:' + today(), rec);
+         /* Ce qui entrera au stock, préparé maintenant mais écrit seulement à
+            la confirmation d'un manager (même principe que l'inventaire). */
+         const aStocker = [];
    
          /* Glace non reconnue (lait, cornets, parfum hors catalogue) : tracée pour
             sa DLC, mais pas ajoutée aux bacs de la chambre froide. */
@@ -449,17 +552,25 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
           const cle = cleArticle(fam.id, fam.parfums ? parfum : '',
                                  glace ? (num(l.taille) || tailleDepuisDesignation(l.produit) ||
                                           FOURNISSEUR.tailleParDefaut) : '');
-          await ajouterMouvement('reception', cle, num(l.qte),
-            { lot:l.lot, bl:bl.numero, dlc:l.dlc, famille:fam.id });
+          aStocker.push({ cle:cle, produit:l.produit.trim(), qte:num(l.qte),
+                          lot:l.lot || '', dlc:l.dlc || '', famille:fam.id });
         }
       }
+         /* La réception (contrôle, température, DLC) est tracée tout de suite :
+            c'est le registre sanitaire. Le stock réel, lui, attend. */
+         rec.aConfirmer = aStocker.length > 0;
+         await DB.push('reception:' + today(), rec);
+         if (aStocker.length) {
+           await DB.push(CLE_RECEPTION_ATTENTE, { id:rec.id, jour:rec.jour, at:rec.at, par:rec.par,
+             fournisseur:rec.fournisseur, numero:rec.numero, lignes:aStocker });
+         }
          await feed(bl.refuse ? 'bad' : 'ok',
            STATE.user.prenom + (bl.refuse ? ' a REFUSÉ la livraison ' : ' a réceptionné ') + bl.numero +
            ' (' + valides.length + ' réf.)');
          if (bl.refuse && typeof feedEcrit === 'function') await feedEcrit();
          closeSheet();
          toast(bl.refuse ? 'Réception refusée et tracée'
-           : (auStock ? auStock + ' ' + accord(auStock, 'produit ajouté', 'produits ajoutés') + ' au stock, DLC suivie' : 'Réception tracée, DLC suivie') +
+           : (auStock ? 'Réception tracée. ' + auStock + ' ' + accord(auStock, 'produit entrera', 'produits entreront') + ' au stock après confirmation d’un manager' : 'Réception tracée, DLC suivie') +
              (horsStock.length ? '. Non reconnu, hors stock : ' + horsStock.join(', ') : ''));
          rendre('reception');
        }
