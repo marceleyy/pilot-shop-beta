@@ -1065,7 +1065,7 @@ function extraireLignesBL(texte) {
   const mBL = brut.match(/\bBL\s*(\d{5,8})\b/i);
   /* « 1.456,00 » ou « 1 456,00 » : séparateur de milliers retiré, sinon
      parseFloat rendait 1,456 L et l'écart accusait un manque de 1 454 L. */
-  const NB = '(\\d{1,3}(?:[ .]\\d{3})+(?:,\\d+)?|\\d+(?:[.,]\\d+)?)';
+  const NB = '(\\d{1,3}(?:\\.\\d{3})+(?:,\\d+)?|\\d{1,3}(?: \\d{3})+,\\d{2}|\\d+(?:[.,]\\d+)?)';
   const mTot = brut.match(new RegExp('Total\\s+Litres[^\\d\\n]*' + NB, 'i'))
             || brut.match(new RegExp('Lit(?:ri|ro)\\s*=\\s*' + NB, 'i'));
   const nombre = x => parseFloat(String(x).replace(/[ .](?=\d{3}\b)/g, '').replace(',', '.'));
@@ -1109,8 +1109,9 @@ function extraireLignesBL(texte) {
     for (let i = jetons.length - 1; i > iLot && i > 0; i--) {
       /* Le cercle au stylo se lit parfois en parenthèse : « (12,00) ». */
       const mQ = jetons[i].replace(/[()[\]{}]/g, '').match(/^\d{1,3}[.,]\d{2}$/);
-      /* Arrondi au demi : « 12,06 » est un 12,00 dont le cercle a mordu un zéro. */
-      if (mQ) { qte = Math.round(parseFloat(mQ[0].replace(',', '.')) * 2) / 2 || null; break; }
+      /* Arrondi à l'entier : « 12,06 » est un 12,00 dont le cercle a mordu un
+         zéro, et le bon compte des bacs et des cartons entiers. */
+      if (mQ) { qte = Math.round(parseFloat(mQ[0].replace(',', '.'))) || null; break; }
     }
 
     const debut = ref ? 1 : 0;
@@ -1127,11 +1128,11 @@ function extraireLignesBL(texte) {
     /* Lignes qui ne sont pas des produits : frais de port, total, sous-total.
        Sans ce filtre, le « Total Litres = 348,00 » devenait une ligne de 348
        unités, et les frais de port un article à réceptionner. */
-    if (/total|frais\s+de\s+port|emballage|palette\s*n|^page\b|forwarder|adresse|t[ée]l[ée]phone|intracom|\bBL\b|commande|client|siret|\bn[°o]\s/i.test(t)) return;
-    const produit = /glace|sorbet|macaron|gaufre|cookie|cr[eê]pe|gianduiotto|biscuit|cornet/i.test(design);
+    if (/total|frais\s+de\s+port|emballage|palette\s*n|^page\b|forwarder|adresse|t[ée]l[ée]phone|intracom|\bBL\b|commande|client|siret|siren|\brcs\b|\btva\b|iban|\bbic\b|capital|\bn[°o]\s/i.test(t)) return;
+    const produit = /glace|sorbet|macaron|gaufre|cookie|cr[eêè]pe|gianduiotto|biscuit|cornet/i.test(design);
     /* Une ligne d'en-tête avec un nombre à six chiffres n'est pas un produit :
-       il faut une référence en tête ou un libellé de produit. */
-    if (!(ref || produit)) return;
+       il faut une référence en tête, un libellé de produit, ou lot ET quantité. */
+    if (!(ref || produit || (lot && qte))) return;
     if (!lot && !(ref && produit)) return;
 
     /* Contenance : « 3 litres » pour un bac, « (14x6p) » pour un carton. */
@@ -1156,7 +1157,8 @@ function extraireLignesBL(texte) {
   return {
     lignes: lignes,
     bl: mBL ? 'BL' + mBL[1] : null,
-    total: mTot ? nombre(mTot[1]) : null,
+    /* Au-delà de 5 000 L, c'est une lecture collée : champ laissé vide. */
+    total: mTot && nombre(mTot[1]) > 0 && nombre(mTot[1]) <= 5000 ? nombre(mTot[1]) : null,
     date: date
   };
 }

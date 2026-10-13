@@ -361,6 +361,8 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
          $$('[data-r]').forEach(inp => inp.oninput = () => {
            const [i, k] = inp.dataset.r.split('.');
            lignes[+i][k] = inp.value;
+           /* Lot retapé à la main : il n'est plus « corrigé par la lecture ». */
+           if (k === 'lot') lignes[+i].lotCorrige = false;
          });
          $$('[data-scandlc]').forEach(b => b.onclick = async () => {
            const i = +b.dataset.scandlc;
