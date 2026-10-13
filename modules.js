@@ -419,8 +419,17 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
              qui n'est aucun parfum (lait, cornets…) n'entre pas dans les bacs de
              la chambre froide : la réception reste tracée pour sa DLC. */
           const nrmP = x => String(x || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/\s+/g, ' ').trim();
+          /* Un parfum ajouté par la boutique (« Myrtille ») n'est dans aucun
+             libellé fournisseur connu : « Glace Myrtille 5 litres » était
+             rejeté et les bacs livrés n'entraient jamais au stock. On cherche
+             donc aussi le nom du catalogue comme mot entier dans le libellé,
+             le plus long d'abord (« Citron vert basilic » avant « Citron »). */
+          const libre = ' ' + nrmP(l.produit.replace(/\d+(?:[.,]\d+)?\s*(?:litres?|lt|l)\b/i, '')).replace(/[^a-z0-9]+/g, ' ') + ' ';
           const connu = glace ? (parfumDepuisDesignation(l.produit) ||
-            PARFUMS.filter(p => nrmP(p) === nrmP(l.produit.replace(/\d+(?:[.,]\d+)?\s*(?:litres?|lt|l)\b/i, '')))[0] || null) : null;
+            PARFUMS.filter(p => nrmP(p) === nrmP(l.produit.replace(/\d+(?:[.,]\d+)?\s*(?:litres?|lt|l)\b/i, '')))[0] ||
+            PARFUMS.slice().sort((a, b) => b.length - a.length)
+              .filter(p => { const m = nrmP(p).replace(/[^a-z0-9]+/g, ' ').trim(); return m && libre.indexOf(' ' + m + ' ') >= 0; })[0] ||
+            null) : null;
           if (glace && !connu) { horsStock.push(l.produit.trim()); continue; }
           auStock++;
           let parfum = glace ? (connu || l.produit.trim()) : l.produit.trim();

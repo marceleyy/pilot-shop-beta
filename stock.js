@@ -2463,15 +2463,22 @@ function confirmerOuverture(r) {
             /* Les coulis et toppings ont leurs propres saveurs : proposer les
                vingt-trois parfums de glace pour un flacon de coulis n'avait
                aucun sens et rendait le choix impraticable. */
-            '<select id="co-parfum">' + (fam.saveurs || PARFUMS).map(p => {
+            '<select id="co-parfum">' + (() => {
               /* Le mot lu sur l'étiquette est comparé sans accent ni casse, et
                  sur ses cinq premières lettres : « Pistache » lu sur un bac et
-                 « Pistacchio » de la liste des macarons se retrouvent. */
+                 « Pistacchio » de la liste des macarons se retrouvent.
+                 Une seule option est retenue, le nom exact d'abord : marquer
+                 toutes les « choco… » laissait le navigateur garder la dernière,
+                 et « Chocolat noir » devenait « Chocolat bio (sorbet) » dès qu'on
+                 touchait la taille du bac ou la destination. */
+              const liste = fam.saveurs || PARFUMS;
               const nrm = s => String(s||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z]/g,'');
-              const a = nrm(p), b = nrm(parfum);
-              const proche = b && (a === b || (a.length >= 5 && b.length >= 5 && a.slice(0,5) === b.slice(0,5)));
-              return '<option' + (proche ? ' selected' : '') + '>' + esc(p) + '</option>';
-            }).join('') +
+              const b = nrm(parfum);
+              const choisi = (b && liste.find(p => nrm(p) === b)) ||
+                (b.length >= 5 ? liste.find(p => { const a = nrm(p); return a.length >= 5 && a.slice(0,5) === b.slice(0,5); }) : undefined);
+              return liste.map(p =>
+                '<option' + (p === choisi ? ' selected' : '') + '>' + esc(p) + '</option>').join('');
+            })() +
             '</select></div>' +
             (fam.id === 'glace'
               ? '<div class="champ" style="margin-top:14px"><label class="f">Taille du bac</label>' +
