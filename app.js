@@ -138,7 +138,9 @@
      ['boutique',     'reglages'],
      /* Résumé lu par les autres boutiques du franchisé (franchise.js). */
      ['franchise:',   'reglages'],
-     ['async:',       'reglages']
+     ['async:',       'reglages'],
+     /* Tâches à rythme propre modifiées par le manager (Paramètres). */
+     ['asynchrones',  'reglages']
    ].filter(function (r) {
      /* Une route dont la table est introuvable est retirée dès le chargement :
         mieux vaut garder la clé en local que d'interroger « undefined ». */
@@ -167,7 +169,9 @@
                       'anomalies', 'reception:', 'stock:mv:', 'stock:m13:', 'pointage:', 'ecart:',
                       /* Deux iPads qui ajoutent une ligne au même moment : sans fusion,
                          la seconde écriture effaçait la ligne de l'autre. */
-                      'feed:', 'pertes:'];
+                      'feed:', 'pertes:',
+                      /* Tâches à rythme propre : un champ par tâche (id). */
+                      'asynchrones'];
    const aFusionner = cle => FUSIONNER.some(p => cle.indexOf(p) === 0);
 
    /* Fusion superficielle, champ par champ. Suffisante : chaque personne
@@ -5445,7 +5449,7 @@ function modifierPeriode(per) {
            '<div style="font-size:9.5px">' +
            nets.map(x => x.d.split('-').reverse().join('/') + ' : ' + x.n + '/' + x.total).join(' · ') +
            '. Plan de nettoyage : ' +
-           NETTOYAGE.asynchrones.map(a => a.nom + ' (' + (a.type === 'jours-fixes'
+           NETTOYAGE.asynchrones.map(a => esc(a.nom) + ' (' + (a.type === 'jours-fixes'
              ? a.jours.map(j => JOURS_SEMAINE[j].toLowerCase()).join(', ')
              : 'tous les ' + a.intervalleJours + ' jours') + ')').join(' · ') + '.</div>'
          : '<div>Aucun enregistrement de nettoyage sur la période.</div>') +
