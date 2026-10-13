@@ -558,15 +558,27 @@ async function theoriqueAuComptage(a, maintenant) {
     const v = num(maintenant[c] || 0) - num(delta[c] || 0);
     if (v) theo[c] = v;
   });
-  const livraisons = [];
+  /* Livraisons en attente : avant le comptage (et après l'inventaire déjà
+     sur le stock, qui les a comptées sinon), elles entrent dans l'attendu ;
+     après le comptage (« apres »), elles sont là physiquement mais hors du
+     stock réel et du comptage. */
+  const livraisons = [], apres = {};
   if (typeof receptionsEnAttente === 'function') {
-    (await receptionsEnAttente()).filter(r => r.at && r.at <= a.at).forEach(r => {
+    const ref = await DB.get('stock:inventaire', null).catch(() => null);
+    const borne = (ref && ref.at) || '';
+    (await receptionsEnAttente()).forEach(r => {
+      if (!r.at || r.at <= borne) return;
+      const avantComptage = r.at <= a.at;
       let n = 0;
-      (r.lignes || []).forEach(l => { if (l.cle && froid(l.cle)) { theo[l.cle] = num(theo[l.cle] || 0) + num(l.qte); n += num(l.qte); } });
+      (r.lignes || []).forEach(l => {
+        if (!l.cle || !froid(l.cle)) return;
+        if (avantComptage) { theo[l.cle] = num(theo[l.cle] || 0) + num(l.qte); n += num(l.qte); }
+        else apres[l.cle] = num(apres[l.cle] || 0) + num(l.qte);
+      });
       if (n) livraisons.push({ fournisseur: r.fournisseur, numero: r.numero, jour: r.jour, bacs: n });
     });
   }
-  return { theo: theo, delta: delta, livraisons: livraisons };
+  return { theo: theo, delta: delta, livraisons: livraisons, apres: apres };
 }
 
 /* Ce que l'inventaire confirmé doit porter : le compté, plus, pour ce qui
@@ -684,7 +696,7 @@ async function verifierInventaire(partie) {
         ? '<div class="rappel" style="margin-top:10px">L’attendu compte aussi ' +
           th.livraisons.map(l => l.bacs + ' ' + accord(l.bacs, 'bac') + ' de la livraison ' + esc(l.fournisseur || '') +
             (l.numero ? ' n° ' + esc(l.numero) : '') + ' du ' + esc(fmtD(l.jour))).join(', ') +
-          ', livrés avant le comptage et pas encore confirmés.</div>' : '') +
+          ', livrés avant le comptage et pas encore confirmés. Confirmez la livraison avant de reprendre cet inventaire.</div>' : '') +
       (nonComptes.length
         ? '<div class="rappel" style="margin-top:10px">Pas compté cette fois : ' + esc(nonComptes.join(', ')) +
           '. Leur stock ne change pas.</div>' : '') +
@@ -728,7 +740,9 @@ async function verifierInventaire(partie) {
         invaliderStock();
         art = (await stockReel()).articles || {};
         th = await theoriqueAuComptage(a, art);
-        bouge = num(th.delta[enCours] || 0);
+        /* Livraison arrivée depuis, pas encore confirmée : elle est dans le
+           recomptage, elle entrera au stock à sa confirmation. */
+        bouge = num(th.delta[enCours] || 0) + num(th.apres[enCours] || 0);
       }
       if (q - bouge < 0) {
         return toast('Recomptage incohérent avec les mouvements tracés depuis le comptage', 'erreur');
@@ -758,7 +772,9 @@ async function verifierInventaire(partie) {
         toast('Comptage écarté');
         rendre(STATE.view);
       }, () => dessinerV(), 'Retour');
-    $('#ci-ok').onclick = () => confirmer('Reprendre cet inventaire sur le stock réel ?',
+    $('#ci-ok').onclick = () => th.livraisons.length
+      ? toast('Confirmez d’abord la livraison en attente : une quantité corrigée fausserait les écarts', 'erreur')
+      : confirmer('Reprendre cet inventaire sur le stock réel ?',
       'Le stock prend les quantités comptées le ' + fmtD(a.jour) + '.' +
       (manq ? ' ' + manq + ' ' + accord(manq, 'bac manquant part', 'bacs manquants partent') +
               ' au registre des pertes.' : ''),
@@ -784,7 +800,18 @@ async function confirmerInventaire(a, partie) {
   if (partie === 'sec') {
     /* Même enregistrement que l'ancienne validation directe du sec, à
        l'heure du comptage. */
-    const inv = Object.assign({}, meta, { note: cur.note || '', lignes: lignesAReprendre(cur, 'sec', cur.avant) });
+    const lignes = lignesAReprendre(cur, 'sec', cur.avant);
+    /* Référence tracée (chantilly, coulis, toppings) non comptée : on reprend
+       son stock vivant à l'heure du comptage, pas le chiffre du comptage
+       précédent, sinon ses ouvertures depuis seraient effacées. */
+    const comptes = groupesComptes(cur, 'sec');
+    const vivant = (await stockReel()).articles || {};
+    for (const c of Object.keys(lignes)) {
+      if (comptes.has(groupeInv('sec', c))) continue;
+      const cleV = cleVivanteSec(c, cur.avant);
+      if (cleV && vivant[cleV] !== undefined) lignes[c] = Math.max(0, num(vivant[cleV]) - await mouvementsDepuis(cleV, cur.at));
+    }
+    const inv = Object.assign({}, meta, { note: cur.note || '', lignes: lignes });
     await DB.set('stock:sec', inv);
     invaliderStock();
     /* Historique du sec : une correction du même jour remplace son entrée. */
@@ -801,7 +828,11 @@ async function confirmerInventaire(a, partie) {
   /* L'attendu est recalculé maintenant : un mouvement d'avant le comptage,
      synchronisé après, et les livraisons pas encore confirmées y entrent. */
   invaliderStock();
-  const { theo } = await theoriqueAuComptage(cur, (await stockReel()).articles || {});
+  const { theo, livraisons } = await theoriqueAuComptage(cur, (await stockReel()).articles || {});
+  if (livraisons.length) {
+    toast('Confirmez d’abord la livraison en attente', 'erreur');
+    return rendre(STATE.view);
+  }
   const inv = await enregistrerInventaire(lignesAReprendre(cur, 'froid', theo), cur.note, theo, meta);
 
   /* Chaque bac manquant devient une perte du jour du comptage. L'id dérive
@@ -1104,7 +1135,8 @@ V.stock = async function () {
   const attenteSec = await inventaireEnAttente('sec');
   /* Réceptions pas encore confirmées : leurs bacs ne sont pas dans ces chiffres. */
   const recAttente = typeof receptionsEnAttente === 'function' ? await receptionsEnAttente() : [];
-  const resumes = { froid: await resumeAttente(attente, 'froid', articles), sec: await resumeAttente(attenteSec, 'sec') };
+  const [rf, rs] = await Promise.all([resumeAttente(attente, 'froid', articles), resumeAttente(attenteSec, 'sec')]);
+  const resumes = { froid: rf, sec: rs };
   /* Comptage en attente : affiché, mais pas encore dans les chiffres. */
   const bandeauAttente = (a, p) => !a ? '' :
     '<div class="alerte warn" style="margin-top:12px"><div style="flex:1;min-width:0">' +
@@ -2067,11 +2099,12 @@ V.inventaire = async function () {
       try {
         invaliderStock();
         const art = (await stockReel()).articles || {};
-        const av = attente.avant || {};
-        new Set(Object.keys(attente.lignes || {}).concat(Object.keys(av))).forEach(c => {
-          const bouge = num(art[c] || 0) - num(av[c] || 0);
-          if (!bouge) return;
-          saisie[c] = String(Math.max(0, num(saisie[c] || 0) + bouge));
+        /* Seulement les articles comptés : une famille non comptée le reste. */
+        const { delta, apres } = await theoriqueAuComptage(attente, art);
+        Object.keys(attente.lignes || {}).forEach(c => {
+          const bouge = num(delta[c] || 0) + num(apres[c] || 0);
+          if (!bouge || saisie[c] === undefined) return;
+          saisie[c] = String(Math.max(0, num(saisie[c]) + bouge));
         });
       } catch (e) { /* stock illisible : on garde le comptage affiché */ }
       ouvertFroid = true;
@@ -2217,6 +2250,8 @@ V.inventaire = async function () {
        : manq + ' ' + accord(manq, 'bac manquant', 'bacs manquants') + ', ' + trop + ' en trop par rapport au stock attendu.' +
          (manq ? ' Des ouvertures non tracées ?' : '') +
          (trop ? (manq ? ' Et' : ' Peut-être') + ' une réception non saisie ?' : '')) +
+      ' Compté : ' + [...famComptees].map(f => (FAMILLES_PRODUIT.filter(x => x.id === f)[0] || {}).libelle || f).join(', ') +
+      ' (un article non saisi y vaut 0) ; les autres familles ne changent pas.' +
       ' L’inventaire est enregistré, à confirmer par un manager : le stock ne change pas avant.' +
       (attente && !attenteDuJour ? ' Il remplace celui du ' + fmtD(attente.jour) + ', encore à confirmer.' : ''),
       'Valider', async () => {
