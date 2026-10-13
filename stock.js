@@ -477,6 +477,33 @@ function libelleSec(c) {
   const r = catalogueSec().filter(x => typeof x === 'object' && x.id === p[1])[0];
   return (r ? r.nom : p[1]) + (p[2] ? ' · ' + p[2] : '');
 }
+/* Clé « vivante » d'une ligne du sec : chantilly, coulis et toppings sont
+   tracés à l'ouverture sous « <famille>|<saveur>| ». Même correspondance que
+   le Rouvrir du sec confirmé. null pour le reste du sec, sans mouvement. */
+function cleVivanteSec(c, lignes) {
+  const [, ref, v] = String(c).split('|');
+  const nrm = x => String(x || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  const f = FAMILLES_PRODUIT.filter(x => (x.lieu === 'sec' || x.stock === 'sec') && (x.refSec || x.id) === ref)[0];
+  if (!f) return null;
+  if (f.saveurs && f.saveurs.length) {
+    const sv = f.saveurs.filter(x => nrm(x) === nrm(v))[0];
+    return sv ? cleArticle(f.id, sv, '') : null;
+  }
+  return Object.keys(lignes || {}).filter(k => k.split('|')[1] === ref).length === 1 ? cleArticle(f.id, '', '') : null;
+}
+
+/* Mouvements tracés sur un article après une heure donnée (réceptions moins
+   ouvertures et pertes). */
+async function mouvementsDepuis(cle, at) {
+  let d = 0;
+  (await tousMouvements(String(at).slice(0, 10))).forEach(m => {
+    if ((m.c || m.cle) !== cle || !((m.a || m.at) > at)) return;
+    const q = num(m.q !== undefined ? m.q : m.qte), t = m.t || m.type;
+    if (t === 'reception') d += q; else if (t === 'ouverture' || t === 'perte') d -= q;
+  });
+  return d;
+}
+
 const libelleInv = (partie, c) => partie === 'sec' ? libelleSec(c) : libelleArticle(c);
 
 /* Article par article : compté, attendu au moment du comptage, écart.
@@ -536,8 +563,8 @@ async function verifierInventaire(partie) {
         (enCours === x.c
           ? '<div class="invl"><span class="invn">Combien maintenant ?' +
             (sec ? '' : '<small>attendu maintenant : ' + nb(num(maintenant[x.c] || 0)) + '</small>') + '</span>' +
-            '<input type="number" inputmode="' + (r && r.decimal !== false ? 'decimal' : 'numeric') + '" min="0" ' +
-            'step="' + (r && r.decimal !== false ? '0.5' : '1') + '" id="rc-v" data-autofocus ' +
+            '<input type="number" inputmode="' + (sec && !(r && r.decimal === false) ? 'decimal' : 'numeric') + '" min="0" ' +
+            'step="' + (sec && !(r && r.decimal === false) ? '0.5' : '1') + '" id="rc-v" data-autofocus ' +
             'aria-label="' + esc(lib(x.c) + ', recompté maintenant') + '">' +
             '<button type="button" class="btn menthe sm" id="rc-ok">OK</button></div>'
           : '');
@@ -587,7 +614,10 @@ async function verifierInventaire(partie) {
          comptage. On retire donc ce qui a bougé depuis, sinon une ouverture
          tracée entre-temps serait comptée deux fois. */
       let bouge = 0, art = null;
-      if (!sec) {
+      if (sec) {
+        const cleV = cleVivanteSec(enCours, a.lignes);
+        if (cleV) bouge = await mouvementsDepuis(cleV, a.at);
+      } else {
         invaliderStock();
         art = (await stockReel()).articles || {};
         bouge = num(art[enCours] || 0) - num((a.avant || {})[enCours] || 0);
@@ -1928,7 +1958,16 @@ V.inventaire = async function () {
       dessiner();
     };
     /* Le sec n'a pas de mouvements tracés : le comptage en attente se rouvre tel quel. */
-    else if (bRouvrir && partie === 'sec' && attenteSecDuJour) bRouvrir.onclick = () => {
+    /* Sec : seules chantilly, coulis et toppings ont des mouvements ; on les
+       ajoute aux chiffres comptés, comme pour la chambre froide. */
+    else if (bRouvrir && partie === 'sec' && attenteSecDuJour) bRouvrir.onclick = async () => {
+      try {
+        for (const c of Object.keys(saisieSec)) {
+          const cleV = cleVivanteSec(c, attenteSec.lignes);
+          const bouge = cleV ? await mouvementsDepuis(cleV, attenteSec.at) : 0;
+          if (bouge) saisieSec[c] = String(Math.max(0, num(saisieSec[c]) + bouge));
+        }
+      } catch (e) { /* journal illisible : on garde le comptage affiché */ }
       ouvertSec = true;
       dessiner();
     };
