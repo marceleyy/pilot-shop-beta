@@ -852,7 +852,9 @@ async function analyserBL(canvas, nom, resolve) {
        ligne du total si elle manque encore. */
     if (res.lignes.some(l => l._box)) {
       etape('Lecture des quantités…');
-      await lireQuantitesBL(nb && res._nb ? nb : canvas, res, lu.lignes);
+      /* Amélioration seulement : une erreur ici ne doit pas jeter les
+         lignes, lots et numéro déjà lus. */
+      try { await lireQuantitesBL(nb && res._nb ? nb : canvas, res, lu.lignes); } catch (e) {}
     }
     libererCanvas(canvas);
     if (nb) libererCanvas(nb);
@@ -912,7 +914,11 @@ function valeurQuantite(t) {
      collés à la virgule. « 1200 » : virgule perdue, les deux zéros restent. */
   const m = s.match(/(\d{1,2})[.,]0{1,2}(?!\d)/) || s.match(/^(\d{1,2})00$/);
   const v = m ? +m[1] : 0;
-  return v > 0 && v < 100 ? v : null;
+  if (!(v > 0 && v < 100)) return null;
+  /* Chiffre en trop devant (« 412,00 », « 120,00 ») : valeur gardée mais
+     signalée, elle ne doit jamais passer pour sûre. */
+  const avant = s.slice(0, m.index + m[0].indexOf(m[1])).match(/\d+$/);
+  return { v: v, rogne: !!avant };
 }
 
 async function lireQuantitesBL(canvas, res, lignesLues) {
@@ -924,7 +930,7 @@ async function lireQuantitesBL(canvas, res, lignesLues) {
      mot précis, le lot (ou à défaut le dernier mot avant la colonne). */
   const reperes = [];
   avecBox.forEach(l => {
-    const d = l._mots.filter(m => QTE_CASE.test(m.t) && m.bbox.x0 > (l._box.x0 + l._box.x1) / 2).pop();
+    const d = l._mots.filter(m => m.bbox && QTE_CASE.test(m.t) && m.bbox.x0 > (l._box.x0 + l._box.x1) / 2).pop();
     const a = ancreLigne(l, d ? d.bbox.x0 : Infinity);
     if (d && a) reperes.push({ y: cy(a), dy: (cy(d.bbox) - cy(a)) / Math.max(1, a.y1 - a.y0), x0: d.bbox.x0, x1: d.bbox.x1 });
   });
@@ -933,39 +939,38 @@ async function lireQuantitesBL(canvas, res, lignesLues) {
   const marge = (colX1 - colX0) * 0.4;
 
   const cases = [];
-  avecBox.forEach(l => {
-    const a = ancreLigne(l, colX0 - marge);
-    if (!a) return;
-    const h = Math.max(1, a.y1 - a.y0);
-    const proche = reperes.slice().sort((p, q) => Math.abs(p.y - cy(a)) - Math.abs(q.y - cy(a)))[0];
-    const yc = cy(a) + proche.dy * h;
-    const x0 = Math.max(0, colX0 - marge), x1 = Math.min(canvas.width, colX1 + marge);
-    const y0 = Math.max(0, yc - h * 0.9), y1 = Math.min(canvas.height, yc + h * 0.9);
-    if (x1 - x0 < 4 || y1 - y0 < 4) return;
-    cases.push({ l: l, gris: decouper(canvas, x0, y0, x1, y1, 60) });
-  });
-  /* Ligne du total, si aucune lecture ne l'a donnée. */
   let caseTotal = null;
-  if (res.total === null) {
-    const lt = (lignesLues || []).filter(L => /total|litr/i.test(L.texte)).pop();
-    if (lt) {
-      const h = Math.max(1, lt.bbox.y1 - lt.bbox.y0);
-      caseTotal = decouper(canvas, lt.bbox.x0, Math.max(0, lt.bbox.y0 - h * 0.6),
-        canvas.width, Math.min(canvas.height, lt.bbox.y1 + h * 0.6), 60);
-    }
-  }
-  cases.forEach(c => { c.nb = copierCanvas(c.gris); binariserOtsu(c.nb); });
-
-  clearTimeout(OCR._minuteur);
-  const w = await obtenirWorker();
-  const votes = cases.map(() => []);
   try {
+    avecBox.forEach(l => {
+      const a = ancreLigne(l, colX0 - marge);
+      if (!a) return;
+      const h = Math.max(1, a.y1 - a.y0);
+      const proche = reperes.slice().sort((p, q) => Math.abs(p.y - cy(a)) - Math.abs(q.y - cy(a)))[0];
+      const yc = cy(a) + proche.dy * h;
+      const x0 = Math.max(0, colX0 - marge), x1 = Math.min(canvas.width, colX1 + marge);
+      const y0 = Math.max(0, yc - h * 0.9), y1 = Math.min(canvas.height, yc + h * 0.9);
+      if (x1 - x0 < 4 || y1 - y0 < 4) return;
+      cases.push({ l: l, gris: decouper(canvas, x0, y0, x1, y1, 60), votes: [] });
+    });
+    /* Ligne du total, si aucune lecture ne l'a donnée. */
+    if (res.total === null) {
+      const lt = (lignesLues || []).filter(L => L.bbox && /total|litr/i.test(L.texte)).pop();
+      if (lt) {
+        const h = Math.max(1, lt.bbox.y1 - lt.bbox.y0);
+        caseTotal = decouper(canvas, lt.bbox.x0, Math.max(0, lt.bbox.y0 - h * 0.6),
+          canvas.width, Math.min(canvas.height, lt.bbox.y1 + h * 0.6), 60);
+      }
+    }
+    cases.forEach(c => { c.nb = copierCanvas(c.gris); binariserOtsu(c.nb); });
+
+    clearTimeout(OCR._minuteur);
+    const w = await obtenirWorker();
     for (const [source, psm] of [['gris', '7'], ['gris', '6'], ['nb', '7']]) {
       await w.setParameters({ tessedit_char_whitelist: '0123456789,.', tessedit_pageseg_mode: psm });
       for (let i = 0; i < cases.length; i++) {
         const r = await w.recognize(cases[i][source]);
         const v = valeurQuantite(r.data.text);
-        if (v) votes[i].push(v);
+        if (v) { cases[i].votes.push(v.v); if (v.rogne) cases[i].rogne = true; }
       }
     }
     if (caseTotal) {
@@ -976,12 +981,12 @@ async function lireQuantitesBL(canvas, res, lignesLues) {
     }
   } finally {
     reporterArret();
-    cases.forEach(c => { libererCanvas(c.gris); libererCanvas(c.nb); });
+    cases.forEach(c => { libererCanvas(c.gris); if (c.nb) libererCanvas(c.nb); });
     if (caseTotal) libererCanvas(caseTotal);
   }
 
   cases.forEach((c, i) => {
-    const v = votes[i].slice();
+    const v = c.votes.slice();
     if (c.l.qte) v.push(c.l.qte);          // la lecture de la page vote aussi
     if (!v.length) return;
     const compte = {};
@@ -989,7 +994,10 @@ async function lireQuantitesBL(canvas, res, lignesLues) {
     /* À égalité, l'ordre des lectures départage : gris en ligne d'abord. */
     const gagnant = v.reduce((a, b) => compte[b] > compte[a] ? b : a, v[0]);
     c.l.qte = gagnant;
-    c.l.qteDouteuse = compte[gagnant] < 2;
+    /* Sûre seulement si toutes les lectures concordent, à deux au moins :
+       un bord de cercle lu « 1 » transforme un 2 en 12 sur les trois
+       lectures de la même case, mais pas dans la page. */
+    c.l.qteDouteuse = v.length < 2 || Object.keys(compte).length > 1 || !!c.rogne;
   });
 }
 
@@ -1035,23 +1043,21 @@ function binariserOtsu(cv) {
 }
 
 /* Recoupement avec « Total Litres » : la somme des bacs × taille doit le
-   donner. Si une seule quantité de glace manque, le total la donne exactement.
-   Sinon on garde la somme lue (litresLus), affichée si elle diffère. */
+   donner. Si une seule quantité de glace manque, le total la propose. La
+   somme lue (litresLus) est affichée quand elle diffère du total. */
 function recouperTotal(res) {
   const glaces = res.lignes.filter(l => l.taille > 0);
   if (!res.total || !glaces.length) return;
   const sures = glaces.filter(l => l.qte && !l.qteDouteuse);
   const autres = glaces.filter(l => !l.qte || l.qteDouteuse);
   const somme = ls => ls.reduce((t, l) => t + l.qte * l.taille, 0);
-  if (autres.length === 1) {
+  /* Proposée seulement, jamais confirmée : une ligne entière a pu échapper
+     à la lecture, et le reste du total lui revient alors en partie. */
+  if (autres.length === 1 && !autres[0].qte) {
     const q = (res.total - somme(sures)) / autres[0].taille;
-    if (q > 0 && q < 100 && Number.isInteger(q)) { autres[0].qte = q; autres[0].qteDouteuse = false; }
+    if (q > 0 && q < 100 && Number.isInteger(q)) { autres[0].qte = q; autres[0].qteDouteuse = true; }
   }
-  if (glaces.every(l => l.qte)) {
-    res.litresLus = somme(glaces);
-    /* Tout concorde : les quantités marquées douteuses sont confirmées. */
-    if (res.litresLus === res.total) glaces.forEach(l => { l.qteDouteuse = false; });
-  }
+  if (glaces.every(l => l.qte)) res.litresLus = somme(glaces);
 }
 
 /* Complète une lecture par une autre : total, numéro, et lots manquants
