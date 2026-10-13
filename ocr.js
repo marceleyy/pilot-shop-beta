@@ -348,7 +348,15 @@ async function lire(canvas, profil) {
   /* Le minuteur d'inactivité pourrait arrêter le worker en pleine lecture. */
   clearTimeout(OCR._minuteur);
   const w = await obtenirWorker();
-  const params = profil === 'code'
+  /* Profil « bl » : une page entière, tableau compris. Aucune liste de
+     caractères (la liste vide efface celle de la passe précédente, le worker
+     étant partagé) ; psm 6 lit chaque rangée du tableau comme une ligne, psm 4
+     sert de seconde lecture quand la première a perdu le total. */
+  const params = (profil === 'bl' || profil === 'bl4')
+    ? { tessedit_char_whitelist: '',
+        tessedit_pageseg_mode: profil === 'bl4' ? '4' : '6',
+        preserve_interword_spaces: '1' }
+    : profil === 'code'
     ? { tessedit_char_whitelist: '0123456789' + MAJUSCULES,
         tessedit_pageseg_mode: '11',        // texte épars : l'étiquette n'est pas un paragraphe
         tessedit_ocr_engine_mode: '1',      // LSTM seul
@@ -359,12 +367,18 @@ async function lire(canvas, profil) {
         tessedit_ocr_engine_mode: '1',
         preserve_interword_spaces: '1' };
 
+  const page = profil === 'bl' || profil === 'bl4';
   let r;
   try {
     await w.setParameters(params);
-    r = await w.recognize(canvas);
+    /* Pour un bon, on garde aussi la position de chaque ligne et de chaque
+       mot : elle sert à relire la colonne Quantité case par case. */
+    r = page ? await w.recognize(canvas, {}, { text: true, blocks: true }) : await w.recognize(canvas);
   } finally { reporterArret(); }
-  return { texte: (r.data.text || '').trim(), confiance: (r.data.confidence || 0) / 100 };
+  const lignes = [];
+  if (page) (r.data.blocks || []).forEach(b => (b.paragraphs || []).forEach(p => (p.lines || []).forEach(l =>
+    lignes.push({ texte: l.text || '', bbox: l.bbox, mots: (l.words || []).map(m => ({ t: m.text, bbox: m.bbox })) }))));
+  return { texte: (r.data.text || '').trim(), confiance: (r.data.confidence || 0) / 100, lignes: lignes };
 }
 
 /* =============================================================================
@@ -757,9 +771,11 @@ function rappelCadrage(type) {
    7. FONCTION PRINCIPALE
    Contrat de retour inchangé :
      'etiquette' → { lot, ouv, parfum, confiance, texte }
-     'bl'        → { fournisseur, numero, date, lignes, confiance, texte }
+     'bl'        → { fournisseur, numero, date, total, lignes, source:'ocr', confiance, texte }
+                   (lignes : ref, parfum, lot, lotCorrige, bacs, taille, unite) — voir analyserBL
    ========================================================================== */
 async function analyserCanvas(type, canvas, nom, resolve) {
+  if (type === 'bl') return analyserBL(canvas, nom, resolve);
   let apercu = '', gris = null;
   const etape = (t, s) => showSheet(
     '<h2 id="sheet-titre">' + t + '</h2><p class="sub">' + esc(nom) + '</p>' +
@@ -784,17 +800,11 @@ async function analyserCanvas(type, canvas, nom, resolve) {
     const confiance = (code.confiance + parfum.confiance) / 2;
     libererCanvas(canvas);
 
-    const r = type === 'etiquette'
-      ? { lot: batch ? batch.code : '', ouv: today(), parfum: trouve ? trouve.parfum : '',
+    const r = { lot: batch ? batch.code : '', ouv: today(), parfum: trouve ? trouve.parfum : '',
           volume: champs.volume || null, poidsNet: champs.poidsNet || null,
           production: champs.production || null, dluo: champs.dluo || null,
           confiance: confiance, corrige: !!(batch && batch.corrige),
-          texte: (code.texte + '\n' + parfum.texte).trim() }
-      : { fournisseur: FOURNISSEUR.nom, numero: batch ? batch.code : '', date: today(),
-          /* La lecture des lignes d'un bon de livraison n'est pas implémentée :
-             l'OCR ne sait extraire qu'un code lot, pas un tableau de références. */
-          lignes: [], lignesNonLues: true,
-          confiance: confiance, texte: (code.texte + '\n' + parfum.texte).trim() };
+          texte: (code.texte + '\n' + parfum.texte).trim() };
 
     confirmerLecture(type, r, apercu, resolve);
   } catch (err) {
@@ -802,6 +812,310 @@ async function analyserCanvas(type, canvas, nom, resolve) {
     if (gris) libererCanvas(gris);
     saisieManuelle(type, err && err.message ? err.message : 'Lecture impossible', resolve);
   }
+}
+
+/* Bon de livraison : une page A4, pas une étiquette. Jusqu'ici on lui
+   appliquait la lecture d'étiquette, qui rendait un « numero » mais ni lot ni
+   parfum : confirmerLecture concluait « Aucun code lisible sur la photo » à
+   CHAQUE bon, quelle que soit la photo. On lit maintenant la page entière en
+   niveaux de gris (la binarisation mange les petits caractères du tableau) et
+   on en tire le numéro du bon, la date, le total en litres et les lignes. */
+async function analyserBL(canvas, nom, resolve) {
+  const etape = s => showSheet(
+    '<h2 id="sheet-titre">Lecture du bon</h2><p class="sub">' + esc(nom) + '</p>' +
+    '<div class="vide"><span class="vi">🔍</span>' + s + '</div>');
+  let nb = null;
+  try {
+    etape('Reconnaissance du texte…');
+    await new Promise(r => setTimeout(r, 30));
+    let apercu = '';
+    try { apercu = canvas.toDataURL('image/jpeg', 0.6); } catch (e) {}
+    /* Mesuré sur le bon BL221970 : en gris, 23 lignes sur 26 et tous les lots
+       lisibles ; binarisé, moitié moins. Le noir et blanc ne sert qu'en repli. */
+    let lu = await lire(canvas, 'bl');
+    let res = extraireBLPositionne(lu);
+    if (!res.lignes.length) {
+      nb = copierCanvas(canvas); pretraiter(nb);
+      const lu2 = await lire(nb, 'bl');
+      const res2 = extraireBLPositionne(lu2);
+      if (res2.lignes.length > res.lignes.length) { lu = lu2; res = res2; res._nb = true; }
+    }
+    /* Le total en litres manque souvent en psm 6 (ligne coupée) : une seconde
+       lecture en colonnes le retrouve, et comble au passage les lots perdus. */
+    if (res.lignes.length && res.total === null) {
+      etape('Recherche du total…');
+      const lu4 = await lire(canvas, 'bl4');
+      completerBL(res, extraireLignesBL(lu4.texte));
+    }
+    /* Les quantités sont entourées au stylo : dans la page entière, le cercle
+       les noie. On relit chaque case de la colonne Quantité à part, et la
+       ligne du total si elle manque encore. */
+    if (res.lignes.some(l => l._box)) {
+      etape('Lecture des quantités…');
+      /* Amélioration seulement : une erreur ici ne doit pas jeter les
+         lignes, lots et numéro déjà lus. */
+      try { await lireQuantitesBL(nb && res._nb ? nb : canvas, res, lu.lignes); } catch (e) {}
+    }
+    libererCanvas(canvas);
+    if (nb) libererCanvas(nb);
+    recouperTotal(res);
+
+    const r = { fournisseur: FOURNISSEUR.nom, numero: res.bl || '', date: res.date || today(),
+                total: res.total, litresLus: res.litresLus, source: 'ocr',
+                /* Contrat des appelants : ref, parfum (libellé), bacs, taille. */
+                lignes: res.lignes.map(l => ({
+                  ref: l.reference, parfum: l.designation, designation: l.designation,
+                  lot: l.lot, lotCorrige: l.lotCorrige, bacs: l.qte, qte: l.qte, qteDouteuse: !!l.qteDouteuse,
+                  taille: l.taille, unite: l.unite, parColis: l.parColis })),
+                confiance: lu.confiance, texte: lu.texte };
+    if (!r.numero && !r.lignes.length) return saisieManuelle('bl', 'Aucun texte de bon lisible sur la photo', resolve);
+    confirmerBL(r, apercu, resolve);
+  } catch (err) {
+    libererCanvas(canvas);
+    if (nb) libererCanvas(nb);
+    saisieManuelle('bl', err && err.message ? err.message : 'Lecture impossible', resolve);
+  }
+}
+
+/* Même extraction, mais ligne par ligne de la lecture : chaque ligne du bon
+   garde sa position sur la photo (_box), utile pour relire sa quantité. */
+function extraireBLPositionne(lu) {
+  const res = extraireLignesBL(lu.texte);
+  if (!lu.lignes || !lu.lignes.length) return res;
+  const lignes = [];
+  lu.lignes.forEach(L => {
+    const l = extraireLignesBL(L.texte).lignes[0];
+    if (!l || (res.bl && l.lot === res.bl.slice(2))) return;
+    l._box = L.bbox; l._mots = L.mots;
+    lignes.push(l);
+  });
+  if (lignes.length >= res.lignes.length) res.lignes = lignes;
+  return res;
+}
+
+/* -----------------------------------------------------------------------------
+   QUANTITÉS ENTOURÉES
+   L'équipe entoure les quantités au stylo en contrôlant la livraison. Le
+   cercle traverse les chiffres : dans la page entière, « 12,00 » devient
+   « 722 » ou disparaît. Recadrée sur la seule case, agrandie, la même
+   quantité se lit (mesuré sur BL221970 : de 9 à 19 quantités sur 24).
+
+   Où est la case ? Les quantités non entourées se lisent dans la page : leur
+   position donne la colonne, et leur décalage vertical par rapport au début
+   de la ligne donne l'inclinaison locale de la photo (un bon tenu à la main
+   n'est jamais droit). Chaque case est lue trois fois (gris en ligne, gris
+   en bloc, noir et blanc) ; la valeur qui revient le plus l'emporte.
+   -------------------------------------------------------------------------- */
+const QTE_CASE = /^\d{1,3}[.,]\d{2}$/;
+
+function valeurQuantite(t) {
+  const s = String(t || '').replace(/\s+/g, '');
+  /* « 412,00 » : le 4 est le bord du cercle. On prend les deux chiffres
+     collés à la virgule. « 1200 » : virgule perdue, les deux zéros restent. */
+  const m = s.match(/(\d{1,2})[.,]0{1,2}(?!\d)/) || s.match(/^(\d{1,2})00$/);
+  const v = m ? +m[1] : 0;
+  if (!(v > 0 && v < 100)) return null;
+  /* Chiffre en trop devant (« 412,00 », « 120,00 ») : valeur gardée mais
+     signalée, elle ne doit jamais passer pour sûre. */
+  const avant = s.slice(0, m.index + m[0].indexOf(m[1])).match(/\d+$/);
+  return { v: v, rogne: !!avant };
+}
+
+async function lireQuantitesBL(canvas, res, lignesLues) {
+  const med = a => a.slice().sort((x, y) => x - y)[a.length >> 1];
+  const cy = b => (b.y0 + b.y1) / 2;
+  const avecBox = res.lignes.filter(l => l._box && l._mots && l._mots.length);
+  /* Repères : lignes dont la quantité s'est lue dans la page. Le cadre d'une
+     ligne entière est trop haut sur une photo inclinée : on s'ancre sur un
+     mot précis, le lot (ou à défaut le dernier mot avant la colonne). */
+  const reperes = [];
+  avecBox.forEach(l => {
+    const d = l._mots.filter(m => m.bbox && QTE_CASE.test(m.t) && m.bbox.x0 > (l._box.x0 + l._box.x1) / 2).pop();
+    const a = ancreLigne(l, d ? d.bbox.x0 : Infinity);
+    if (d && a) reperes.push({ y: cy(a), dy: (cy(d.bbox) - cy(a)) / Math.max(1, a.y1 - a.y0), x0: d.bbox.x0, x1: d.bbox.x1 });
+  });
+  if (!reperes.length) return;
+  const colX0 = med(reperes.map(r => r.x0)), colX1 = med(reperes.map(r => r.x1));
+  const marge = (colX1 - colX0) * 0.4;
+
+  const cases = [];
+  let caseTotal = null;
+  try {
+    avecBox.forEach(l => {
+      const a = ancreLigne(l, colX0 - marge);
+      if (!a) return;
+      const h = Math.max(1, a.y1 - a.y0);
+      const proche = reperes.slice().sort((p, q) => Math.abs(p.y - cy(a)) - Math.abs(q.y - cy(a)))[0];
+      const yc = cy(a) + proche.dy * h;
+      const x0 = Math.max(0, colX0 - marge), x1 = Math.min(canvas.width, colX1 + marge);
+      const y0 = Math.max(0, yc - h * 0.9), y1 = Math.min(canvas.height, yc + h * 0.9);
+      if (x1 - x0 < 4 || y1 - y0 < 4) return;
+      cases.push({ l: l, gris: decouper(canvas, x0, y0, x1, y1, 60), votes: [] });
+    });
+    /* Ligne du total, si aucune lecture ne l'a donnée. */
+    if (res.total === null) {
+      const lt = (lignesLues || []).filter(L => L.bbox && /total|litr/i.test(L.texte)).pop();
+      if (lt) {
+        const h = Math.max(1, lt.bbox.y1 - lt.bbox.y0);
+        caseTotal = decouper(canvas, lt.bbox.x0, Math.max(0, lt.bbox.y0 - h * 0.6),
+          canvas.width, Math.min(canvas.height, lt.bbox.y1 + h * 0.6), 60);
+      }
+    }
+    cases.forEach(c => { c.nb = copierCanvas(c.gris); binariserOtsu(c.nb); });
+
+    clearTimeout(OCR._minuteur);
+    const w = await obtenirWorker();
+    for (const [source, psm] of [['gris', '7'], ['gris', '6'], ['nb', '7']]) {
+      await w.setParameters({ tessedit_char_whitelist: '0123456789,.', tessedit_pageseg_mode: psm });
+      for (let i = 0; i < cases.length; i++) {
+        const r = await w.recognize(cases[i][source]);
+        const v = valeurQuantite(r.data.text);
+        if (v) { cases[i].votes.push(v.v); if (v.rogne) cases[i].rogne = true; }
+      }
+    }
+    if (caseTotal) {
+      await w.setParameters({ tessedit_char_whitelist: '0123456789,.=', tessedit_pageseg_mode: '7' });
+      const r = await w.recognize(caseTotal);
+      const m = String(r.data.text || '').replace(/\s+/g, '').match(/=?(\d{1,4})[.,](\d{2})$/);
+      if (m && +m[1] > 0 && +m[1] <= 5000) res.total = +m[1];
+    }
+  } finally {
+    reporterArret();
+    cases.forEach(c => { libererCanvas(c.gris); if (c.nb) libererCanvas(c.nb); });
+    if (caseTotal) libererCanvas(caseTotal);
+  }
+
+  cases.forEach((c, i) => {
+    const v = c.votes.slice();
+    if (c.l.qte) v.push(c.l.qte);          // la lecture de la page vote aussi
+    if (!v.length) return;
+    const compte = {};
+    v.forEach(x => { compte[x] = (compte[x] || 0) + 1; });
+    /* À égalité, l'ordre des lectures départage : gris en ligne d'abord. */
+    const gagnant = v.reduce((a, b) => compte[b] > compte[a] ? b : a, v[0]);
+    c.l.qte = gagnant;
+    /* Sûre seulement si toutes les lectures concordent, à deux au moins :
+       un bord de cercle lu « 1 » transforme un 2 en 12 sur les trois
+       lectures de la même case, mais pas dans la page. */
+    c.l.qteDouteuse = v.length < 2 || Object.keys(compte).length > 1 || !!c.rogne;
+  });
+}
+
+/* Mot d'ancrage d'une ligne : le lot s'il est lu, sinon le dernier mot
+   situé avant la colonne des quantités. */
+function ancreLigne(l, avantX) {
+  const mots = l._mots.filter(m => m.bbox && m.bbox.x1 < avantX && m.bbox.y1 > m.bbox.y0);
+  const lot = l.lot ? mots.filter(m => lotDepuisJeton(m.t, !!l.taille)).pop() : null;
+  const m = lot || mots.pop();
+  return m ? m.bbox : null;
+}
+
+/* Découpe agrandie : une case de quelques pixels de haut est remise à
+   environ `hauteur` px, la taille où le moteur lit le mieux les chiffres. */
+function decouper(src, x0, y0, x1, y1, hauteur) {
+  const k = Math.max(1, Math.min(6, hauteur / (y1 - y0)));
+  const cv = document.createElement('canvas');
+  cv.width = Math.round((x1 - x0) * k); cv.height = Math.round((y1 - y0) * k);
+  const g = cv.getContext('2d');
+  g.imageSmoothingQuality = 'high';
+  g.drawImage(src, x0, y0, x1 - x0, y1 - y0, 0, 0, cv.width, cv.height);
+  return cv;
+}
+
+/* Noir et blanc à seuil unique (Otsu) : sur une case isolée l'éclairage est
+   uniforme, le seuillage local de la page entière n'apporte rien. */
+function binariserOtsu(cv) {
+  const g = cv.getContext('2d', { willReadFrequently: true });
+  const img = g.getImageData(0, 0, cv.width, cv.height), px = img.data;
+  const N = cv.width * cv.height, gris = new Uint8Array(N), hist = new Uint32Array(256);
+  for (let i = 0, j = 0; i < N; i++, j += 4) { gris[i] = (px[j] * 0.299 + px[j + 1] * 0.587 + px[j + 2] * 0.114) | 0; hist[gris[i]]++; }
+  let somme = 0; for (let t = 0; t < 256; t++) somme += t * hist[t];
+  let sB = 0, wB = 0, meilleur = 0, seuil = 128;
+  for (let t = 0; t < 256; t++) {
+    wB += hist[t]; if (!wB) continue;
+    const wF = N - wB; if (!wF) break;
+    sB += t * hist[t];
+    const mB = sB / wB, mF = (somme - sB) / wF, v = wB * wF * (mB - mF) * (mB - mF);
+    if (v > meilleur) { meilleur = v; seuil = t; }
+  }
+  for (let i = 0, j = 0; i < N; i++, j += 4) { const o = gris[i] < seuil ? 0 : 255; px[j] = px[j + 1] = px[j + 2] = o; }
+  g.putImageData(img, 0, 0);
+}
+
+/* Recoupement avec « Total Litres » : la somme des bacs × taille doit le
+   donner. Si une seule quantité de glace manque, le total la propose. La
+   somme lue (litresLus) est affichée quand elle diffère du total. */
+function recouperTotal(res) {
+  const glaces = res.lignes.filter(l => l.taille > 0);
+  if (!res.total || !glaces.length) return;
+  const sures = glaces.filter(l => l.qte && !l.qteDouteuse);
+  const autres = glaces.filter(l => !l.qte || l.qteDouteuse);
+  const somme = ls => ls.reduce((t, l) => t + l.qte * l.taille, 0);
+  /* Proposée seulement, jamais confirmée : une ligne entière a pu échapper
+     à la lecture, et le reste du total lui revient alors en partie. */
+  if (autres.length === 1 && !autres[0].qte) {
+    const q = (res.total - somme(sures)) / autres[0].taille;
+    if (q > 0 && q < 100 && Number.isInteger(q)) { autres[0].qte = q; autres[0].qteDouteuse = true; }
+  }
+  if (glaces.every(l => l.qte)) res.litresLus = somme(glaces);
+}
+
+/* Complète une lecture par une autre : total, numéro, et lots manquants
+   repris sur la ligne de même référence. */
+function completerBL(res, autre) {
+  if (res.total === null) res.total = autre.total;
+  if (!res.bl) res.bl = autre.bl;
+  const cle = r => String(r || '').toUpperCase().replace(/^[\$S]+/, '');
+  res.lignes.forEach(l => {
+    if (l.lot || !l.reference) return;
+    const m = autre.lignes.filter(a => a.lot && cle(a.reference) === cle(l.reference))[0];
+    if (m) { l.lot = m.lot; l.lotCorrige = m.lotCorrige; }
+  });
+}
+
+/* Relecture du bon avant de poursuivre. Rien n'est enregistré ici : l'écran
+   suivant (réception ou écart) reprend chaque ligne, modifiable. */
+function confirmerBL(r, apercu, resolve) {
+  const sansQte = r.lignes.filter(l => !l.qte || l.qteDouteuse).length;
+  const sansLot = r.lignes.filter(l => !l.lot).length;
+  showSheet(
+    '<h2 id="sheet-titre">Bon de livraison lu</h2>' +
+    '<p class="sub">' + r.lignes.length + ' ' + (r.lignes.length > 1 ? 'lignes lues' : 'ligne lue') +
+    (r.total !== null && r.total !== undefined ? ' · total ' + r.total + ' L' : '') + '</p>' +
+    '<div class="alerte warn"><span class="ai">●</span><div><b>Vérifiez avec le bon papier</b>' +
+    '<p>' + (sansQte ? sansQte + ' quantité' + (sansQte > 1 ? 's' : '') + ' illisible' + (sansQte > 1 ? 's' : '') + ' ou douteuse' + (sansQte > 1 ? 's' : '') + ' (marquée' + (sansQte > 1 ? 's' : '') + ' « ? »). ' : '') +
+    (sansLot ? sansLot + ' lot' + (sansLot > 1 ? 's' : '') + ' illisible' + (sansLot > 1 ? 's' : '') + '. ' : '') +
+    (r.litresLus && r.total && r.litresLus !== r.total
+      ? 'Les quantités de glace lues font ' + r.litresLus + ' L, le bon annonce ' + r.total + ' L : au moins une est fausse. ' : '') +
+    'Chaque ligne reste modifiable à l’étape suivante.</p></div></div>' +
+    '<div class="champ" style="margin-top:14px"><label class="f">N° de bon</label>' +
+    '<input type="text" id="ob-num" value="' + esc(r.numero) + '" autocapitalize="characters" spellcheck="false"></div>' +
+    (r.lignes.length
+      ? '<div class="dense" style="margin-top:14px"><div class="dense-h"><span class="c1">Produit</span>' +
+        '<span class="c ww">Lot</span><span class="c w">Qté</span></div><div class="dense-scroll">' +
+        r.lignes.map(l => '<div class="dl"><span class="c1">' + esc(l.designation) + '</span>' +
+          '<span class="c ww">' + (l.lot ? esc(l.lot) + (l.lotCorrige ? ' ?' : '') : '—') + '</span>' +
+          '<span class="c w num">' + (l.qte ? l.qte + (l.qteDouteuse ? ' ?' : '') : '?') + '</span></div>').join('') + '</div></div>'
+      : '') +
+    (apercu ? '<details style="margin-top:16px"><summary class="mini">Voir ce qu’a vu la machine</summary>' +
+      '<img src="' + apercu + '" alt="Photo du bon" ' +
+      'style="width:100%;border-radius:12px;margin-top:10px;border:1px solid var(--line)">' +
+      '<pre class="mini" style="white-space:pre-wrap;margin-top:10px">' + esc(r.texte.slice(0, 1500)) + '</pre>' +
+      '</details>' : '') +
+    '<div class="actions"><button class="btn clair" id="ob-x">Reprendre la photo</button>' +
+    '<button class="btn menthe" id="ob-ok">Continuer</button></div>' +
+    '<button class="btn clair bloc" id="ob-annuler" style="margin-top:10px">Annuler</button>');
+
+  document.getElementById('ob-annuler').onclick = () => { closeSheet(); resolve(null); };
+  document.getElementById('ob-x').onclick = () => {
+    closeSheet();
+    scannerPhoto('bl').then(resolve, () => resolve(null));
+  };
+  document.getElementById('ob-ok').onclick = () => {
+    const numero = document.getElementById('ob-num').value.trim().toUpperCase();
+    closeSheet();
+    resolve(Object.assign({}, r, { numero: numero, valide: true, par: STATE.user ? STATE.user.prenom : null }));
+  };
 }
 
 /* options.enchainer : propose « … et scanner le suivant ». Seul l'écran
@@ -943,48 +1257,99 @@ function libererCanvas(cv) {
    bacs contient un carton, le bon le dit.
    -------------------------------------------------------------------------- */
 function extraireLignesBL(texte) {
-  if (!texte) return { lignes: [], bl: null, total: null };
+  if (!texte) return { lignes: [], bl: null, total: null, date: null };
   const brut = String(texte);
 
-  /* Numéro du bon et total en litres, pour recouper la saisie. */
+  /* Numéro du bon et total en litres, pour recouper la saisie. Le total
+     s'écrit « Total Litres / Liters / Litro / Litri = 456,00 » : la lecture
+     coupe parfois la ligne, on prend aussi le nombre qui suit « Litri = ». */
   const mBL = brut.match(/\bBL\s*(\d{5,8})\b/i);
-  const mTot = brut.match(/Total\s+Litres[^\d]*(\d+[.,]?\d*)/i);
+  /* « 1.456,00 » ou « 1 456,00 » : séparateur de milliers retiré, sinon
+     parseFloat rendait 1,456 L et l'écart accusait un manque de 1 454 L. */
+  const NB = '(\\d{1,3}(?:\\.\\d{3})+(?:,\\d+)?|\\d{1,3}(?: \\d{3})+,\\d{2}|\\d+(?:[.,]\\d+)?)';
+  const mTot = brut.match(new RegExp('Total\\s+Litres[^\\d\\n]*' + NB, 'i'))
+            || brut.match(new RegExp('Lit(?:ri|ro)\\s*=\\s*' + NB, 'i'));
+  const nombre = x => parseFloat(String(x).replace(/[ .](?=\d{3}\b)/g, '').replace(',', '.'));
+  /* Date d'enlèvement : la date qui suit le numéro du bon, sinon la première
+     date complète. Une date impossible (31/02) est écartée. */
+  let date = null;
+  const reD = /\b(\d{2})[\/.](\d{2})[\/.](20\d{2})\b/g;
+  const apresBL = mBL ? brut.slice(mBL.index) : brut;
+  const mD = reD.exec(apresBL) || (reD.lastIndex = 0, reD.exec(brut));
+  if (mD) {
+    const j = new Date(+mD[3], +mD[2] - 1, +mD[1]);
+    if (j.getMonth() === +mD[2] - 1 && j.getDate() === +mD[1]) date = mD[3] + '-' + mD[2] + '-' + mD[1];
+  }
 
   const lignes = [];
   brut.split(/[\r\n]+/).forEach(l => {
-    const t = l.replace(/\s+/g, ' ').trim();
-    if (t.length < 12) return;
+    const t = l.replace(/[|]/g, ' ').replace(/\s+/g, ' ').trim();
+    if (t.length < 8) return;
+    const jetons = t.split(' ');
 
-    /* La quantité est le dernier nombre décimal de la ligne. */
-    const mQ = t.match(/(\d+[.,]\d{2})\s*$/);
-    if (!mQ) return;
-    const qte = parseFloat(mQ[1].replace(',', '.'));
-    if (!isFinite(qte) || qte <= 0) return;
+    /* Référence en tête : « $AMARENA25 », « MACGLAMP », « GAUFRE ». La lecture
+       rend souvent le « $ » en « S » : on garde la référence telle que lue,
+       elle sert de repère, pas de clé. */
+    const mRef = jetons[0].match(/^[\$s]{0,2}[A-Z][A-Z0-9$]{3,15}$/);
+    const ref = mRef ? jetons[0] : '';
 
-    /* Le lot précède la quantité. Trois formats acceptés. */
-    const avant = t.slice(0, t.length - mQ[0].length).trim();
-    const mLot = avant.match(/([A-Z]?\d{4,6}[A-Z]?)\s*$/);
-    const lot = mLot ? mLot[1] : '';
+    /* Lot : le dernier jeton qui a la forme d'un lot connu, après correction
+       des confusions de lecture (s → 5, 4 final → A sur un lot de glace). */
+    const glace = /\b\d\s*[lt]itres?\b|\blitres?\b/i.test(t);
+    let iLot = -1, lot = '', corrige = false;
+    for (let i = jetons.length - 1; i > 0; i--) {
+      const c = lotDepuisJeton(jetons[i], glace);
+      /* Le numéro du bon lui-même (« BL 221970 ») n'est pas un lot. */
+      if (c && !(mBL && c.lot === mBL[1])) { iLot = i; lot = c.lot; corrige = c.corrige; break; }
+    }
 
-    const design = (mLot ? avant.slice(0, avant.length - mLot[0].length) : avant).trim();
+    /* Quantité : un nombre à deux décimales APRÈS le lot (« 12,00 »). Les
+       quantités entourées au stylo se lisent mal : sans nombre propre, on la
+       laisse vide plutôt que d'en inventer une. */
+    let qte = null;
+    for (let i = jetons.length - 1; i > iLot && i > 0; i--) {
+      /* Le cercle au stylo se lit parfois en parenthèse : « (12,00) ». */
+      const mQ = jetons[i].replace(/[()[\]{}]/g, '').match(/^\d{1,3}[.,]\d{2}$/);
+      /* Arrondi à l'entier : « 12,06 » est un 12,00 dont le cercle a mordu un
+         zéro, et le bon compte des bacs et des cartons entiers. */
+      if (mQ) { qte = Math.round(parseFloat(mQ[0].replace(',', '.'))) || null; break; }
+    }
+
+    const debut = ref ? 1 : 0;
+    let design = jetons.slice(debut, iLot > 0 ? iLot : jetons.length).join(' ')
+      .replace(/\b\d{1,3}[.,]\d{2}\b.*$/, '').trim();
+    /* On coupe après la contenance : ce qui suit est l'annotation manuscrite
+       de l'équipe (« Glace Café 3 litres Cafe »). */
+    const coupe = design.match(/^(.*?\b\d+\s*[lt]itres?\b)/i) || design.match(/^(.*?\(\s*\d+\s*(?:[x×]\s*\d+\s*)?p\s*[)}])/i);
+    if (coupe) design = coupe[1];
+    design = design.replace(/\b(\d+)\s*titres?\b/i, '$1 litres').replace(/[}]$/, ')')
+      .replace(/[\s;:,.'"_—-]+$/, '').trim();
     if (design.length < 4) return;
 
     /* Lignes qui ne sont pas des produits : frais de port, total, sous-total.
        Sans ce filtre, le « Total Litres = 348,00 » devenait une ligne de 348
        unités, et les frais de port un article à réceptionner. */
-    if (/^total|total\s+litres|frais\s+de\s+port|emballage|palette\s*n|^page\b/i.test(design)) return;
+    if (/total|frais\s+de\s+port|emballage|palette\s*n|^page\b|forwarder|adresse|t[ée]l[ée]phone|intracom|\bBL\b|commande|client|siret|siren|\brcs\b|\btva\b|iban|\bbic\b|capital|\bn[°o]\s/i.test(t)) return;
+    const produit = /glace|sorbet|macaron|gaufre|cookie|cr[eêè]pe|gianduiotto|biscuit|cornet/i.test(design);
+    /* Une ligne d'en-tête avec un nombre à six chiffres n'est pas un produit :
+       il faut une référence en tête, un libellé de produit, ou lot ET quantité. */
+    if (!(ref || produit || (lot && qte))) return;
+    if (!lot && !(ref && produit)) return;
 
     /* Contenance : « 3 litres » pour un bac, « (14x6p) » pour un carton. */
     const mL = design.match(/(\d+)\s*litres?/i);
     const mC = design.match(/\((\d+)\s*[x×]\s*(\d+)\s*p\)/i);
     const mU = design.match(/\((\d+)\s*p\)/i);
+    const taille = mL ? +mL[1] : null;
 
     lignes.push({
-      designation: design.replace(/^[\$A-Z0-9]+\s+/, '').trim() || design,
-      reference: (design.match(/^([\$A-Z0-9]+)\s/) || [])[1] || '',
+      designation: design,
+      reference: ref.replace(/^s(?=\$)/, ''),
       lot: lot,
+      lotCorrige: corrige,
       qte: qte,
-      taille: mL ? +mL[1] : null,
+      taille: taille,
+      unite: (taille || /^(glace|sorbet)\b/i.test(design)) ? 'bac' : 'carton',
       /* Unités par colis, quand le conditionnement est indiqué. */
       parColis: mC ? (+mC[1] * +mC[2]) : (mU ? +mU[1] : null)
     });
@@ -993,8 +1358,38 @@ function extraireLignesBL(texte) {
   return {
     lignes: lignes,
     bl: mBL ? 'BL' + mBL[1] : null,
-    total: mTot ? parseFloat(mTot[1].replace(',', '.')) : null
+    /* Au-delà de 5 000 L, c'est une lecture collée : champ laissé vide. */
+    total: mTot && nombre(mTot[1]) > 0 && nombre(mTot[1]) <= 5000 ? nombre(mTot[1]) : null,
+    date: date
   };
+}
+
+/* Un jeton lu est-il un lot ? Formats du bon Jetfreeze : 14159A (glace),
+   L5245A (macaron), 260903 (gaufre, crêpe), 62455006 (cookie). La lecture
+   confond s et 5, O et 0 ; sur une ligne de glace, le A final sort en 4
+   (« 141594 »). La correction n'est gardée que si le résultat a une forme
+   connue, et elle est signalée pour que la personne vérifie. */
+function lotDepuisJeton(jeton, glace) {
+  const j = String(jeton).replace(/[.,;:]+$/, '').toUpperCase();
+  if (j.length < 6 || j.length > 10) return null;
+  if (/^20[2-4]\d/.test(j) && j.length === 8) return null;   // une date collée
+  if (/^1[34]\d{3}[A-Z]$/.test(j) || /^L\d{4}[A-Z]$/.test(j) || /^\d{8}$/.test(j)) return { lot: j, corrige: false };
+  if (/^\d{6}$/.test(j) && !(glace && /^1[34]/.test(j))) return { lot: j, corrige: false };
+  if (j.length !== 6) return null;
+  const ch = c => VERS_CHIFFRE[c] !== undefined ? VERS_CHIFFRE[c] : c;
+  const le = c => VERS_LETTRE[c] !== undefined ? VERS_LETTRE[c] : c;
+  const c = j.split('');
+  /* Macaron : L + quatre chiffres + lettre. */
+  if (j[0] === 'L') {
+    const m = 'L' + c.slice(1, 5).map(ch).join('') + le(c[5]);
+    if (/^L\d{4}[A-Z]$/.test(m)) return { lot: m, corrige: m !== j };
+  }
+  /* Glace : cinq chiffres + lettre. */
+  if (glace) {
+    const g = c.slice(0, 5).map(ch).join('') + le(c[5]);
+    if (/^1[34]\d{3}[A-Z]$/.test(g)) return { lot: g, corrige: g !== j };
+  }
+  return null;
 }
 
 /* -----------------------------------------------------------------------------
@@ -1230,11 +1625,15 @@ function saisieManuelle(type, raison, resolve) {
   showSheet(
     '<h2 id="sheet-titre">Lecture impossible</h2>' +
     '<p class="sub">' + esc(raison) + '</p>' +
-    '<div class="alerte info"><span class="ai">✍️</span><div><b>Saisissez le lot à la main</b>' +
-    '<p>Reflet trop fort, étiquette abîmée ou photo floue. Tapez le numéro, on avance quand même.</p></div></div>' +
-    '<div class="champ" style="margin-top:14px"><label class="f">Numéro de lot</label>' +
+    (type === 'bl'
+      ? '<div class="alerte info"><span class="ai">✍️</span><div><b>Saisissez le n° du bon à la main</b>' +
+        '<p>Photo floue, de travers ou trop sombre. Tapez le numéro, on avance quand même.</p></div></div>' +
+        '<div class="champ" style="margin-top:14px"><label class="f">N° de bon</label>'
+      : '<div class="alerte info"><span class="ai">✍️</span><div><b>Saisissez le lot à la main</b>' +
+        '<p>Reflet trop fort, étiquette abîmée ou photo floue. Tapez le numéro, on avance quand même.</p></div></div>' +
+        '<div class="champ" style="margin-top:14px"><label class="f">Numéro de lot</label>') +
     '<input type="text" id="sm-lot" data-autofocus autocapitalize="characters" spellcheck="false" ' +
-    'placeholder="Ex. 13845A" style="font-size:22px;letter-spacing:.14em;text-align:center"></div>' +
+    'placeholder="' + (type === 'bl' ? 'Ex. BL221970' : 'Ex. 13845A') + '" style="font-size:22px;letter-spacing:.14em;text-align:center"></div>' +
     (type === 'etiquette'
       ? '<div class="champ" style="margin-top:14px"><label class="f">Parfum</label>' +
         '<select id="sm-parfum"><option value="">Choisir…</option>' +
@@ -1248,7 +1647,7 @@ function saisieManuelle(type, raison, resolve) {
   document.getElementById('sm-x').onclick  = () => { closeSheet(); resolve(null); };
   const valider = enchainer => {
     const lot = document.getElementById('sm-lot').value.trim().toUpperCase();
-    if (!lot) return toast('Saisissez le numéro de lot', 'erreur');
+    if (!lot) return toast(type === 'bl' ? 'Saisissez le numéro du bon' : 'Saisissez le numéro de lot', 'erreur');
     const pf = document.getElementById('sm-parfum');
     closeSheet();
     resolve({ lot: lot, numero: lot, ouv: today(), date: today(),
