@@ -1803,6 +1803,7 @@ V.parametres = async function () {
      const ench = await DB.get('enceintes', null);
      if (ench) ENCEINTES = ench;
      const hebdo = await DB.get('hebdo', null);
+     appliquerAsynchrones(await DB.get('asynchrones', null));
    
      $('#page').innerHTML =
        carte(entete('🗓️', 'Tâches hebdomadaires', 'Qui fait quoi, et quel jour.') +
@@ -1841,14 +1842,15 @@ V.parametres = async function () {
        /* Une seconde carte « Tâches hebdomadaires » proposait ici un jour pour
           les tâches du plan de nettoyage et répondait « Jours enregistrés » :
           aucun écran ne lit ces jours (Tâches du jour et Nettoyage suivent
-          « Organiser la semaine », ci-dessus). On ne garde que le rappel, en
-          lecture, des tâches qui ont leur propre rythme. */
+          « Organiser la semaine », ci-dessus). On ne garde que le rappel des
+          tâches qui ont leur propre rythme, modifiable par le manager. */
        carte(entete('🔁', 'Tâches à rythme propre', 'Hors tableau de la semaine : jours fixes ou intervalle.') +
-         NETTOYAGE.asynchrones.map(a =>
+         NETTOYAGE.asynchrones.map((a, i) =>
            '<div class="tache"><span class="tx"><span class="tn">' + esc(a.nom) + '</span>' +
            '<span class="tm">' + (a.type === 'jours-fixes'
              ? a.jours.map(x => JOURS_SEMAINE[x]).join(', ')
-             : 'tous les ' + a.intervalleJours + ' jours') + '</span></span></div>').join(''));
+             : 'tous les ' + a.intervalleJours + ' jours') + '</span></span>' +
+           '<button class="btn clair sm" data-asyn="' + i + '">Modifier</button></div>').join(''));
    
      $('#hv').onclick = async () => {
      /* Contrôle de cohérence avant d'enregistrer : un début de phase à 18:00
@@ -1881,6 +1883,7 @@ V.parametres = async function () {
 
   $('#hb-ouvrir').onclick = organiserSemaine;
   $('#hb-resp').onclick   = attribuerResponsables;
+  $$('[data-asyn]').forEach(b => b.onclick = () => modifierAsynchrone(+b.dataset.asyn));
    
      $$('[data-supp]').forEach(b => b.onclick = () => {
        const e = ENCEINTES[+b.dataset.supp];
@@ -2024,6 +2027,85 @@ async function organiserSemaine() {
 
   showSheet('<div class="vide">Chargement…</div>');
   rendreEditeur();
+}
+
+/* Changements du manager ({ id: { nom, type, jours, intervalleJours } })
+   appliqués sur la référence d'usine : une tâche ajoutée ou une consigne
+   corrigée dans config.js arrive quand même dans les boutiques. */
+function appliquerAsynchrones(surcharges) {
+  const sc = surcharges || {};
+  NETTOYAGE.asynchrones = ASYNCHRONES_DEF.map(a =>
+    Object.assign({}, a, { jours:(a.jours || []).slice() }, sc[a.id] || {}));
+}
+
+/* Tâche à rythme propre : nom, jours fixes ou intervalle glissant. On
+   travaille sur une copie ; rien n'est écrit tant que ce n'est pas valide.
+   L'identifiant ne change pas, le dernier passage (« async: ») reste lié. */
+function modifierAsynchrone(i) {
+  const a = NETTOYAGE.asynchrones[i];
+  if (!a) return;
+  const t = Object.assign({}, a, { jours:(a.jours || []).slice() });
+  const JOURS_COURTS = ['', 'L', 'M', 'M', 'J', 'V', 'S', 'D'];
+
+  const dessiner = () => {
+    showSheet(
+      '<h2 id="sheet-titre">Modifier la tâche</h2>' +
+      '<div class="champ" style="margin-top:14px"><label class="f">Nom</label>' +
+      '<input type="text" id="as-nom" maxlength="80" value="' + esc(t.nom) + '"></div>' +
+      '<div class="champ" style="margin-top:14px"><label class="f">Rythme</label>' +
+      '<select id="as-type">' +
+      '<option value="jours-fixes"' + (t.type === 'jours-fixes' ? ' selected' : '') + '>Jours fixes</option>' +
+      '<option value="intervalle"' + (t.type !== 'jours-fixes' ? ' selected' : '') + '>Tous les X jours</option>' +
+      '</select></div>' +
+      (t.type === 'jours-fixes'
+        ? '<div class="jours" style="margin-top:14px">' + [1,2,3,4,5,6,7].map(k =>
+            '<button type="button" class="jbtn' + (t.jours.indexOf(k) >= 0 ? ' on' : '') +
+            '" data-asj="' + k + '">' + JOURS_COURTS[k] + '</button>').join('') + '</div>'
+        : '<div class="champ" style="margin-top:14px"><label class="f">Intervalle (jours)</label>' +
+          '<input type="number" id="as-int" min="1" max="60" step="1" value="' +
+          esc(t.intervalleJours || 7) + '"></div>') +
+      '<div class="actions"><button class="btn clair" data-fermer>Annuler</button>' +
+      '<button class="btn menthe" id="as-ok">Enregistrer</button></div>');
+
+    /* Changer de rythme redessine la feuille : on garde le nom en cours. */
+    $('#as-type').onchange = () => {
+      t.nom = $('#as-nom').value;
+      if ($('#as-int')) t.intervalleJours = $('#as-int').value;
+      t.type = $('#as-type').value;
+      dessiner();
+    };
+    $$('[data-asj]').forEach(b => b.onclick = () => {
+      const k = +b.dataset.asj, p = t.jours.indexOf(k);
+      if (p >= 0) t.jours.splice(p, 1); else t.jours.push(k);
+      t.jours.sort();
+      b.classList.toggle('on', p < 0);
+    });
+
+    $('#as-ok').onclick = async () => {
+      const nom = $('#as-nom').value.trim();
+      if (!nom) return toast('Donnez un nom à la tâche', 'erreur');
+      const out = { nom:nom, type:t.type, jours:t.jours, intervalleJours:null };
+      if (t.type === 'jours-fixes') {
+        if (!t.jours.length) return toast('Choisissez au moins un jour', 'erreur');
+      } else {
+        const n = Number($('#as-int').value);
+        if (!Number.isInteger(n) || n < 1 || n > 60) return toast('Intervalle entre 1 et 60 jours', 'erreur');
+        out.intervalleJours = n;
+        out.jours = [];
+      }
+      /* Relu juste avant d'écrire : un changement fait entre-temps sur un
+         autre appareil, pour une autre tâche, n'est pas effacé. */
+      const sc = Object.assign({}, await DB.get('asynchrones', null));
+      sc[a.id] = out;
+      await DB.set('asynchrones', sc);
+      appliquerAsynchrones(sc);
+      await feed('ok', STATE.user.prenom + ' a modifié la tâche « ' + nom + ' »');
+      closeSheet();
+      toast('Tâche modifiée');
+      rendre('parametres');
+    };
+  };
+  dessiner();
 }
 
 /* Les trois responsabilités de la semaine, en bas du tableau du mur */
@@ -2369,6 +2451,7 @@ function formulaireAnomalie() {
        if (e && e.length) ENCEINTES = e;
        const hb = await DB.get('hebdo', null);
        if (hb) NETTOYAGE.zones.forEach(z => z.taches.forEach(t => { if (hb[t.id]) t.jours = hb[t.id]; }));
+       appliquerAsynchrones(await DB.get('asynchrones', null));
        /* Plan hebdomadaire décidé par le manager. On repart de la référence
           d'usine avant d'appliquer : sinon une tâche retirée du plan gardait
           ses anciens jours, puisqu'on ne faisait qu'ajouter par-dessus. */

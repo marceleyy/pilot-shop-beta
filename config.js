@@ -307,6 +307,9 @@ const NETTOYAGE = {
   validationRapide: true,
   tracerAuteur: true
 };
+/* Référence d'usine des tâches à rythme propre : le manager n'enregistre que
+   ses changements, par identifiant, appliqués par-dessus (Paramètres). */
+const ASYNCHRONES_DEF = NETTOYAGE.asynchrones.map(a => Object.assign({}, a, { jours:(a.jours || []).slice() }));
 
 /* -----------------------------------------------------------------------------
    8. RÉASSORT — sec et surgelé, groupés par section
