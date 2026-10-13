@@ -309,7 +309,7 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
          /* Livraison antérieure au dernier inventaire : il l'a déjà comptée,
             le journal écarte le mouvement. */
          const inv = await DB.get('stock:inventaire', null);
-         toast(inv && inv.at && inv.at > r.at
+         toast(inv && inv.at && inv.at >= r.at
            ? 'Confirmée. L’inventaire du ' + fmtD(inv.jour) + ' comptait déjà cette livraison : stock inchangé'
            : n + ' ' + accord(n, 'unité ajoutée', 'unités ajoutées') + ' au stock');
          if ((await receptionsEnAttente()).length) return verifierReceptions();
