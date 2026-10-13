@@ -2232,7 +2232,9 @@ async function purgerLocalAncien() {
        '<span class="pousse mini num">' + n1(visibles.reduce((s, w) => s + litresPerte(w), 0)) + ' L</span></div>' +
    
        (visibles.length ? '<div class="stack">' + visibles.map(w => {
-         const m = MOTIFS_PERTE.filter(x => x.id === w.motif)[0] || MOTIFS_PERTE[0];
+         /* « inventaire » : bacs manquants repris à la confirmation d'un inventaire (stock.js). */
+         const m = MOTIFS_PERTE.filter(x => x.id === w.motif)[0] ||
+           (w.motif === 'inventaire' ? { label:'Écart d’inventaire' } : MOTIFS_PERTE[0]);
          return carte('<div class="rang">' +
            '<div style="flex:1"><b>' + esc(w.produit) + '</b>' +
            '<div class="mini">' + w.nombre + ' × · ' + (w.litrage ? n1(w.litrage) + ' L · ' : '') +
