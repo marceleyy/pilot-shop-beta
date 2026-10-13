@@ -306,7 +306,12 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
          await feed('ok', STATE.user.prenom + ' a confirmé l’entrée en stock du bon ' + (r.numero || 'sans n°') +
            ' (' + (r.par || '—') + ')' + (corrige ? ', quantités corrigées' : ''));
          closeSheet();
-         toast(n + ' ' + accord(n, 'unité ajoutée', 'unités ajoutées') + ' au stock');
+         /* Livraison antérieure au dernier inventaire : il l'a déjà comptée,
+            le journal écarte le mouvement. */
+         const inv = await DB.get('stock:inventaire', null);
+         toast(inv && inv.at && inv.at > r.at
+           ? 'Confirmée. L’inventaire du ' + fmtD(inv.jour) + ' comptait déjà cette livraison : stock inchangé'
+           : n + ' ' + accord(n, 'unité ajoutée', 'unités ajoutées') + ' au stock');
          if ((await receptionsEnAttente()).length) return verifierReceptions();
          rendre(STATE.view);
        } finally { enCours = false; }

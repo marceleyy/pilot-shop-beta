@@ -234,7 +234,7 @@ async function ajouterMouvement(type, cle, qte, extra) {
        son comptage et le journal l'écarte ; dans la période d'écart, elle
        compte le jour où les bacs sont arrivés. */
     const quand = (extra && extra.at) || nowISO();
-    const cm = cleMois(String(quand).slice(0, 10));
+    const cm = cleMois(isoOf(new Date(quand)));   // jour local, comme cleMois()
     let l = await lireMois(cm);
 
     /* Champs courts : t=type, c=clé, q=quantité, a=horodatage, e=employé, l=lot,
