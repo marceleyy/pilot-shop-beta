@@ -229,7 +229,7 @@ const CALCUL = {
    async function litresPertesRegistre(debut, fin) {
      let l = 0;
      const cles = (await DB.list('pertes:')).filter(k => { const d = k.slice(7); return d >= debut && d <= fin; });
-     for (const k of cles) (await DB.get(k, [])).forEach(w => { l += litresPerte(w); });
+     for (const k of cles) (await DB.get(k, [])).forEach(w => { l += litresJetes(w); });
      return l;
    }
 
