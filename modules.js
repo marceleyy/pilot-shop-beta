@@ -174,7 +174,14 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
         liste restait à « 0 article(s) » et les alertes DLC ne partaient jamais.
         Ce qui reste fermé se déduit maintenant du journal (stock.js). */
      if (typeof stockFermeJournal === 'function') {
-       try { return await stockFermeJournal(); } catch (e) { return []; }
+       let l = [];
+       try { l = await stockFermeJournal(); } catch (e) {}
+       /* Livré mais pas encore confirmé : physiquement en réserve, sa DLC
+          doit alerter comme le reste. */
+       (await receptionsEnAttente()).forEach(r => (r.lignes || []).forEach((x, i) => l.push({
+         id: r.id + '|' + i, cle: x.cle, produit: x.produit + ' (à confirmer)', qte: x.qte,
+         unite: '', lot: x.lot || '', dlc: x.dlc || '', recuLe: r.jour, attente: true })));
+       return l;
      }
      const l = await DB.get('stock:ferme', []);
      return l.filter(x => !x.ouvert && !x.jete);
@@ -225,8 +232,12 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
       -------------------------------------------------------------------------- */
    const CLE_RECEPTION_ATTENTE = 'reception:attente';
 
+   /* La liste n'est jamais vidée : une réception traitée est marquée
+      « traite » (confirmée ou écartée). Sous « reception: », la liste est
+      réunie avec celle du serveur à chaque écriture ; une ligne retirée y
+      reviendrait, et serait confirmée une seconde fois. */
    async function receptionsEnAttente() {
-     try { return (await DB.get(CLE_RECEPTION_ATTENTE, [])).filter(r => r && r.id && (r.lignes || []).length); }
+     try { return (await DB.get(CLE_RECEPTION_ATTENTE, [])).filter(r => r && r.id && !r.traite && (r.lignes || []).length); }
      catch (e) { return []; }
    }
 
@@ -268,25 +279,27 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
      $('#rv-ecarter').onclick = () => confirmer('Écarter cette réception ?',
        'Rien n’entrera au stock pour ce bon. La réception reste tracée au registre.', 'Écarter',
        async () => {
-         if (!(await retirerReceptionAttente(r.id))) return;
+         if (!(await marquerReceptionTraitee(r.id, 'ecartee'))) return;
          await feed('warn', STATE.user.prenom + ' a écarté l’entrée en stock du bon ' + (r.numero || 'sans n°') + ' (' + (r.par || '—') + ')');
          toast('Réception écartée du stock');
+         if ((await receptionsEnAttente()).length) return verifierReceptions();
          rendre(STATE.view);
        }, verifierReceptions, 'Retour');
      let enCours = false;
      $('#rv-ok').onclick = async () => {
        if (enCours) return;
-       if (qtes.some(q => q === '' || !(num(q) >= 0))) return toast('Quantité invalide', 'erreur');
+       if (qtes.some(q => q === '' || !(num(q) >= 0) || !Number.isInteger(num(q)))) return toast('Quantité invalide : un nombre entier', 'erreur');
        enCours = true;
        try {
-         /* Retirée d'abord : un second iPad qui confirme en même temps ne
-            trouve plus rien et n'ajoute pas les bacs une seconde fois. */
-         if (!(await retirerReceptionAttente(r.id))) return;
+         /* Marquée d'abord : un second iPad qui confirme ensuite la trouve
+            traitée et n'ajoute pas les bacs une seconde fois. */
+         if (!(await marquerReceptionTraitee(r.id, 'confirmee'))) return;
          let n = 0;
          for (let i = 0; i < r.lignes.length; i++) {
            const l = r.lignes[i], q = num(qtes[i]);
            if (!(q > 0)) continue;
-           await ajouterMouvement('reception', l.cle, q, { lot:l.lot, bl:r.numero, dlc:l.dlc, famille:l.famille });
+           /* Daté de la livraison, pas de la confirmation (voir ajouterMouvement). */
+           await ajouterMouvement('reception', l.cle, q, { lot:l.lot, bl:r.numero, dlc:l.dlc, famille:l.famille, at:r.at });
            n += q;
          }
          const corrige = r.lignes.some((l, i) => num(qtes[i]) !== num(l.qte));
@@ -300,16 +313,18 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
      };
    }
 
-   /* Retire une réception de l'attente. false si elle n'y est plus
-      (confirmée ou écartée entre-temps sur un autre appareil). */
-   async function retirerReceptionAttente(id) {
+   /* Marque une réception traitée. false si elle l'est déjà (confirmée ou
+      écartée entre-temps sur un autre appareil). */
+   async function marquerReceptionTraitee(id, etat) {
      const liste = await DB.get(CLE_RECEPTION_ATTENTE, []);
-     if (!liste.some(x => x && x.id === id)) {
+     const r = liste.filter(x => x && x.id === id)[0];
+     if (!r || r.traite) {
        toast('Cette réception a déjà été confirmée ou écartée', 'erreur');
        rendre(STATE.view);
        return false;
      }
-     await DB.set(CLE_RECEPTION_ATTENTE, liste.filter(x => x && x.id !== id));
+     r.traite = etat; r.traitePar = STATE.user.prenom; r.traiteAt = nowISO();
+     await DB.set(CLE_RECEPTION_ATTENTE, liste);
      return true;
    }
    V.reception = async function () {

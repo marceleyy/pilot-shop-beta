@@ -189,7 +189,13 @@ async function stockInsuffisant(cle) {
 
     const q = num(s.articles[cle] || 0);
     if (q > 0) return null;
-    return { reste: q, article: libelleArticle(cle),
+    /* Livraison saisie mais pas encore confirmée par un manager : le bac est
+       bien là, il n'est juste pas encore compté. */
+    let attente = 0;
+    if (typeof receptionsEnAttente === 'function') {
+      (await receptionsEnAttente()).forEach(r => (r.lignes || []).forEach(l => { if (l.cle === cle) attente += num(l.qte); }));
+    }
+    return { reste: q, article: libelleArticle(cle), attente: attente,
              depuis: s.inventaire ? s.inventaire.jour : null };
   } catch (e) { return null; }
 }
@@ -222,12 +228,18 @@ async function ajouterMouvement(type, cle, qte, extra) {
   }
   _mouvementsEnCours.add(sig);
   try {
-    const cm = cleMois();
+    /* extra.at : un mouvement daté de son fait réel, pas de sa saisie. Une
+       réception confirmée par le manager le surlendemain appartient au jour
+       de la livraison : antérieure au dernier inventaire, elle est déjà dans
+       son comptage et le journal l'écarte ; dans la période d'écart, elle
+       compte le jour où les bacs sont arrivés. */
+    const quand = (extra && extra.at) || nowISO();
+    const cm = cleMois(String(quand).slice(0, 10));
     let l = await lireMois(cm);
 
     /* Champs courts : t=type, c=clé, q=quantité, a=horodatage, e=employé, l=lot,
        d=DLC du produit fermé (réception) */
-    const m = { t:type, c:cle, q:q, a:nowISO(),
+    const m = { t:type, c:cle, q:q, a:quand,
                 e: STATE.user ? STATE.user.id : null };
     if (extra && extra.lot) m.l = extra.lot;
     if (extra && extra.bl)  m.b = extra.bl;
@@ -2573,6 +2585,13 @@ function confirmerOuverture(r) {
       const cleOuv = cleArticle(fam.id, fam.parfums ? parfum : '', fam.id === 'glace' ? taille : '');
       /* Vers l'armoire, rien ne sort du stock : pas d'alerte de rupture. */
       const manque = versArmoire ? null : await stockInsuffisant(cleOuv).catch(() => null);
+      if (manque && manque.attente) {
+        return confirmer('Livraison pas encore confirmée',
+          'Une livraison de ' + manque.article + ' attend la confirmation d’un manager : ' +
+          'ses bacs ne sont pas encore au stock. Ne la saisissez pas une seconde fois, ' +
+          'demandez au manager de la confirmer.',
+          'Ouvrir quand même', () => { poser(fam, lot); }, annuler);
+      }
       if (manque) {
         return confirmer('Ce bac n’est plus au stock',
           'L’application n’a plus de ' + manque.article + ' en réserve' +
