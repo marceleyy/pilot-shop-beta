@@ -367,12 +367,18 @@ async function lire(canvas, profil) {
         tessedit_ocr_engine_mode: '1',
         preserve_interword_spaces: '1' };
 
+  const page = profil === 'bl' || profil === 'bl4';
   let r;
   try {
     await w.setParameters(params);
-    r = await w.recognize(canvas);
+    /* Pour un bon, on garde aussi la position de chaque ligne et de chaque
+       mot : elle sert à relire la colonne Quantité case par case. */
+    r = page ? await w.recognize(canvas, {}, { text: true, blocks: true }) : await w.recognize(canvas);
   } finally { reporterArret(); }
-  return { texte: (r.data.text || '').trim(), confiance: (r.data.confidence || 0) / 100 };
+  const lignes = [];
+  if (page) (r.data.blocks || []).forEach(b => (b.paragraphs || []).forEach(p => (p.lines || []).forEach(l =>
+    lignes.push({ texte: l.text || '', bbox: l.bbox, mots: (l.words || []).map(m => ({ t: m.text, bbox: m.bbox })) }))));
+  return { texte: (r.data.text || '').trim(), confiance: (r.data.confidence || 0) / 100, lignes: lignes };
 }
 
 /* =============================================================================
@@ -827,12 +833,12 @@ async function analyserBL(canvas, nom, resolve) {
     /* Mesuré sur le bon BL221970 : en gris, 23 lignes sur 26 et tous les lots
        lisibles ; binarisé, moitié moins. Le noir et blanc ne sert qu'en repli. */
     let lu = await lire(canvas, 'bl');
-    let res = extraireLignesBL(lu.texte);
+    let res = extraireBLPositionne(lu);
     if (!res.lignes.length) {
       nb = copierCanvas(canvas); pretraiter(nb);
       const lu2 = await lire(nb, 'bl');
-      const res2 = extraireLignesBL(lu2.texte);
-      if (res2.lignes.length > res.lignes.length) { lu = lu2; res = res2; }
+      const res2 = extraireBLPositionne(lu2);
+      if (res2.lignes.length > res.lignes.length) { lu = lu2; res = res2; res._nb = true; }
     }
     /* Le total en litres manque souvent en psm 6 (ligne coupée) : une seconde
        lecture en colonnes le retrouve, et comble au passage les lots perdus. */
@@ -841,15 +847,23 @@ async function analyserBL(canvas, nom, resolve) {
       const lu4 = await lire(canvas, 'bl4');
       completerBL(res, extraireLignesBL(lu4.texte));
     }
+    /* Les quantités sont entourées au stylo : dans la page entière, le cercle
+       les noie. On relit chaque case de la colonne Quantité à part, et la
+       ligne du total si elle manque encore. */
+    if (res.lignes.some(l => l._box)) {
+      etape('Lecture des quantités…');
+      await lireQuantitesBL(nb && res._nb ? nb : canvas, res, lu.lignes);
+    }
     libererCanvas(canvas);
     if (nb) libererCanvas(nb);
+    recouperTotal(res);
 
     const r = { fournisseur: FOURNISSEUR.nom, numero: res.bl || '', date: res.date || today(),
-                total: res.total, source: 'ocr',
+                total: res.total, litresLus: res.litresLus, source: 'ocr',
                 /* Contrat des appelants : ref, parfum (libellé), bacs, taille. */
                 lignes: res.lignes.map(l => ({
                   ref: l.reference, parfum: l.designation, designation: l.designation,
-                  lot: l.lot, lotCorrige: l.lotCorrige, bacs: l.qte, qte: l.qte,
+                  lot: l.lot, lotCorrige: l.lotCorrige, bacs: l.qte, qte: l.qte, qteDouteuse: !!l.qteDouteuse,
                   taille: l.taille, unite: l.unite, parColis: l.parColis })),
                 confiance: lu.confiance, texte: lu.texte };
     if (!r.numero && !r.lignes.length) return saisieManuelle('bl', 'Aucun texte de bon lisible sur la photo', resolve);
@@ -858,6 +872,185 @@ async function analyserBL(canvas, nom, resolve) {
     libererCanvas(canvas);
     if (nb) libererCanvas(nb);
     saisieManuelle('bl', err && err.message ? err.message : 'Lecture impossible', resolve);
+  }
+}
+
+/* Même extraction, mais ligne par ligne de la lecture : chaque ligne du bon
+   garde sa position sur la photo (_box), utile pour relire sa quantité. */
+function extraireBLPositionne(lu) {
+  const res = extraireLignesBL(lu.texte);
+  if (!lu.lignes || !lu.lignes.length) return res;
+  const lignes = [];
+  lu.lignes.forEach(L => {
+    const l = extraireLignesBL(L.texte).lignes[0];
+    if (!l || (res.bl && l.lot === res.bl.slice(2))) return;
+    l._box = L.bbox; l._mots = L.mots;
+    lignes.push(l);
+  });
+  if (lignes.length >= res.lignes.length) res.lignes = lignes;
+  return res;
+}
+
+/* -----------------------------------------------------------------------------
+   QUANTITÉS ENTOURÉES
+   L'équipe entoure les quantités au stylo en contrôlant la livraison. Le
+   cercle traverse les chiffres : dans la page entière, « 12,00 » devient
+   « 722 » ou disparaît. Recadrée sur la seule case, agrandie, la même
+   quantité se lit (mesuré sur BL221970 : de 9 à 19 quantités sur 24).
+
+   Où est la case ? Les quantités non entourées se lisent dans la page : leur
+   position donne la colonne, et leur décalage vertical par rapport au début
+   de la ligne donne l'inclinaison locale de la photo (un bon tenu à la main
+   n'est jamais droit). Chaque case est lue trois fois (gris en ligne, gris
+   en bloc, noir et blanc) ; la valeur qui revient le plus l'emporte.
+   -------------------------------------------------------------------------- */
+const QTE_CASE = /^\d{1,3}[.,]\d{2}$/;
+
+function valeurQuantite(t) {
+  const s = String(t || '').replace(/\s+/g, '');
+  /* « 412,00 » : le 4 est le bord du cercle. On prend les deux chiffres
+     collés à la virgule. « 1200 » : virgule perdue, les deux zéros restent. */
+  const m = s.match(/(\d{1,2})[.,]0{1,2}(?!\d)/) || s.match(/^(\d{1,2})00$/);
+  const v = m ? +m[1] : 0;
+  return v > 0 && v < 100 ? v : null;
+}
+
+async function lireQuantitesBL(canvas, res, lignesLues) {
+  const med = a => a.slice().sort((x, y) => x - y)[a.length >> 1];
+  const cy = b => (b.y0 + b.y1) / 2;
+  const avecBox = res.lignes.filter(l => l._box && l._mots && l._mots.length);
+  /* Repères : lignes dont la quantité s'est lue dans la page. Le cadre d'une
+     ligne entière est trop haut sur une photo inclinée : on s'ancre sur un
+     mot précis, le lot (ou à défaut le dernier mot avant la colonne). */
+  const reperes = [];
+  avecBox.forEach(l => {
+    const d = l._mots.filter(m => QTE_CASE.test(m.t) && m.bbox.x0 > (l._box.x0 + l._box.x1) / 2).pop();
+    const a = ancreLigne(l, d ? d.bbox.x0 : Infinity);
+    if (d && a) reperes.push({ y: cy(a), dy: (cy(d.bbox) - cy(a)) / Math.max(1, a.y1 - a.y0), x0: d.bbox.x0, x1: d.bbox.x1 });
+  });
+  if (!reperes.length) return;
+  const colX0 = med(reperes.map(r => r.x0)), colX1 = med(reperes.map(r => r.x1));
+  const marge = (colX1 - colX0) * 0.4;
+
+  const cases = [];
+  avecBox.forEach(l => {
+    const a = ancreLigne(l, colX0 - marge);
+    if (!a) return;
+    const h = Math.max(1, a.y1 - a.y0);
+    const proche = reperes.slice().sort((p, q) => Math.abs(p.y - cy(a)) - Math.abs(q.y - cy(a)))[0];
+    const yc = cy(a) + proche.dy * h;
+    const x0 = Math.max(0, colX0 - marge), x1 = Math.min(canvas.width, colX1 + marge);
+    const y0 = Math.max(0, yc - h * 0.9), y1 = Math.min(canvas.height, yc + h * 0.9);
+    if (x1 - x0 < 4 || y1 - y0 < 4) return;
+    cases.push({ l: l, gris: decouper(canvas, x0, y0, x1, y1, 60) });
+  });
+  /* Ligne du total, si aucune lecture ne l'a donnée. */
+  let caseTotal = null;
+  if (res.total === null) {
+    const lt = (lignesLues || []).filter(L => /total|litr/i.test(L.texte)).pop();
+    if (lt) {
+      const h = Math.max(1, lt.bbox.y1 - lt.bbox.y0);
+      caseTotal = decouper(canvas, lt.bbox.x0, Math.max(0, lt.bbox.y0 - h * 0.6),
+        canvas.width, Math.min(canvas.height, lt.bbox.y1 + h * 0.6), 60);
+    }
+  }
+  cases.forEach(c => { c.nb = copierCanvas(c.gris); binariserOtsu(c.nb); });
+
+  clearTimeout(OCR._minuteur);
+  const w = await obtenirWorker();
+  const votes = cases.map(() => []);
+  try {
+    for (const [source, psm] of [['gris', '7'], ['gris', '6'], ['nb', '7']]) {
+      await w.setParameters({ tessedit_char_whitelist: '0123456789,.', tessedit_pageseg_mode: psm });
+      for (let i = 0; i < cases.length; i++) {
+        const r = await w.recognize(cases[i][source]);
+        const v = valeurQuantite(r.data.text);
+        if (v) votes[i].push(v);
+      }
+    }
+    if (caseTotal) {
+      await w.setParameters({ tessedit_char_whitelist: '0123456789,.=', tessedit_pageseg_mode: '7' });
+      const r = await w.recognize(caseTotal);
+      const m = String(r.data.text || '').replace(/\s+/g, '').match(/=?(\d{1,4})[.,](\d{2})$/);
+      if (m && +m[1] > 0 && +m[1] <= 5000) res.total = +m[1];
+    }
+  } finally {
+    reporterArret();
+    cases.forEach(c => { libererCanvas(c.gris); libererCanvas(c.nb); });
+    if (caseTotal) libererCanvas(caseTotal);
+  }
+
+  cases.forEach((c, i) => {
+    const v = votes[i].slice();
+    if (c.l.qte) v.push(c.l.qte);          // la lecture de la page vote aussi
+    if (!v.length) return;
+    const compte = {};
+    v.forEach(x => { compte[x] = (compte[x] || 0) + 1; });
+    /* À égalité, l'ordre des lectures départage : gris en ligne d'abord. */
+    const gagnant = v.reduce((a, b) => compte[b] > compte[a] ? b : a, v[0]);
+    c.l.qte = gagnant;
+    c.l.qteDouteuse = compte[gagnant] < 2;
+  });
+}
+
+/* Mot d'ancrage d'une ligne : le lot s'il est lu, sinon le dernier mot
+   situé avant la colonne des quantités. */
+function ancreLigne(l, avantX) {
+  const mots = l._mots.filter(m => m.bbox && m.bbox.x1 < avantX && m.bbox.y1 > m.bbox.y0);
+  const lot = l.lot ? mots.filter(m => lotDepuisJeton(m.t, !!l.taille)).pop() : null;
+  const m = lot || mots.pop();
+  return m ? m.bbox : null;
+}
+
+/* Découpe agrandie : une case de quelques pixels de haut est remise à
+   environ `hauteur` px, la taille où le moteur lit le mieux les chiffres. */
+function decouper(src, x0, y0, x1, y1, hauteur) {
+  const k = Math.max(1, Math.min(6, hauteur / (y1 - y0)));
+  const cv = document.createElement('canvas');
+  cv.width = Math.round((x1 - x0) * k); cv.height = Math.round((y1 - y0) * k);
+  const g = cv.getContext('2d');
+  g.imageSmoothingQuality = 'high';
+  g.drawImage(src, x0, y0, x1 - x0, y1 - y0, 0, 0, cv.width, cv.height);
+  return cv;
+}
+
+/* Noir et blanc à seuil unique (Otsu) : sur une case isolée l'éclairage est
+   uniforme, le seuillage local de la page entière n'apporte rien. */
+function binariserOtsu(cv) {
+  const g = cv.getContext('2d', { willReadFrequently: true });
+  const img = g.getImageData(0, 0, cv.width, cv.height), px = img.data;
+  const N = cv.width * cv.height, gris = new Uint8Array(N), hist = new Uint32Array(256);
+  for (let i = 0, j = 0; i < N; i++, j += 4) { gris[i] = (px[j] * 0.299 + px[j + 1] * 0.587 + px[j + 2] * 0.114) | 0; hist[gris[i]]++; }
+  let somme = 0; for (let t = 0; t < 256; t++) somme += t * hist[t];
+  let sB = 0, wB = 0, meilleur = 0, seuil = 128;
+  for (let t = 0; t < 256; t++) {
+    wB += hist[t]; if (!wB) continue;
+    const wF = N - wB; if (!wF) break;
+    sB += t * hist[t];
+    const mB = sB / wB, mF = (somme - sB) / wF, v = wB * wF * (mB - mF) * (mB - mF);
+    if (v > meilleur) { meilleur = v; seuil = t; }
+  }
+  for (let i = 0, j = 0; i < N; i++, j += 4) { const o = gris[i] < seuil ? 0 : 255; px[j] = px[j + 1] = px[j + 2] = o; }
+  g.putImageData(img, 0, 0);
+}
+
+/* Recoupement avec « Total Litres » : la somme des bacs × taille doit le
+   donner. Si une seule quantité de glace manque, le total la donne exactement.
+   Sinon on garde la somme lue (litresLus), affichée si elle diffère. */
+function recouperTotal(res) {
+  const glaces = res.lignes.filter(l => l.taille > 0);
+  if (!res.total || !glaces.length) return;
+  const sures = glaces.filter(l => l.qte && !l.qteDouteuse);
+  const autres = glaces.filter(l => !l.qte || l.qteDouteuse);
+  const somme = ls => ls.reduce((t, l) => t + l.qte * l.taille, 0);
+  if (autres.length === 1) {
+    const q = (res.total - somme(sures)) / autres[0].taille;
+    if (q > 0 && q < 100 && Number.isInteger(q)) { autres[0].qte = q; autres[0].qteDouteuse = false; }
+  }
+  if (glaces.every(l => l.qte)) {
+    res.litresLus = somme(glaces);
+    /* Tout concorde : les quantités marquées douteuses sont confirmées. */
+    if (res.litresLus === res.total) glaces.forEach(l => { l.qteDouteuse = false; });
   }
 }
 
@@ -877,15 +1070,17 @@ function completerBL(res, autre) {
 /* Relecture du bon avant de poursuivre. Rien n'est enregistré ici : l'écran
    suivant (réception ou écart) reprend chaque ligne, modifiable. */
 function confirmerBL(r, apercu, resolve) {
-  const sansQte = r.lignes.filter(l => !l.qte).length;
+  const sansQte = r.lignes.filter(l => !l.qte || l.qteDouteuse).length;
   const sansLot = r.lignes.filter(l => !l.lot).length;
   showSheet(
     '<h2 id="sheet-titre">Bon de livraison lu</h2>' +
     '<p class="sub">' + r.lignes.length + ' ' + (r.lignes.length > 1 ? 'lignes lues' : 'ligne lue') +
     (r.total !== null && r.total !== undefined ? ' · total ' + r.total + ' L' : '') + '</p>' +
     '<div class="alerte warn"><span class="ai">●</span><div><b>Vérifiez avec le bon papier</b>' +
-    '<p>' + (sansQte ? sansQte + ' quantité' + (sansQte > 1 ? 's' : '') + ' illisible' + (sansQte > 1 ? 's' : '') + ' (souvent entourées au stylo). ' : '') +
+    '<p>' + (sansQte ? sansQte + ' quantité' + (sansQte > 1 ? 's' : '') + ' illisible' + (sansQte > 1 ? 's' : '') + ' ou douteuse' + (sansQte > 1 ? 's' : '') + ' (marquée' + (sansQte > 1 ? 's' : '') + ' « ? »). ' : '') +
     (sansLot ? sansLot + ' lot' + (sansLot > 1 ? 's' : '') + ' illisible' + (sansLot > 1 ? 's' : '') + '. ' : '') +
+    (r.litresLus && r.total && r.litresLus !== r.total
+      ? 'Les quantités de glace lues font ' + r.litresLus + ' L, le bon annonce ' + r.total + ' L : au moins une est fausse. ' : '') +
     'Chaque ligne reste modifiable à l’étape suivante.</p></div></div>' +
     '<div class="champ" style="margin-top:14px"><label class="f">N° de bon</label>' +
     '<input type="text" id="ob-num" value="' + esc(r.numero) + '" autocapitalize="characters" spellcheck="false"></div>' +
@@ -894,7 +1089,7 @@ function confirmerBL(r, apercu, resolve) {
         '<span class="c ww">Lot</span><span class="c w">Qté</span></div><div class="dense-scroll">' +
         r.lignes.map(l => '<div class="dl"><span class="c1">' + esc(l.designation) + '</span>' +
           '<span class="c ww">' + (l.lot ? esc(l.lot) + (l.lotCorrige ? ' ?' : '') : '—') + '</span>' +
-          '<span class="c w num">' + (l.qte || '?') + '</span></div>').join('') + '</div></div>'
+          '<span class="c w num">' + (l.qte ? l.qte + (l.qteDouteuse ? ' ?' : '') : '?') + '</span></div>').join('') + '</div></div>'
       : '') +
     (apercu ? '<details style="margin-top:16px"><summary class="mini">Voir ce qu’a vu la machine</summary>' +
       '<img src="' + apercu + '" alt="Photo du bon" ' +

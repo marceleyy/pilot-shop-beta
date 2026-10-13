@@ -319,7 +319,7 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
        const lignes = (bl.lignes || []).map(l => ({
          /* Lot et unité lus sur le bon ; quantité illisible laissée vide, pour
             qu'elle soit saisie plutôt qu'enregistrée à 1 par défaut. */
-         produit:l.parfum || l.ref || '', qte:l.bacs || '', unite:l.unite || 'bac', lot:l.lot || '', lotCorrige:!!l.lotCorrige, dlc:'', taille:l.taille || ''
+         produit:l.parfum || l.ref || '', qte:l.bacs || '', unite:l.unite || 'bac', lot:l.lot || '', lotCorrige:!!l.lotCorrige, qteDouteuse:!!l.qteDouteuse, dlc:'', taille:l.taille || ''
        }));
        if (!lignes.length) lignes.push({ produit:'', qte:1, unite:'bac', lot:'', dlc:'' });
    
@@ -335,7 +335,7 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
              '<div class="card plat"><div class="champ"><label class="f">Produit</label>' +
              '<input type="text" data-r="' + i + '.produit" value="' + esc(l.produit) + '" placeholder="Ex. Gelato pistache"></div>' +
              '<div class="grid g3" style="margin-top:10px">' +
-             '<div class="champ"><label class="f">Quantité</label><input type="number" min="1" data-r="' + i + '.qte" value="' + l.qte + '"></div>' +
+             '<div class="champ"><label class="f">Quantité' + (l.qteDouteuse ? ' <b style="color:var(--corail-d)">à vérifier</b>' : '') + '</label><input type="number" min="1" data-r="' + i + '.qte" value="' + l.qte + '"></div>' +
              '<div class="champ"><label class="f">Unité</label><select data-r="' + i + '.unite">' +
              STOCK.unites.map(u => '<option' + (u === l.unite ? ' selected' : '') + '>' + u + '</option>').join('') + '</select></div>' +
              '<div class="champ"><label class="f">N° de lot' + (l.lotCorrige ? ' <b style="color:var(--corail-d)">à vérifier</b>' : '') + '</label><input type="text" data-r="' + i + '.lot" value="' + esc(l.lot) + '"></div></div>' +
@@ -363,6 +363,7 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
            lignes[+i][k] = inp.value;
            /* Lot retapé à la main : il n'est plus « corrigé par la lecture ». */
            if (k === 'lot') lignes[+i].lotCorrige = false;
+           if (k === 'qte') lignes[+i].qteDouteuse = false;
          });
          $$('[data-scandlc]').forEach(b => b.onclick = async () => {
            const i = +b.dataset.scandlc;
