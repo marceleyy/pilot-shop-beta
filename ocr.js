@@ -1284,10 +1284,11 @@ function extraireLignesBL(texte) {
   const lignes = [];
   brut.split(/[\r\n]+/).forEach(l => {
     /* « 3 tres », « 3 ltres », « 3 itres » : le « li » de litres se perd sur
-       une photo floue. Sans contenance, la ligne n'était plus une glace : ni
+       une photo floue. Un seul chiffre (bacs de 3, 5 ou 7 L) : « 31tres » est
+       un « 3 l1tres », pas 31 litres. Sans contenance, la ligne n'était plus une glace : ni
        taille, ni correction du lot (« 140694 » pour 14069A), et un carton. */
     const t = l.replace(/[|]/g, ' ').replace(/\s+/g, ' ').trim()
-      .replace(/\b(\d{1,2}) ?(?:[lt][i1l]?tres?|[i1]?tres|lires?)\b/gi, '$1 litres');
+      .replace(/\b([1-9]) ?(?:[lti1][i1l]?tres?|[i1]?tres|lires?)\b/gi, '$1 litres');
     if (t.length < 8) return;
     const jetons = t.split(' ');
 
