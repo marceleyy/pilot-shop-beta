@@ -375,7 +375,10 @@ async function purgerJournal(l) {
    sans avoir été tracé — c'est la seule explication possible, puisque le stock
    ne baisse que par la traçabilité. Ces écarts serviront au calcul de fin de
    période : théoriquement on devait vendre tant, on a vendu tant. */
-async function enregistrerInventaire(lignes, note, avant) {
+/* « meta » : un inventaire confirmé plus tard garde le jour et l'heure de son
+   comptage (les mouvements tracés depuis s'y ajoutent) et dit qui l'a compté
+   et qui l'a confirmé. */
+async function enregistrerInventaire(lignes, note, avant, meta) {
   const ecarts = {};
   let manquants = 0, surplus = 0;
   if (avant) {
@@ -388,16 +391,17 @@ async function enregistrerInventaire(lignes, note, avant) {
     });
   }
 
-  const inv = {
+  const inv = Object.assign({
     jour: today(), at: nowISO(),
     par: STATE.user ? STATE.user.prenom : null,
-    employe: STATE.user ? STATE.user.id : null,
+    employe: STATE.user ? STATE.user.id : null
+  }, meta || {}, {
     note: note || '',
     lignes: lignes,            // { cleArticle : quantité }
     ecarts: ecarts,            // écart constaté par article
     manquants: manquants,      // bacs disparus sans traçabilité
     surplus: surplus           // bacs trouvés en trop : réception non saisie
-  };
+  });
 
   const hist = await DB.get('stock:inventaires', []);
   /* Une correction du même jour REMPLACE son entrée au lieu d'en ajouter une :
@@ -432,6 +436,286 @@ async function enregistrerInventaire(lignes, note, avant) {
 
   invaliderStock();
   return inv;
+}
+
+/* -----------------------------------------------------------------------------
+   INVENTAIRE À CONFIRMER
+   Un comptage, qu'il vienne d'un équipier ou du manager, n'écrase plus le
+   stock : il attend qu'un manager le confirme. Un bac oublié derrière un
+   autre faisait sinon disparaître du stock un parfum bien présent, sans que
+   personne ne le voie.
+   Avant de confirmer, le manager voit l'écart article par article et peut
+   recompter (le lendemain s'il le veut). À la confirmation, le stock prend
+   les quantités comptées.
+   Chambre froide : chaque bac manquant part au registre des pertes, où les
+   écarts s'additionnent au fil des inventaires.
+   Sec : rien n'y trace la consommation (cornets, gobelets), la différence
+   avec le comptage précédent est donc de la consommation, pas une perte.
+   Un seul inventaire en attente par partie : un nouveau comptage remplace
+   le précédent.
+   -------------------------------------------------------------------------- */
+const INV_ATTENTE = {
+  froid: { cle: 'stock:attente',     ref: 'stock:inventaire' },
+  sec:   { cle: 'stock:attente-sec', ref: 'stock:sec' }
+};
+const CLE_INV_ATTENTE = INV_ATTENTE.froid.cle;
+
+async function inventaireEnAttente(partie) {
+  const p = INV_ATTENTE[partie] || INV_ATTENTE.froid;
+  try {
+    const [a, inv] = await Promise.all([DB.get(p.cle, null), DB.get(p.ref, null)]);
+    /* Un comptage déjà repris, ou plus ancien que l'inventaire sur le stock
+       (rejoué par un iPad revenu en ligne), n'attend plus rien. */
+    if (!a || (inv && inv.at && a.at && inv.at >= a.at)) return null;
+    return a;
+  } catch (e) { return null; }
+}
+
+/* « sec|<réf>|<déclinaison> » → « Cornets · Petit ». */
+function libelleSec(c) {
+  const p = String(c).split('|');
+  const r = catalogueSec().filter(x => typeof x === 'object' && x.id === p[1])[0];
+  return (r ? r.nom : p[1]) + (p[2] ? ' · ' + p[2] : '');
+}
+/* Clé « vivante » d'une ligne du sec : chantilly, coulis et toppings sont
+   tracés à l'ouverture sous « <famille>|<saveur>| ». Même correspondance que
+   le Rouvrir du sec confirmé. null pour le reste du sec, sans mouvement. */
+function cleVivanteSec(c, lignes) {
+  const [, ref, v] = String(c).split('|');
+  const nrm = x => String(x || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  const f = FAMILLES_PRODUIT.filter(x => (x.lieu === 'sec' || x.stock === 'sec') && (x.refSec || x.id) === ref)[0];
+  if (!f) return null;
+  if (f.saveurs && f.saveurs.length) {
+    const sv = f.saveurs.filter(x => nrm(x) === nrm(v))[0];
+    return sv ? cleArticle(f.id, sv, '') : null;
+  }
+  return Object.keys(lignes || {}).filter(k => k.split('|')[1] === ref).length === 1 ? cleArticle(f.id, '', '') : null;
+}
+
+/* Mouvements tracés sur un article après une heure donnée (réceptions moins
+   ouvertures et pertes). */
+async function mouvementsDepuis(cle, at) {
+  let d = 0;
+  (await tousMouvements(String(at).slice(0, 10))).forEach(m => {
+    if ((m.c || m.cle) !== cle || !((m.a || m.at) > at)) return;
+    const q = num(m.q !== undefined ? m.q : m.qte), t = m.t || m.type;
+    if (t === 'reception') d += q; else if (t === 'ouverture' || t === 'perte') d -= q;
+  });
+  return d;
+}
+
+const libelleInv = (partie, c) => partie === 'sec' ? libelleSec(c) : libelleArticle(c);
+
+/* Article par article : compté, attendu au moment du comptage, écart.
+   Les manquants d'abord, du plus gros au plus petit. */
+function lignesAttente(a, partie) {
+  const l = a.lignes || {}, av = a.avant || {};
+  return [...new Set(Object.keys(av).concat(Object.keys(l)))]
+    .map(c => ({ c: c, compte: num(l[c] || 0), attendu: num(av[c] || 0) }))
+    .filter(x => x.compte || x.attendu)
+    .map(x => Object.assign(x, { d: x.compte - x.attendu }))
+    .sort((x, y) => (x.d - y.d) || libelleInv(partie, x.c).localeCompare(libelleInv(partie, y.c)));
+}
+
+/* Écran du manager : vérifier, recompter, confirmer ou laisser en attente. */
+async function verifierInventaire(partie) {
+  partie = partie === 'sec' ? 'sec' : 'froid';
+  const sec = partie === 'sec';
+  const CLE = INV_ATTENTE[partie].cle;
+  if (!(STATE.user && STATE.user.role === 'manager')) {
+    return toast('Seul un manager peut confirmer un inventaire', 'erreur');
+  }
+  if (sec) await chargerCatalogueSec();
+  let a = await inventaireEnAttente(partie);
+  if (!a) { toast('Aucun inventaire à confirmer'); return rendre(STATE.view); }
+  /* Stock du moment, sur l'ancien inventaire : l'inventaire en attente n'y
+     touche pas. Son écart avec « avant » donne les mouvements tracés depuis
+     le comptage (réceptions, ouvertures, pertes). Le sec n'en a pas. */
+  invaliderStock();
+  const maintenant = sec ? {} : ((await stockReel()).articles || {});
+  let enCours = null;          // article en cours de recomptage
+  const lib = c => libelleInv(partie, c);
+  const refSec = c => catalogueSec().filter(x => typeof x === 'object' && x.id === String(c).split('|')[1])[0];
+
+  const dessinerV = () => {
+    const lignes = lignesAttente(a, partie);
+    const ecarts = lignes.filter(x => x.d !== 0);
+    const justes = lignes.filter(x => x.d === 0);
+    const bacs = x => !!litArticle(x.c).taille;
+    const manq = sec ? 0 : ecarts.filter(x => x.d < 0 && bacs(x)).reduce((s, x) => s - x.d, 0);
+    const trop = sec ? 0 : ecarts.filter(x => x.d > 0 && bacs(x)).reduce((s, x) => s + x.d, 0);
+    const litres = sec ? 0 : ecarts.filter(x => x.d < 0)
+      .reduce((s, x) => s - x.d * num(litArticle(x.c).taille), 0);
+    const corr = a.corrections || {};
+    const nb = v => Number.isInteger(v) ? String(v) : n1(v);
+
+    const rang = x => {
+      const k = corr[x.c];
+      const r = sec ? refSec(x.c) : null;
+      return '<div class="invl">' +
+        '<span class="invn">' + esc(lib(x.c)) +
+        '<small>compté ' + nb(x.compte) + (sec ? ' · précédent ' : ' · attendu ') + nb(x.attendu) +
+        (r && r.unite ? ' ' + esc(accord(x.attendu, r.unite)) : '') +
+        (k ? ' · recompté ' + nb(num(k.q)) + ' le ' + esc(fmtD(String(k.at).slice(0, 10))) + ' par ' + esc(k.par || '—') : '') +
+        '</small></span>' +
+        '<span class="invc">' + (x.d ? (sec ? '' : 'écart ') + (x.d > 0 ? '+' : '') + nb(x.d) : (sec ? 'inchangé' : 'juste')) + '<br>' +
+        '<button type="button" class="btn clair sm" data-recompter="' + esc(x.c) + '">Recompter</button></span></div>' +
+        (enCours === x.c
+          ? '<div class="invl"><span class="invn">Combien maintenant ?' +
+            (sec ? '' : '<small>attendu maintenant : ' + nb(num(maintenant[x.c] || 0)) + '</small>') + '</span>' +
+            '<input type="number" inputmode="' + (sec && !(r && r.decimal === false) ? 'decimal' : 'numeric') + '" min="0" ' +
+            'step="' + (sec && !(r && r.decimal === false) ? '0.5' : '1') + '" id="rc-v" data-autofocus ' +
+            'aria-label="' + esc(lib(x.c) + ', recompté maintenant') + '">' +
+            '<button type="button" class="btn menthe sm" id="rc-ok">OK</button></div>'
+          : '');
+    };
+
+    showSheet(
+      '<h2 id="sheet-titre">Confirmer l’inventaire ' + (sec ? 'du sec' : 'de la chambre froide') + '</h2>' +
+      '<p class="sub">Compté le ' + esc(fmtD(a.jour)) + ' à ' + heure(a.at) + ' par ' + esc(a.par || '—') + '. ' +
+      (sec
+        ? (ecarts.length ? ecarts.length + ' ' + accord(ecarts.length, 'référence a changé', 'références ont changé') +
+            ' depuis le comptage précédent.' : 'Rien n’a changé depuis le comptage précédent.')
+        : ecarts.length
+        ? manq + ' ' + accord(manq, 'bac manquant', 'bacs manquants') +
+          (litres ? ' (' + n1(litres) + ' L)' : '') + ', ' + trop + ' en trop.'
+        : 'Aucun écart avec le stock attendu.') +
+      ' Le stock ne change pas tant que vous ne confirmez pas.</p>' +
+      (a.note ? '<div class="rappel" style="margin-top:10px">' + esc(a.note) + '</div>' : '') +
+      (ecarts.length
+        ? '<div class="entete" style="margin-top:16px"><h3>' + (sec ? 'Changements' : 'Écarts') + '</h3></div>' +
+          '<div class="stack">' + ecarts.map(rang).join('') + '</div>'
+        : '') +
+      (justes.length
+        ? '<details style="margin-top:16px"><summary>' + justes.length + ' ' +
+          (sec ? accord(justes.length, 'référence inchangée', 'références inchangées')
+               : accord(justes.length, 'article sans écart', 'articles sans écart')) + '</summary>' +
+          '<div class="stack">' + justes.map(rang).join('') + '</div></details>'
+        : '') +
+      '<div class="actions"><button class="btn clair" data-fermer>Laisser en attente</button>' +
+      '<button class="btn menthe" id="ci-ok">Reprendre sur le stock réel</button></div>' +
+      '<button type="button" class="btn fantome bloc sm" id="ci-ecarter" style="margin-top:8px">Écarter ce comptage</button>');
+
+    if (enCours && justes.some(x => x.c === enCours)) {
+      const d = $('#sheet-corps details'); if (d) d.open = true;
+    }
+    $$('[data-recompter]').forEach(b => b.onclick = () => {
+      enCours = enCours === b.dataset.recompter ? null : b.dataset.recompter;
+      dessinerV();
+    });
+    const ok = $('#rc-ok');
+    if (ok) ok.onclick = async () => {
+      const brut = $('#rc-v').value;
+      const q = num(brut);
+      const r = sec ? refSec(enCours) : null;
+      const pasOk = sec && !(r && r.decimal === false) ? (q * 2) % 1 === 0 : q % 1 === 0;
+      if (brut === '' || q < 0 || !pasOk) return toast('Quantité impossible', 'erreur');
+      /* Le recomptage est fait maintenant ; l'inventaire garde l'heure de son
+         comptage. On retire donc ce qui a bougé depuis, sinon une ouverture
+         tracée entre-temps serait comptée deux fois. */
+      let bouge = 0, art = null;
+      if (sec) {
+        const cleV = cleVivanteSec(enCours, a.lignes);
+        if (cleV) bouge = await mouvementsDepuis(cleV, a.at);
+      } else {
+        invaliderStock();
+        art = (await stockReel()).articles || {};
+        bouge = num(art[enCours] || 0) - num((a.avant || {})[enCours] || 0);
+      }
+      if (q - bouge < 0) {
+        return toast('Recomptage incohérent avec les mouvements tracés depuis le comptage', 'erreur');
+      }
+      const cur = await inventaireEnAttente(partie);
+      if (!cur || cur.at !== a.at) {
+        closeSheet(); toast('Cet inventaire a changé entre-temps', 'erreur'); return rendre(STATE.view);
+      }
+      cur.lignes = cur.lignes || {};
+      cur.lignes[enCours] = q - bouge;
+      cur.corrections = Object.assign({}, cur.corrections, {
+        [enCours]: { q: q, par: STATE.user.prenom, at: nowISO() }
+      });
+      await DB.set(CLE, cur);
+      a = cur; enCours = null;
+      if (art) Object.assign(maintenant, art);
+      toast('Recomptage noté');
+      dessinerV();
+    };
+    $('#ci-ecarter').onclick = () => confirmer('Écarter ce comptage ?',
+      'Il est supprimé sans toucher au stock. Il faudra refaire l’inventaire.',
+      'Écarter', async () => {
+        const cur = await DB.get(CLE, null);
+        if (cur && cur.at === a.at) await DB.del(CLE);
+        await feed('warn', STATE.user.prenom + ' a écarté l’inventaire ' + (sec ? 'du sec' : 'de la chambre froide') +
+          ' du ' + fmtD(a.jour) + ' (' + (a.par || '—') + ')');
+        toast('Comptage écarté');
+        rendre(STATE.view);
+      }, () => dessinerV(), 'Retour');
+    $('#ci-ok').onclick = () => confirmer('Reprendre cet inventaire sur le stock réel ?',
+      'Le stock prend les quantités comptées le ' + fmtD(a.jour) + '.' +
+      (manq ? ' ' + manq + ' ' + accord(manq, 'bac manquant part', 'bacs manquants partent') +
+              ' au registre des pertes.' : ''),
+      'Reprendre', () => confirmerInventaire(a, partie), () => dessinerV(), 'Retour');
+  };
+  dessinerV();
+}
+
+async function confirmerInventaire(a, partie) {
+  partie = partie === 'sec' ? 'sec' : 'froid';
+  const CLE = INV_ATTENTE[partie].cle;
+  const cur = await inventaireEnAttente(partie);
+  if (!cur || cur.at !== a.at) {
+    toast('Cet inventaire a déjà été confirmé ou remplacé', 'erreur');
+    return rendre(STATE.view);
+  }
+  const meta = {
+    jour: cur.jour, at: cur.at, par: cur.par, employe: cur.employe,
+    confirmePar: STATE.user.prenom, confirmeAt: nowISO(),
+    corrections: cur.corrections || null
+  };
+
+  if (partie === 'sec') {
+    /* Même enregistrement que l'ancienne validation directe du sec, à
+       l'heure du comptage. */
+    const inv = Object.assign({}, meta, { note: cur.note || '', lignes: cur.lignes || {} });
+    await DB.set('stock:sec', inv);
+    invaliderStock();
+    /* Historique du sec : une correction du même jour remplace son entrée. */
+    const hist = await DB.get('stock:secs', []);
+    const i = hist.findIndex(h => h.jour === inv.jour);
+    if (i >= 0) hist[i] = inv; else hist.push(inv);
+    await DB.set('stock:secs', hist.slice(-36));
+    await DB.del(CLE);
+    await feed('ok', STATE.user.prenom + ' a confirmé l’inventaire du sec du ' + fmtD(cur.jour) + ' (' + (cur.par || '—') + ')');
+    toast('Inventaire du sec repris sur le stock');
+    return rendre(STATE.view);
+  }
+
+  const inv = await enregistrerInventaire(cur.lignes || {}, cur.note, cur.avant || {}, meta);
+
+  /* Chaque bac manquant devient une perte du jour du comptage. L'id dérive
+     du comptage : confirmer deux fois n'en ajoute pas de seconde. */
+  const manquants = Object.keys(inv.ecarts).filter(c => inv.ecarts[c] < 0 && litArticle(c).taille);
+  if (manquants.length) {
+    const cle = 'pertes:' + cur.jour;
+    const liste = await DB.get(cle, []);
+    manquants.forEach(c => {
+      const id = 'inv|' + cur.at + '|' + c;
+      if (liste.some(w => w && w.id === id)) return;
+      liste.push({ id: id, produit: libelleArticle(c), nombre: -inv.ecarts[c],
+                   litrage: num(litArticle(c).taille), parUnite: true, motif: 'inventaire',
+                   par: STATE.user.prenom, employe: STATE.user.id, at: cur.at,
+                   inventaire: cur.at });
+    });
+    await DB.set(cle, liste);
+    if (typeof cumulerPertesMois === 'function') await cumulerPertesMois(cur.jour);
+  }
+  await DB.del(CLE);
+  const bacsPerdus = manquants.reduce((s, c) => s - inv.ecarts[c], 0);
+  await feed(bacsPerdus ? 'warn' : 'ok',
+    STATE.user.prenom + ' a confirmé l’inventaire du ' + fmtD(cur.jour) + ' (' + (cur.par || '—') + ')' +
+    (bacsPerdus ? ' · ' + bacsPerdus + ' ' + accord(bacsPerdus, 'bac', 'bacs') + ' en perte' : ''));
+  toast('Inventaire repris sur le stock');
+  rendre(STATE.view);
 }
 
 /* -----------------------------------------------------------------------------
@@ -704,6 +988,15 @@ V.stock = async function () {
   const { articles, inventaire } = await stockReel();
   if (typeof chargerCatalogueSec === 'function') await chargerCatalogueSec();
   const sec = await DB.get('stock:sec', null);
+  const attente = await inventaireEnAttente('froid');
+  const attenteSec = await inventaireEnAttente('sec');
+  /* Comptage en attente : affiché, mais pas encore dans les chiffres. */
+  const bandeauAttente = (a, p) => !a ? '' :
+    '<div class="alerte warn" style="margin-top:12px"><div style="flex:1;min-width:0">' +
+    '<b>Inventaire du ' + esc(fmtD(a.jour)) + ' à confirmer</b>' +
+    '<p>Compté par ' + esc(a.par || '—') + '. Ces chiffres ne comptent qu’après la confirmation d’un manager.</p></div>' +
+    (STATE.user && STATE.user.role === 'manager'
+      ? '<button class="btn menthe sm" data-verif="' + p + '">Vérifier</button>' : '') + '</div>';
 
   /* Deux onglets, comme l'inventaire. On mémorise le dernier ouvert. */
   let partie = STATE.stockPartie === 'sec' ? 'sec' : 'froid';
@@ -735,7 +1028,8 @@ V.stock = async function () {
       (inventaire
         ? '<p class="rappel" style="margin-top:14px">Dernier inventaire le ' +
           fmtD(inventaire.jour) + (inventaire.par ? ' par ' + esc(inventaire.par) : '') + '.</p>'
-        : '<p class="rappel" style="margin-top:14px">Aucun inventaire : le stock part de zéro.</p>'),
+        : '<p class="rappel" style="margin-top:14px">Aucun inventaire : le stock part de zéro.</p>') +
+      bandeauAttente(attente, 'froid'),
       'solide') +
 
     (alertes.length
@@ -782,7 +1076,7 @@ V.stock = async function () {
   /* ---------- Sec ---------- */
   const blocSec = () => {
     if (!sec || !sec.lignes || !Object.keys(sec.lignes).length) {
-      return carte('<p class="cs">Le sec n’a jamais été compté.</p>' +
+      return carte('<p class="cs">Le sec n’a jamais été compté.</p>' + bandeauAttente(attenteSec, 'sec') +
         '<button class="btn menthe bloc xl" id="st-inv-sec" style="margin-top:12px">Compter le sec</button>', 'solide');
     }
     const cat = (typeof catalogueSec === 'function') ? catalogueSec() : INVENTAIRE_SEC;
@@ -824,7 +1118,7 @@ V.stock = async function () {
       kpi('Unités', n1(totalUnites), '', 'au dernier comptage') + '</div>' +
       '<p class="rappel" style="margin-top:14px">Compté le ' + fmtD(sec.jour) +
       (sec.par ? ' par ' + esc(sec.par) : '') + '. Chantilly, coulis et toppings ' +
-      'baissent à chaque ouverture tracée ; le reste suit le comptage.</p>', 'solide') +
+      'baissent à chaque ouverture tracée ; le reste suit le comptage.</p>' + bandeauAttente(attenteSec, 'sec'), 'solide') +
       '<button class="btn menthe bloc xl" id="st-inv-sec" style="margin-top:16px">Recompter le sec</button>' +
 
       sections.map(s => {
@@ -876,6 +1170,7 @@ V.stock = async function () {
     });
     const bi = $('#st-inv');
     if (bi) bi.onclick = () => { STATE.inventairePartie = 'froid'; rendre('inventaire'); };
+    $$('[data-verif]').forEach(b => b.onclick = () => verifierInventaire(b.dataset.verif));
     const bs = $('#st-inv-sec');
     if (bs) bs.onclick = () => { STATE.inventairePartie = 'sec'; rendre('inventaire'); };
   };
@@ -1239,6 +1534,10 @@ V.inventaire = async function () {
   /* L'historique du sec, séparé : les deux comptages ne se font pas le même
      jour ni par la même personne, et on doit pouvoir voir l'un sans l'autre. */
   const historiqueSec = await DB.get('stock:secs', []);
+  /* Comptages qui attendent la confirmation d'un manager. */
+  const attente = await inventaireEnAttente('froid');
+  const attenteSec = await inventaireEnAttente('sec');
+  const estManager = !!(STATE.user && STATE.user.role === 'manager');
   /* Les bacs de l'armoire −13 sont encore au stock : l'inventaire de la
      chambre froide doit les compter aussi, sinon ils sortent deux fois
      (au comptage, puis à leur mise en vitrine). */
@@ -1269,10 +1568,14 @@ V.inventaire = async function () {
 
      Et ça ne vaut QUE pour la journée en cours : le lendemain, on ne revient
      pas sur l'inventaire de la veille, on en fait un nouveau. */
-  const dejaFaitAujourdhui = precedent && precedent.jour === today();
-  if (dejaFaitAujourdhui) Object.assign(saisie, precedent.lignes || {});
-  const secDejaFait = secPrec && secPrec.jour === today();
-  if (secDejaFait) Object.assign(saisieSec, secPrec.lignes || {});
+  /* Un comptage du jour encore à confirmer passe devant le dernier confirmé :
+     c'est lui qu'on relit et qu'on corrige. */
+  const attenteDuJour = !!(attente && attente.jour === today());
+  const dejaFaitAujourdhui = attenteDuJour || !!(precedent && precedent.jour === today());
+  if (dejaFaitAujourdhui) Object.assign(saisie, (attenteDuJour ? attente : precedent).lignes || {});
+  const attenteSecDuJour = !!(attenteSec && attenteSec.jour === today());
+  const secDejaFait = attenteSecDuJour || !!(secPrec && secPrec.jour === today());
+  if (secDejaFait) Object.assign(saisieSec, (attenteSecDuJour ? attenteSec : secPrec).lignes || {});
 
   /* Verrouillé tant que la personne n'a pas demandé à rouvrir. */
   let ouvertFroid = !dejaFaitAujourdhui;
@@ -1523,7 +1826,9 @@ V.inventaire = async function () {
 
   const dessiner = () => {
     $('#vue-actions').innerHTML = '';
-    const dernier = partie === 'froid' ? precedent : secPrec;
+    const enAttente = partie === 'froid' ? attente : attenteSec;
+    const enAttenteDuJour = partie === 'froid' ? attenteDuJour : attenteSecDuJour;
+    const dernier = partie === 'froid' ? (attenteDuJour ? attente : precedent) : (attenteSecDuJour ? attenteSec : secPrec);
     const dejaCeJour = partie === 'froid' ? dejaFaitAujourdhui : secDejaFait;
     const ouvert = partie === 'froid' ? ouvertFroid : ouvertSec;
 
@@ -1535,13 +1840,23 @@ V.inventaire = async function () {
           ? 'Compté et enregistré. Rouvrez si un chiffre doit être corrigé.'
           : ouvert && dejaCeJour
           ? 'Modifiez ce qu’il faut, puis revalidez.'
-          : 'Comptez ce qui est physiquement présent. Ce relevé devient la ' +
-            'nouvelle référence.') + '</div>' +
-        (dernier
+          : 'Comptez ce qui est physiquement présent. Un manager confirme ensuite ' +
+            'le comptage avant qu’il remplace le stock.') + '</div>' +
+        /* Comptage en attente : il est fait, mais le stock n'a pas bougé. */
+        (enAttente
+          ? '<div class="alerte warn" style="margin-top:12px">' +
+            '<div style="flex:1;min-width:0"><b>À confirmer par un manager</b>' +
+            '<p>Compté le ' + esc(fmtD(enAttente.jour)) + ' à ' + heure(enAttente.at) + ' par ' + esc(enAttente.par || '—') +
+            '. Le stock réel ne change qu’à la confirmation.</p></div>' +
+            (estManager ? '<button class="btn menthe sm" id="inv-verif">Vérifier</button>' : '') +
+            (enAttenteDuJour && !ouvert ? '<button class="btn clair sm" id="inv-rouvrir">Rouvrir</button>' : '') +
+            '</div>'
+          : '') +
+        (dernier && !enAttenteDuJour
           ? (dejaCeJour
             ? '<div class="alerte ok" style="margin-top:12px">' +
               '<div style="flex:1;min-width:0"><b>Validé à ' + heure(dernier.at) + '</b>' +
-              '<p>Par ' + esc(dernier.par || '—') + '.</p></div>' +
+              '<p>Par ' + esc(dernier.par || '—') + (dernier.confirmePar ? ', confirmé par ' + esc(dernier.confirmePar) : '') + '.</p></div>' +
               (ouvert ? '' : '<button class="btn clair sm" id="inv-rouvrir">Rouvrir</button>') +
               '</div>'
             : '<p class="rappel" style="margin-top:12px">Dernier comptage : ' +
@@ -1620,8 +1935,43 @@ V.inventaire = async function () {
       if (liste[+i]) voirInventaire(liste[+i], p);
     });
 
+    const bVerif = $('#inv-verif');
+    if (bVerif) bVerif.onclick = () => verifierInventaire(partie);
+
     const bRouvrir = $('#inv-rouvrir');
-    if (bRouvrir) bRouvrir.onclick = () => {
+    /* Le comptage en attente n'a pas touché le stock : on le rouvre tel quel. */
+    if (bRouvrir && partie === 'froid' && attenteDuJour) bRouvrir.onclick = async () => {
+      /* Revalidé, il prendra l'heure de la correction : on ajoute aux chiffres
+         comptés ce qui a été tracé depuis, sinon une ouverture faite entre
+         les deux serait effacée (Vanille 3 redeviendrait 4). */
+      try {
+        invaliderStock();
+        const art = (await stockReel()).articles || {};
+        const av = attente.avant || {};
+        new Set(Object.keys(attente.lignes || {}).concat(Object.keys(av))).forEach(c => {
+          const bouge = num(art[c] || 0) - num(av[c] || 0);
+          if (!bouge) return;
+          saisie[c] = String(Math.max(0, num(saisie[c] || 0) + bouge));
+        });
+      } catch (e) { /* stock illisible : on garde le comptage affiché */ }
+      ouvertFroid = true;
+      dessiner();
+    };
+    /* Le sec n'a pas de mouvements tracés : le comptage en attente se rouvre tel quel. */
+    /* Sec : seules chantilly, coulis et toppings ont des mouvements ; on les
+       ajoute aux chiffres comptés, comme pour la chambre froide. */
+    else if (bRouvrir && partie === 'sec' && attenteSecDuJour) bRouvrir.onclick = async () => {
+      try {
+        for (const c of Object.keys(saisieSec)) {
+          const cleV = cleVivanteSec(c, attenteSec.lignes);
+          const bouge = cleV ? await mouvementsDepuis(cleV, attenteSec.at) : 0;
+          if (bouge) saisieSec[c] = String(Math.max(0, num(saisieSec[c]) + bouge));
+        }
+      } catch (e) { /* journal illisible : on garde le comptage affiché */ }
+      ouvertSec = true;
+      dessiner();
+    };
+    else if (bRouvrir) bRouvrir.onclick = () => {
       confirmer('Rouvrir l’inventaire ?',
         'Les quantités reprennent le stock actuel, ouvertures et réceptions du jour comprises. Vous pourrez les corriger, ' +
         'puis il faudra revalider pour enregistrer.',
@@ -1742,23 +2092,36 @@ V.inventaire = async function () {
     confirmer('Valider la chambre froide ?',
       t.bacs + ' ' + accord(t.bacs, 'bac compté', 'bacs comptés') + ' sur ' + cptes.length + ' ' + accord(cptes.length, 'référence') + ', soit ' +
       n1(t.kg) + ' kg. ' +
-      (premier ? 'Premier comptage : il devient la référence du stock.'
+      (premier ? 'Premier comptage : il deviendra la référence du stock.'
        : manq === 0 && trop === 0 ? 'Cela correspond exactement au stock attendu.'
        : manq + ' ' + accord(manq, 'bac manquant', 'bacs manquants') + ', ' + trop + ' en trop par rapport au stock attendu.' +
          (manq ? ' Des ouvertures non tracées ?' : '') +
-         (trop ? (manq ? ' Et' : ' Peut-être') + ' une réception non saisie ?' : '')),
+         (trop ? (manq ? ' Et' : ' Peut-être') + ' une réception non saisie ?' : '')) +
+      ' L’inventaire est enregistré, à confirmer par un manager : le stock ne change pas avant.' +
+      (attente && !attenteDuJour ? ' Il remplace celui du ' + fmtD(attente.jour) + ', encore à confirmer.' : ''),
       'Valider', async () => {
-        const inv = await enregistrerInventaire(lignes,
-          $('#inv-note') ? $('#inv-note').value : '', avant);
+        /* Enregistré comme fait, pas repris sur le stock : un manager le
+           confirme (verifierInventaire). « avant » est le stock attendu au
+           moment du comptage, celui dont on mesure l'écart. */
+        const a = {
+          jour: today(), at: nowISO(),
+          par: STATE.user ? STATE.user.prenom : null,
+          employe: STATE.user ? STATE.user.id : null,
+          note: $('#inv-note') ? $('#inv-note').value : '',
+          lignes: lignes, avant: avant
+        };
+        await DB.set(CLE_INV_ATTENTE, a);
         /* Le brouillon de la chambre froide est effacé — il n'a plus lieu
            d'être puisque c'est validé — mais PAS la saisie : revenir sur
            l'écran doit montrer les quantités enregistrées. Celui du sec reste. */
         oublierBrouillon('froid');
-        await feed(inv.manquants ? 'warn' : 'ok',
+        await feed(manq ? 'warn' : 'ok',
           STATE.user.prenom + ' a compté la chambre froide : ' + t.bacs + ' ' + accord(t.bacs, 'bac') + ', ' + n1(t.kg) + ' kg' +
-          (inv.manquants ? ' · ' + inv.manquants + ' ' + accord(inv.manquants, 'bac manquant', 'bacs manquants') : ''));
-        toast('Chambre froide enregistrée');
-        rendre('stock');
+          (manq ? ' · ' + manq + ' ' + accord(manq, 'bac manquant', 'bacs manquants') : '') + ' · à confirmer');
+        toast('Inventaire enregistré, à confirmer par un manager');
+        /* Le manager enchaîne sur la vérification ; l'équipier retourne au stock. */
+        if (estManager) { await rendre('inventaire'); verifierInventaire('froid'); }
+        else rendre('stock');
       });
   }
 
@@ -1781,26 +2144,27 @@ V.inventaire = async function () {
     cptes.forEach(k => { lignes[k] = num(saisieSec[k]); });
 
     confirmer('Valider le sec ?',
-      cptes.length + ' ' + accord(cptes.length, 'référence comptée', 'références comptées') + '. Ce relevé remplace le précédent.',
+      cptes.length + ' ' + accord(cptes.length, 'référence comptée', 'références comptées') + '. ' +
+      'L’inventaire est enregistré, à confirmer par un manager : le stock ne change pas avant.' +
+      (attenteSec && !attenteSecDuJour ? ' Il remplace celui du ' + fmtD(attenteSec.jour) + ', encore à confirmer.' : ''),
       'Valider', async () => {
-        const inv = {
+        /* Enregistré comme fait, pas repris sur le stock : un manager le
+           confirme (verifierInventaire). « avant » est le dernier comptage
+           confirmé, celui dont le manager voit la différence. */
+        const a = {
           jour: today(), at: nowISO(),
           par: STATE.user ? STATE.user.prenom : null,
           employe: STATE.user ? STATE.user.id : null,
           note: $('#inv-note') ? $('#inv-note').value : '',
-          lignes: lignes
+          lignes: lignes,
+          avant: Object.assign({}, (secPrec && secPrec.lignes) || {})
         };
-        await DB.set('stock:sec', inv);
-        invaliderStock();
-        /* Historique du sec : une correction du même jour remplace son entrée. */
-        const hist = await DB.get('stock:secs', []);
-        const i = hist.findIndex(h => h.jour === inv.jour);
-        if (i >= 0) hist[i] = inv; else hist.push(inv);
-        await DB.set('stock:secs', hist.slice(-36));
+        await DB.set(INV_ATTENTE.sec.cle, a);
         oublierBrouillon('sec');
-        await feed('ok', STATE.user.prenom + ' a compté le sec : ' + cptes.length + ' ' + accord(cptes.length, 'référence'));
-        toast('Inventaire du sec enregistré');
-        rendre('stock');
+        await feed('ok', STATE.user.prenom + ' a compté le sec : ' + cptes.length + ' ' + accord(cptes.length, 'référence') + ' · à confirmer');
+        toast('Inventaire enregistré, à confirmer par un manager');
+        if (estManager) { STATE.inventairePartie = 'sec'; await rendre('inventaire'); verifierInventaire('sec'); }
+        else rendre('stock');
       });
   }
 

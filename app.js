@@ -2232,7 +2232,9 @@ async function purgerLocalAncien() {
        '<span class="pousse mini num">' + n1(visibles.reduce((s, w) => s + litresPerte(w), 0)) + ' L</span></div>' +
    
        (visibles.length ? '<div class="stack">' + visibles.map(w => {
-         const m = MOTIFS_PERTE.filter(x => x.id === w.motif)[0] || MOTIFS_PERTE[0];
+         /* « inventaire » : bacs manquants repris à la confirmation d'un inventaire (stock.js). */
+         const m = MOTIFS_PERTE.filter(x => x.id === w.motif)[0] ||
+           (w.motif === 'inventaire' ? { label:'Écart d’inventaire' } : MOTIFS_PERTE[0]);
          return carte('<div class="rang">' +
            '<div style="flex:1"><b>' + esc(w.produit) + '</b>' +
            '<div class="mini">' + w.nombre + ' × · ' + (w.litrage ? n1(w.litrage) + ' L · ' : '') +
@@ -2336,6 +2338,12 @@ async function purgerLocalAncien() {
    const litresPerte = w => (!w || w.supprime) ? 0 : w.parUnite
      ? num(w.nombre || 1) * num(w.litrage)
      : num(w.litrage);
+   /* Litres d'une perte réellement jetée. Les bacs manquants repris d'un
+      inventaire (motif « inventaire », stock.js) restent au registre pour
+      s'y additionner, mais n'entrent pas dans le jeté de l'écart de période :
+      un bac disparu a le plus souvent été vendu sans scan, il est déjà dans
+      les ventes et le stock compté ; le compter jeté le compterait deux fois. */
+   const litresJetes = w => (w && w.motif === 'inventaire') ? 0 : litresPerte(w);
 
    /* Reporte le litrage détruit dans la période d'écart en cours. L'écart est
       rangé sous l'identifiant de la période (ecart:<id>), pas sous le mois :
@@ -2352,7 +2360,7 @@ async function purgerLocalAncien() {
        /* Pas de borne de fin : une période échue reste la période en cours
           jusqu'à sa clôture, et la suivante part de son propre début. */
        if (d < per.debut) continue;
-       (await DB.get(c, [])).forEach(w => total += litresPerte(w));
+       (await DB.get(c, [])).forEach(w => total += litresJetes(w));
      }
      await DB.patch('ecart:' + per.id, { jeteL:total, jeteKg:+(total * FOURNISSEUR.poidsMoyenLitre).toFixed(2) });
    }
@@ -4853,7 +4861,7 @@ function ouvrirPremierePeriode() {
          }
          if (k.ann && String(k.ann).trim()) annulations++;
        }
-       (await DB.get('pertes:' + d, [])).forEach(p => pertesTotal += litresPerte(p));
+       (await DB.get('pertes:' + d, [])).forEach(p => pertesTotal += litresJetes(p));
      }
    
      Object.keys(parJour).forEach(j => {
