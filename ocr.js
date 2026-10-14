@@ -1296,7 +1296,7 @@ function extraireLignesBL(texte) {
        et finissait dans le nom du produit. */
     const reRef = /^[\$s]{0,2}[A-Z][A-Z0-9$]{3,15}$/;
     if (jetons.length > 2 && jetons[0].length <= 3 && !reRef.test(jetons[0]) &&
-        reRef.test(jetons[1]) && /\d/.test(jetons[1])) jetons.shift();
+        reRef.test(jetons[1]) && /\d/.test(jetons[1]) && !/^L\d{4}[A-Z]$/i.test(jetons[1])) jetons.shift();
 
     /* Référence en tête : « $AMARENA25 », « MACGLAMP », « GAUFRE ». La lecture
        rend souvent le « $ » en « S » : on garde la référence telle que lue,
