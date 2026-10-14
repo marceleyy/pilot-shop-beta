@@ -4841,13 +4841,20 @@ function ouvrirPremierePeriode() {
      (async () => {
        const box = $('#ec-pertes');
        if (!box) return;
-       const jours = joursEntre(per.debut, finVue);
+       /* Jusqu'à aujourd'hui, comme le poids jeté (cumulerPertesMois) : une
+          période échue reste en cours jusqu'à sa clôture. */
+       const jours = joursEntre(per.debut, today());
        DB.prelire(jours.map(d => 'pertes:' + d));
        const lignes = [];
-       for (const d of jours) (await DB.get('pertes:' + d, [])).forEach(w => {
-         const l = litresJetes(w);
-         if (l > 0) lignes.push({ jour:d, w:w, l:l });
-       });
+       try {
+         for (const d of jours) (await DB.get('pertes:' + d, [])).forEach(w => {
+           const l = litresJetes(w);
+           if (l > 0) lignes.push({ jour:d, w:w, l:l });
+         });
+       } catch (x) {
+         if (box.isConnected) box.innerHTML = '<p class="mini">Détail des pertes indisponible pour le moment.</p>';
+         return;
+       }
        if (!box.isConnected) return;
        if (!lignes.length) { box.innerHTML = '<p class="mini">Aucune perte de glace au registre sur la période.</p>'; return; }
        const total = lignes.reduce((t, x) => t + x.l, 0);
@@ -5038,7 +5045,8 @@ function ouvrirPremierePeriode() {
          '<span class="c w">Écart</span><span class="c ww">Clôturée par</span></div>' +
          historique.map((p, i) =>
            '<div class="dl" data-pclose="' + i + '" role="button" tabindex="0" style="cursor:pointer" aria-label="Voir et modifier ' +
-             esc(libellePeriode(p)) + '"><span class="c1">' + esc(libellePeriode(p)) +
+             esc(libellePeriode(p)) + ', écart ' + (p.ecartPct === undefined ? (p.ecartIncoherent ? 'incohérent' : 'non calculé') : pctEcartTxt(p.ecartPct)) +
+             ', clôturée par ' + esc(p.par) + ' le ' + fmtD(p.jour) + '"><span class="c1">' + esc(libellePeriode(p)) +
            (p.anticipee ? ' · anticipée' : '') + '</span>' +
            '<span class="c w num">' + (p.ecartPct === undefined ? '—' : pctEcartTxt(p.ecartPct)) + '</span>' +
            '<span class="c ww">' + esc(p.par) + ' ' + fmtDC(p.jour) + '</span></div>').join('') + '</div>' : '');
@@ -5109,6 +5117,10 @@ async function voirPeriodeClose(p) {
   $('#pc-ok').onclick = async () => {
     if (enCours) return;
     if (num($('#pc-bl').value) < 0 || num($('#pc-jk').value) < 0) return toast('Une quantité ne peut pas être négative', 'erreur');
+    if (num($('#pc-bl').value) === num(e.litrageBL) && num($('#pc-jk').value) === num(e.jeteKg) && avecEcart === !p.sansEcart) {
+      closeSheet();
+      return toast('Aucune modification');
+    }
     enCours = true;
     try {
       await DB.patch('ecart:' + p.id, { litrageBL:Math.max(0, num($('#pc-bl').value)), jeteKg:Math.max(0, num($('#pc-jk').value)) });
@@ -5117,14 +5129,16 @@ async function voirPeriodeClose(p) {
       const i = liste.findIndex(x => x && x.id === p.id && x.at === p.at);
       if (i < 0) { toast('Cette période n’est plus dans l’historique', 'erreur'); return; }
       const maj2 = Object.assign({}, liste[i], { modifiee:nowISO(), modifieePar:STATE.user.prenom });
-      ['ecartKg', 'ecartPct', 'stockFin', 'valeur', 'sansEcart'].forEach(k => delete maj2[k]);
+      ['ecartKg', 'ecartPct', 'ecartIncoherent', 'stockFin', 'valeur', 'sansEcart'].forEach(k => delete maj2[k]);
+      /* Même règle qu'à la clôture : un écart incohérent n'a pas de %. */
       Object.assign(maj2, avecEcart
-        ? { ecartKg:+n2(c.ecart), ecartPct:+n2(c.pct), stockFin:+n2(c.reel), valeur:+n2(c.valeur) }
+        ? Object.assign({ ecartKg:+n2(c.ecart), stockFin:+n2(c.reel), valeur:+n2(c.valeur) },
+                        c.incoherent ? { ecartIncoherent:true } : { ecartPct:+n2(c.pct) })
         : { sansEcart:true });
       liste[i] = maj2;
       await DB.set('periodes', liste);
       await feed('ok', STATE.user.prenom + ' a modifié la période clôturée ' + libellePeriode(p) +
-        (avecEcart ? ' : écart ' + pctEcartTxt(c.pct) : ' : sans écart'));
+        (avecEcart ? (c.incoherent ? ' : écart incohérent' : ' : écart ' + pctEcartTxt(c.pct)) : ' : sans écart'));
       closeSheet();
       toast('Période modifiée');
       rendre('periodes');
@@ -6203,7 +6217,10 @@ function modifierPeriode(per) {
           62 jours importés sur une période de 8 donnaient 547 kg vendus. */
        ((() => {
          const jp = joursEntre(per.debut, today() < per.fin ? today() : per.fin).length;
-         return (num(r.jours) > 0 && jp > 0 && num(r.jours) !== jp)
+         /* Accepté : un export arrêté la veille, ou qui va jusqu'au jour de
+            clôture d'une période échue (elle s'étendra jusque-là). */
+         const haut = today() > per.fin ? joursEntre(per.debut, today()).length : jp;
+         return (num(r.jours) > 0 && jp > 0 && (num(r.jours) < jp - 1 || num(r.jours) > haut))
            ? '<div class="alerte warn" style="margin-top:12px"><span class="ai">●</span><div><b>Ce fichier couvre ' + num(r.jours) + ' ' +
              accord(num(r.jours), 'jour') + ', la période en compte ' + jp + '</b><p>Exportez les ventes du ' + fmtD(per.debut) +
              ' au ' + fmtD(today() < per.fin ? today() : per.fin) + ', sinon le poids vendu et l’écart seront faux.</p></div></div>'
