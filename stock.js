@@ -61,14 +61,22 @@ const DESIGNATION_PARFUM = [
    comparés au début de la référence sans le $ (lu « S ») ni le format. */
 const REFERENCE_PARFUM = [
   ['AMARENA', 'Amarena'], ['CAFFE', 'Café'], ['CARAM', 'Caramel au beurre salé'],
-  ['CIOCCOLATO', 'Chocolat noir'], ['COCCO', 'Noix de coco'], ['FRAGOLA', 'Fraise'],
+  /* CIOCCOLATO seul : « CIOCCOLATOBIO », « CIOCCOLATOECUADOR » sont d'autres
+     parfums, laissés à la désignation. */
+  [/^CIOCCOLATO\d/, 'Chocolat noir'], ['COCCO', 'Noix de coco'], ['FRAGOLA', 'Fraise'],
   ['INIM', 'Inimitable'], ['MANGO', 'Mangue'], ['NOCCIOLA', 'Noisette'],
-  ['PISTA', 'Pistache'], ['STRACCIA', 'Stracciatella'], ['TIRAS', 'Tiramisu'],
+  ['PISTA', 'Pistache'], ['STRACCIA', 'Stracciatella'], ['TIRA', 'Tiramisu'],
   ['VANIG', 'Vanille']
 ];
 function parfumDepuisReference(ref) {
-  const r = String(ref || '').toUpperCase().replace(/^[\$S]/, '');
-  for (const [pre, p] of REFERENCE_PARFUM) if (r.indexOf(pre) === 0) return p;
+  const R = String(ref || '').toUpperCase();
+  /* Avec et sans le premier S : « $STRACCIA25 » lu « SSTRACCIA25 », mais
+     aussi « STRACCIA25 » quand le $ a disparu. */
+  for (const r of [R.replace(/^S?\$/, ''), R.replace(/^S/, ''), R]) {
+    for (const [pre, p] of REFERENCE_PARFUM) {
+      if (pre instanceof RegExp ? pre.test(r) : r.indexOf(pre) === 0) return p;
+    }
+  }
   return null;
 }
 
@@ -1230,7 +1238,8 @@ V.controle = async function () {
      ni Réception ni Stock ne sont dans sa barre. Sans ce bandeau, un bon
      scanné par l'équipe attendait sans que personne ne le voie. */
   const recAttente = typeof receptionsEnAttente === 'function' ? await receptionsEnAttente() : [];
-  if (recAttente.length && typeof bandeauReceptions === 'function') {
+  if (STATE.view !== 'controle' || page !== $('#page')) return;
+  if (recAttente.length && typeof bandeauReceptions === 'function' && page.firstChild) {
     const br = document.createElement('div');
     br.style.marginTop = '14px';
     br.innerHTML = bandeauReceptions(recAttente);
