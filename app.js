@@ -138,7 +138,9 @@
      ['boutique',     'reglages'],
      /* Résumé lu par les autres boutiques du franchisé (franchise.js). */
      ['franchise:',   'reglages'],
-     ['async:',       'reglages']
+     ['async:',       'reglages'],
+     /* Tâches à rythme propre modifiées par le manager (Paramètres). */
+     ['asynchrones',  'reglages']
    ].filter(function (r) {
      /* Une route dont la table est introuvable est retirée dès le chargement :
         mieux vaut garder la clé en local que d'interroger « undefined ». */
@@ -167,7 +169,9 @@
                       'anomalies', 'reception:', 'stock:mv:', 'stock:m13:', 'pointage:', 'ecart:',
                       /* Deux iPads qui ajoutent une ligne au même moment : sans fusion,
                          la seconde écriture effaçait la ligne de l'autre. */
-                      'feed:', 'pertes:'];
+                      'feed:', 'pertes:',
+                      /* Tâches à rythme propre : un champ par tâche (id). */
+                      'asynchrones'];
    const aFusionner = cle => FUSIONNER.some(p => cle.indexOf(p) === 0);
 
    /* Fusion superficielle, champ par champ. Suffisante : chaque personne
@@ -2232,7 +2236,9 @@ async function purgerLocalAncien() {
        '<span class="pousse mini num">' + n1(visibles.reduce((s, w) => s + litresPerte(w), 0)) + ' L</span></div>' +
    
        (visibles.length ? '<div class="stack">' + visibles.map(w => {
-         const m = MOTIFS_PERTE.filter(x => x.id === w.motif)[0] || MOTIFS_PERTE[0];
+         /* « inventaire » : bacs manquants repris à la confirmation d'un inventaire (stock.js). */
+         const m = MOTIFS_PERTE.filter(x => x.id === w.motif)[0] ||
+           (w.motif === 'inventaire' ? { label:'Écart d’inventaire' } : MOTIFS_PERTE[0]);
          return carte('<div class="rang">' +
            '<div style="flex:1"><b>' + esc(w.produit) + '</b>' +
            '<div class="mini">' + w.nombre + ' × · ' + (w.litrage ? n1(w.litrage) + ' L · ' : '') +
@@ -2336,6 +2342,12 @@ async function purgerLocalAncien() {
    const litresPerte = w => (!w || w.supprime) ? 0 : w.parUnite
      ? num(w.nombre || 1) * num(w.litrage)
      : num(w.litrage);
+   /* Litres d'une perte réellement jetée. Les bacs manquants repris d'un
+      inventaire (motif « inventaire », stock.js) restent au registre pour
+      s'y additionner, mais n'entrent pas dans le jeté de l'écart de période :
+      un bac disparu a le plus souvent été vendu sans scan, il est déjà dans
+      les ventes et le stock compté ; le compter jeté le compterait deux fois. */
+   const litresJetes = w => (w && w.motif === 'inventaire') ? 0 : litresPerte(w);
 
    /* Reporte le litrage détruit dans la période d'écart en cours. L'écart est
       rangé sous l'identifiant de la période (ecart:<id>), pas sous le mois :
@@ -2352,7 +2364,7 @@ async function purgerLocalAncien() {
        /* Pas de borne de fin : une période échue reste la période en cours
           jusqu'à sa clôture, et la suivante part de son propre début. */
        if (d < per.debut) continue;
-       (await DB.get(c, [])).forEach(w => total += litresPerte(w));
+       (await DB.get(c, [])).forEach(w => total += litresJetes(w));
      }
      await DB.patch('ecart:' + per.id, { jeteL:total, jeteKg:+(total * FOURNISSEUR.poidsMoyenLitre).toFixed(2) });
    }
@@ -4439,21 +4451,24 @@ function ouvrirPremierePeriode() {
      const r = await scannerPhoto('bl');
      if (!r) return;
 
-     /* L'OCR ne sait pas lire les lignes d'un bon de livraison. Enregistrer ici
-        ajouterait 0 litre aux achats : le stock théorique serait amputé de toute
-        la livraison et l'écart accuserait l'équipe d'un manque qui n'existe pas. */
-     if (!r.lignes || !r.lignes.length) {
+     /* Sans lignes exploitables, enregistrer ajouterait 0 litre aux achats : le
+        stock théorique serait amputé de toute la livraison et l'écart
+        accuserait l'équipe d'un manque qui n'existe pas. */
+     /* Bon lu par la caméra : les quantités entourées au stylo se lisent mal,
+        on ne calcule pas les litres ligne à ligne. On reprend le total du bon
+        (« Total Litres = 456,00 »), que la personne vérifie. */
+     if (!r.lignes || !r.lignes.length || r.source === 'ocr') {
        /* Le scan lit le numéro du bon, pas son tableau : on demande le total
           livré au lieu de s'arrêter. Avant, l'écran aboutissait toujours ici et
           le bouton « Scanner BL » ne pouvait ajouter aucun achat. */
        showSheet(
          '<h2 id="sheet-titre">Bon de livraison</h2>' +
-         '<p class="sub">Les lignes du bon ne se lisent pas automatiquement : indiquez le total livré.</p>' +
+         '<p class="sub">' + (r.total ? 'Total lu sur le bon : vérifiez-le avant d’ajouter.' : 'Indiquez le total livré, en bas du bon.') + '</p>' +
          '<div class="grid g2">' +
          '<div class="champ"><label class="f">N° de bon</label>' +
          '<input type="text" id="bl-num" value="' + esc(r.numero || '') + '" autocapitalize="characters" spellcheck="false"></div>' +
          '<div class="champ"><label class="f">Litres livrés (total du bon)</label>' +
-         '<input type="number" id="bl-litres" min="0" step="0.5" inputmode="decimal" placeholder="Ex. 120"></div></div>' +
+         '<input type="number" id="bl-litres" min="0" step="0.5" inputmode="decimal" placeholder="Ex. 120" value="' + (r.total > 0 ? r.total : '') + '"></div></div>' +
          '<div class="alerte info" style="margin-top:14px"><span class="ai">•</span><div><b>Ce que fait la validation</b>' +
          '<p>Les litres s’ajoutent aux achats de la période en cours, base du calcul d’écart. ' +
          'Un oubli ici se lit ensuite comme un manque de glace.</p></div></div>' +
@@ -4853,7 +4868,7 @@ function ouvrirPremierePeriode() {
          }
          if (k.ann && String(k.ann).trim()) annulations++;
        }
-       (await DB.get('pertes:' + d, [])).forEach(p => pertesTotal += litresPerte(p));
+       (await DB.get('pertes:' + d, [])).forEach(p => pertesTotal += litresJetes(p));
      }
    
      Object.keys(parJour).forEach(j => {
@@ -5445,7 +5460,7 @@ function modifierPeriode(per) {
            '<div style="font-size:9.5px">' +
            nets.map(x => x.d.split('-').reverse().join('/') + ' : ' + x.n + '/' + x.total).join(' · ') +
            '. Plan de nettoyage : ' +
-           NETTOYAGE.asynchrones.map(a => a.nom + ' (' + (a.type === 'jours-fixes'
+           NETTOYAGE.asynchrones.map(a => esc(a.nom) + ' (' + (a.type === 'jours-fixes'
              ? a.jours.map(j => JOURS_SEMAINE[j].toLowerCase()).join(', ')
              : 'tous les ' + a.intervalleJours + ' jours') + ')').join(' · ') + '.</div>'
          : '<div>Aucun enregistrement de nettoyage sur la période.</div>') +
