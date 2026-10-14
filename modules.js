@@ -578,7 +578,7 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
          $$('[data-lieu]').forEach(b => b.onclick = () => {
            const l = lignes[+b.dataset.lieu];
            /* Un produit choisi dans l'autre zone ne vaut plus. */
-           if (l.lieu !== b.dataset.z) l.choix = null;
+           if ((l.lieu || 'froid') !== b.dataset.z) l.choix = null;
            l.lieu = b.dataset.z;
            rendre2();
          });
