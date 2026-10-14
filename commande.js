@@ -245,7 +245,7 @@ async function facteurMeteo(depuis, fin, jour, jusqua) {
   const neutre = { facteur: 1, passe: null, prevu: null };
   if (!METEO.actif || !STATE.enLigne) return neutre;
   const passe = Math.min(92, Math.max(1, ecartJours(depuis, jour)));
-  const cle = jour + '|' + passe;
+  const cle = jour + '|' + passe + '|' + METEO.lat + ',' + METEO.lon;   // la ville peut changer
   let d = (_meteoCommande.cle === cle && Date.now() - _meteoCommande.at < 3600e3) ? _meteoCommande.valeur : null;
   if (!d) {
     /* Échec récent : pas de nouvel essai avant 10 min, on rend sans correction. */

@@ -97,6 +97,9 @@ async function cocherEtape(id) {
    elle a été saisie depuis un autre écran ou un autre appareil.
    -------------------------------------------------------------------------- */
 const ETAPES_GUIDE = [
+  { id:'ville', titre:'La ville de la boutique',
+    texte:'La météo affichée et la correction de la commande de glace suivent cette ville.',
+    bouton:'Choisir la ville' },
   { id:'horaires', titre:'Jours et heures d’ouverture',
     texte:'Ils règlent les moments du relevé des frigos et les rappels d’ouverture et de fermeture.',
     bouton:'Régler les horaires' },
@@ -132,12 +135,15 @@ const ETAPES_GUIDE = [
 async function etatEtapes() {
   const b = (await lireGuide()) || {};
   const fait = Object.assign({}, b.etapes || {});
-  const [per, inv, sec, temp] = await Promise.all([
+  const [per, inv, sec, temp, ville] = await Promise.all([
     DB.get('periode:courante', null).catch(() => null),
     DB.get('stock:inventaire', null).catch(() => null),
     DB.get('stock:sec', null).catch(() => null),
-    DB.get('temp:' + today(), null).catch(() => null)
+    DB.get('temp:' + today(), null).catch(() => null),
+    DB.get('boutique:ville', null).catch(() => null)
   ]);
+  /* Ville déjà choisie depuis les Paramètres : rien à refaire ici. */
+  if (ville) fait.ville = fait.ville || true;
   if (per) fait.periode = fait.periode || true;
   if (inv && inv.at) fait.invglace = fait.invglace || true;
   if (sec && (sec.at || sec.jour)) fait.invsec = fait.invsec || true;
@@ -177,7 +183,7 @@ V.miseenroute = async function () {
 
   $('#page').innerHTML =
     carte(entete('', 'Bienvenue, ' + STATE.user.prenom,
-      'Dix étapes pour que la boutique ' + APP.site + ' soit prête à ouvrir. Faites-les dans l’ordre : chacune se coche toute seule ' +
+      ETAPES_GUIDE.length + ' étapes pour que la boutique ' + APP.site + ' soit prête à ouvrir. Faites-les dans l’ordre : chacune se coche toute seule ' +
       'quand c’est fait, et vous pouvez revenir ici à tout moment depuis la tour de contrôle.') +
       '<div class="rang" style="margin-top:12px"><b class="num">' + n + ' / ' + ETAPES_GUIDE.length + '</b>' +
       '<span class="mini">' + (n === ETAPES_GUIDE.length ? 'Tout est prêt.' :
@@ -234,6 +240,7 @@ V.miseenroute = async function () {
 };
 
 function lancerEtape(id) {
+  if (id === 'ville')     return feuilleVille(async () => { await cocherEtape('ville'); rendre('miseenroute'); });
   if (id === 'horaires')  return feuilleHoraires();
   if (id === 'equipe')    return editerPersonne(null);
   if (id === 'appareils') return feuilleAppareils();
@@ -654,4 +661,124 @@ function changerDeBoutique() {
   if (!b) return;
   if (!SUPABASE.url || !SUPABASE.anonKey) { b.hidden = true; return; }
   b.onclick = changerDeBoutique;
+})();
+
+/* -----------------------------------------------------------------------------
+   VILLE DE LA BOUTIQUE (météo)
+   La météo suivait Chamonix pour toutes les boutiques. Chaque boutique choisit
+   sa ville, sous la clé « boutique:ville » (table reglages) :
+     { ville, region, pays, lat, lon, timezone, par, at }
+   Une copie reste sur l'appareil : la météo du premier écran part tout de
+   suite avec la bonne ville, sans attendre la base.
+   -------------------------------------------------------------------------- */
+const VILLE_LOCALE = 'pilotshop.v3:ville';
+const GEOCODAGE = 'https://geocoding-api.open-meteo.com/v1/search';
+
+function appliquerVille(v) {
+  if (!v || typeof v.lat !== 'number' || typeof v.lon !== 'number') return false;
+  const change = v.lat !== METEO.lat || v.lon !== METEO.lon;
+  METEO.ville = v.ville || METEO.ville;
+  METEO.lat = v.lat;
+  METEO.lon = v.lon;
+  if (v.timezone) METEO.parametres.timezone = v.timezone;
+  return change;
+}
+try { appliquerVille(JSON.parse(localStorage.getItem(VILLE_LOCALE) || 'null')); } catch (e) {}
+
+/* La base fait foi : une ville choisie sur un autre iPad arrive ici au
+   chargement suivant, et la bande météo se redessine à la prochaine vue. */
+async function chargerVille() {
+  /* Appareil pas encore rattaché : la base refuse (comme appliquerReglages). */
+  if (typeof appareilRattache === 'function' && !appareilRattache()) return;
+  try {
+    const v = await DB.get('boutique:ville', null);
+    if (!v) return;
+    try { localStorage.setItem(VILLE_LOCALE, JSON.stringify(v)); } catch (e) {}
+    appliquerVille(v);
+  } catch (e) { /* on garde la copie de l'appareil */ }
+}
+chargerVille();
+
+async function chercherVilles(nom) {
+  const u = GEOCODAGE + '?name=' + encodeURIComponent(nom) + '&count=8&language=fr&format=json';
+  const r = await fetch(u, { signal:signalDelai() });
+  if (!r.ok) throw new Error('http');
+  const d = await r.json();
+  return (d.results || []).map(x => ({
+    ville:x.name, region:x.admin1 || '', pays:x.country || '',
+    lat:x.latitude, lon:x.longitude, timezone:x.timezone || METEO.parametres.timezone
+  }));
+}
+
+/* apres(v) : appelé une fois la ville enregistrée (guide ou Paramètres). */
+function feuilleVille(apres) {
+  showSheet(
+    '<h2 id="sheet-titre">Ville de la boutique</h2>' +
+    '<p class="sub">La météo de Ma journée, de la tour de contrôle et de la commande de glace suit cette ville.</p>' +
+    '<div class="champ"><label class="f" for="vl-q">Rechercher une ville</label>' +
+    '<input type="search" id="vl-q" autocomplete="off" spellcheck="false" placeholder="Annecy, Lyon, Nice…" value=""></div>' +
+    '<p class="mini" id="vl-etat" role="status" style="margin-top:8px">Actuellement : ' + esc(METEO.ville) + '</p>' +
+    '<div class="stack" id="vl-res" style="margin-top:10px"></div>' +
+    '<div class="actions"><button class="btn clair" data-fermer>Annuler</button></div>');
+
+  const etat = m => { const e = $('#vl-etat'); if (e) e.textContent = m; };
+  let liste = [], minuterie = null, tour = 0;
+  const lancer = async () => {
+    const champ = $('#vl-q');
+    if (!champ) return;                 // feuille fermée pendant la frappe
+    const q = champ.value.trim();
+    const n = ++tour;
+    if (q.length < 2) { $('#vl-res').innerHTML = ''; return etat('Tapez au moins deux lettres.'); }
+    if (!STATE.enLigne) return etat('Hors ligne : la recherche de ville demande Internet.');
+    etat('Recherche…');
+    try {
+      const r = await chercherVilles(q);
+      if (n !== tour) return;           // une frappe plus récente a pris la main
+      liste = r;
+      etat(r.length ? 'Touchez votre ville.' : 'Aucune ville trouvée pour « ' + q + ' ».');
+      $('#vl-res').innerHTML = r.map((v, i) =>
+        '<button type="button" class="btn clair bloc" data-v="' + i + '" style="justify-content:flex-start;text-align:left">' +
+        '<span><b>' + esc(v.ville) + '</b><span class="mini" style="display:block">' +
+        esc([v.region, v.pays].filter(Boolean).join(', ')) + '</span></span></button>').join('');
+      $$('#vl-res [data-v]').forEach(b => b.onclick = () => enregistrer(liste[+b.dataset.v], b));
+    } catch (e) {
+      if (n === tour) etat('Recherche impossible pour le moment. Vérifiez le Wi-Fi, puis réessayez.');
+    }
+  };
+  const enregistrer = async (v, bouton) => {
+    if (!v) return;
+    $$('#vl-res [data-v]').forEach(b => b.disabled = true);
+    const fiche = Object.assign({}, v, { par:STATE.user ? STATE.user.prenom : '', at:nowISO() });
+    try {
+      await DB.set('boutique:ville', fiche);
+    } catch (e) {
+      $$('#vl-res [data-v]').forEach(b => b.disabled = false);
+      return etat('Enregistrement impossible. Réessayez.');
+    }
+    try { localStorage.setItem(VILLE_LOCALE, JSON.stringify(fiche)); } catch (e) {}
+    appliquerVille(fiche);
+    closeSheet();
+    toast('Météo de ' + v.ville);
+    if (typeof apres === 'function') await apres(fiche);
+  };
+  $('#vl-q').oninput = () => { clearTimeout(minuterie); minuterie = setTimeout(lancer, 350); };
+  $('#vl-q').focus();
+}
+
+/* Paramètres : la ville en tête, pour les boutiques déjà en service. */
+(function () {
+  const origine = V.parametres;
+  if (typeof origine !== 'function') return;
+  V.parametres = async function () {
+    await origine.apply(this, arguments);
+    const page = $('#page');
+    if (!page || STATE.view !== 'parametres') return;
+    /* Sous « Revenir à la mise en route » quand il est là. */
+    const retour = $('#page [data-guide-retour]');
+    (retour || page).insertAdjacentHTML(retour ? 'afterend' : 'afterbegin',
+      carte(entete('📍', 'Ville de la boutique', 'La météo affichée et la correction de la commande de glace.') +
+        '<div class="rang"><b>' + esc(METEO.ville) + '</b>' +
+        '<button class="btn clair sm" id="vl-changer">Changer de ville</button></div>', 'solide'));
+    $('#vl-changer').onclick = () => feuilleVille(() => rendre('parametres'));
+  };
 })();
