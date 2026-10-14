@@ -1263,7 +1263,7 @@ function extraireLignesBL(texte) {
   /* Numéro du bon et total en litres, pour recouper la saisie. Le total
      s'écrit « Total Litres / Liters / Litro / Litri = 456,00 » : la lecture
      coupe parfois la ligne, on prend aussi le nombre qui suit « Litri = ». */
-  const mBL = brut.match(/\bBL\s*(\d{5,8})\b/i);
+  const mBL = brut.match(/\bBL\s*(\d{5,8})\b/i) || numeroBLTolerant(brut);
   /* « 1.456,00 » ou « 1 456,00 » : séparateur de milliers retiré, sinon
      parseFloat rendait 1,456 L et l'écart accusait un manque de 1 454 L. */
   const NB = '(\\d{1,3}(?:\\.\\d{3})+(?:,\\d+)?|\\d{1,3}(?: \\d{3})+,\\d{2}|\\d+(?:[.,]\\d+)?)';
@@ -1367,6 +1367,34 @@ function extraireLignesBL(texte) {
     total: mTot && nombre(mTot[1]) > 0 && nombre(mTot[1]) <= 5000 ? nombre(mTot[1]) : null,
     date: date
   };
+}
+
+/* Numéro du bon quand « BL221970 » est mal lu : « 8L221970 », « B1221970 »,
+   « BL 22197O », ou le « BL » perdu devant le numéro, juste avant la date
+   d'enlèvement (« 221970   07/10/2026 »). Rend la même forme qu'un match :
+   [0] le texte trouvé, [1] les chiffres, index. */
+function numeroBLTolerant(brut) {
+  const chiffres = x => x.split('').map(c => VERS_CHIFFRE[c] !== undefined ? VERS_CHIFFRE[c] : c).join('');
+  const essais = [
+    /(?:^|[^A-Za-z0-9])([B8][L1I|]\s*[-:]?\s*([0-9OoQDIlZSsG]{6}))(?![A-Za-z0-9])/g,
+    /^[ \t]*([A-Za-z|]{0,2}([0-9OoQDIlZSs]{6}))\s+\d{2}[\/.]\d{2}[\/.]20\d{2}\b/gm
+  ];
+  /* Le numéro est dans l'en-tête : sans « BL », on ne cherche pas dans le
+     tableau, où un lot de gaufre suivi de sa DLC lui ressemblerait ; et le
+     numéro doit ouvrir sa ligne, comme sur le bon. */
+  const fin = brut.search(/palette|d[ée]signation/i);
+  const entete = fin >= 0 ? brut.slice(0, fin) : brut;
+  for (const re of essais) {
+    const zone = re === essais[0] ? brut : entete;
+    let m;
+    while ((m = re.exec(zone))) {
+      const n = chiffres(m[2]);
+      if (!/^\d{6}$/.test(n)) continue;
+      const r = [m[1], n]; r.index = m.index + m[0].indexOf(m[1]);
+      return r;
+    }
+  }
+  return null;
 }
 
 /* Un jeton lu est-il un lot ? Formats du bon Jetfreeze : 14159A (glace),
