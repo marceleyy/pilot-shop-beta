@@ -139,7 +139,9 @@ function libelleArticle(cle) {
    même si le nom est illisible. Une variante de lecture (« SPISTAMZS ») est
    apprise à son tour la première fois qu'elle est confirmée.
    -------------------------------------------------------------------------- */
-const CLE_MEMO_BL = 'bl:memo';
+/* Préfixe « stock: » : synchronisée (table stock) pour que ce qu'apprend
+   un iPad serve aux autres. Hors FUSIONNER : le dernier qui écrit gagne. */
+const CLE_MEMO_BL = 'stock:memo-bl';
 function cleMemoRef(ref) {
   const r = String(ref || '').toUpperCase().replace(/[^A-Z0-9$]/g, '').replace(/^\$/, 'S');
   return r.length >= 4 ? r : '';

@@ -269,7 +269,7 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
        '<p>Corrigez une quantité si besoin. Mettre 0 retire la ligne. Le stock ne change pas tant que vous ne confirmez pas.</p></div></div>' +
        '<div class="stack" style="margin-top:14px">' + r.lignes.map((l, i) =>
          '<div class="rang"><div style="flex:1;min-width:0"><b>' + esc(l.produit) + '</b>' +
-         '<div class="mini">' + (l.lot ? 'lot ' + esc(l.lot) : 'sans lot') + ' · ' + (l.dlc ? 'DLC ' + esc(fmtD(l.dlc)) : 'sans DLC') + '</div></div>' +
+         '<div class="mini">' + (l.cle && typeof libelleArticle === 'function' ? 'au stock : ' + esc(libelleArticle(l.cle)) + ' · ' : '') + (l.lot ? 'lot ' + esc(l.lot) : 'sans lot') + ' · ' + (l.dlc ? 'DLC ' + esc(fmtD(l.dlc)) : 'sans DLC') + '</div></div>' +
          '<input type="number" min="0" step="1" inputmode="numeric" data-q="' + i + '" value="' + esc(qtes[i]) + '" style="width:76px;text-align:center"></div>').join('') +
        '</div>' +
        '<div class="actions"><button class="btn clair" data-fermer>Laisser en attente</button>' +
@@ -416,8 +416,12 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
            : '';
        }
    
+       let ouvre = false;
        $('#rc-ok').onclick = async () => {
+         if (ouvre) return;
+         ouvre = true;
          const memo = typeof memoBL === 'function' ? await memoBL() : {};
+         ouvre = false;
          const t = $('#rc-t').value;
          const refuse = (t !== '' && num(t) > RECEPTION.tempMax) || Object.keys(conf).some(k => !conf[k]);
          lignesReception({ fournisseur:$('#rc-f').value.trim(), numero:$('#rc-n').value.trim(),
@@ -457,6 +461,9 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
        lignes.forEach(l => {
          const a = memo && l.ref && typeof cleMemoRef === 'function' ? memo[cleMemoRef(l.ref)] : null;
          if (!a || !a.cle) return;
+         /* Une seule confirmation ne suffit pas à passer outre un nom bien lu :
+            une association fausse s'imposerait à chaque bon. */
+         if (!((a.vu || 1) >= 2 || !parfumDepuisDesignation(l.lu))) return;
          const art = litArticle(a.cle);
          l.appris = a.cle;
          l.produit = l.lu = libelleArticle(a.cle);
