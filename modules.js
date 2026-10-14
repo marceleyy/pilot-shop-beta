@@ -424,6 +424,9 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
         libellé qui partage ses cinq premières lettres avec la saveur. */
      function saveurDepuisLibelle(saveurs, libelle) {
        const nrm = s => String(s||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z]/g,'');
+       /* Le bon écrit « Vanille » en français, le catalogue « Vaniglia » :
+          les cinq premières lettres diffèrent (vanil / vanig). */
+       libelle = String(libelle || '').replace(/vanille/gi, 'Vaniglia');
        const tout = nrm(libelle);
        if (!tout) return null;
        const exact = saveurs.filter(sv => nrm(sv) && tout.indexOf(nrm(sv)) >= 0)
