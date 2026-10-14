@@ -565,15 +565,21 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
          function brancherChoix() {
            $$('[data-choix]').forEach(b => b.onclick = () => {
              const l = lignes[+b.dataset.choix];
-             const c = catalogue.filter(x => x.nom === b.dataset.nom)[0];
+             const c = catalogue.filter(x => x.lieu === (l.lieu || 'froid') && x.nom === b.dataset.nom)[0];
              if (!c) return;
              l.choix = c; l.produit = c.nom; l.unite = c.unite;
+             /* Le nom choisi ne porte pas de taille : sans taille saisie, le
+                bac par défaut est signalé à vérifier. */
+             if (c.fam === 'glace' && !num(l.taille)) l.tailleDeduite = true;
              rendre2();
            });
          }
          brancherChoix();
          $$('[data-lieu]').forEach(b => b.onclick = () => {
-           lignes[+b.dataset.lieu].lieu = b.dataset.z;
+           const l = lignes[+b.dataset.lieu];
+           /* Un produit choisi dans l'autre zone ne vaut plus. */
+           if (l.lieu !== b.dataset.z) l.choix = null;
+           l.lieu = b.dataset.z;
            rendre2();
          });
          $$('[data-scandlc]').forEach(b => b.onclick = async () => {
