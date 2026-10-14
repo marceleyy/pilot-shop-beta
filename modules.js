@@ -440,7 +440,7 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
        const lignes = (bl.lignes || []).map(l => ({
          /* Lot et unité lus sur le bon ; quantité illisible laissée vide, pour
             qu'elle soit saisie plutôt qu'enregistrée à 1 par défaut. */
-         produit:l.parfum || l.ref || '', qte:l.bacs || '', unite:l.unite || 'bac', lot:l.lot || '', lotCorrige:!!l.lotCorrige, qteDouteuse:!!l.qteDouteuse, dlc:'', taille:l.taille || ''
+         produit:l.parfum || l.ref || '', ref:l.ref || '', lu:l.parfum || l.ref || '', qte:l.bacs || '', unite:l.unite || 'bac', lot:l.lot || '', lotCorrige:!!l.lotCorrige, qteDouteuse:!!l.qteDouteuse, dlc:'', taille:l.taille || ''
        }));
        if (!lignes.length) lignes.push({ produit:'', qte:1, unite:'bac', lot:'', dlc:'' });
    
@@ -555,7 +555,10 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
              qui n'est aucun parfum (lait, cornets…) n'entre pas dans les bacs de
              la chambre froide : la réception reste tracée pour sa DLC. */
           const nrmP = x => String(x || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/\s+/g, ' ').trim();
+          /* La référence ne sert que si le libellé vient du bon tel quel :
+             un libellé retapé à la main dit ce que la personne a voulu. */
           const connu = glace ? (parfumDepuisDesignation(l.produit) ||
+            (l.ref && l.produit === l.lu ? parfumDepuisReference(l.ref) : null) ||
             PARFUMS.filter(p => nrmP(p) === nrmP(l.produit.replace(/\d+(?:[.,]\d+)?\s*(?:litres?|lt|l)\b/i, '')))[0] || null) : null;
           if (glace && !connu) { horsStock.push(l.produit.trim()); continue; }
           auStock++;

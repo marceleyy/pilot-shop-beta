@@ -50,11 +50,27 @@ const DESIGNATION_PARFUM = [
   [/cocco|coco\b/i,                        'Noix de coco'],
   [/sanguin|arancia/i,                     'Orange sanguine'],
   [/pista/i,                               'Pistache'],
-  [/stracciatella/i,                       'Stracciatella'],
+  [/stracci/i,                          'Stracciatella'],
   [/tiramis/i,                             'Tiramisu'],
   [/vanig|vanille|vaniglia|vanilla/i,      'Vanille'],
   [/yogurt|yaourt/i,                       'Yogurt']
 ];
+
+/* Repli quand le libellé est mal lu (« Glace Caté ») : la référence du bon,
+   « SCAFFE25 » ou « $CAFFE25 », porte aussi le parfum. Préfixes Jetfreeze,
+   comparés au début de la référence sans le $ (lu « S ») ni le format. */
+const REFERENCE_PARFUM = [
+  ['AMARENA', 'Amarena'], ['CAFFE', 'Café'], ['CARAM', 'Caramel au beurre salé'],
+  ['CIOCCOLATO', 'Chocolat noir'], ['COCCO', 'Noix de coco'], ['FRAGOLA', 'Fraise'],
+  ['INIM', 'Inimitable'], ['MANGO', 'Mangue'], ['NOCCIOLA', 'Noisette'],
+  ['PISTA', 'Pistache'], ['STRACCIA', 'Stracciatella'], ['TIRAS', 'Tiramisu'],
+  ['VANIG', 'Vanille']
+];
+function parfumDepuisReference(ref) {
+  const r = String(ref || '').toUpperCase().replace(/^[\$S]/, '');
+  for (const [pre, p] of REFERENCE_PARFUM) if (r.indexOf(pre) === 0) return p;
+  return null;
+}
 
 function parfumDepuisDesignation(nom) {
   const n = String(nom || '');
@@ -1209,6 +1225,18 @@ V.controle = async function () {
   await V_controle_origine.call(this);
   const page = $('#page');
   if (!page) return;
+
+  /* Réceptions à confirmer : la tour de contrôle est l'accueil du manager, et
+     ni Réception ni Stock ne sont dans sa barre. Sans ce bandeau, un bon
+     scanné par l'équipe attendait sans que personne ne le voie. */
+  const recAttente = typeof receptionsEnAttente === 'function' ? await receptionsEnAttente() : [];
+  if (recAttente.length && typeof bandeauReceptions === 'function') {
+    const br = document.createElement('div');
+    br.style.marginTop = '14px';
+    br.innerHTML = bandeauReceptions(recAttente);
+    page.insertBefore(br, page.firstChild.nextSibling);
+    const bv = br.querySelector('#rc-verif'); if (bv) bv.onclick = verifierReceptions;
+  }
 
   /* -----------------------------------------------------------------------------
      ANOMALIES SIGNALÉES
