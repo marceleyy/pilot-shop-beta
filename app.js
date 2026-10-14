@@ -77,7 +77,7 @@
      jour: today(),
      phase: null,         // 'ouverture' | 'service' | 'fermeture'
      service: null,       // session de pointeuse en cours ({…, jour} : jour de début)
-     moisFrigo: null,     // mois affiché par le Frigo virtuel (« AAAA-MM »), indépendant de jour
+     moisFrigo: null,     // mois affiché par Produits ouverts (« AAAA-MM »), indépendant de jour
      enLigne: navigator.onLine,
      erreurBase: null,
      dernierEchec: null,
@@ -1289,6 +1289,11 @@
      (sous ? '<div class="cs">' + esc(sous) + '</div>' : '');
    const vide = (icone, texte) => '<div class="vide">' + esc(texte) + '</div>';
    const pastille = (cls, txt) => '<span class="pill ' + cls + '">' + esc(txt) + '</span>';
+   /* Pastille qui ouvre l'écran concerné : « Frigos matin à faire » se lisait
+      sans mener nulle part. data-go est relié par rendre(), comme « Ouvrir ». */
+   const pastilleLien = (cls, txt, go, moment) =>
+     '<button type="button" class="pill lien ' + cls + '" data-go="' + go + '"' +
+     (moment ? ' data-moment="' + moment + '"' : '') + '>' + esc(txt) + '</button>';
    const avatar = (e, cls) =>
      '<span class="' + (cls || 'av') + '" style="background:' + esc(e.couleur) + '">' + esc(e.initiales) + '</span>';
 
@@ -3792,7 +3797,7 @@ window.addEventListener('error', function (ev) {
    })();
    /* =============================================================================
       PILOT-SHOP — app.js  ·  PARTIE 2 / 2
-      Espace manager : tour de contrôle, frigo virtuel, écarts, périodes,
+      Espace manager : tour de contrôle, produits ouverts, écarts, périodes,
       inventaires, caisse, historique, équipe, réglages.
       Se colle telle quelle à la suite de la partie 1.
       ============================================================================= */
@@ -4192,10 +4197,10 @@ function ouvrirPremierePeriode() {
        '<div class="grid g2" id="ctl-meteo">' + widgetMeteo(m) +
        carte(entete('👥', enService.length ? enService.map(s => s.prenom).join(', ') : 'Personne en service',
          enService.length ? 'En poste depuis ' + enService.map(s => heure(s.debut)).join(', ') : 'Aucun pointage ouvert') +
-         '<div class="rang">' + pastille(e.tempM ? 'ok' : (matinDu ? 'bad' : 'n'),
-           e.tempM ? 'Frigos matin faits' : (matinDu ? 'Frigos matin manquants' : 'Frigos matin à faire')) +
-         pastille(e.net ? 'ok' : 'warn', e.net + '/' + e.netTotal + ' nettoyage') +
-         pastille(e.caisse ? 'ok' : 'n', e.caisse ? 'Caisse faite' : 'Caisse ouverte') + '</div>', 'solide') + '</div>' +
+         '<div class="rang">' + pastilleLien(e.tempM ? 'ok' : (matinDu ? 'bad' : 'n'),
+           e.tempM ? 'Frigos matin faits' : (matinDu ? 'Frigos matin manquants' : 'Frigos matin à faire'), 'temp', 'm') +
+         pastilleLien(e.net ? 'ok' : 'warn', e.net + '/' + e.netTotal + ' nettoyage', 'clean') +
+         pastilleLien(e.caisse ? 'ok' : 'n', e.caisse ? 'Caisse faite' : 'Caisse ouverte', 'caisse') + '</div>', 'solide') + '</div>' +
    
        carte(entete('📅', libellePeriode(per), 'Fenêtre de calcul en cours.') +
          '<div class="grid g4">' +
@@ -4305,7 +4310,7 @@ function ouvrirPremierePeriode() {
 
    async function calculFIFO(mois) {
      /* Le mois précédent est lu aussi : un produit ouvert le 30 périme le mois
-        suivant, et il disparaissait du frigo virtuel — et des alertes — dès le
+        suivant, et il disparaissait des produits ouverts — et des alertes — dès le
         1er. Pour une même clé, l'ouverture du mois le plus récent l'emporte,
         comme à l'intérieur d'un mois. On garde le mois d'origine de chaque
         lot : c'est sous lui qu'on le marque jeté. */
@@ -4388,7 +4393,7 @@ function ouvrirPremierePeriode() {
      $$('[data-jeter]').forEach(b => b.onclick = () => {
        const f = fifo.filter(x => x.cle === b.dataset.jeter)[0];
        confirmer('Jeter ' + f.nom + ' ?',
-         'Le lot ' + f.lot + ' sera enregistré en perte et retiré du frigo virtuel.', 'Jeter et déclarer', async () => {
+         'Le lot ' + f.lot + ' sera enregistré en perte et retiré des produits ouverts.', 'Jeter et déclarer', async () => {
            /* Litrage réel du lot : sa taille de bac pour une glace (5 L par
               défaut si elle n'a pas été saisie), 0 pour le reste — une
               chantilly ou un coulis n'a pas de litrage de glace, et lui

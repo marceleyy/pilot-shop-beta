@@ -17,7 +17,7 @@
 
 'use strict';
 
-PAGES.boutiques = { titre:'Mes boutiques', sous:'Vos boutiques comparées côte à côte' };
+PAGES.boutiques = { titre:'Mes boutiques', sous:'Ce qui demande votre attention, boutique par boutique' };
 if (MENU_PLUS.manager.indexOf('boutiques') < 0) MENU_PLUS.manager.unshift('boutiques');
 
 /* Ancienne version de cet écran (jamais publiée) : jetons d'autres boutiques. */
@@ -192,23 +192,23 @@ function depuis(iso) {
 
 /* Une ligne d'indicateur : libellé, valeur, et la couleur qui dit s'il faut agir. */
 const LIGNES_FRANCHISE = [
-  { id:'ecart', libelle:'Écart glace', aide:'dernier calcul clôturé',
+  { id:'ecart', go:'ecarts', libelle:'Écart glace', aide:'dernier calcul clôturé',
     val:r => r.ecartIncoherent ? 'incohérent' : r.ecartPct === null || r.ecartPct === undefined ? null
       : (Math.abs(r.ecartPct) < 0.05 ? '' : r.ecartPct > 0 ? '−' : '+') + n1(Math.abs(r.ecartPct)) + ' %',
     c:r => r.ecartIncoherent ? 'bad' : r.ecartPct === null || r.ecartPct === undefined ? 'n' : etatEcart(r.ecartPct).c },
-  { id:'pertes', libelle:'Pertes glace', aide:'7 derniers jours',
+  { id:'pertes', go:'pertes', libelle:'Pertes glace', aide:'7 derniers jours',
     val:r => fmtEur(r.pertesEur) + ' · ' + n1(r.pertesL) + ' L',
     c:r => r.pertesEur > 50 ? 'bad' : r.pertesEur > 15 ? 'warn' : 'ok' },
-  { id:'frigos', libelle:'Frigos hors norme', aide:'relevés critiques, 7 jours',
+  { id:'frigos', go:'temp', libelle:'Frigos hors norme', aide:'relevés critiques, 7 jours',
     val:r => String(r.frigosCrit), c:r => r.frigosCrit ? 'bad' : 'ok' },
-  { id:'retard', libelle:'Tâches en retard', aide:'relevés non validés et nettoyage non fait',
+  { id:'retard', go:'controle', libelle:'Tâches en retard', aide:'relevés non validés et nettoyage non fait',
     val:r => String((r.relevesManquants || 0) + (r.tachesManquantes || 0)),
     c:r => (r.relevesManquants || 0) + (r.tachesManquantes || 0) > 3 ? 'bad'
          : (r.relevesManquants || 0) + (r.tachesManquantes || 0) ? 'warn' : 'ok' },
-  { id:'preaudit', libelle:'Score pré-audit', aide:'dernier pré-audit',
+  { id:'preaudit', go:'preaudit', libelle:'Score pré-audit', aide:'dernier pré-audit',
     val:r => r.preaudit ? Math.round(r.preaudit.score) + ' / 100' : null,
     c:r => !r.preaudit ? 'n' : r.preaudit.score >= 85 ? 'ok' : r.preaudit.score >= 70 ? 'warn' : 'bad' },
-  { id:'signal', libelle:'Signalements ouverts', aide:'anomalies et ruptures',
+  { id:'signal', go:'controle', libelle:'Signalements ouverts', aide:'anomalies et ruptures',
     val:r => String((r.anomalies || 0) + (r.ruptures || 0)),
     c:r => (r.anomalies || 0) + (r.ruptures || 0) ? 'warn' : 'ok' }
 ];
@@ -231,19 +231,62 @@ V.boutiques = async function () {
   const liste = Array.isArray(autres) ? autres.filter(x => x.site !== APP.site) : [];
   const colonnes = [{ site:APP.site, r:ici, ici:true }].concat(liste.map(x => ({ site:x.site, r:x.data })));
 
-  const cellule = (col, l) => {
-    if (!col.r) return '<span class="mini">—</span>';
-    const v = l.val(col.r);
-    return v === null ? '<span class="pill n">—</span>' : pastille(l.c(col.r), v);
+  /* Une carte par boutique plutôt qu'un tableau large : au téléphone, le
+     tableau défilait de côté et on perdait le nom de la boutique. Chaque
+     carte dit d'abord s'il faut agir, puis les six chiffres. */
+  const bilan = col => {
+    if (!col.r) return { bad:0, warn:0 };
+    const cs = LIGNES_FRANCHISE.map(l => l.val(col.r) === null ? 'n' : l.c(col.r));
+    return { bad:cs.filter(c => c === 'bad').length, warn:cs.filter(c => c === 'warn').length };
   };
-  const etatColonne = col => col.ici ? 'Cet appareil · à l’instant'
+  colonnes.forEach(col => { col.b = bilan(col); });
+  /* Cette boutique d'abord, puis celles qui demandent le plus d'attention. */
+  const triees = colonnes.slice(0, 1).concat(colonnes.slice(1).sort((a, b) =>
+    (!a.r - !b.r) || (b.b.bad - a.b.bad) || (b.b.warn - a.b.warn) || String(a.site).localeCompare(String(b.site))));
+
+  const verdict = col => !col.r ? pastille('n', 'Pas encore de chiffres')
+    : col.b.bad ? pastille('bad', col.b.bad + ' ' + accord(col.b.bad, 'point urgent', 'points urgents'))
+    : col.b.warn ? pastille('warn', col.b.warn + ' ' + accord(col.b.warn, 'point à surveiller', 'points à surveiller'))
+    : pastille('ok', 'Tout va bien');
+  const etatColonne = col => col.ici ? 'Cette boutique · à l’instant'
     : !col.r ? 'Pas encore de chiffres'
     : 'Mis à jour ' + depuis(col.r.at);
 
+  const ligne = (col, l) => {
+    const v = col.r ? l.val(col.r) : null;
+    const contenu = '<span style="flex:1;min-width:0"><span style="display:block;font-weight:550">' + esc(l.libelle) + '</span>' +
+      '<span class="mini">' + esc(l.aide) + '</span></span>' +
+      (v === null ? pastille('n', '—') : pastille(l.c(col.r), v));
+    /* Sur cette boutique, la ligne ouvre l'écran où l'on corrige. */
+    return col.ici && l.go
+      ? '<button type="button" class="fr-ligne" data-go="' + l.go + '">' + contenu + '<span class="fr-va" aria-hidden="true">›</span></button>'
+      : '<div class="fr-ligne">' + contenu + '</div>';
+  };
+
+  const carteBoutique = col => carte(
+    '<div class="rang" style="align-items:flex-start;gap:10px">' +
+      '<div style="flex:1;min-width:0"><h2 style="margin:0;font-size:18px">' + esc(col.site) + '</h2>' +
+      '<span class="mini">' + esc(etatColonne(col)) + '</span></div>' + verdict(col) + '</div>' +
+    (col.r ? '<div class="fr-lignes">' + LIGNES_FRANCHISE.map(l => ligne(col, l)).join('') + '</div>'
+      : '<p class="mini" style="margin-top:10px">' + (col.ici
+        ? 'Chiffres indisponibles pour le moment. Appuyez sur « Actualiser ».'
+        : 'Cette boutique n’a encore publié aucun chiffre. Il suffit qu’un manager y ouvre la tour de contrôle une fois.') + '</p>'),
+    col.ici ? 'solide' : '');
+
+  /* En tête : ce qui demande d'agir, toutes boutiques confondues. */
+  const aSuivre = colonnes.filter(c => c.r && (c.b.bad || c.b.warn))
+    .sort((a, b) => (b.b.bad - a.b.bad) || (b.b.warn - a.b.warn));
+  const resume = colonnes.length < 2 ? ''
+    : carte('<div class="ch"><h2>' + colonnes.length + ' ' + accord(colonnes.length, 'boutique suivie', 'boutiques suivies') + '</h2></div>' +
+      '<div class="cs">' + (aSuivre.length
+        ? 'À regarder : ' + esc(aSuivre.map(c => c.site + ' (' + (c.b.bad ? c.b.bad + ' ' + accord(c.b.bad, 'urgent', 'urgents')
+            : c.b.warn + ' à surveiller') + ')').join(', ')) + '.'
+        : 'Rien à signaler dans vos boutiques sur les 7 derniers jours.') + '</div>', aSuivre.some(c => c.b.bad) ? 'corail' : aSuivre.length ? 'ambre' : 'menthe');
+
+  $('#vue-actions').innerHTML = '<button class="btn clair sm" id="fr-maj">Actualiser</button>';
+
   $('#page').innerHTML =
-    carte(entete('', 'Vos boutiques côte à côte',
-      'Chaque boutique calcule ses chiffres elle-même, sur les 7 derniers jours. ' +
-      'Les autres boutiques ne voient que ce résumé, jamais les registres.'), 'solide') +
+    resume +
 
     (erreur ? carte('<p class="mini">' + (erreur === 'horsligne'
         ? 'Hors ligne : seule cette boutique est affichée.'
@@ -252,19 +295,11 @@ V.boutiques = async function () {
         'La comparaison s’active pour le compte de cette boutique depuis l’administration de Pilot-Shop. ' +
         'Demandez-la à votre contact Pilot-Shop.</p>', 'ambre') : '') +
 
-    '<div style="overflow-x:auto;margin-top:14px">' +
-    '<table class="fr-table" style="width:100%;border-collapse:collapse;min-width:' + (180 + colonnes.length * 140) + 'px">' +
-    '<thead><tr><th scope="col" style="text-align:left;padding:10px 8px"></th>' +
-    colonnes.map(col => '<th scope="col" style="text-align:left;padding:10px 8px;vertical-align:bottom">' +
-      '<b>' + esc(col.site) + '</b><span class="mini" style="display:block;font-weight:400">' +
-      esc(etatColonne(col)) + '</span></th>').join('') + '</tr></thead>' +
-    '<tbody>' + LIGNES_FRANCHISE.map(l =>
-      '<tr style="border-top:.5px solid rgba(15,32,39,.1)">' +
-      '<th scope="row" style="text-align:left;padding:10px 8px;font-weight:500">' + esc(l.libelle) +
-      '<span class="mini" style="display:block;font-weight:400">' + esc(l.aide) + '</span></th>' +
-      colonnes.map(col => '<td style="padding:10px 8px">' + cellule(col, l) + '</td>').join('') +
-      '</tr>').join('') + '</tbody></table></div>' +
+    '<div class="grid g2 fr-grille">' + triees.map(carteBoutique).join('') + '</div>' +
 
-    colonnes.filter(c => !c.ici && !c.r).map(c => carte('<b>' + esc(c.site) + '</b><p class="mini" style="margin-top:4px">' +
-      'Cette boutique n’a encore publié aucun chiffre. Il suffit qu’un manager y ouvre la tour de contrôle une fois.</p>')).join('');
+    '<p class="mini" style="margin:14px 4px 0">Chaque boutique calcule ses chiffres elle-même, sur les 7 derniers jours. ' +
+    'Les autres boutiques ne voient que ce résumé, jamais les registres.</p>';
+
+  const maj = $('#fr-maj');
+  if (maj) maj.onclick = () => { maj.disabled = true; rendre('boutiques'); };
 };

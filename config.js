@@ -905,7 +905,7 @@ const TABS = {
   manager: [
     { id: 'controle', label: 'Contrôle' },
     { id: 'ecarts',   label: 'Écarts' },
-    { id: 'frigo',    label: 'Frigo' },
+    { id: 'frigo',    label: 'Ouverts' },
     { id: 'periodes', label: 'Périodes' },
     { id: 'plus',     label: 'Plus' }
   ]
@@ -929,7 +929,7 @@ const PAGES = {
   fiches:   { titre: 'Bibliothèque',      sous: 'Protocoles et fiches techniques' },
   releve:   { titre: 'Carnet de relève',  sous: 'Messages entre les services' },
   ecarts:   { titre: 'Écarts glace',      sous: 'Rendement de la période' },
-  frigo:    { titre: 'Frigo virtuel',     sous: 'Produits ouverts, du plus urgent' },
+  frigo:    { titre: 'Produits ouverts',  sous: 'Du plus urgent au moins urgent' },
   periodes: { titre: 'Périodes',          sous: 'Clôture et fenêtre de calcul' },
   histo:    { titre: 'Historique',        sous: 'Registres et retours, jour par jour' },
   equipe:   { titre: 'Équipe',            sous: 'Heures et activité' },

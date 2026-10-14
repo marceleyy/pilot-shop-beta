@@ -539,6 +539,12 @@ select,select:focus{
 .pill.n   {background:var(--creme-2);    color:var(--cacao);      border-color:var(--filet)}
 .pill.ciel{background:var(--myrtille-l); color:var(--myrtille);   border-color:var(--myrtille-c)}
 .pill.ambre{background:var(--caramel-l); color:var(--caramel-d);  border-color:var(--caramel-c)}
+/* Pastille cliquable (tour de contrôle) : mène à l'écran concerné. Une
+   flèche après le mot dit qu'on peut appuyer, et la cible reste au doigt. */
+.pill.lien{cursor:pointer;min-height:34px;padding-right:9px}
+.pill.lien::after{content:'›';font-weight:800;margin-left:2px;opacity:.7}
+.pill.lien:active{transform:scale(.97)}
+.pill.lien:focus-visible{outline:2px solid currentColor;outline-offset:2px}
 
 /* --- Alertes : une forme ET un signe distincts par niveau ---------------
    Le pictogramme d'origine (.ai : ▲ ●) avait été masqué. On le remplace par
@@ -1190,3 +1196,15 @@ select,select:focus{
 /* Calcul guidé, ventes par produit : trois colonnes à toute largeur
    (la grille .g3 s'empilait sur téléphone et mélangeait les champs). */
 .cv-g{display:grid;grid-template-columns:minmax(0,2fr) minmax(0,1fr) minmax(0,1fr);gap:8px;align-items:center}
+
+/* Mes boutiques (franchise.js) : une carte par boutique, une ligne par
+   chiffre. Sur la boutique de l'appareil, la ligne est un bouton qui ouvre
+   l'écran où l'on corrige. */
+.fr-grille{margin-top:14px;align-items:start}
+.fr-lignes{margin-top:10px}
+.fr-ligne{display:flex;align-items:center;gap:10px;width:100%;text-align:left;
+  padding:10px 2px;border-top:1px solid var(--filet);min-height:52px}
+button.fr-ligne{cursor:pointer;border-radius:0}
+button.fr-ligne:active{background:var(--creme-2)}
+button.fr-ligne:focus-visible{outline:2px solid var(--cacao);outline-offset:-2px}
+.fr-va{flex:0 0 auto;font-weight:800;color:var(--brume);margin-left:-2px}
