@@ -1055,6 +1055,9 @@ const RESPONSABLES = [
   { id:'r_trace',  libelle:'Responsable du contrôle de la traçabilité',   icone:'📋' },
   { id:'r_fifo',   libelle:'Responsable du contrôle FIFO : alerter si un produit approche de sa DLC', icone:'🧊' }
 ];
+/* Référence d'usine des rôles : le manager renomme, retire ou ajoute des
+   rôles (Paramètres) ; RESPONSABLES est reconstruit en place par-dessus. */
+const RESPONSABLES_DEF = RESPONSABLES.map(r => Object.assign({}, r));
 
 const HEBDO = {
   photosObligatoires: true,

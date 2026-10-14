@@ -129,6 +129,8 @@
      ['enceintes',    'reglages'],
      ['hebdo:plan',   'reglages'],
      ['hebdo:responsables', 'reglages'],
+     /* Rôles des responsables renommés, retirés ou ajoutés (Paramètres). */
+     ['hebdo:roles',  'reglages'],
      ['hebdo:',       'checklists'],
      /* Pré-audit Amorino (preaudit.js) : un document par pré-audit. */
      ['preaudit:',    'checklists'],
