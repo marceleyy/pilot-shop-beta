@@ -269,7 +269,7 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
        '<p>Corrigez une quantité si besoin. Mettre 0 retire la ligne. Le stock ne change pas tant que vous ne confirmez pas.</p></div></div>' +
        '<div class="stack" style="margin-top:14px">' + r.lignes.map((l, i) =>
          '<div class="rang"><div style="flex:1;min-width:0"><b>' + esc(l.produit) + '</b>' +
-         '<div class="mini">' + (l.lot ? 'lot ' + esc(l.lot) : 'sans lot') + ' · ' + (l.dlc ? 'DLC ' + esc(fmtD(l.dlc)) : 'sans DLC') + '</div></div>' +
+         '<div class="mini">' + (l.cle && typeof libelleArticle === 'function' ? 'au stock : ' + esc(libelleArticle(l.cle)) + ' · ' : '') + (l.lot ? 'lot ' + esc(l.lot) : 'sans lot') + ' · ' + (l.dlc ? 'DLC ' + esc(fmtD(l.dlc)) : 'sans DLC') + '</div></div>' +
          '<input type="number" min="0" step="1" inputmode="numeric" data-q="' + i + '" value="' + esc(qtes[i]) + '" style="width:76px;text-align:center"></div>').join('') +
        '</div>' +
        '<div class="actions"><button class="btn clair" data-fermer>Laisser en attente</button>' +
@@ -303,6 +303,11 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
            n += q;
          }
          const corrige = r.lignes.some((l, i) => num(qtes[i]) !== num(l.qte));
+         /* Le manager a validé chaque ligne gardée : l'appli retient l'article
+            de chaque référence pour les prochains bons. */
+         if (typeof apprendreBL === 'function') {
+           try { await apprendreBL(r.lignes.filter((l, i) => num(qtes[i]) > 0)); } catch (e) {}
+         }
          await feed('ok', STATE.user.prenom + ' a confirmé l’entrée en stock du bon ' + (r.numero || 'sans n°') +
            ' (' + (r.par || '—') + ')' + (corrige ? ', quantités corrigées' : ''));
          closeSheet();
@@ -411,11 +416,16 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
            : '';
        }
    
-       $('#rc-ok').onclick = () => {
+       let ouvre = false;
+       $('#rc-ok').onclick = async () => {
+         if (ouvre) return;
+         ouvre = true;
+         const memo = typeof memoBL === 'function' ? await memoBL() : {};
+         ouvre = false;
          const t = $('#rc-t').value;
          const refuse = (t !== '' && num(t) > RECEPTION.tempMax) || Object.keys(conf).some(k => !conf[k]);
          lignesReception({ fournisseur:$('#rc-f').value.trim(), numero:$('#rc-n').value.trim(),
-                           temp:t, conf:conf, refuse:refuse, lignes:bl.lignes });
+                           temp:t, conf:conf, refuse:refuse, lignes:bl.lignes }, memo);
        };
      }
    
@@ -424,6 +434,9 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
         libellé qui partage ses cinq premières lettres avec la saveur. */
      function saveurDepuisLibelle(saveurs, libelle) {
        const nrm = s => String(s||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z]/g,'');
+       /* Le bon écrit « Vanille » en français, le catalogue « Vaniglia » :
+          les cinq premières lettres diffèrent (vanil / vanig). */
+       libelle = String(libelle || '').replace(/vanille/gi, 'Vaniglia');
        const tout = nrm(libelle);
        if (!tout) return null;
        const exact = saveurs.filter(sv => nrm(sv) && tout.indexOf(nrm(sv)) >= 0)
@@ -436,13 +449,26 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
        })[0] || null;
      }
 
-     function lignesReception(bl) {
+     function lignesReception(bl, memo) {
        const lignes = (bl.lignes || []).map(l => ({
          /* Lot et unité lus sur le bon ; quantité illisible laissée vide, pour
             qu'elle soit saisie plutôt qu'enregistrée à 1 par défaut. */
-         produit:l.parfum || l.ref || '', qte:l.bacs || '', unite:l.unite || 'bac', lot:l.lot || '', lotCorrige:!!l.lotCorrige, qteDouteuse:!!l.qteDouteuse, dlc:'', taille:l.taille || ''
+         produit:l.parfum || l.ref || '', ref:l.ref || '', lu:l.parfum || l.ref || '', qte:l.bacs || '', unite:l.unite || 'bac', lot:l.lot || '', lotCorrige:!!l.lotCorrige, qteDouteuse:!!l.qteDouteuse, tailleDeduite:!!l.tailleDeduite, dlc:'', taille:l.taille || ''
        }));
        if (!lignes.length) lignes.push({ produit:'', qte:1, unite:'bac', lot:'', dlc:'' });
+       /* Référence déjà confirmée par un manager : l'article appris remplace
+          le nom lu, souvent abîmé (voir apprendreBL). */
+       lignes.forEach(l => {
+         const a = memo && l.ref && typeof cleMemoRef === 'function' ? memo[cleMemoRef(l.ref)] : null;
+         if (!a || !a.cle) return;
+         /* Une seule confirmation ne suffit pas à passer outre un nom bien lu :
+            une association fausse s'imposerait à chaque bon. */
+         if (!((a.vu || 1) >= 2 || !parfumDepuisDesignation(l.lu))) return;
+         const art = litArticle(a.cle);
+         l.appris = a.cle;
+         l.produit = l.lu = libelleArticle(a.cle);
+         if (art.taille) { l.taille = art.taille; l.tailleDeduite = false; }
+       });
    
        /* showSheet et non #sheet-corps : le scan d'une DLC remplace la feuille
           par celle du cadrage puis la ferme. Réécrite dans une feuille fermée,
@@ -454,7 +480,8 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
            (bl.refuse ? ' · <b style="color:var(--corail-d)">livraison refusée</b>' : '') + '</p>' +
            '<div class="stack">' + lignes.map((l, i) =>
              '<div class="card plat"><div class="champ"><label class="f">Produit</label>' +
-             '<input type="text" data-r="' + i + '.produit" value="' + esc(l.produit) + '" placeholder="Ex. Gelato pistache"></div>' +
+             '<input type="text" data-r="' + i + '.produit" value="' + esc(l.produit) + '" placeholder="Ex. Gelato pistache">' +
+             (l.appris && l.produit === l.lu ? '<p class="mini" style="margin-top:4px">Reconnu grâce aux livraisons précédentes (' + esc(l.ref) + ')</p>' : '') + '</div>' +
              '<div class="grid g3" style="margin-top:10px">' +
              '<div class="champ"><label class="f">Quantité' + (l.qteDouteuse ? ' <b style="color:var(--corail-d)">à vérifier</b>' : '') + '</label><input type="number" min="1" data-r="' + i + '.qte" value="' + l.qte + '"></div>' +
              '<div class="champ"><label class="f">Unité</label><select data-r="' + i + '.unite">' +
@@ -464,7 +491,7 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
              '<div class="champ"><label class="f">DLC / DLUO</label>' +
              '<input type="date" data-r="' + i + '.dlc" value="' + l.dlc + '"></div>' +
              /* Sans ce choix, tout bac de glace reçu était compté en 5 L. */
-             '<div class="champ"><label class="f">Taille du bac (glace)</label><select data-r="' + i + '.taille">' +
+             '<div class="champ"><label class="f">Taille du bac (glace)' + (l.tailleDeduite ? ' <b style="color:var(--corail-d)">à vérifier</b>' : '') + '</label><select data-r="' + i + '.taille">' +
              '<option value="">Lue dans le nom, sinon ' + FOURNISSEUR.tailleParDefaut + ' L</option>' +
              FOURNISSEUR.taillesBac.map(t => '<option value="' + t + '"' + (String(l.taille) === String(t) ? ' selected' : '') + '>' + t + ' L</option>').join('') +
              '</select></div></div>' +
@@ -485,6 +512,7 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
            /* Lot retapé à la main : il n'est plus « corrigé par la lecture ». */
            if (k === 'lot') lignes[+i].lotCorrige = false;
            if (k === 'qte') lignes[+i].qteDouteuse = false;
+          if (k === 'taille') lignes[+i].tailleDeduite = false;
          });
          $$('[data-scandlc]').forEach(b => b.onclick = async () => {
            const i = +b.dataset.scandlc;
@@ -545,6 +573,18 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
            l'ancien « stock fermé » tenait une comptabilité parallèle que les
            ouvertures ne décrémentaient pas — elle dérivait en silence. */
         for (const l of valides) {
+          /* Article appris pour cette référence, nom non retouché : pris tel
+             quel, sans redeviner famille, parfum ni taille. */
+          if (l.appris && l.produit === l.lu) {
+            const a = litArticle(l.appris);
+            /* Taille changée à la main : même article, autre bac. */
+            const cleA = a.taille && num(l.taille) && String(num(l.taille)) !== String(a.taille)
+              ? cleArticle(a.famille, a.parfum, num(l.taille)) : l.appris;
+            auStock++;
+            aStocker.push({ cle:cleA, produit:l.produit.trim(), qte:num(l.qte), ref:l.ref || '',
+                            lot:l.lot || '', dlc:l.dlc || '', famille:a.famille });
+            continue;
+          }
           const fam = devinerFamille(l.produit);
           /* Même clé que l'ouverture : « Gelato pistache 3 litres » doit
              alimenter glace|Pistache|3, pas un article fantôme en 5 L que
@@ -555,7 +595,10 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
              qui n'est aucun parfum (lait, cornets…) n'entre pas dans les bacs de
              la chambre froide : la réception reste tracée pour sa DLC. */
           const nrmP = x => String(x || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/\s+/g, ' ').trim();
+          /* La référence ne sert que si le libellé vient du bon tel quel :
+             un libellé retapé à la main dit ce que la personne a voulu. */
           const connu = glace ? (parfumDepuisDesignation(l.produit) ||
+            (l.ref && l.produit === l.lu ? parfumDepuisReference(l.ref) : null) ||
             PARFUMS.filter(p => nrmP(p) === nrmP(l.produit.replace(/\d+(?:[.,]\d+)?\s*(?:litres?|lt|l)\b/i, '')))[0] || null) : null;
           if (glace && !connu) { horsStock.push(l.produit.trim()); continue; }
           auStock++;
@@ -572,7 +615,7 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
           const cle = cleArticle(fam.id, fam.parfums ? parfum : '',
                                  glace ? (num(l.taille) || tailleDepuisDesignation(l.produit) ||
                                           FOURNISSEUR.tailleParDefaut) : '');
-          aStocker.push({ cle:cle, produit:l.produit.trim(), qte:num(l.qte),
+          aStocker.push({ cle:cle, produit:l.produit.trim(), qte:num(l.qte), ref:l.ref || '',
                           lot:l.lot || '', dlc:l.dlc || '', famille:fam.id });
         }
       }

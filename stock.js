@@ -50,11 +50,35 @@ const DESIGNATION_PARFUM = [
   [/cocco|coco\b/i,                        'Noix de coco'],
   [/sanguin|arancia/i,                     'Orange sanguine'],
   [/pista/i,                               'Pistache'],
-  [/stracciatella/i,                       'Stracciatella'],
+  [/stracci/i,                          'Stracciatella'],
   [/tiramis/i,                             'Tiramisu'],
   [/vanig|vanille|vaniglia|vanilla/i,      'Vanille'],
   [/yogurt|yaourt/i,                       'Yogurt']
 ];
+
+/* Repli quand le libellé est mal lu (« Glace Caté ») : la référence du bon,
+   « SCAFFE25 » ou « $CAFFE25 », porte aussi le parfum. Préfixes Jetfreeze,
+   comparés au début de la référence sans le $ (lu « S ») ni le format. */
+const REFERENCE_PARFUM = [
+  ['AMARENA', 'Amarena'], ['CAFFE', 'Café'], ['CARAM', 'Caramel au beurre salé'],
+  /* CIOCCOLATO seul : « CIOCCOLATOBIO », « CIOCCOLATOECUADOR » sont d'autres
+     parfums, laissés à la désignation. */
+  [/^CIOCCOLATO\d/, 'Chocolat noir'], ['COCCO', 'Noix de coco'], ['FRAGOLA', 'Fraise'],
+  ['INIM', 'Inimitable'], ['MANGO', 'Mangue'], ['NOCCIOLA', 'Noisette'],
+  ['PISTA', 'Pistache'], ['STRACCIA', 'Stracciatella'], ['TIRA', 'Tiramisu'],
+  ['VANIG', 'Vanille']
+];
+function parfumDepuisReference(ref) {
+  const R = String(ref || '').toUpperCase();
+  /* Avec et sans le premier S : « $STRACCIA25 » lu « SSTRACCIA25 », mais
+     aussi « STRACCIA25 » quand le $ a disparu. */
+  for (const r of [R.replace(/^S?\$/, ''), R.replace(/^S/, ''), R]) {
+    for (const [pre, p] of REFERENCE_PARFUM) {
+      if (pre instanceof RegExp ? pre.test(r) : r.indexOf(pre) === 0) return p;
+    }
+  }
+  return null;
+}
 
 function parfumDepuisDesignation(nom) {
   const n = String(nom || '');
@@ -103,6 +127,41 @@ function libelleArticle(cle) {
   const f = FAMILLES_PRODUIT.filter(x => x.id === a.famille)[0];
   return [a.parfum, f ? f.libelle : a.famille, a.taille ? a.taille + ' L' : '']
     .filter(Boolean).join(' · ');
+}
+
+/* -----------------------------------------------------------------------------
+   APPRENTISSAGE DES RÉFÉRENCES DU BON
+   La lecture du nom de produit dépend de la photo (ombre, pli, flou) ; la
+   référence du fournisseur, elle, ne change pas d'une livraison à l'autre.
+   Chaque réception confirmée par un manager enseigne à l'appli l'article
+   validé pour chaque référence lue (« SPISTAM25 » → glace|Pistache|3). À la
+   livraison suivante, la même référence donne directement le bon article,
+   même si le nom est illisible. Une variante de lecture (« SPISTAMZS ») est
+   apprise à son tour la première fois qu'elle est confirmée.
+   -------------------------------------------------------------------------- */
+/* Préfixe « stock: » : synchronisée (table stock) pour que ce qu'apprend
+   un iPad serve aux autres. Hors FUSIONNER : le dernier qui écrit gagne. */
+const CLE_MEMO_BL = 'stock:memo-bl';
+function cleMemoRef(ref) {
+  const r = String(ref || '').toUpperCase().replace(/[^A-Z0-9$]/g, '').replace(/^\$/, 'S');
+  return r.length >= 4 ? r : '';
+}
+async function memoBL() {
+  try { return (await DB.get(CLE_MEMO_BL, {})) || {}; } catch (e) { return {}; }
+}
+/* lignes : [{ ref, cle }] confirmées par un manager. */
+async function apprendreBL(lignes) {
+  const m = await memoBL();
+  let n = 0;
+  (lignes || []).forEach(l => {
+    const k = cleMemoRef(l.ref);
+    if (!k || !l.cle) return;
+    const avant = m[k];
+    m[k] = { cle: l.cle, vu: avant && avant.cle === l.cle ? (avant.vu || 1) + 1 : 1, at: nowISO() };
+    n++;
+  });
+  if (n) await DB.set(CLE_MEMO_BL, m);
+  return n;
 }
 
 /* -----------------------------------------------------------------------------
@@ -1341,6 +1400,19 @@ V.controle = async function () {
   await V_controle_origine.call(this);
   const page = $('#page');
   if (!page) return;
+
+  /* Réceptions à confirmer : la tour de contrôle est l'accueil du manager, et
+     ni Réception ni Stock ne sont dans sa barre. Sans ce bandeau, un bon
+     scanné par l'équipe attendait sans que personne ne le voie. */
+  const recAttente = typeof receptionsEnAttente === 'function' ? await receptionsEnAttente() : [];
+  if (STATE.view !== 'controle' || page !== $('#page')) return;
+  if (recAttente.length && typeof bandeauReceptions === 'function' && page.firstChild) {
+    const br = document.createElement('div');
+    br.style.marginTop = '14px';
+    br.innerHTML = bandeauReceptions(recAttente);
+    page.insertBefore(br, page.firstChild.nextSibling);
+    const bv = br.querySelector('#rc-verif'); if (bv) bv.onclick = verifierReceptions;
+  }
 
   /* -----------------------------------------------------------------------------
      ANOMALIES SIGNALÉES
