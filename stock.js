@@ -130,6 +130,39 @@ function libelleArticle(cle) {
 }
 
 /* -----------------------------------------------------------------------------
+   APPRENTISSAGE DES RÉFÉRENCES DU BON
+   La lecture du nom de produit dépend de la photo (ombre, pli, flou) ; la
+   référence du fournisseur, elle, ne change pas d'une livraison à l'autre.
+   Chaque réception confirmée par un manager enseigne à l'appli l'article
+   validé pour chaque référence lue (« SPISTAM25 » → glace|Pistache|3). À la
+   livraison suivante, la même référence donne directement le bon article,
+   même si le nom est illisible. Une variante de lecture (« SPISTAMZS ») est
+   apprise à son tour la première fois qu'elle est confirmée.
+   -------------------------------------------------------------------------- */
+const CLE_MEMO_BL = 'bl:memo';
+function cleMemoRef(ref) {
+  const r = String(ref || '').toUpperCase().replace(/[^A-Z0-9$]/g, '').replace(/^\$/, 'S');
+  return r.length >= 4 ? r : '';
+}
+async function memoBL() {
+  try { return (await DB.get(CLE_MEMO_BL, {})) || {}; } catch (e) { return {}; }
+}
+/* lignes : [{ ref, cle }] confirmées par un manager. */
+async function apprendreBL(lignes) {
+  const m = await memoBL();
+  let n = 0;
+  (lignes || []).forEach(l => {
+    const k = cleMemoRef(l.ref);
+    if (!k || !l.cle) return;
+    const avant = m[k];
+    m[k] = { cle: l.cle, vu: avant && avant.cle === l.cle ? (avant.vu || 1) + 1 : 1, at: nowISO() };
+    n++;
+  });
+  if (n) await DB.set(CLE_MEMO_BL, m);
+  return n;
+}
+
+/* -----------------------------------------------------------------------------
    ÉCRITURE DES MOUVEMENTS
    Journal en ajout seul : on n'efface jamais une ligne, on en ajoute une qui
    corrige. C'est ce qui permet de reconstituer l'historique lors d'un contrôle.
