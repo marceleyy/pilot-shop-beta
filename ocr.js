@@ -911,9 +911,12 @@ async function analyserBL(canvas, nom, resolve) {
        lignes complètes au lieu de 10, la Stracciatella retrouvée. Sans ombre,
        la première lecture reste meilleure et elle est gardée. */
 
-    if (res.lignes.length && res.lignes.some(l => !l.lot || (/glace|sorbet/i.test(l.designation) && !l.taille))) {
+    /* Deux lignes touchées au moins : un seul lot de macaron mal lu ne vaut
+       pas une seconde lecture de page (plusieurs secondes sur iPad). */
+    if (res.lignes.filter(l => !l.lot || (/glace|sorbet/i.test(l.designation) && !l.taille)).length >= 2) {
       etape('Photo inégalement éclairée, seconde lecture…');
-      fondEgal = normaliserFond(copierCanvas(canvas));
+      fondEgal = copierCanvas(canvas);
+      normaliserFond(fondEgal);
       const luE = await lire(fondEgal, 'bl');
       const resE = extraireBLPositionne(luE);
       const note = r => r.lignes.filter(l => l.lot && !l.lotCorrige).length +
@@ -931,7 +934,7 @@ async function analyserBL(canvas, nom, resolve) {
       etape('Lecture des quantités…');
       /* Amélioration seulement : une erreur ici ne doit pas jeter les
          lignes, lots et numéro déjà lus. */
-      try { await lireQuantitesBL(nb && res._nb ? nb : (res._egal && window.__QEGAL ? fondEgal : canvas), res, lu.lignes); } catch (e) {}
+      try { await lireQuantitesBL(nb && res._nb ? nb : canvas, res, lu.lignes); } catch (e) {}
     }
     /* Numéro du bon perdu : on relit sa case seule, à gauche de la date
        d'enlèvement, chiffres et « BL » seulement. */
@@ -945,7 +948,7 @@ async function analyserBL(canvas, nom, resolve) {
     const tailles = res.lignes.filter(l => l.taille).map(l => l.taille);
     if (tailles.length >= 3 && tailles.every(t => t === tailles[0])) {
       res.lignes.forEach(l => {
-        if (!l.taille && l.unite === 'bac' && /glace|sorbet|gelato/i.test(l.designation)) l.taille = tailles[0];
+        if (!l.taille && l.unite === 'bac' && /glace|sorbet|gelato/i.test(l.designation)) { l.taille = tailles[0]; l.tailleDeduite = true; }
       });
     }
     recouperTotal(res);
@@ -956,7 +959,7 @@ async function analyserBL(canvas, nom, resolve) {
                 lignes: res.lignes.map(l => ({
                   ref: l.reference, parfum: l.designation, designation: l.designation,
                   lot: l.lot, lotCorrige: l.lotCorrige, bacs: l.qte, qte: l.qte, qteDouteuse: !!l.qteDouteuse,
-                  taille: l.taille, unite: l.unite, parColis: l.parColis })),
+                  taille: l.taille, tailleDeduite: !!l.tailleDeduite, unite: l.unite, parColis: l.parColis })),
                 confiance: lu.confiance, texte: lu.texte };
     if (!r.numero && !r.lignes.length) return saisieManuelle('bl', 'Aucun texte de bon lisible sur la photo', resolve);
     confirmerBL(r, apercu, resolve);
@@ -1118,7 +1121,8 @@ async function lireNumeroBL(canvas, res, lignesLues) {
     for (const psm of ['7', '6']) {
       await w.setParameters({ tessedit_char_whitelist: 'BL0123456789', tessedit_pageseg_mode: psm });
       const r = await w.recognize(cv);
-      const t = String(r.data.text || '').replace(/\s+/g, '').match(/(?:BL|8L|B1|L)?(\d{6})(?!\d)/);
+      /* Exactement six chiffres : un numéro client plus long n'en donne pas six. */
+      const t = String(r.data.text || '').replace(/\s+/g, '').match(/^(?:BL|8L|B1|L)?(\d{6})$/);
       if (t) {
         res.bl = 'BL' + t[1];
         /* Le lot qui portait ce numéro n'en est pas un. */

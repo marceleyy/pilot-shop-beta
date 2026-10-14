@@ -443,7 +443,7 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
        const lignes = (bl.lignes || []).map(l => ({
          /* Lot et unité lus sur le bon ; quantité illisible laissée vide, pour
             qu'elle soit saisie plutôt qu'enregistrée à 1 par défaut. */
-         produit:l.parfum || l.ref || '', ref:l.ref || '', lu:l.parfum || l.ref || '', qte:l.bacs || '', unite:l.unite || 'bac', lot:l.lot || '', lotCorrige:!!l.lotCorrige, qteDouteuse:!!l.qteDouteuse, dlc:'', taille:l.taille || ''
+         produit:l.parfum || l.ref || '', ref:l.ref || '', lu:l.parfum || l.ref || '', qte:l.bacs || '', unite:l.unite || 'bac', lot:l.lot || '', lotCorrige:!!l.lotCorrige, qteDouteuse:!!l.qteDouteuse, tailleDeduite:!!l.tailleDeduite, dlc:'', taille:l.taille || ''
        }));
        if (!lignes.length) lignes.push({ produit:'', qte:1, unite:'bac', lot:'', dlc:'' });
    
@@ -467,7 +467,7 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
              '<div class="champ"><label class="f">DLC / DLUO</label>' +
              '<input type="date" data-r="' + i + '.dlc" value="' + l.dlc + '"></div>' +
              /* Sans ce choix, tout bac de glace reçu était compté en 5 L. */
-             '<div class="champ"><label class="f">Taille du bac (glace)</label><select data-r="' + i + '.taille">' +
+             '<div class="champ"><label class="f">Taille du bac (glace)' + (l.tailleDeduite ? ' <b style="color:var(--corail-d)">à vérifier</b>' : '') + '</label><select data-r="' + i + '.taille">' +
              '<option value="">Lue dans le nom, sinon ' + FOURNISSEUR.tailleParDefaut + ' L</option>' +
              FOURNISSEUR.taillesBac.map(t => '<option value="' + t + '"' + (String(l.taille) === String(t) ? ' selected' : '') + '>' + t + ' L</option>').join('') +
              '</select></div></div>' +
@@ -488,6 +488,7 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
            /* Lot retapé à la main : il n'est plus « corrigé par la lecture ». */
            if (k === 'lot') lignes[+i].lotCorrige = false;
            if (k === 'qte') lignes[+i].qteDouteuse = false;
+          if (k === 'taille') lignes[+i].tailleDeduite = false;
          });
          $$('[data-scandlc]').forEach(b => b.onclick = async () => {
            const i = +b.dataset.scandlc;
