@@ -3997,9 +3997,17 @@ function ouvrirPremierePeriode() {
       21. MÉTÉO
       ========================================================================== */
    let _meteoEchec = 0;   // dernier échec d'open-meteo (voir meteo)
+   /* Dernière météo gardée sur l'iPad, seulement si elle est de la ville en
+      cours : après un changement de ville, l'ancienne ne s'affiche pas sous
+      le nouveau nom. */
+   async function meteoGardee() {
+     const c = await DB.get('meteo', null);
+     return c && c.lieu === METEO.lat + ',' + METEO.lon ? c : null;
+   }
    async function meteo() {
      if (!METEO.actif) return null;
-     const cache = await DB.get('meteo', null);
+     const lieu = METEO.lat + ',' + METEO.lon;
+     const cache = await meteoGardee();
      const frais = cache && (Date.now() - new Date(cache.at)) < METEO.cacheHeures * 3600e3;
      if (frais || !STATE.enLigne) return cache;
      /* Échec récent : pas de nouvel essai avant 10 minutes. Sans ce frein,
@@ -4019,7 +4027,7 @@ function ouvrirPremierePeriode() {
        const d = await r.json();
        const o = { t:Math.round(d.current.temperature_2m), code:d.current.weather_code,
                    max:Math.round(d.daily.temperature_2m_max[0]),
-                   pluie:d.daily.precipitation_probability_max[0], at:nowISO(), source:'api' };
+                   pluie:d.daily.precipitation_probability_max[0], at:nowISO(), source:'api', lieu:lieu };
        await DB.set('meteo', o);
        return o;
      } catch (e) {
@@ -4040,12 +4048,12 @@ function ouvrirPremierePeriode() {
      /* Une requête encore en route est partagée, sans nouvelle attente :
         chaque redessin relançait sinon sa propre requête et attendait de
         nouveau 300 ms tant qu'open-meteo traînait. */
-     if (_meteoEnCours) return { m:await DB.get('meteo', null), suite:_meteoEnCours };
+     if (_meteoEnCours) return { m:await meteoGardee(), suite:_meteoEnCours };
      const p = _meteoEnCours = meteo().catch(() => null);
      p.then(() => { if (_meteoEnCours === p) _meteoEnCours = null; });
      const vite = await Promise.race([p, new Promise(r => setTimeout(() => r(undefined), 300))]);
      if (vite !== undefined) return { m:vite, suite:null };
-     return { m:await DB.get('meteo', null), suite:p };
+     return { m:await meteoGardee(), suite:p };
    }
    function widgetMeteo(m) {
      if (!m || m.source === 'indisponible') return '';
