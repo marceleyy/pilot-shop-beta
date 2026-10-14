@@ -4747,22 +4747,24 @@ function ouvrirPremierePeriode() {
          '<span class="go"><button class="btn clair sm" data-go="inventaire" data-partie="froid">Compter</button></span></div>') +
    
        '<div class="grid g2" style="margin-top:12px">' +
-       carte(entete('📥', 'Achats de la période', 'Litrage cumulé des bons de livraison.') +
+       carte(entete('📥', 'Achats de la période', 'Litrage cumulé des bons de livraison : saisi à la main, ou repris des réceptions ci-dessous.') +
          '<div class="champ"><label class="f">Litrage total (L)</label>' +
          '<input type="number" step="0.1" id="bl" value="' + (e.litrageBL || '') + '"></div>' +
-         '<p class="mini" id="ec-achats" style="margin-top:10px">' + achatsTxt(c, e) + '</p>') +
-       carte(entete('🗑️', 'Pertes de la période', 'Reprises automatiquement du registre.') +
+         '<p class="mini" id="ec-achats" style="margin-top:10px">' + achatsTxt(c, e) + '</p>' +
+         '<div id="ec-rec" style="margin-top:12px"></div>') +
+       carte(entete('🗑️', 'Pertes de la période', 'Reprises automatiquement du registre, détaillées ci-dessous.') +
          '<div class="champ"><label class="f">Poids jeté (kg)</label>' +
          '<input type="number" step="0.01" id="jk" value="' + (e.jeteKg || '') + '"></div>' +
-         '<p class="mini" style="margin-top:10px">' + n1(num(e.jeteL)) + ' L déclarés</p>') + '</div>' +
+         '<p class="mini" style="margin-top:10px">' + n1(num(e.jeteL)) + ' L déclarés</p>' +
+         '<div id="ec-pertes" style="margin-top:12px"></div>') + '</div>' +
    
        carte(entete('🍦', 'Glace vendue', 'Poids sorti par la caisse sur la période. C’est la donnée qui pèse le plus dans l’écart.') +
          '<button class="btn ciel bloc xl" id="imp-btn">Importer l’export de caisse (Excel ou CSV)</button>' +
          /* .txt : l'export « Texte Unicode » (UTF-16) porte souvent cette extension. */
          '<input type="file" id="import-caisse" accept=".xlsx,.xls,.csv,.txt,text/csv" hidden>' +
-         '<div class="grid g2" id="ec-vente" style="margin-top:16px">' + venduKpi(c, e) +
-         '<div class="champ"><label class="f">Corriger à la main (kg)</label>' +
-         '<input type="number" step="0.01" id="vd" value="' + (num(c.vendu) || '') + '" placeholder="0"></div></div>' +
+         /* Plus de correction à la main : personne ne connaît ce poids sans
+            l'export. Le poids vendu vient de l'import, vérifié à la lecture. */
+         '<div id="ec-vente" style="margin-top:16px">' + venduKpi(c, e) + '</div>' +
          ((e.imports || []).length
            ? '<div class="dense" style="margin-top:14px"><div class="dense-h"><span class="c1">Import</span>' +
              '<span class="c w">Lignes</span><span class="c w">Poids</span></div>' +
@@ -4802,8 +4804,7 @@ function ouvrirPremierePeriode() {
      };
      const champs = {
        '#bl': v => ({ litrageBL:v }),
-       '#jk': v => ({ jeteKg:v }),
-       '#vd': v => ({ ventes:{ total:v }, venteSource:'Saisie manuelle · ' + STATE.user.prenom })
+       '#jk': v => ({ jeteKg:v })
      };
      Object.keys(champs).forEach(x => {
        const el = $(x);
@@ -4815,6 +4816,62 @@ function ouvrirPremierePeriode() {
        }, 700);
      });
      $('#sbl').onclick = scannerBL;
+
+     /* Réceptions de glace de la période, avec leur total : proposées, jamais
+        reprises sans un appui du manager. */
+     const finVue = today() < per.fin ? today() : per.fin;
+     (async () => {
+       const box = $('#ec-rec');
+       if (!box || typeof donneesAppli !== 'function') return;
+       let d;
+       try { d = await donneesAppli(per.debut, finVue); } catch (x) { return; }
+       if (!box.isConnected) return;
+       const l = d.livraisons || [];
+       if (!l.length) { box.innerHTML = '<p class="mini">Aucune réception de glace enregistrée sur la période.</p>'; return; }
+       const total = +l.reduce((t, x) => t + (x.doublon ? 0 : num(x.litres)), 0).toFixed(2);
+       box.innerHTML = '<div class="dense"><div class="dense-h"><span class="c1">Réceptions reçues</span><span class="c w">Litres</span></div>' +
+         l.map(x => '<div class="dl"><span class="c1">' + esc(fmtDC(x.date)) + ' · ' + esc(x.numero || 'sans numéro') +
+           (x.doublon ? ' · peut-être déjà compté (' + esc(x.doublon) + '), hors total' : '') + '</span>' +
+           '<span class="c w num">' + n1(x.litres) + ' L</span></div>').join('') +
+         '<div class="dl"><span class="c1"><b>Total</b></span><span class="c w num"><b>' + n1(total) + ' L</b></span></div></div>' +
+         (total > 0 ? '<button class="btn clair bloc" id="ec-rec-ok" style="margin-top:10px">Reprendre ces réceptions (' + n1(total) + ' L)</button>' : '');
+       if ($('#ec-rec-ok')) $('#ec-rec-ok').onclick = () => {
+         const el = $('#bl');
+         if (!el) return;
+         el.value = total;
+         el.dispatchEvent(new Event('input'));
+         toast(n1(total) + ' L repris des réceptions');
+       };
+     })();
+
+     /* Détail des pertes du registre qui font le poids jeté. */
+     (async () => {
+       const box = $('#ec-pertes');
+       if (!box) return;
+       /* Jusqu'à aujourd'hui, comme le poids jeté (cumulerPertesMois) : une
+          période échue reste en cours jusqu'à sa clôture. */
+       const jours = joursEntre(per.debut, today());
+       DB.prelire(jours.map(d => 'pertes:' + d));
+       const lignes = [];
+       try {
+         for (const d of jours) (await DB.get('pertes:' + d, [])).forEach(w => {
+           const l = litresJetes(w);
+           if (l > 0) lignes.push({ jour:d, w:w, l:l });
+         });
+       } catch (x) {
+         if (box.isConnected) box.innerHTML = '<p class="mini">Détail des pertes indisponible pour le moment.</p>';
+         return;
+       }
+       if (!box.isConnected) return;
+       if (!lignes.length) { box.innerHTML = '<p class="mini">Aucune perte de glace au registre sur la période.</p>'; return; }
+       const total = lignes.reduce((t, x) => t + x.l, 0);
+       box.innerHTML = '<div class="dense"><div class="dense-h"><span class="c1">Pertes au registre</span><span class="c w">Litres</span></div>' +
+         lignes.map(x => '<div class="dl"><span class="c1">' + esc(fmtDC(x.jour)) + ' · ' + esc(x.w.produit || 'produit ?') +
+           (x.w.parUnite && num(x.w.nombre) > 1 ? ' × ' + num(x.w.nombre) : '') + (x.w.par ? ' · ' + esc(x.w.par) : '') + '</span>' +
+           '<span class="c w num">' + n1(x.l) + ' L</span></div>').join('') +
+         '<div class="dl"><span class="c1"><b>Total</b> · ' + n1(total * FOURNISSEUR.poidsMoyenLitre) + ' kg</span>' +
+         '<span class="c w num"><b>' + n1(total) + ' L</b></span></div></div>';
+     })();
    
      $('#imp-btn').onclick = () => $('#import-caisse').click();
      $('#import-caisse').onchange = async ev => {
@@ -4925,16 +4982,18 @@ function ouvrirPremierePeriode() {
      const dansLaPeriode = inv => inv && inv.jour >= per.debut;
 
      if (!dansLaPeriode(invStock)) {
-       B.push({ id:'inv_glace', go:'inventaire',
+       B.push({ id:'inv_glace', go:'inventaire', partie:'froid',
          txt: invStock
-           ? 'Chambre froide comptée le ' + fmtD(invStock.jour) + ', avant la période'
-           : 'Chambre froide jamais comptée' });
+           ? 'Inventaire de la chambre froide à refaire : dernier comptage le ' + fmtD(invStock.jour) +
+             ', avant le début de la période (' + fmtD(per.debut) + ')'
+           : 'Inventaire de la chambre froide jamais fait' });
      }
      if (!dansLaPeriode(invSec)) {
-       B.push({ id:'inv_sec', go:'inventaire',
+       B.push({ id:'inv_sec', go:'inventaire', partie:'sec',
          txt: invSec
-           ? 'Sec compté le ' + fmtD(invSec.jour) + ', avant la période'
-           : 'Sec jamais compté' });
+           ? 'Inventaire du sec à refaire : dernier comptage le ' + fmtD(invSec.jour) +
+             ', avant le début de la période (' + fmtD(per.debut) + ')'
+           : 'Inventaire du sec jamais fait' });
      }
      if (!num(e.litrageBL))     B.push({ id:'achats', txt:'Achats de la période non saisis', go:'ecarts' });
    
@@ -4959,10 +5018,12 @@ function ouvrirPremierePeriode() {
      const anticipee = today() < per.fin;
      const bloquants = B.filter(b => !b.forcable && !b.pourEcart);
      const historique = (await DB.get('periodes', [])).slice().reverse().slice(0, 12);
+     const estManager = !!(STATE.user && STATE.user.role === 'manager');
      /* Ce qui ne sert qu'à l'écart n'empêche pas de terminer la période. */
      const niveau = b => b.pourEcart ? 'info' : b.forcable ? 'warn' : 'bad';
      const aide = b => b.pourEcart ? 'Pour l’écart seulement : pas obligatoire pour terminer la période.'
-       : b.forcable ? 'Peut être forcé avec un motif écrit.' : 'Bloquant : la clôture est impossible sans cela.';
+       : b.forcable ? 'Pas obligatoire : vous pourrez terminer la période en écrivant pourquoi ce n’est pas fait.'
+       : 'Bloquant : la clôture est impossible sans cela.';
    
      $('#page').innerHTML =
        carte(entete('📅', libellePeriode(per),
@@ -4976,26 +5037,121 @@ function ouvrirPremierePeriode() {
          '<div class="alerte ' + niveau(b) + '"><span class="ai">' + (niveau(b) === 'bad' ? '▲' : '●') + '</span>' +
          '<div><b>' + esc(b.txt) + '</b><p>' + aide(b) + '</p></div>' +
          '<span class="go"><button class="btn clair sm" data-go="' + b.go + '"' + (b.jour ? ' data-jour="' + b.jour + '"' : '') +
-         (b.moment ? ' data-moment="' + b.moment + '"' : '') + '>Ouvrir</button></span></div>').join('') + '</div>'
+         (b.moment ? ' data-moment="' + b.moment + '"' : '') + (b.partie ? ' data-partie="' + b.partie + '"' : '') +
+         '>Ouvrir</button></span></div>').join('') + '</div>'
          : carte('<div class="alerte ok"><span class="ai">•</span><div><b>Tout est en ordre</b>' +
            '<p>Inventaires validés, achats saisis, registres complets.</p></div></div>', 'plat')) +
    
        '<button class="btn ' + (bloquants.length ? 'clair' : 'menthe') + ' bloc xl" id="clo" style="margin-top:16px">' +
-       (anticipee ? '⏭️ Clôture anticipée' : 'Terminer la période') + '</button>' +
+       (anticipee ? 'Clôture anticipée' : 'Terminer la période') + '</button>' +
     '<button class="btn clair bloc" id="modif" style="margin-top:8px">Modifier les dates de la période</button>' +
    
-       (historique.length ? '<div class="entete"><h3>Périodes clôturées</h3></div>' +
+       /* Réservé au manager : il les consulte et les corrige d'un appui. */
+       (historique.length && estManager ? '<div class="entete"><h3>Périodes clôturées</h3></div>' +
          '<div class="dense"><div class="dense-h"><span class="c1">Période</span>' +
          '<span class="c w">Écart</span><span class="c ww">Clôturée par</span></div>' +
-         historique.map(p =>
-           '<div class="dl"><span class="c1">' + esc(libellePeriode(p)) +
+         historique.map((p, i) =>
+           '<div class="dl" data-pclose="' + i + '" role="button" tabindex="0" style="cursor:pointer" aria-label="Voir et modifier ' +
+             esc(libellePeriode(p)) + ', écart ' + (p.ecartPct === undefined ? (p.ecartIncoherent ? 'incohérent' : 'non calculé') : pctEcartTxt(p.ecartPct)) +
+             ', clôturée par ' + esc(p.par) + ' le ' + fmtD(p.jour) + '"><span class="c1">' + esc(libellePeriode(p)) +
            (p.anticipee ? ' · anticipée' : '') + '</span>' +
            '<span class="c w num">' + (p.ecartPct === undefined ? '—' : pctEcartTxt(p.ecartPct)) + '</span>' +
            '<span class="c ww">' + esc(p.par) + ' ' + fmtDC(p.jour) + '</span></div>').join('') + '</div>' : '');
    
      $('#clo').onclick = () => ouvrirCloture(per, B, anticipee);
   $('#modif').onclick = () => modifierPeriode(per);
+  $$('[data-pclose]').forEach(r => {
+    r.onclick = () => voirPeriodeClose(historique[+r.dataset.pclose]);
+    r.onkeydown = ev => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); r.onclick(); } };
+  });
 };
+
+/* Période clôturée, vue et corrigée par le manager : achats, poids jeté et
+   choix de l'écart. L'écart est recalculé avec les mêmes règles qu'à la
+   clôture et réécrit dans l'historique. */
+async function voirPeriodeClose(p) {
+  if (!p || !(STATE.user && STATE.user.role === 'manager')) return;
+  const e = await DB.get('ecart:' + p.id, {});
+  const c0 = await calculEcart(p);
+  let avecEcart = !p.sansEcart;
+  showSheet(
+    '<h2 id="sheet-titre">' + esc(libellePeriode(p)) + '</h2>' +
+    '<p class="sub">Clôturée par ' + esc(p.par || '?') + ' le ' + fmtD(p.jour) + (p.anticipee ? ' · anticipée' : '') +
+      (p.modifieePar ? ' · modifiée par ' + esc(p.modifieePar) : '') + '</p>' +
+    (p.motif ? '<p class="mini"><b>Motif</b> : ' + esc(p.motif) + '</p>' : '') +
+    '<div class="dense" style="margin-top:12px"><div class="dense-h"><span class="c1">Calcul</span><span class="c w">kg</span></div>' +
+      '<div class="dl"><span class="c1">Stock de départ</span><span class="c w num">' + n1(c0.debutKg) + '</span></div>' +
+      '<div class="dl"><span class="c1">Ventes importées</span><span class="c w num">' + n1(c0.vendu) + '</span></div>' +
+      '<div class="dl"><span class="c1">Stock de fin compté</span><span class="c w num">' + n1(c0.finKg) + '</span></div></div>' +
+    (c0.invValide ? '' : '<div class="alerte warn" style="margin-top:10px"><span class="ai">●</span><div><b>Pas d’inventaire de fin</b>' +
+      '<p>Le stock de fin de cette période est inconnu : un écart calculé serait faux.</p></div></div>') +
+    '<div class="grid g2" style="margin-top:14px">' +
+      '<div class="champ"><label class="f">Achats (L)</label><input type="number" min="0" step="0.1" id="pc-bl" value="' + (num(e.litrageBL) || '') + '" placeholder="0"></div>' +
+      '<div class="champ"><label class="f">Poids jeté (kg)</label><input type="number" min="0" step="0.01" id="pc-jk" value="' + (num(e.jeteKg) || '') + '" placeholder="0"></div></div>' +
+    '<div class="chips" id="pc-ecart" style="margin-top:12px">' +
+      '<button type="button" class="chip' + (avecEcart ? ' on' : '') + '" data-e="oui" aria-pressed="' + avecEcart + '">Calculer l’écart</button>' +
+      '<button type="button" class="chip' + (avecEcart ? '' : ' on') + '" data-e="non" aria-pressed="' + !avecEcart + '">Sans écart</button></div>' +
+    '<p class="mini" id="pc-res" style="margin-top:10px"></p>' +
+    '<div class="actions"><button class="btn clair" data-fermer>Fermer</button>' +
+    '<button class="btn menthe" id="pc-ok">Enregistrer</button></div>');
+
+  /* Même calcul que calculEcart, avec les deux champs saisis. */
+  const resultat = () => {
+    const achats = Math.max(0, num($('#pc-bl').value)) * FOURNISSEUR.poidsMoyenLitre;
+    const jete = Math.max(0, num($('#pc-jk').value));
+    const theo = c0.debutKg + achats - jete - c0.vendu;
+    const ecart = c0.finKg - theo;
+    const pct = theo > 0 ? ((theo - c0.finKg) / theo) * 100 : 0;
+    return { theo:theo, ecart:ecart, pct:pct, incoherent:!(theo > 0) && (c0.finKg > 0 || c0.vendu > 0) };
+  };
+  const maj = () => {
+    const r = resultat();
+    $('#pc-res').textContent = !avecEcart ? 'Période enregistrée sans écart.'
+      : r.incoherent ? 'Calcul incohérent : le stock théorique est nul ou négatif.'
+      : 'Théorique ' + n1(r.theo) + ' kg · écart ' + (Math.abs(r.ecart) < 0.05 ? '' : r.ecart > 0 ? '+' : '−') +
+        n1(Math.abs(r.ecart)) + ' kg (' + pctEcartTxt(r.pct) + ')';
+  };
+  $('#pc-bl').oninput = maj;
+  $('#pc-jk').oninput = maj;
+  $$('#pc-ecart [data-e]').forEach(b => b.onclick = () => {
+    avecEcart = b.dataset.e === 'oui';
+    $$('#pc-ecart [data-e]').forEach(x => { x.classList.toggle('on', x === b); x.setAttribute('aria-pressed', x === b); });
+    maj();
+  });
+  maj();
+
+  let enCours = false;
+  $('#pc-ok').onclick = async () => {
+    if (enCours) return;
+    if (num($('#pc-bl').value) < 0 || num($('#pc-jk').value) < 0) return toast('Une quantité ne peut pas être négative', 'erreur');
+    if (num($('#pc-bl').value) === num(e.litrageBL) && num($('#pc-jk').value) === num(e.jeteKg) && avecEcart === !p.sansEcart) {
+      closeSheet();
+      return toast('Aucune modification');
+    }
+    enCours = true;
+    try {
+      await DB.patch('ecart:' + p.id, { litrageBL:Math.max(0, num($('#pc-bl').value)), jeteKg:Math.max(0, num($('#pc-jk').value)) });
+      const c = await calculEcart(p);
+      const liste = await DB.get('periodes', []);
+      const i = liste.findIndex(x => x && x.id === p.id && x.at === p.at);
+      if (i < 0) { toast('Cette période n’est plus dans l’historique', 'erreur'); return; }
+      const maj2 = Object.assign({}, liste[i], { modifiee:nowISO(), modifieePar:STATE.user.prenom });
+      ['ecartKg', 'ecartPct', 'ecartIncoherent', 'stockFin', 'valeur', 'sansEcart'].forEach(k => delete maj2[k]);
+      /* Même règle qu'à la clôture : un écart incohérent n'a pas de %. */
+      Object.assign(maj2, avecEcart
+        ? Object.assign({ ecartKg:+n2(c.ecart), stockFin:+n2(c.reel), valeur:+n2(c.valeur) },
+                        c.incoherent ? { ecartIncoherent:true } : { ecartPct:+n2(c.pct) })
+        : { sansEcart:true });
+      liste[i] = maj2;
+      await DB.set('periodes', liste);
+      await feed('ok', STATE.user.prenom + ' a modifié la période clôturée ' + libellePeriode(p) +
+        (avecEcart ? (c.incoherent ? ' : écart incohérent' : ' : écart ' + pctEcartTxt(c.pct)) : ' : sans écart'));
+      closeSheet();
+      toast('Période modifiée');
+      rendre('periodes');
+    } finally { enCours = false; }
+  };
+}
 
 /* Ajuster une période en cours sans la clôturer : la date de fin n'était
    modifiable qu'au moment de la clôture, ce qui obligeait à fermer pour
@@ -5091,7 +5247,7 @@ function modifierPeriode(per) {
            '<div class="alerte bad"><span class="ai">▲</span><div><b>' + esc(b.txt) + '</b></div>' +
            '<span class="go"><button class="btn clair sm" data-saut="' + b.go + '"' + (b.jour ? ' data-jour="' + b.jour + '"' : '') +
            (b.moment ? ' data-moment="' + b.moment + '"' : '') + '>Ouvrir</button></span></div>').join('') + '</div>' +
-         '<div class="alerte info" style="margin-top:14px"><span class="ai">ℹ️</span><div><b>Pourquoi c’est bloquant</b>' +
+         '<div class="alerte info" style="margin-top:14px"><span class="ai">●</span><div><b>Pourquoi c’est bloquant</b>' +
          '<p>Ces points ne peuvent pas être forcés : réglez-les, puis revenez terminer la période.</p></div></div>' +
          '<div class="actions"><button class="btn clair" data-fermer>Fermer</button></div>');
        $$('[data-saut]').forEach(b => b.onclick = () => { closeSheet(); rendre(b.dataset.saut, false, b.dataset.jour, b.dataset.moment); });
@@ -5109,7 +5265,7 @@ function modifierPeriode(per) {
          (forcables.length > 3 ? '…' : '') + '</p></div></div>' : '') +
    
        (forcables.length && PERIODES.forcageMotifObligatoire
-         ? '<div class="champ" style="margin-top:14px"><label class="f">Motif du forçage (obligatoire)</label>' +
+         ? '<div class="champ" style="margin-top:14px"><label class="f">Pourquoi ces points ne sont pas faits (obligatoire)</label>' +
            '<input type="text" id="cl-motif" data-autofocus placeholder="Ex. boutique fermée le 14, relevés sans objet"></div>' : '') +
    
        /* L'écart n'est plus imposé : l'appli le propose, le manager choisit. */
@@ -6064,6 +6220,21 @@ function modifierPeriode(per) {
          '<p>Le fichier n’a ni colonne de poids ni SKU reconnus. Le calcul repose sur une moyenne de 150 g par unité : ' +
          'l’écart qui en découlera sera indicatif, pas exploitable pour trancher.</p></div></div>') +
    
+       /* Un export d'une autre durée que la période fausse tout l'écart :
+          62 jours importés sur une période de 8 donnaient 547 kg vendus. */
+       ((() => {
+         const jp = joursEntre(per.debut, today() < per.fin ? today() : per.fin).length;
+         /* Accepté : un export arrêté la veille, ou qui va jusqu'au jour de
+            clôture d'une période échue (elle s'étendra jusque-là). */
+         const echue = today() > per.fin, haut = echue ? joursEntre(per.debut, today()).length : jp;
+         const nj = num(r.jours);
+         return (nj > 0 && jp > 0 && [jp - 1, jp, haut - 1, haut].indexOf(nj) < 0)
+           ? '<div class="alerte warn" style="margin-top:12px"><span class="ai">●</span><div><b>Ce fichier couvre ' + num(r.jours) + ' ' +
+             accord(num(r.jours), 'jour') + ', la période en compte ' + jp + '</b><p>Exportez les ventes du ' + fmtD(per.debut) +
+             ' au ' + fmtD(today() < per.fin ? today() : per.fin) + (echue ? ' (ou jusqu’à aujourd’hui si vous clôturez aujourd’hui)' : '') +
+             ', sinon le poids vendu et l’écart seront faux.</p></div></div>'
+           : '';
+       })()) +
        '<div class="grid g2" style="margin:14px 0">' +
        kpi('Poids vendu', n1(r.kg) + '<span class="u">kg</span>', r.fiable ? 'ok' : 'warn', r.lignes + ' ' + accord(r.lignes, 'ligne')) +
        kpi('Valeur', eur(r.kg * FOURNISSEUR.prixMoyenKg), '', 'à ' + eur(FOURNISSEUR.prixMoyenKg) + '/kg') + '</div>' +
