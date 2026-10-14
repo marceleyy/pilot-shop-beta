@@ -1291,11 +1291,17 @@ function extraireLignesBL(texte) {
       .replace(/\b([1-9]) ?(?:[lti1][i1l]?tres?|[i1]?tres|lires?)\b/gi, '$1 litres');
     if (t.length < 8) return;
     const jetons = t.split(' ');
+    /* Débris de la marge avant la référence (« 4 SPISTAM25 », « AN SMANGO25 »,
+       « > SVANIG25 ») : sans ce retrait, la référence n'était pas reconnue
+       et finissait dans le nom du produit. */
+    const reRef = /^[\$s]{0,2}[A-Z][A-Z0-9$]{3,15}$/;
+    if (jetons.length > 2 && jetons[0].length <= 3 && !reRef.test(jetons[0]) &&
+        reRef.test(jetons[1]) && /\d/.test(jetons[1])) jetons.shift();
 
     /* Référence en tête : « $AMARENA25 », « MACGLAMP », « GAUFRE ». La lecture
        rend souvent le « $ » en « S » : on garde la référence telle que lue,
        elle sert de repère, pas de clé. */
-    const mRef = jetons[0].match(/^[\$s]{0,2}[A-Z][A-Z0-9$]{3,15}$/);
+    const mRef = jetons[0].match(reRef);
     const ref = mRef ? jetons[0] : '';
 
     /* Lot : le dernier jeton qui a la forme d'un lot connu, après correction
