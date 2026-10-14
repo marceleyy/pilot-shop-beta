@@ -679,12 +679,15 @@ async function resumeAttente(a, partie, articles) {
   } catch (e) { return ''; }
 }
 
-/* Écran du manager : vérifier, recompter, confirmer ou laisser en attente. */
-async function verifierInventaire(partie) {
+/* Écran du manager : vérifier, recompter, confirmer ou laisser en attente.
+   « lecture » : le même détail, sans rien modifier, ouvert à toute l'équipe
+   (le manager le regarde avant de décider). */
+async function verifierInventaire(partie, lecture) {
   partie = partie === 'sec' ? 'sec' : 'froid';
   const sec = partie === 'sec';
   const CLE = INV_ATTENTE[partie].cle;
-  if (!(STATE.user && STATE.user.role === 'manager')) {
+  const estManager = !!(STATE.user && STATE.user.role === 'manager');
+  if (!lecture && !estManager) {
     return toast('Seul un manager peut confirmer un inventaire', 'erreur');
   }
   if (sec) await chargerCatalogueSec();
@@ -696,6 +699,16 @@ async function verifierInventaire(partie) {
   invaliderStock();
   const maintenant = sec ? {} : ((await stockReel()).articles || {});
   let th = sec ? { theo: a.avant || {}, delta: {}, livraisons: [] } : await theoriqueAuComptage(a, maintenant);
+  /* Aucune livraison tracée entre l'inventaire en place et ce comptage : des
+     bacs « en trop » viennent souvent d'une livraison jamais saisie. */
+  let ref = null, receptions = 0;
+  if (!sec) {
+    ref = await DB.get('stock:inventaire', null).catch(() => null);
+    if (ref && ref.at) (await tousMouvements(String(ref.at).slice(0, 10))).forEach(m => {
+      const at = m.a || m.at;
+      if ((m.t || m.type) === 'reception' && at > ref.at && at <= a.at) receptions++;
+    });
+  }
   let enCours = null;          // article en cours de recomptage
   const lib = c => libelleInv(partie, c);
   const refSec = c => catalogueSec().filter(x => typeof x === 'object' && x.id === String(c).split('|')[1])[0];
@@ -729,7 +742,7 @@ async function verifierInventaire(partie) {
         (k ? ' · recompté ' + nb(num(k.q)) + ' le ' + esc(fmtD(String(k.at).slice(0, 10))) + ' par ' + esc(k.par || '—') : '') +
         '</small></span>' +
         '<span class="invc">' + (x.d ? (sec ? '' : 'écart ') + (x.d > 0 ? '+' : '') + nb(x.d) : (sec ? 'inchangé' : 'juste')) + '<br>' +
-        '<button type="button" class="btn clair sm" data-recompter="' + esc(x.c) + '">Recompter</button></span></div>' +
+        (lecture ? '' : '<button type="button" class="btn clair sm" data-recompter="' + esc(x.c) + '">Recompter</button>') + '</span></div>' +
         (enCours === x.c
           ? '<div class="invl"><span class="invn">Combien maintenant ?' +
             (sec ? '' : '<small>attendu maintenant : ' + nb(num(maintenant[x.c] || 0)) + '</small>') + '</span>' +
@@ -741,7 +754,7 @@ async function verifierInventaire(partie) {
     };
 
     showSheet(
-      '<h2 id="sheet-titre">Confirmer l’inventaire ' + (sec ? 'du sec' : 'de la chambre froide') + '</h2>' +
+      '<h2 id="sheet-titre">' + (lecture ? 'Détail de l’inventaire ' : 'Confirmer l’inventaire ') + (sec ? 'du sec' : 'de la chambre froide') + '</h2>' +
       '<p class="sub">Compté le ' + esc(fmtD(a.jour)) + ' à ' + heure(a.at) + ' par ' + esc(a.par || '—') + '. ' +
       (sec
         ? (ecarts.length ? ecarts.length + ' ' + accord(ecarts.length, 'référence a changé', 'références ont changé') +
@@ -750,12 +763,15 @@ async function verifierInventaire(partie) {
         ? manq + ' ' + accord(manq, 'bac manquant', 'bacs manquants') +
           (litres ? ' (' + n1(litres) + ' L)' : '') + ', ' + trop + ' en trop.'
         : 'Aucun écart avec le stock attendu.') +
-      ' Le stock ne change pas tant que vous ne confirmez pas.</p>' +
+      (lecture ? ' Le stock ne change qu’à la confirmation d’un manager.</p>' : ' Le stock ne change pas tant que vous ne confirmez pas.</p>') +
       (th.livraisons.length
         ? '<div class="rappel" style="margin-top:10px">L’attendu compte aussi ' +
           th.livraisons.map(l => l.bacs + ' ' + accord(l.bacs, 'bac') + ' de la livraison ' + esc(l.fournisseur || '') +
             (l.numero ? ' n° ' + esc(l.numero) : '') + ' du ' + esc(fmtD(l.jour))).join(', ') +
           ', livrés avant le comptage et pas encore confirmés. Confirmez la livraison avant de reprendre cet inventaire.</div>' : '') +
+      (!sec && trop && !receptions && !th.livraisons.length && ref
+        ? '<div class="rappel" style="margin-top:10px">Aucune livraison n’est enregistrée entre l’inventaire du ' +
+          esc(fmtD(ref.jour)) + ' et ce comptage. Si une livraison est arrivée sans être saisie, les bacs en trop viennent sans doute de là.</div>' : '') +
       (nonComptes.length
         ? '<div class="rappel" style="margin-top:10px">Pas compté cette fois : ' + esc(nonComptes.join(', ')) +
           '. Leur stock ne change pas.</div>' : '') +
@@ -770,9 +786,17 @@ async function verifierInventaire(partie) {
                : accord(justes.length, 'article sans écart', 'articles sans écart')) + '</summary>' +
           '<div class="stack">' + justes.map(rang).join('') + '</div></details>'
         : '') +
-      '<div class="actions"><button class="btn clair" data-fermer>Laisser en attente</button>' +
-      '<button class="btn menthe" id="ci-ok">Reprendre sur le stock réel</button></div>' +
-      '<button type="button" class="btn fantome bloc sm" id="ci-ecarter" style="margin-top:8px">Écarter ce comptage</button>');
+      (lecture
+        ? '<div class="actions"><button class="btn clair" data-fermer>Fermer</button>' +
+          (estManager ? '<button class="btn menthe" id="ci-verif">Vérifier et confirmer</button>' : '') + '</div>'
+        : '<div class="actions"><button class="btn clair" data-fermer>Laisser en attente</button>' +
+          '<button class="btn menthe" id="ci-ok">Reprendre sur le stock réel</button></div>' +
+          '<button type="button" class="btn fantome bloc sm" id="ci-ecarter" style="margin-top:8px">Écarter ce comptage</button>'));
+    if (lecture) {
+      const v = $('#ci-verif');
+      if (v) v.onclick = () => verifierInventaire(partie);
+      return;
+    }
 
     if (enCours && justes.some(x => x.c === enCours)) {
       const d = $('#sheet-corps details'); if (d) d.open = true;
@@ -1204,6 +1228,7 @@ V.stock = async function () {
     '<div class="alerte warn" style="margin-top:12px"><div style="flex:1;min-width:0">' +
     '<b>Inventaire du ' + esc(fmtD(a.jour)) + ' à confirmer</b>' +
     '<p>Compté par ' + esc(a.par || '—') + '. ' + esc(resumes[p]) + ' Ces chiffres ne comptent qu’après la confirmation d’un manager.</p></div>' +
+    '<button class="btn clair sm" data-detail="' + p + '">Détail</button>' +
     (STATE.user && STATE.user.role === 'manager'
       ? '<button class="btn menthe sm" data-verif="' + p + '">Vérifier</button>' : '') + '</div>';
 
@@ -1382,6 +1407,7 @@ V.stock = async function () {
     const bi = $('#st-inv');
     if (bi) bi.onclick = () => { STATE.inventairePartie = 'froid'; rendre('inventaire'); };
     $$('[data-verif]').forEach(b => b.onclick = () => verifierInventaire(b.dataset.verif));
+    $$('[data-detail]').forEach(b => b.onclick = () => verifierInventaire(b.dataset.detail, true));
     const rv = document.getElementById('rc-verif');
     if (rv && typeof verifierReceptions === 'function') rv.onclick = verifierReceptions;
     const bs = $('#st-inv-sec');
@@ -2075,6 +2101,7 @@ V.inventaire = async function () {
             '<div style="flex:1;min-width:0"><b>À confirmer par un manager</b>' +
             '<p>Compté le ' + esc(fmtD(enAttente.jour)) + ' à ' + heure(enAttente.at) + ' par ' + esc(enAttente.par || '—') +
             '. ' + esc(resumes[partie]) + ' Le stock réel ne change qu’à la confirmation.</p></div>' +
+            '<button class="btn clair sm" id="inv-detail">Détail</button>' +
             (estManager ? '<button class="btn menthe sm" id="inv-verif">Vérifier</button>' : '') +
             (enAttenteDuJour && !ouvert ? '<button class="btn clair sm" id="inv-rouvrir">Rouvrir</button>' : '') +
             '</div>'
@@ -2164,6 +2191,8 @@ V.inventaire = async function () {
 
     const bVerif = $('#inv-verif');
     if (bVerif) bVerif.onclick = () => verifierInventaire(partie);
+    const bDetail = $('#inv-detail');
+    if (bDetail) bDetail.onclick = () => verifierInventaire(partie, true);
 
     const bRouvrir = $('#inv-rouvrir');
     /* Le comptage en attente n'a pas touché le stock : on le rouvre tel quel. */
