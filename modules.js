@@ -1632,6 +1632,7 @@ V.hebdo = async function () {
   const rec = await DB.get('hebdo:' + j, {});
   const preuves = (await DB.get('preuves:' + j, [])).filter(p => !p.supprime);
   const resp = await DB.get('hebdo:responsables', {});
+  appliquerRoles(await DB.get('hebdo:roles', null));
   const faits = taches.filter(t => rec[t.id] && rec[t.id].ok).length;
 
   $('#vue-actions').innerHTML = '';
@@ -2030,14 +2031,16 @@ V.parametres = async function () {
           les tâches du plan de nettoyage et répondait « Jours enregistrés » :
           aucun écran ne lit ces jours (Tâches du jour et Nettoyage suivent
           « Organiser la semaine », ci-dessus). On ne garde que le rappel des
-          tâches qui ont leur propre rythme, modifiable par le manager. */
+          tâches qui ont leur propre rythme, que le manager modifie, ajoute
+          ou retire. */
        carte(entete('🔁', 'Tâches à rythme propre', 'Hors tableau de la semaine : jours fixes ou intervalle.') +
-         NETTOYAGE.asynchrones.map((a, i) =>
+         NETTOYAGE.asynchrones.map(a =>
            '<div class="tache"><span class="tx"><span class="tn">' + esc(a.nom) + '</span>' +
            '<span class="tm">' + (a.type === 'jours-fixes'
              ? a.jours.map(x => JOURS_SEMAINE[x]).join(', ')
              : 'tous les ' + a.intervalleJours + ' jours') + '</span></span>' +
-           '<button class="btn clair sm" data-asyn="' + i + '">Modifier</button></div>').join(''));
+           '<button class="btn clair sm" data-asyn="' + esc(a.id) + '">Modifier</button></div>').join('') +
+         '<button class="btn clair bloc" id="asyn-ajout" style="margin-top:12px">+ Ajouter une tâche</button>');
    
      $('#hv').onclick = async () => {
      /* Contrôle de cohérence avant d'enregistrer : un début de phase à 18:00
@@ -2070,7 +2073,8 @@ V.parametres = async function () {
 
   $('#hb-ouvrir').onclick = organiserSemaine;
   $('#hb-resp').onclick   = attribuerResponsables;
-  $$('[data-asyn]').forEach(b => b.onclick = () => modifierAsynchrone(+b.dataset.asyn));
+  $$('[data-asyn]').forEach(b => b.onclick = () => modifierAsynchrone(b.dataset.asyn));
+  $('#asyn-ajout').onclick = () => modifierAsynchrone(null);
    
      $$('[data-supp]').forEach(b => b.onclick = () => {
        const e = ENCEINTES[+b.dataset.supp];
@@ -2218,25 +2222,50 @@ async function organiserSemaine() {
 
 /* Changements du manager ({ id: { nom, type, jours, intervalleJours } })
    appliqués sur la référence d'usine : une tâche ajoutée ou une consigne
-   corrigée dans config.js arrive quand même dans les boutiques. */
+   corrigée dans config.js arrive quand même dans les boutiques.
+   Une tâche ajoutée par le manager porte « cree » ; une tâche retirée garde
+   une entrée { supprime:true } : la fusion par champ, à l'écriture comme au
+   rejeu hors ligne, ferait sinon revenir une clé simplement effacée. */
 function appliquerAsynchrones(surcharges) {
   const sc = surcharges || {};
-  NETTOYAGE.asynchrones = ASYNCHRONES_DEF.map(a =>
+  const usine = ASYNCHRONES_DEF.map(a =>
     Object.assign({}, a, { jours:(a.jours || []).slice() }, sc[a.id] || {}));
+  const ajouts = Object.keys(sc)
+    .filter(id => sc[id] && sc[id].cree && !ASYNCHRONES_DEF.some(a => a.id === id))
+    .map(id => Object.assign({ id:id, icone:'🔁', phase:'fermeture', jours:[] }, sc[id]))
+    .sort((x, y) => String(x.cree).localeCompare(String(y.cree)));
+  NETTOYAGE.asynchrones = usine.concat(ajouts).filter(a => !a.supprime);
+}
+
+/* Même principe pour les rôles des responsables de la semaine
+   ({ id: { libelle } | { supprime:true } | { libelle, cree } }). On
+   reconstruit RESPONSABLES en place : c'est une constante partagée. */
+function appliquerRoles(surcharges) {
+  const sc = surcharges || {};
+  const usine = RESPONSABLES_DEF.map(r => Object.assign({}, r, sc[r.id] || {}));
+  const ajouts = Object.keys(sc)
+    .filter(id => sc[id] && sc[id].cree && !RESPONSABLES_DEF.some(r => r.id === id))
+    .map(id => Object.assign({ id:id, icone:'👤' }, sc[id]))
+    .sort((x, y) => String(x.cree).localeCompare(String(y.cree)));
+  RESPONSABLES.splice(0, RESPONSABLES.length, ...usine.concat(ajouts).filter(r => !r.supprime));
 }
 
 /* Tâche à rythme propre : nom, jours fixes ou intervalle glissant. On
    travaille sur une copie ; rien n'est écrit tant que ce n'est pas valide.
-   L'identifiant ne change pas, le dernier passage (« async: ») reste lié. */
-function modifierAsynchrone(i) {
-  const a = NETTOYAGE.asynchrones[i];
+   L'identifiant ne change pas, le dernier passage (« async: ») reste lié.
+   id null : nouvelle tâche. */
+function modifierAsynchrone(id) {
+  const nouvelle = !id;
+  const a = nouvelle
+    ? { id:'a_' + uid(), nom:'', type:'jours-fixes', jours:[], intervalleJours:7 }
+    : NETTOYAGE.asynchrones.filter(x => x.id === id)[0];
   if (!a) return;
   const t = Object.assign({}, a, { jours:(a.jours || []).slice() });
   const JOURS_COURTS = ['', 'L', 'M', 'M', 'J', 'V', 'S', 'D'];
 
   const dessiner = () => {
     showSheet(
-      '<h2 id="sheet-titre">Modifier la tâche</h2>' +
+      '<h2 id="sheet-titre">' + (nouvelle ? 'Nouvelle tâche' : 'Modifier la tâche') + '</h2>' +
       '<div class="champ" style="margin-top:14px"><label class="f">Nom</label>' +
       '<input type="text" id="as-nom" maxlength="80" value="' + esc(t.nom) + '"></div>' +
       '<div class="champ" style="margin-top:14px"><label class="f">Rythme</label>' +
@@ -2252,7 +2281,8 @@ function modifierAsynchrone(i) {
           '<input type="number" id="as-int" min="1" max="60" step="1" value="' +
           esc(t.intervalleJours || 7) + '"></div>') +
       '<div class="actions"><button class="btn clair" data-fermer>Annuler</button>' +
-      '<button class="btn menthe" id="as-ok">Enregistrer</button></div>');
+      '<button class="btn menthe" id="as-ok">Enregistrer</button></div>' +
+      (nouvelle ? '' : '<button class="btn fantome bloc" id="as-supp" style="margin-top:8px">Supprimer cette tâche</button>'));
 
     /* Changer de rythme redessine la feuille : on garde le nom en cours. */
     $('#as-type').onchange = () => {
@@ -2260,6 +2290,7 @@ function modifierAsynchrone(i) {
       if ($('#as-int')) t.intervalleJours = $('#as-int').value;
       t.type = $('#as-type').value;
       dessiner();
+      _feuilleModifiee = true;
     };
     $$('[data-asj]').forEach(b => b.onclick = () => {
       const k = +b.dataset.asj, p = t.jours.indexOf(k);
@@ -2283,42 +2314,121 @@ function modifierAsynchrone(i) {
       /* Relu juste avant d'écrire : un changement fait entre-temps sur un
          autre appareil, pour une autre tâche, n'est pas effacé. */
       const sc = Object.assign({}, await DB.get('asynchrones', null));
+      if (nouvelle || (sc[a.id] && sc[a.id].cree)) out.cree = (sc[a.id] && sc[a.id].cree) || nowISO();
       sc[a.id] = out;
       await DB.set('asynchrones', sc);
       appliquerAsynchrones(sc);
-      await feed('ok', STATE.user.prenom + ' a modifié la tâche « ' + nom + ' »');
+      await feed('ok', STATE.user.prenom + (nouvelle ? ' a ajouté' : ' a modifié') + ' la tâche « ' + nom + ' »');
       closeSheet();
-      toast('Tâche modifiée');
+      toast(nouvelle ? 'Tâche ajoutée' : 'Tâche modifiée');
       rendre('parametres');
+    };
+
+    if ($('#as-supp')) $('#as-supp').onclick = () => {
+      t.nom = $('#as-nom').value;
+      if ($('#as-int')) t.intervalleJours = $('#as-int').value;
+      confirmer('Supprimer « ' + a.nom + ' » ?',
+        'La tâche disparaîtra des Paramètres et du registre exporté. Les passages déjà enregistrés sont conservés.',
+        'Supprimer', async () => {
+          const sc = Object.assign({}, await DB.get('asynchrones', null));
+          sc[a.id] = { supprime:true };
+          await DB.set('asynchrones', sc);
+          appliquerAsynchrones(sc);
+          await feed('ok', STATE.user.prenom + ' a supprimé la tâche « ' + a.nom + ' »');
+          closeSheet(); toast('Tâche supprimée'); rendre('parametres');
+        },
+        /* « Annuler » revient à la feuille, saisie en cours comprise. */
+        () => { dessiner(); _feuilleModifiee = true; });
     };
   };
   dessiner();
 }
 
-/* Les trois responsabilités de la semaine, en bas du tableau du mur */
+/* Les responsabilités de la semaine, en bas du tableau du mur. Le manager
+   désigne qui s'en charge, et peut renommer, retirer ou ajouter un rôle. */
 async function attribuerResponsables() {
   const resp = await DB.get('hebdo:responsables', {}) || {};
-  showSheet(
-    '<h2 id="sheet-titre">Responsables de la semaine</h2>' +
-    '<p class="sub">Trois rôles à désigner, comme au bas du tableau.</p>' +
-    RESPONSABLES.map(r =>
-      '<div class="champ" style="margin-top:14px"><label class="f">' + r.icone + ' ' + esc(r.libelle) + '</label>' +
-      '<select data-r="' + esc(r.id) + '"><option value="">Personne</option>' +
-      EQUIPE.map(e => '<option value="' + esc(e.id) + '"' +
-        (resp[r.id] === e.id ? ' selected' : '') + '>' + esc(e.prenom) + '</option>').join('') +
-      '</select></div>').join('') +
-    '<div class="actions"><button class="btn clair" data-fermer>Annuler</button>' +
-    '<button class="btn menthe" id="ar-ok">Enregistrer</button></div>');
+  appliquerRoles(await DB.get('hebdo:roles', null));
+  /* Copie de travail : rien n'est écrit avant « Enregistrer ». */
+  const roles = RESPONSABLES.map(r => ({ id:r.id, libelle:r.libelle, icone:r.icone,
+                                         qui:resp[r.id] || '', cree:r.cree || null }));
+  const retires = [];
 
-  $('#ar-ok').onclick = async () => {
-    const out = {};
-    $$('[data-r]').forEach(s => { if (s.value) out[s.dataset.r] = s.value; });
-    await DB.set('hebdo:responsables', out);
-    await feed('ok', STATE.user.prenom + ' a désigné les responsables de la semaine');
-    closeSheet();
-    toast('Responsables enregistrés');
-    rendre('parametres');
+  /* Redessiner la feuille (ajout, retrait) ne doit rien perdre de la saisie. */
+  const relire = () => {
+    $$('[data-rl]').forEach(i => {
+      const r = roles.filter(x => x.id === i.dataset.rl)[0];
+      if (r) r.libelle = i.value;
+    });
+    $$('[data-r]').forEach(s => {
+      const r = roles.filter(x => x.id === s.dataset.r)[0];
+      if (r) r.qui = s.value;
+    });
   };
+
+  const dessiner = () => {
+    showSheet(
+      '<h2 id="sheet-titre">Responsables de la semaine</h2>' +
+      '<p class="sub">Les rôles du bas du tableau : qui s’en charge cette semaine.</p>' +
+      roles.map(r =>
+        '<div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--line)">' +
+        '<div class="champ"><label class="f">' + esc(r.icone) + ' Rôle</label>' +
+        '<input type="text" maxlength="120" data-rl="' + esc(r.id) + '" value="' + esc(r.libelle) + '"></div>' +
+        '<div class="champ" style="margin-top:10px"><label class="f">Responsable</label>' +
+        '<select data-r="' + esc(r.id) + '"><option value="">Personne</option>' +
+        EQUIPE.map(e => '<option value="' + esc(e.id) + '"' +
+          (r.qui === e.id ? ' selected' : '') + '>' + esc(e.prenom) + '</option>').join('') +
+        '</select></div>' +
+        '<button class="btn fantome bloc sm" data-rs="' + esc(r.id) + '" style="margin-top:8px">Retirer ce rôle</button></div>').join('') +
+      '<button class="btn clair bloc" id="ar-ajout" style="margin-top:12px">+ Ajouter un rôle</button>' +
+      '<div class="actions"><button class="btn clair" data-fermer>Annuler</button>' +
+      '<button class="btn menthe" id="ar-ok">Enregistrer</button></div>');
+
+    $('#ar-ajout').onclick = () => {
+      relire();
+      roles.push({ id:'r_' + uid(), libelle:'', icone:'👤', qui:'', cree:nowISO() });
+      dessiner();
+      _feuilleModifiee = true;   // showSheet l'a remis à zéro : toucher le voile demandera confirmation
+      const champs = $$('[data-rl]');
+      if (champs.length) champs[champs.length - 1].focus();
+    };
+    $$('[data-rs]').forEach(b => b.onclick = () => {
+      relire();
+      const k = roles.findIndex(x => x.id === b.dataset.rs);
+      if (k < 0) return;
+      retires.push(roles[k]);
+      roles.splice(k, 1);
+      dessiner();
+      _feuilleModifiee = true;
+    });
+
+    $('#ar-ok').onclick = async () => {
+      relire();
+      roles.forEach(r => { r.libelle = String(r.libelle || '').trim(); });
+      if (roles.some(r => !r.libelle)) return toast('Donnez un nom à chaque rôle', 'erreur');
+      /* Relu juste avant d'écrire, comme les tâches à rythme propre. */
+      const sc = Object.assign({}, await DB.get('hebdo:roles', null));
+      roles.forEach(r => {
+        const usine = RESPONSABLES_DEF.filter(d => d.id === r.id)[0];
+        sc[r.id] = usine ? { libelle:r.libelle } : { libelle:r.libelle, cree:r.cree || nowISO() };
+      });
+      retires.forEach(r => { sc[r.id] = { supprime:true }; });
+      /* « hebdo:responsables » est fusionné champ par champ : une clé
+         absente gardait l'ancien responsable. On écrit donc '' pour
+         « Personne » et pour un rôle retiré. */
+      const out = {};
+      roles.forEach(r => { out[r.id] = r.qui || ''; });
+      retires.forEach(r => { out[r.id] = ''; });
+      await DB.set('hebdo:roles', sc);
+      await DB.set('hebdo:responsables', out);
+      appliquerRoles(sc);
+      await feed('ok', STATE.user.prenom + ' a mis à jour les responsables de la semaine');
+      closeSheet();
+      toast('Responsables enregistrés');
+      rendre('parametres');
+    };
+  };
+  dessiner();
 }
 
 /* =============================================================================
@@ -2639,6 +2749,7 @@ function formulaireAnomalie() {
        const hb = await DB.get('hebdo', null);
        if (hb) NETTOYAGE.zones.forEach(z => z.taches.forEach(t => { if (hb[t.id]) t.jours = hb[t.id]; }));
        appliquerAsynchrones(await DB.get('asynchrones', null));
+       appliquerRoles(await DB.get('hebdo:roles', null));
        /* Plan hebdomadaire décidé par le manager. On repart de la référence
           d'usine avant d'appliquer : sinon une tâche retirée du plan gardait
           ses anciens jours, puisqu'on ne faisait qu'ajouter par-dessus. */
