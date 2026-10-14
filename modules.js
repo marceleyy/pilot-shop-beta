@@ -2626,6 +2626,8 @@ function formulaireAnomalie() {
    async function appliquerReglages() {
      /* Appareil pas encore rattaché : la base refuse (401 en console). */
      if (typeof appareilRattache === 'function' && !appareilRattache()) return;
+     /* Ville de la météo (guide.js) : relue avec les autres réglages. */
+     if (typeof chargerVille === 'function') chargerVille();
      try {
        const h = await DB.get('horaires', null);
        if (h) {

@@ -688,6 +688,8 @@ try { appliquerVille(JSON.parse(localStorage.getItem(VILLE_LOCALE) || 'null')); 
 /* La base fait foi : une ville choisie sur un autre iPad arrive ici au
    chargement suivant, et la bande météo se redessine à la prochaine vue. */
 async function chargerVille() {
+  /* Appareil pas encore rattaché : la base refuse (comme appliquerReglages). */
+  if (typeof appareilRattache === 'function' && !appareilRattache()) return;
   try {
     const v = await DB.get('boutique:ville', null);
     if (!v) return;
@@ -722,7 +724,9 @@ function feuilleVille(apres) {
   const etat = m => { const e = $('#vl-etat'); if (e) e.textContent = m; };
   let liste = [], minuterie = null, tour = 0;
   const lancer = async () => {
-    const q = $('#vl-q').value.trim();
+    const champ = $('#vl-q');
+    if (!champ) return;                 // feuille fermée pendant la frappe
+    const q = champ.value.trim();
     const n = ++tour;
     if (q.length < 2) { $('#vl-res').innerHTML = ''; return etat('Tapez au moins deux lettres.'); }
     if (!STATE.enLigne) return etat('Hors ligne : la recherche de ville demande Internet.');

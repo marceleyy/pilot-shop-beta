@@ -4002,7 +4002,10 @@ function ouvrirPremierePeriode() {
       le nouveau nom. */
    async function meteoGardee() {
      const c = await DB.get('meteo', null);
-     return c && c.lieu === METEO.lat + ',' + METEO.lon ? c : null;
+     if (!c) return null;
+     /* Météo gardée avant ce changement (sans lieu) : c'était Chamonix. */
+     const lieu = c.lieu || '45.9237,6.8694';
+     return lieu === METEO.lat + ',' + METEO.lon ? c : null;
    }
    async function meteo() {
      if (!METEO.actif) return null;
@@ -4061,7 +4064,7 @@ function ouvrirPremierePeriode() {
      return carte(
        '<div class="meteo"><span class="mi">' + c.i + '</span>' +
        '<div style="flex:1"><div class="mt">' + m.t + '°</div>' +
-       '<div class="md">' + esc(c.l) + ' · ' + METEO.ville + '</div></div>' +
+       '<div class="md">' + esc(c.l) + ' · ' + esc(METEO.ville) + '</div></div>' +
        '<div style="text-align:right"><div class="mini">max ' + m.max + '°</div>' +
        '<div class="mini">pluie ' + m.pluie + ' %</div>' +
        (m.source === 'api' ? '' : '<div class="mini">hors ligne</div>') + '</div></div>', 'ciel');
