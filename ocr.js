@@ -1376,7 +1376,7 @@ function extraireLignesBL(texte) {
 function numeroBLTolerant(brut) {
   const chiffres = x => x.split('').map(c => VERS_CHIFFRE[c] !== undefined ? VERS_CHIFFRE[c] : c).join('');
   const essais = [
-    /(?:^|[^A-Za-z0-9])([B8][L1I|]\s*[-:]?\s*([0-9OoQDIlZSsG]{6}))(?![A-Za-z0-9])/g,
+    /(?:^|[^A-Za-z0-9])([B8E][L1I|]\s*[-:]?\s*([0-9OoQDIlZSsG]{6}))(?![A-Za-z0-9])/g,
     /^[ \t]*([A-Za-z|]{0,2}([0-9OoQDIlZSs]{6}))\s+\d{2}[\/.]\d{2}[\/.]20\d{2}\b/gm
   ];
   /* Le numéro est dans l'en-tête : sans « BL », on ne cherche pas dans le
@@ -1385,7 +1385,7 @@ function numeroBLTolerant(brut) {
   const fin = brut.search(/palette|d[ée]signation/i);
   const entete = fin >= 0 ? brut.slice(0, fin) : brut;
   for (const re of essais) {
-    const zone = re === essais[0] ? brut : entete;
+    const zone = entete;   // « B1 123456 » dans une adresse ou le tableau : écarté
     let m;
     while ((m = re.exec(zone))) {
       const n = chiffres(m[2]);
