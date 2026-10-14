@@ -6219,11 +6219,13 @@ function modifierPeriode(per) {
          const jp = joursEntre(per.debut, today() < per.fin ? today() : per.fin).length;
          /* Accepté : un export arrêté la veille, ou qui va jusqu'au jour de
             clôture d'une période échue (elle s'étendra jusque-là). */
-         const haut = today() > per.fin ? joursEntre(per.debut, today()).length : jp;
-         return (num(r.jours) > 0 && jp > 0 && (num(r.jours) < jp - 1 || num(r.jours) > haut))
+         const echue = today() > per.fin, haut = echue ? joursEntre(per.debut, today()).length : jp;
+         const nj = num(r.jours);
+         return (nj > 0 && jp > 0 && [jp - 1, jp, haut - 1, haut].indexOf(nj) < 0)
            ? '<div class="alerte warn" style="margin-top:12px"><span class="ai">●</span><div><b>Ce fichier couvre ' + num(r.jours) + ' ' +
              accord(num(r.jours), 'jour') + ', la période en compte ' + jp + '</b><p>Exportez les ventes du ' + fmtD(per.debut) +
-             ' au ' + fmtD(today() < per.fin ? today() : per.fin) + ', sinon le poids vendu et l’écart seront faux.</p></div></div>'
+             ' au ' + fmtD(today() < per.fin ? today() : per.fin) + (echue ? ' (ou jusqu’à aujourd’hui si vous clôturez aujourd’hui)' : '') +
+             ', sinon le poids vendu et l’écart seront faux.</p></div></div>'
            : '';
        })()) +
        '<div class="grid g2" style="margin:14px 0">' +
