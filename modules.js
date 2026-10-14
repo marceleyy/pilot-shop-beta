@@ -421,6 +421,7 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
          if (ouvre) return;
          ouvre = true;
          const memo = typeof memoBL === 'function' ? await memoBL() : {};
+         if (typeof chargerCatalogueSec === 'function') { try { await chargerCatalogueSec(); } catch (e) {} }
          ouvre = false;
          const t = $('#rc-t').value;
          const refuse = (t !== '' && num(t) > RECEPTION.tempMax) || Object.keys(conf).some(k => !conf[k]);
@@ -449,7 +450,46 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
        })[0] || null;
      }
 
+     /* Produits proposés à la saisie d'une ligne, rangés froid ou sec.
+        fam : famille de FAMILLES_PRODUIT, l'article entre au stock à la
+        confirmation. Sans fam : référence du catalogue du sec, qui ne se
+        suit pas en mouvements mais se compte à l'inventaire du sec. */
+     function catalogueReception() {
+       const out = [];
+       const auSec = f => f.lieu === 'sec' || f.stock === 'sec';
+       PARFUMS.forEach(p => out.push({ nom:'Glace ' + p, lieu:'froid', fam:'glace', parfum:p, unite:'bac' }));
+       FAMILLES_PRODUIT.filter(f => f.id !== 'glace').forEach(f => {
+         const lieu = auSec(f) ? 'sec' : 'froid';
+         const unite = STOCK.unites.indexOf(f.unite) >= 0 ? f.unite : 'unité';
+         if (f.parfums && f.saveurs && f.saveurs.length) {
+           f.saveurs.forEach(sv => out.push({ nom:f.libelle + ' ' + sv, lieu:lieu, fam:f.id, parfum:sv, unite:unite }));
+         } else {
+           out.push({ nom:f.libelle, lieu:lieu, fam:f.id, parfum:'', unite:unite });
+         }
+       });
+       /* Les références du sec déjà couvertes par une famille (crème,
+          coulis, toppings) ne sont pas proposées deux fois. */
+       const dejaFam = FAMILLES_PRODUIT.filter(auSec).map(f => f.refSec || f.id);
+       (typeof catalogueSec === 'function' ? catalogueSec() : []).forEach(r => {
+         if (!r || r.masque || dejaFam.indexOf(r.id) >= 0) return;
+         const unite = STOCK.unites.indexOf(r.unite) >= 0 ? r.unite : 'unité';
+         (r.variantes && r.variantes.length ? r.variantes : ['']).forEach(v =>
+           out.push({ nom:r.nom + (v ? ' · ' + v : ''), lieu:'sec', fam:'', parfum:'', unite:unite }));
+       });
+       return out;
+     }
+
      function lignesReception(bl, memo) {
+       const catalogue = catalogueReception();
+       const nrmC = x => String(x || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+       const propositions = (l, texte) => {
+         const mots = nrmC(texte).split(/\s+/).filter(Boolean);
+         return catalogue.filter(c => c.lieu === (l.lieu || 'froid') &&
+           mots.every(m => nrmC(c.nom).indexOf(m) >= 0)).slice(0, 8);
+       };
+       const puces = (l, i, texte) => propositions(l, texte).map(c =>
+         '<button type="button" class="chip' + (l.choix && l.choix.nom === c.nom ? ' on' : '') +
+         '" data-choix="' + i + '" data-nom="' + esc(c.nom) + '">' + esc(c.nom) + '</button>').join('');
        const lignes = (bl.lignes || []).map(l => ({
          /* Lot et unité lus sur le bon ; quantité illisible laissée vide, pour
             qu'elle soit saisie plutôt qu'enregistrée à 1 par défaut. */
@@ -480,7 +520,11 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
            (bl.refuse ? ' · <b style="color:var(--corail-d)">livraison refusée</b>' : '') + '</p>' +
            '<div class="stack">' + lignes.map((l, i) =>
              '<div class="card plat"><div class="champ"><label class="f">Produit</label>' +
-             '<input type="text" data-r="' + i + '.produit" value="' + esc(l.produit) + '" placeholder="Ex. Gelato pistache">' +
+             '<div class="chips" style="margin-bottom:8px">' +
+             ['froid', 'sec'].map(z => '<button type="button" class="chip' + ((l.lieu || 'froid') === z ? ' on' : '') +
+               '" data-lieu="' + i + '" data-z="' + z + '">' + (z === 'froid' ? 'Froid' : 'Sec') + '</button>').join('') + '</div>' +
+             '<input type="search" data-r="' + i + '.produit" value="' + esc(l.produit) + '" placeholder="Chercher dans le catalogue ou écrire le nom" autocomplete="off">' +
+             '<div class="chips" data-sugg="' + i + '" style="margin-top:6px">' + (l.choix && l.produit === l.choix.nom ? '' : puces(l, i, l.produit)) + '</div>' +
              (l.appris && l.produit === l.lu ? '<p class="mini" style="margin-top:4px">Reconnu grâce aux livraisons précédentes (' + esc(l.ref) + ')</p>' : '') + '</div>' +
              '<div class="grid g3" style="margin-top:10px">' +
              '<div class="champ"><label class="f">Quantité' + (l.qteDouteuse ? ' <b style="color:var(--corail-d)">à vérifier</b>' : '') + '</label><input type="number" min="1" data-r="' + i + '.qte" value="' + l.qte + '"></div>' +
@@ -513,6 +557,24 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
            if (k === 'lot') lignes[+i].lotCorrige = false;
            if (k === 'qte') lignes[+i].qteDouteuse = false;
           if (k === 'taille') lignes[+i].tailleDeduite = false;
+           if (k === 'produit') {
+             const z = $('[data-sugg="' + i + '"]');
+             if (z) { z.innerHTML = puces(lignes[+i], i, inp.value); brancherChoix(); }
+           }
+         });
+         function brancherChoix() {
+           $$('[data-choix]').forEach(b => b.onclick = () => {
+             const l = lignes[+b.dataset.choix];
+             const c = catalogue.filter(x => x.nom === b.dataset.nom)[0];
+             if (!c) return;
+             l.choix = c; l.produit = c.nom; l.unite = c.unite;
+             rendre2();
+           });
+         }
+         brancherChoix();
+         $$('[data-lieu]').forEach(b => b.onclick = () => {
+           lignes[+b.dataset.lieu].lieu = b.dataset.z;
+           rendre2();
          });
          $$('[data-scandlc]').forEach(b => b.onclick = async () => {
            const i = +b.dataset.scandlc;
@@ -567,7 +629,7 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
    
          /* Glace non reconnue (lait, cornets, parfum hors catalogue) : tracée pour
             sa DLC, mais pas ajoutée aux bacs de la chambre froide. */
-         const horsStock = []; let auStock = 0;
+         const horsStock = [], auSecSeul = []; let auStock = 0;
          if (!bl.refuse) {
         /* La réception incrémente le stock réel. C'est le seul enregistrement :
            l'ancien « stock fermé » tenait une comptabilité parallèle que les
@@ -583,6 +645,18 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
             auStock++;
             aStocker.push({ cle:cleA, produit:l.produit.trim(), qte:num(l.qte), ref:l.ref || '',
                             lot:l.lot || '', dlc:l.dlc || '', famille:a.famille });
+            continue;
+          }
+          /* Produit choisi dans le catalogue, nom non retouché : l'article est
+             connu, sans rien deviner. Sec hors famille : tracé au registre,
+             compté à l'inventaire du sec. */
+          if (l.choix && l.produit === l.choix.nom) {
+            const c = l.choix;
+            if (!c.fam) { auSecSeul.push(l.produit.trim()); continue; }
+            const cleC = cleArticle(c.fam, c.parfum, c.fam === 'glace' ? (num(l.taille) || FOURNISSEUR.tailleParDefaut) : '');
+            auStock++;
+            aStocker.push({ cle:cleC, produit:l.produit.trim(), qte:num(l.qte), ref:l.ref || '',
+                            lot:l.lot || '', dlc:l.dlc || '', famille:c.fam });
             continue;
           }
           const fam = devinerFamille(l.produit);
@@ -634,7 +708,8 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
          closeSheet();
          toast(bl.refuse ? 'Réception refusée et tracée'
            : (auStock ? 'Réception tracée. ' + auStock + ' ' + accord(auStock, 'produit entrera', 'produits entreront') + ' au stock après confirmation d’un manager' : 'Réception tracée, DLC suivie') +
-             (horsStock.length ? '. Non reconnu, hors stock : ' + horsStock.join(', ') : ''));
+             (auSecSeul.length ? '. Sec, compté à l’inventaire du sec : ' + auSecSeul.join(', ') : '') +
+             (horsStock.length ? '. Non reconnu, hors stock (choisissez-le dans le catalogue) : ' + horsStock.join(', ') : ''));
          rendre('reception');
        }
    
