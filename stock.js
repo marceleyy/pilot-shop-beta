@@ -2281,6 +2281,44 @@ V.inventaire = async function () {
     $('#inv-ok').onclick = partie === 'froid' ? validerFroid : validerSec;
   };
 
+  /* Résumé avant de valider : ce qui a été saisi, famille par famille, et ce
+     qui est resté vide dans une famille comptée (il vaudra 0 : « il devait y
+     avoir du citron »). Les quantités attendues ne sont pas montrées, le
+     comptage reste à l'aveugle. « Corriger » revient à la saisie. */
+  function resumeAvantValider(p, lignes, avant, titre, texte, libelle, onOui) {
+    const nomGroupe = g => p === 'sec' ? libelleSec('sec|' + g + '|').replace(/ · $/, '')
+      : ((FAMILLES_PRODUIT.filter(f => f.id === g)[0] || {}).libelle || g);
+    const court = c => {
+      if (p === 'sec') return String(c).split('|')[2] || libelleSec(c);
+      const a = litArticle(c);
+      return [a.parfum, a.taille ? a.taille + ' L' : ''].filter(Boolean).join(' ') || libelleArticle(c);
+    };
+    const nb = v => Number.isInteger(v) ? String(v) : n1(v);
+    const parGroupe = {};
+    Object.keys(lignes).forEach(c => (parGroupe[groupeInv(p, c)] = parGroupe[groupeInv(p, c)] || []).push(c));
+    const vides = Object.keys(avant || {})
+      .filter(c => lignes[c] === undefined && num(avant[c]) > 0 && parGroupe[groupeInv(p, c)])
+      .sort((x, y) => libelleInv(p, x).localeCompare(libelleInv(p, y)));
+    showSheet(
+      '<h2 id="sheet-titre">' + esc(titre) + '</h2>' +
+      '<p class="sub">' + esc(texte) + '</p>' +
+      Object.keys(parGroupe).sort((x, y) => nomGroupe(x).localeCompare(nomGroupe(y))).map(g => {
+        const cs = parGroupe[g].sort((x, y) => court(x).localeCompare(court(y)));
+        const total = cs.reduce((t, c) => t + num(lignes[c]), 0);
+        const seul = cs.length === 1 && court(cs[0]) === nomGroupe(g);
+        return '<p style="margin-top:12px"><b>' + esc(nomGroupe(g)) + '</b> · ' + nb(total) +
+          (seul ? '' : '<br>' + cs.map(c => esc(court(c)) + ' : <b>' + nb(num(lignes[c])) + '</b>').join(' · ')) + '</p>';
+      }).join('') +
+      (vides.length
+        ? '<div class="alerte warn" style="margin-top:12px"><div style="flex:1;min-width:0"><b>Laissés vides, comptés 0</b>' +
+          '<p>' + esc(vides.map(libelleInv.bind(null, p)).join(', ')) + '. Corrigez si c’est un oubli.</p></div></div>'
+        : '') +
+      '<div class="actions"><button class="btn clair" data-fermer>Corriger</button>' +
+      '<button class="btn menthe" id="rv-oui">' + esc(libelle) + '</button></div>'
+    );
+    $('#rv-oui').onclick = () => { closeSheet(); return onOui(); };
+  }
+
   async function validerFroid() {
     const cptes = Object.keys(saisie);
     if (!cptes.length) return toast('Saisissez au moins une quantité', 'erreur');
@@ -2318,7 +2356,7 @@ V.inventaire = async function () {
       if (d < 0) manq += -d; else trop += d;
     });
 
-    confirmer('Valider la chambre froide ?',
+    resumeAvantValider('froid', lignes, avant, 'Valider la chambre froide ?',
       t.bacs + ' ' + accord(t.bacs, 'bac compté', 'bacs comptés') + ' sur ' + cptes.length + ' ' + accord(cptes.length, 'référence') + ', soit ' +
       n1(t.kg) + ' kg. ' +
       (premier ? 'Premier comptage : il deviendra la référence du stock.'
@@ -2374,7 +2412,7 @@ V.inventaire = async function () {
     const lignes = {};
     cptes.forEach(k => { lignes[k] = num(saisieSec[k]); });
 
-    confirmer('Valider le sec ?',
+    resumeAvantValider('sec', lignes, (secPrec && secPrec.lignes) || {}, 'Valider le sec ?',
       cptes.length + ' ' + accord(cptes.length, 'référence comptée', 'références comptées') + '. ' +
       'L’inventaire est enregistré, à confirmer par un manager : le stock ne change pas avant.' +
       (attenteSec && !attenteSecDuJour ? ' Il remplace celui du ' + fmtD(attenteSec.jour) + ', encore à confirmer.' : ''),
