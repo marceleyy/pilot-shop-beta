@@ -1254,14 +1254,17 @@ function confirmerBL(r, apercu, resolve) {
     '<button class="btn menthe" id="ob-ok">Continuer</button></div>' +
     '<button class="btn clair bloc" id="ob-annuler" style="margin-top:10px">Annuler</button>');
 
-  document.getElementById('ob-annuler').onclick = () => { closeSheet(); resolve(null); };
+  /* Fermée par le voile ou le retour : le scan répond « rien » au lieu de
+     laisser l'appelant attendre pour toujours. */
+  const lacher = surFermetureFeuille(() => resolve(null));
+  document.getElementById('ob-annuler').onclick = () => { lacher(); closeSheet(); resolve(null); };
   document.getElementById('ob-x').onclick = () => {
-    closeSheet();
+    lacher(); closeSheet();
     scannerPhoto('bl').then(resolve, () => resolve(null));
   };
   document.getElementById('ob-ok').onclick = () => {
     const numero = document.getElementById('ob-num').value.trim().toUpperCase();
-    closeSheet();
+    lacher(); closeSheet();
     resolve(Object.assign({}, r, { numero: numero, valide: true, par: STATE.user ? STATE.user.prenom : null }));
   };
 }
