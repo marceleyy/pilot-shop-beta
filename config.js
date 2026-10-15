@@ -905,7 +905,7 @@ const TABS = {
   manager: [
     { id: 'controle', label: 'Contrôle' },
     { id: 'ecarts',   label: 'Écarts' },
-    { id: 'frigo',    label: 'Frigo' },
+    { id: 'frigo',    label: 'Ouverts' },
     { id: 'periodes', label: 'Périodes' },
     { id: 'plus',     label: 'Plus' }
   ]
@@ -929,7 +929,7 @@ const PAGES = {
   fiches:   { titre: 'Bibliothèque',      sous: 'Protocoles et fiches techniques' },
   releve:   { titre: 'Carnet de relève',  sous: 'Messages entre les services' },
   ecarts:   { titre: 'Écarts glace',      sous: 'Rendement de la période' },
-  frigo:    { titre: 'Frigo virtuel',     sous: 'Produits ouverts, du plus urgent' },
+  frigo:    { titre: 'Produits ouverts',  sous: 'Du plus urgent au moins urgent' },
   periodes: { titre: 'Périodes',          sous: 'Clôture et fenêtre de calcul' },
   histo:    { titre: 'Historique',        sous: 'Registres et retours, jour par jour' },
   equipe:   { titre: 'Équipe',            sous: 'Heures et activité' },
@@ -1055,6 +1055,9 @@ const RESPONSABLES = [
   { id:'r_trace',  libelle:'Responsable du contrôle de la traçabilité',   icone:'📋' },
   { id:'r_fifo',   libelle:'Responsable du contrôle FIFO : alerter si un produit approche de sa DLC', icone:'🧊' }
 ];
+/* Référence d'usine des rôles : le manager renomme, retire ou ajoute des
+   rôles (Paramètres) ; RESPONSABLES est reconstruit en place par-dessus. */
+const RESPONSABLES_DEF = RESPONSABLES.map(r => Object.assign({}, r));
 
 const HEBDO = {
   photosObligatoires: true,

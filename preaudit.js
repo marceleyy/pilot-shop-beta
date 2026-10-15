@@ -316,9 +316,9 @@ async function preuvesPreAudit(fin) {
   const fifo = await calculFIFO(monthKey(fin));
   const depasses = fifo.filter(f => f.c === 'rouge');
   P.dlc = depasses.length
-    ? { c:'bad', texte: depasses.length + ' ' + accord(depasses.length, 'produit dépassé', 'produits dépassés') + ' au frigo virtuel : ' +
+    ? { c:'bad', texte: depasses.length + ' ' + accord(depasses.length, 'produit dépassé', 'produits dépassés') + ' dans les produits ouverts : ' +
         [...new Set(depasses.map(f => f.nom))].slice(0, 3).join(', ') }
-    : { c:'ok', texte:'Aucun produit dépassé au frigo virtuel' };
+    : { c:'ok', texte:'Aucun produit dépassé dans les produits ouverts' };
 
   P.receptions = receptions
     ? { c:'ok', texte: receptions + ' ' + accord(receptions, 'réception enregistrée', 'réceptions enregistrées') + sur +

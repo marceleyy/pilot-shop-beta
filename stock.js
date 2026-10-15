@@ -50,11 +50,35 @@ const DESIGNATION_PARFUM = [
   [/cocco|coco\b/i,                        'Noix de coco'],
   [/sanguin|arancia/i,                     'Orange sanguine'],
   [/pista/i,                               'Pistache'],
-  [/stracciatella/i,                       'Stracciatella'],
+  [/stracci/i,                          'Stracciatella'],
   [/tiramis/i,                             'Tiramisu'],
   [/vanig|vanille|vaniglia|vanilla/i,      'Vanille'],
   [/yogurt|yaourt/i,                       'Yogurt']
 ];
+
+/* Repli quand le libellé est mal lu (« Glace Caté ») : la référence du bon,
+   « SCAFFE25 » ou « $CAFFE25 », porte aussi le parfum. Préfixes Jetfreeze,
+   comparés au début de la référence sans le $ (lu « S ») ni le format. */
+const REFERENCE_PARFUM = [
+  ['AMARENA', 'Amarena'], ['CAFFE', 'Café'], ['CARAM', 'Caramel au beurre salé'],
+  /* CIOCCOLATO seul : « CIOCCOLATOBIO », « CIOCCOLATOECUADOR » sont d'autres
+     parfums, laissés à la désignation. */
+  [/^CIOCCOLATO\d/, 'Chocolat noir'], ['COCCO', 'Noix de coco'], ['FRAGOLA', 'Fraise'],
+  ['INIM', 'Inimitable'], ['MANGO', 'Mangue'], ['NOCCIOLA', 'Noisette'],
+  ['PISTA', 'Pistache'], ['STRACCIA', 'Stracciatella'], ['TIRA', 'Tiramisu'],
+  ['VANIG', 'Vanille']
+];
+function parfumDepuisReference(ref) {
+  const R = String(ref || '').toUpperCase();
+  /* Avec et sans le premier S : « $STRACCIA25 » lu « SSTRACCIA25 », mais
+     aussi « STRACCIA25 » quand le $ a disparu. */
+  for (const r of [R.replace(/^S?\$/, ''), R.replace(/^S/, ''), R]) {
+    for (const [pre, p] of REFERENCE_PARFUM) {
+      if (pre instanceof RegExp ? pre.test(r) : r.indexOf(pre) === 0) return p;
+    }
+  }
+  return null;
+}
 
 function parfumDepuisDesignation(nom) {
   const n = String(nom || '');
@@ -103,6 +127,41 @@ function libelleArticle(cle) {
   const f = FAMILLES_PRODUIT.filter(x => x.id === a.famille)[0];
   return [a.parfum, f ? f.libelle : a.famille, a.taille ? a.taille + ' L' : '']
     .filter(Boolean).join(' · ');
+}
+
+/* -----------------------------------------------------------------------------
+   APPRENTISSAGE DES RÉFÉRENCES DU BON
+   La lecture du nom de produit dépend de la photo (ombre, pli, flou) ; la
+   référence du fournisseur, elle, ne change pas d'une livraison à l'autre.
+   Chaque réception confirmée par un manager enseigne à l'appli l'article
+   validé pour chaque référence lue (« SPISTAM25 » → glace|Pistache|3). À la
+   livraison suivante, la même référence donne directement le bon article,
+   même si le nom est illisible. Une variante de lecture (« SPISTAMZS ») est
+   apprise à son tour la première fois qu'elle est confirmée.
+   -------------------------------------------------------------------------- */
+/* Préfixe « stock: » : synchronisée (table stock) pour que ce qu'apprend
+   un iPad serve aux autres. Hors FUSIONNER : le dernier qui écrit gagne. */
+const CLE_MEMO_BL = 'stock:memo-bl';
+function cleMemoRef(ref) {
+  const r = String(ref || '').toUpperCase().replace(/[^A-Z0-9$]/g, '').replace(/^\$/, 'S');
+  return r.length >= 4 ? r : '';
+}
+async function memoBL() {
+  try { return (await DB.get(CLE_MEMO_BL, {})) || {}; } catch (e) { return {}; }
+}
+/* lignes : [{ ref, cle }] confirmées par un manager. */
+async function apprendreBL(lignes) {
+  const m = await memoBL();
+  let n = 0;
+  (lignes || []).forEach(l => {
+    const k = cleMemoRef(l.ref);
+    if (!k || !l.cle) return;
+    const avant = m[k];
+    m[k] = { cle: l.cle, vu: avant && avant.cle === l.cle ? (avant.vu || 1) + 1 : 1, at: nowISO() };
+    n++;
+  });
+  if (n) await DB.set(CLE_MEMO_BL, m);
+  return n;
 }
 
 /* -----------------------------------------------------------------------------
@@ -524,13 +583,100 @@ const libelleInv = (partie, c) => partie === 'sec' ? libelleSec(c) : libelleArti
 
 /* Article par article : compté, attendu au moment du comptage, écart.
    Les manquants d'abord, du plus gros au plus petit. */
+/* Un inventaire peut ne porter que sur une partie : les glaces sans les
+   macarons, trois références du sec. Ce qui n'a pas été compté du tout
+   (une famille de la chambre froide, une référence du sec) n'est ni comparé
+   ni touché : son stock reste celui d'avant. Dans ce qui est compté, un
+   champ laissé vide vaut 0, comme à la saisie. */
+const groupeInv = (partie, c) => partie === 'sec' ? String(c).split('|')[1] : litArticle(c).famille;
+function groupesComptes(a, partie) {
+  return new Set(Object.keys(a.lignes || {}).map(c => groupeInv(partie, c)));
+}
+
+/* Stock théorique de la chambre froide au moment du comptage : le stock réel
+   d'aujourd'hui moins ce qui a été tracé depuis (réceptions, ouvertures,
+   pertes), plus les livraisons arrivées avant le comptage et pas encore
+   confirmées (les bacs étaient là, le comptage les a vus). Recalculé à
+   chaque vérification : un scan fait hors ligne avant le comptage, arrivé
+   après, est ainsi pris en compte. */
+async function theoriqueAuComptage(a, maintenant) {
+  const delta = {};
+  (await tousMouvements(String(a.at).slice(0, 10))).forEach(m => {
+    const c = m.c || m.cle, at = m.a || m.at;
+    if (!c || !(at > a.at)) return;
+    const q = num(m.q !== undefined ? m.q : m.qte), t = m.t || m.type;
+    delta[c] = (delta[c] || 0) + (t === 'reception' ? q : (t === 'ouverture' || t === 'perte') ? -q : 0);
+  });
+  const froid = c => {
+    const f = FAMILLES_PRODUIT.filter(x => x.id === litArticle(c).famille)[0];
+    return litArticle(c).famille !== 'sec' && !(f && (f.lieu === 'sec' || f.stock === 'sec'));
+  };
+  const theo = {};
+  new Set(Object.keys(maintenant).concat(Object.keys(delta))).forEach(c => {
+    if (!froid(c)) return;
+    const v = num(maintenant[c] || 0) - num(delta[c] || 0);
+    if (v) theo[c] = v;
+  });
+  /* Livraisons en attente : avant le comptage (et après l'inventaire déjà
+     sur le stock, qui les a comptées sinon), elles entrent dans l'attendu ;
+     après le comptage (« apres »), elles sont là physiquement mais hors du
+     stock réel et du comptage. */
+  const livraisons = [], apres = {};
+  if (typeof receptionsEnAttente === 'function') {
+    const ref = await DB.get('stock:inventaire', null).catch(() => null);
+    const borne = (ref && ref.at) || '';
+    (await receptionsEnAttente()).forEach(r => {
+      if (!r.at || r.at <= borne) return;
+      const avantComptage = r.at <= a.at;
+      let n = 0;
+      (r.lignes || []).forEach(l => {
+        if (!l.cle || !froid(l.cle)) return;
+        if (avantComptage) { theo[l.cle] = num(theo[l.cle] || 0) + num(l.qte); n += num(l.qte); }
+        else apres[l.cle] = num(apres[l.cle] || 0) + num(l.qte);
+      });
+      if (n) livraisons.push({ fournisseur: r.fournisseur, numero: r.numero, jour: r.jour, bacs: n });
+    });
+  }
+  return { theo: theo, delta: delta, livraisons: livraisons, apres: apres };
+}
+
+/* Ce que l'inventaire confirmé doit porter : le compté, plus, pour ce qui
+   n'a pas été compté du tout, la valeur attendue (le stock ne bouge pas). */
+function lignesAReprendre(a, partie, attendu) {
+  const comptes = groupesComptes(a, partie);
+  const out = {};
+  Object.keys(attendu || {}).forEach(c => {
+    if (!comptes.has(groupeInv(partie, c)) && num(attendu[c])) out[c] = num(attendu[c]);
+  });
+  return Object.assign(out, a.lignes || {});
+}
+
 function lignesAttente(a, partie) {
   const l = a.lignes || {}, av = a.avant || {};
+  const comptes = groupesComptes(a, partie);
   return [...new Set(Object.keys(av).concat(Object.keys(l)))]
+    .filter(c => comptes.has(groupeInv(partie, c)))
     .map(c => ({ c: c, compte: num(l[c] || 0), attendu: num(av[c] || 0) }))
     .filter(x => x.compte || x.attendu)
     .map(x => Object.assign(x, { d: x.compte - x.attendu }))
     .sort((x, y) => (x.d - y.d) || libelleInv(partie, x.c).localeCompare(libelleInv(partie, y.c)));
+}
+
+/* Résumé d'un comptage en attente pour les bandeaux : ce que le manager va
+   trouver en l'ouvrant, sans avoir à l'ouvrir. */
+async function resumeAttente(a, partie, articles) {
+  if (!a) return '';
+  try {
+    const avant = partie === 'sec' ? (a.avant || {}) : (await theoriqueAuComptage(a, articles || {})).theo;
+    const l = lignesAttente(Object.assign({}, a, { avant: avant }), partie).filter(x => x.d);
+    if (partie === 'sec') return l.length ? l.length + ' ' + accord(l.length, 'référence a changé', 'références ont changé') + '.' : 'Rien n’a changé.';
+    const b = l.filter(x => litArticle(x.c).taille);
+    const manq = b.filter(x => x.d < 0).reduce((s2, x) => s2 - x.d, 0);
+    const trop = b.filter(x => x.d > 0).reduce((s2, x) => s2 + x.d, 0);
+    return !l.length ? 'Aucun écart avec le stock réel.'
+      : (manq ? manq + ' ' + accord(manq, 'bac manquant', 'bacs manquants') : 'Aucun bac manquant') +
+        (trop ? ', ' + trop + ' en trop' : '') + '.';
+  } catch (e) { return ''; }
 }
 
 /* Écran du manager : vérifier, recompter, confirmer ou laisser en attente. */
@@ -549,12 +695,20 @@ async function verifierInventaire(partie) {
      le comptage (réceptions, ouvertures, pertes). Le sec n'en a pas. */
   invaliderStock();
   const maintenant = sec ? {} : ((await stockReel()).articles || {});
+  let th = sec ? { theo: a.avant || {}, delta: {}, livraisons: [] } : await theoriqueAuComptage(a, maintenant);
   let enCours = null;          // article en cours de recomptage
   const lib = c => libelleInv(partie, c);
   const refSec = c => catalogueSec().filter(x => typeof x === 'object' && x.id === String(c).split('|')[1])[0];
 
   const dessinerV = () => {
-    const lignes = lignesAttente(a, partie);
+    const vue = Object.assign({}, a, { avant: th.theo });
+    const lignes = lignesAttente(vue, partie);
+    /* Ce qui n'a pas été compté : nommé, pour que personne ne croie à un oubli silencieux. */
+    const comptes = groupesComptes(a, partie);
+    const nonComptes = [...new Set(Object.keys(th.theo).map(c => groupeInv(partie, c)))]
+      .filter(g => !comptes.has(g))
+      .map(g => sec ? libelleSec('sec|' + g + '|').replace(/ · $/, '')
+                    : ((FAMILLES_PRODUIT.filter(f => f.id === g)[0] || {}).libelle || g));
     const ecarts = lignes.filter(x => x.d !== 0);
     const justes = lignes.filter(x => x.d === 0);
     const bacs = x => !!litArticle(x.c).taille;
@@ -597,6 +751,14 @@ async function verifierInventaire(partie) {
           (litres ? ' (' + n1(litres) + ' L)' : '') + ', ' + trop + ' en trop.'
         : 'Aucun écart avec le stock attendu.') +
       ' Le stock ne change pas tant que vous ne confirmez pas.</p>' +
+      (th.livraisons.length
+        ? '<div class="rappel" style="margin-top:10px">L’attendu compte aussi ' +
+          th.livraisons.map(l => l.bacs + ' ' + accord(l.bacs, 'bac') + ' de la livraison ' + esc(l.fournisseur || '') +
+            (l.numero ? ' n° ' + esc(l.numero) : '') + ' du ' + esc(fmtD(l.jour))).join(', ') +
+          ', livrés avant le comptage et pas encore confirmés. Confirmez la livraison avant de reprendre cet inventaire.</div>' : '') +
+      (nonComptes.length
+        ? '<div class="rappel" style="margin-top:10px">Pas compté cette fois : ' + esc(nonComptes.join(', ')) +
+          '. Leur stock ne change pas.</div>' : '') +
       (a.note ? '<div class="rappel" style="margin-top:10px">' + esc(a.note) + '</div>' : '') +
       (ecarts.length
         ? '<div class="entete" style="margin-top:16px"><h3>' + (sec ? 'Changements' : 'Écarts') + '</h3></div>' +
@@ -636,7 +798,10 @@ async function verifierInventaire(partie) {
       } else {
         invaliderStock();
         art = (await stockReel()).articles || {};
-        bouge = num(art[enCours] || 0) - num((a.avant || {})[enCours] || 0);
+        th = await theoriqueAuComptage(a, art);
+        /* Livraison arrivée depuis, pas encore confirmée : elle est dans le
+           recomptage, elle entrera au stock à sa confirmation. */
+        bouge = num(th.delta[enCours] || 0) + num(th.apres[enCours] || 0);
       }
       if (q - bouge < 0) {
         return toast('Recomptage incohérent avec les mouvements tracés depuis le comptage', 'erreur');
@@ -666,11 +831,16 @@ async function verifierInventaire(partie) {
         toast('Comptage écarté');
         rendre(STATE.view);
       }, () => dessinerV(), 'Retour');
-    $('#ci-ok').onclick = () => confirmer('Reprendre cet inventaire sur le stock réel ?',
+    $('#ci-ok').onclick = async () => {
+      /* Livraison confirmée ailleurs pendant que l'écran était ouvert. */
+      if (!sec && th.livraisons.length) { invaliderStock(); th = await theoriqueAuComptage(a, (await stockReel()).articles || {}); }
+      if (th.livraisons.length) return toast('Confirmez d’abord la livraison en attente : une quantité corrigée fausserait les écarts', 'erreur');
+      confirmer('Reprendre cet inventaire sur le stock réel ?',
       'Le stock prend les quantités comptées le ' + fmtD(a.jour) + '.' +
       (manq ? ' ' + manq + ' ' + accord(manq, 'bac manquant part', 'bacs manquants partent') +
               ' au registre des pertes.' : ''),
       'Reprendre', () => confirmerInventaire(a, partie), () => dessinerV(), 'Retour');
+    };
   };
   dessinerV();
 }
@@ -692,7 +862,18 @@ async function confirmerInventaire(a, partie) {
   if (partie === 'sec') {
     /* Même enregistrement que l'ancienne validation directe du sec, à
        l'heure du comptage. */
-    const inv = Object.assign({}, meta, { note: cur.note || '', lignes: cur.lignes || {} });
+    const lignes = lignesAReprendre(cur, 'sec', cur.avant);
+    /* Référence tracée (chantilly, coulis, toppings) non comptée : on reprend
+       son stock vivant à l'heure du comptage, pas le chiffre du comptage
+       précédent, sinon ses ouvertures depuis seraient effacées. */
+    const comptes = groupesComptes(cur, 'sec');
+    const vivant = (await stockReel()).articles || {};
+    for (const c of new Set(Object.keys(lignes).concat(Object.keys(cur.avant || {})))) {
+      if (comptes.has(groupeInv('sec', c))) continue;
+      const cleV = cleVivanteSec(c, cur.avant);
+      if (cleV && vivant[cleV] !== undefined) lignes[c] = Math.max(0, num(vivant[cleV]) - await mouvementsDepuis(cleV, cur.at));
+    }
+    const inv = Object.assign({}, meta, { note: cur.note || '', lignes: lignes });
     await DB.set('stock:sec', inv);
     invaliderStock();
     /* Historique du sec : une correction du même jour remplace son entrée. */
@@ -706,7 +887,15 @@ async function confirmerInventaire(a, partie) {
     return rendre(STATE.view);
   }
 
-  const inv = await enregistrerInventaire(cur.lignes || {}, cur.note, cur.avant || {}, meta);
+  /* L'attendu est recalculé maintenant : un mouvement d'avant le comptage,
+     synchronisé après, et les livraisons pas encore confirmées y entrent. */
+  invaliderStock();
+  const { theo, livraisons } = await theoriqueAuComptage(cur, (await stockReel()).articles || {});
+  if (livraisons.length) {
+    toast('Confirmez d’abord la livraison en attente', 'erreur');
+    return rendre(STATE.view);
+  }
+  const inv = await enregistrerInventaire(lignesAReprendre(cur, 'froid', theo), cur.note, theo, meta);
 
   /* Chaque bac manquant devient une perte du jour du comptage. L'id dérive
      du comptage : confirmer deux fois n'en ajoute pas de seconde. */
@@ -1008,11 +1197,13 @@ V.stock = async function () {
   const attenteSec = await inventaireEnAttente('sec');
   /* Réceptions pas encore confirmées : leurs bacs ne sont pas dans ces chiffres. */
   const recAttente = typeof receptionsEnAttente === 'function' ? await receptionsEnAttente() : [];
+  const [rf, rs] = await Promise.all([resumeAttente(attente, 'froid', articles), resumeAttente(attenteSec, 'sec')]);
+  const resumes = { froid: rf, sec: rs };
   /* Comptage en attente : affiché, mais pas encore dans les chiffres. */
   const bandeauAttente = (a, p) => !a ? '' :
     '<div class="alerte warn" style="margin-top:12px"><div style="flex:1;min-width:0">' +
     '<b>Inventaire du ' + esc(fmtD(a.jour)) + ' à confirmer</b>' +
-    '<p>Compté par ' + esc(a.par || '—') + '. Ces chiffres ne comptent qu’après la confirmation d’un manager.</p></div>' +
+    '<p>Compté par ' + esc(a.par || '—') + '. ' + esc(resumes[p]) + ' Ces chiffres ne comptent qu’après la confirmation d’un manager.</p></div>' +
     (STATE.user && STATE.user.role === 'manager'
       ? '<button class="btn menthe sm" data-verif="' + p + '">Vérifier</button>' : '') + '</div>';
 
@@ -1209,6 +1400,19 @@ V.controle = async function () {
   await V_controle_origine.call(this);
   const page = $('#page');
   if (!page) return;
+
+  /* Réceptions à confirmer : la tour de contrôle est l'accueil du manager, et
+     ni Réception ni Stock ne sont dans sa barre. Sans ce bandeau, un bon
+     scanné par l'équipe attendait sans que personne ne le voie. */
+  const recAttente = typeof receptionsEnAttente === 'function' ? await receptionsEnAttente() : [];
+  if (STATE.view !== 'controle' || page !== $('#page')) return;
+  if (recAttente.length && typeof bandeauReceptions === 'function' && page.firstChild) {
+    const br = document.createElement('div');
+    br.style.marginTop = '14px';
+    br.innerHTML = bandeauReceptions(recAttente);
+    page.insertBefore(br, page.firstChild.nextSibling);
+    const bv = br.querySelector('#rc-verif'); if (bv) bv.onclick = verifierReceptions;
+  }
 
   /* -----------------------------------------------------------------------------
      ANOMALIES SIGNALÉES
@@ -1573,6 +1777,7 @@ V.inventaire = async function () {
   /* Comptages qui attendent la confirmation d'un manager. */
   const attente = await inventaireEnAttente('froid');
   const attenteSec = await inventaireEnAttente('sec');
+  const resumes = { froid: await resumeAttente(attente, 'froid', articles), sec: await resumeAttente(attenteSec, 'sec') };
   const estManager = !!(STATE.user && STATE.user.role === 'manager');
   /* Les bacs de l'armoire −13 sont encore au stock : l'inventaire de la
      chambre froide doit les compter aussi, sinon ils sortent deux fois
@@ -1883,7 +2088,7 @@ V.inventaire = async function () {
           ? '<div class="alerte warn" style="margin-top:12px">' +
             '<div style="flex:1;min-width:0"><b>À confirmer par un manager</b>' +
             '<p>Compté le ' + esc(fmtD(enAttente.jour)) + ' à ' + heure(enAttente.at) + ' par ' + esc(enAttente.par || '—') +
-            '. Le stock réel ne change qu’à la confirmation.</p></div>' +
+            '. ' + esc(resumes[partie]) + ' Le stock réel ne change qu’à la confirmation.</p></div>' +
             (estManager ? '<button class="btn menthe sm" id="inv-verif">Vérifier</button>' : '') +
             (enAttenteDuJour && !ouvert ? '<button class="btn clair sm" id="inv-rouvrir">Rouvrir</button>' : '') +
             '</div>'
@@ -1983,10 +2188,12 @@ V.inventaire = async function () {
       try {
         invaliderStock();
         const art = (await stockReel()).articles || {};
-        const av = attente.avant || {};
-        new Set(Object.keys(attente.lignes || {}).concat(Object.keys(av))).forEach(c => {
-          const bouge = num(art[c] || 0) - num(av[c] || 0);
-          if (!bouge) return;
+        /* Seulement les articles comptés : une famille non comptée le reste. */
+        const { delta, apres } = await theoriqueAuComptage(attente, art);
+        const comptees = groupesComptes(attente, 'froid');
+        new Set(Object.keys(delta).concat(Object.keys(apres))).forEach(c => {
+          const bouge = num(delta[c] || 0) + num(apres[c] || 0);
+          if (!bouge || !comptees.has(litArticle(c).famille)) return;
           saisie[c] = String(Math.max(0, num(saisie[c] || 0) + bouge));
         });
       } catch (e) { /* stock illisible : on garde le comptage affiché */ }
@@ -2088,6 +2295,44 @@ V.inventaire = async function () {
     $('#inv-ok').onclick = partie === 'froid' ? validerFroid : validerSec;
   };
 
+  /* Résumé avant de valider : ce qui a été saisi, famille par famille, et ce
+     qui est resté vide dans une famille comptée (il vaudra 0 : « il devait y
+     avoir du citron »). Les quantités attendues ne sont pas montrées, le
+     comptage reste à l'aveugle. « Corriger » revient à la saisie. */
+  function resumeAvantValider(p, lignes, avant, titre, texte, libelle, onOui) {
+    const nomGroupe = g => p === 'sec' ? libelleSec('sec|' + g + '|').replace(/ · $/, '')
+      : ((FAMILLES_PRODUIT.filter(f => f.id === g)[0] || {}).libelle || g);
+    const court = c => {
+      if (p === 'sec') return String(c).split('|')[2] || libelleSec(c);
+      const a = litArticle(c);
+      return [a.parfum, a.taille ? a.taille + ' L' : ''].filter(Boolean).join(' ') || libelleArticle(c);
+    };
+    const nb = v => Number.isInteger(v) ? String(v) : n1(v);
+    const parGroupe = {};
+    Object.keys(lignes).forEach(c => (parGroupe[groupeInv(p, c)] = parGroupe[groupeInv(p, c)] || []).push(c));
+    const vides = Object.keys(avant || {})
+      .filter(c => lignes[c] === undefined && num(avant[c]) > 0 && parGroupe[groupeInv(p, c)])
+      .sort((x, y) => libelleInv(p, x).localeCompare(libelleInv(p, y)));
+    showSheet(
+      '<h2 id="sheet-titre">' + esc(titre) + '</h2>' +
+      '<p class="sub">' + esc(texte) + '</p>' +
+      Object.keys(parGroupe).sort((x, y) => nomGroupe(x).localeCompare(nomGroupe(y))).map(g => {
+        const cs = parGroupe[g].sort((x, y) => court(x).localeCompare(court(y)));
+        const total = cs.reduce((t, c) => t + num(lignes[c]), 0);
+        const seul = cs.length === 1 && court(cs[0]) === nomGroupe(g);
+        return '<p style="margin-top:12px"><b>' + esc(nomGroupe(g)) + '</b> · ' + nb(total) +
+          (seul ? '' : '<br>' + cs.map(c => esc(court(c)) + ' : <b>' + nb(num(lignes[c])) + '</b>').join(' · ')) + '</p>';
+      }).join('') +
+      (vides.length
+        ? '<div class="alerte warn" style="margin-top:12px"><div style="flex:1;min-width:0"><b>Laissés vides, comptés 0</b>' +
+          '<p>' + esc(vides.map(libelleInv.bind(null, p)).join(', ')) + '. Corrigez si c’est un oubli.</p></div></div>'
+        : '') +
+      '<div class="actions"><button class="btn clair" data-fermer>Corriger</button>' +
+      '<button class="btn menthe" id="rv-oui">' + esc(libelle) + '</button></div>'
+    );
+    $('#rv-oui').onclick = () => { closeSheet(); return onOui(); };
+  }
+
   async function validerFroid() {
     const cptes = Object.keys(saisie);
     if (!cptes.length) return toast('Saisissez au moins une quantité', 'erreur');
@@ -2104,13 +2349,10 @@ V.inventaire = async function () {
     /* État AVANT le comptage : c'est lui qui révèle les bacs disparus. Sans
        les familles du sec (chantilly, coulis…) : la chambre froide ne les
        compte pas, elles passaient toutes pour manquantes à chaque inventaire. */
+    /* Livraisons arrivées mais pas encore confirmées comprises : les bacs
+       sont dans la chambre froide, l'équipier les a comptés. */
     const tout = (await stockReel()).articles;
-    const avant = {};
-    Object.keys(tout).forEach(c => {
-      const fam = FAMILLES_PRODUIT.filter(f => f.id === litArticle(c).famille)[0];
-      if (litArticle(c).famille === 'sec' || (fam && (fam.lieu === 'sec' || fam.stock === 'sec'))) return;
-      avant[c] = tout[c];
-    });
+    const avant = (await theoriqueAuComptage({ at: nowISO() }, tout)).theo;
     /* Manquants et surplus sont comptés séparément, sur l'union des articles
        attendus et saisis, comme enregistrerInventaire : une somme d'écarts
        signés laissait 2 bacs manquants et 2 en trop s'annuler en
@@ -2119,13 +2361,16 @@ V.inventaire = async function () {
     /* En bacs seulement (clés avec une taille) : boîtes et paquets s'ajoutaient
        aux bacs (« 9 bacs comptés … 16 en trop »). */
     const premier = !Object.keys(avant).length;
+    /* Seules les familles comptées se comparent : compter les glaces seules
+       ne doit pas annoncer tous les macarons manquants. */
+    const famComptees = new Set(Object.keys(lignes).map(c => litArticle(c).famille));
     new Set(Object.keys(avant).concat(Object.keys(lignes))).forEach(c => {
-      if (!litArticle(c).taille) return;
+      if (!litArticle(c).taille || !famComptees.has(litArticle(c).famille)) return;
       const d = num(lignes[c] || 0) - num(avant[c] || 0);
       if (d < 0) manq += -d; else trop += d;
     });
 
-    confirmer('Valider la chambre froide ?',
+    resumeAvantValider('froid', lignes, avant, 'Valider la chambre froide ?',
       t.bacs + ' ' + accord(t.bacs, 'bac compté', 'bacs comptés') + ' sur ' + cptes.length + ' ' + accord(cptes.length, 'référence') + ', soit ' +
       n1(t.kg) + ' kg. ' +
       (premier ? 'Premier comptage : il deviendra la référence du stock.'
@@ -2133,6 +2378,8 @@ V.inventaire = async function () {
        : manq + ' ' + accord(manq, 'bac manquant', 'bacs manquants') + ', ' + trop + ' en trop par rapport au stock attendu.' +
          (manq ? ' Des ouvertures non tracées ?' : '') +
          (trop ? (manq ? ' Et' : ' Peut-être') + ' une réception non saisie ?' : '')) +
+      ' Compté : ' + [...famComptees].map(f => (FAMILLES_PRODUIT.filter(x => x.id === f)[0] || {}).libelle || f).join(', ') +
+      ' (un article non saisi y vaut 0) ; les autres familles ne changent pas.' +
       ' L’inventaire est enregistré, à confirmer par un manager : le stock ne change pas avant.' +
       (attente && !attenteDuJour ? ' Il remplace celui du ' + fmtD(attente.jour) + ', encore à confirmer.' : ''),
       'Valider', async () => {
@@ -2179,7 +2426,7 @@ V.inventaire = async function () {
     const lignes = {};
     cptes.forEach(k => { lignes[k] = num(saisieSec[k]); });
 
-    confirmer('Valider le sec ?',
+    resumeAvantValider('sec', lignes, (secPrec && secPrec.lignes) || {}, 'Valider le sec ?',
       cptes.length + ' ' + accord(cptes.length, 'référence comptée', 'références comptées') + '. ' +
       'L’inventaire est enregistré, à confirmer par un manager : le stock ne change pas avant.' +
       (attenteSec && !attenteSecDuJour ? ' Il remplace celui du ' + fmtD(attenteSec.jour) + ', encore à confirmer.' : ''),

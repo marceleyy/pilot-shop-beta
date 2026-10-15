@@ -269,7 +269,7 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
        '<p>Corrigez une quantité si besoin. Mettre 0 retire la ligne. Le stock ne change pas tant que vous ne confirmez pas.</p></div></div>' +
        '<div class="stack" style="margin-top:14px">' + r.lignes.map((l, i) =>
          '<div class="rang"><div style="flex:1;min-width:0"><b>' + esc(l.produit) + '</b>' +
-         '<div class="mini">' + (l.lot ? 'lot ' + esc(l.lot) : 'sans lot') + ' · ' + (l.dlc ? 'DLC ' + esc(fmtD(l.dlc)) : 'sans DLC') + '</div></div>' +
+         '<div class="mini">' + (l.cle && typeof libelleArticle === 'function' ? 'au stock : ' + esc(libelleArticle(l.cle)) + ' · ' : '') + (l.lot ? 'lot ' + esc(l.lot) : 'sans lot') + ' · ' + (l.dlc ? 'DLC ' + esc(fmtD(l.dlc)) : 'sans DLC') + '</div></div>' +
          '<input type="number" min="0" step="1" inputmode="numeric" data-q="' + i + '" value="' + esc(qtes[i]) + '" style="width:76px;text-align:center"></div>').join('') +
        '</div>' +
        '<div class="actions"><button class="btn clair" data-fermer>Laisser en attente</button>' +
@@ -303,6 +303,11 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
            n += q;
          }
          const corrige = r.lignes.some((l, i) => num(qtes[i]) !== num(l.qte));
+         /* Le manager a validé chaque ligne gardée : l'appli retient l'article
+            de chaque référence pour les prochains bons. */
+         if (typeof apprendreBL === 'function') {
+           try { await apprendreBL(r.lignes.filter((l, i) => num(qtes[i]) > 0)); } catch (e) {}
+         }
          await feed('ok', STATE.user.prenom + ' a confirmé l’entrée en stock du bon ' + (r.numero || 'sans n°') +
            ' (' + (r.par || '—') + ')' + (corrige ? ', quantités corrigées' : ''));
          closeSheet();
@@ -411,11 +416,17 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
            : '';
        }
    
-       $('#rc-ok').onclick = () => {
+       let ouvre = false;
+       $('#rc-ok').onclick = async () => {
+         if (ouvre) return;
+         ouvre = true;
+         const memo = typeof memoBL === 'function' ? await memoBL() : {};
+         if (typeof chargerCatalogueSec === 'function') { try { await chargerCatalogueSec(); } catch (e) {} }
+         ouvre = false;
          const t = $('#rc-t').value;
          const refuse = (t !== '' && num(t) > RECEPTION.tempMax) || Object.keys(conf).some(k => !conf[k]);
          lignesReception({ fournisseur:$('#rc-f').value.trim(), numero:$('#rc-n').value.trim(),
-                           temp:t, conf:conf, refuse:refuse, lignes:bl.lignes });
+                           temp:t, conf:conf, refuse:refuse, lignes:bl.lignes }, memo);
        };
      }
    
@@ -424,6 +435,9 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
         libellé qui partage ses cinq premières lettres avec la saveur. */
      function saveurDepuisLibelle(saveurs, libelle) {
        const nrm = s => String(s||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z]/g,'');
+       /* Le bon écrit « Vanille » en français, le catalogue « Vaniglia » :
+          les cinq premières lettres diffèrent (vanil / vanig). */
+       libelle = String(libelle || '').replace(/vanille/gi, 'Vaniglia');
        const tout = nrm(libelle);
        if (!tout) return null;
        const exact = saveurs.filter(sv => nrm(sv) && tout.indexOf(nrm(sv)) >= 0)
@@ -436,13 +450,65 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
        })[0] || null;
      }
 
-     function lignesReception(bl) {
+     /* Produits proposés à la saisie d'une ligne, rangés froid ou sec.
+        fam : famille de FAMILLES_PRODUIT, l'article entre au stock à la
+        confirmation. Sans fam : référence du catalogue du sec, qui ne se
+        suit pas en mouvements mais se compte à l'inventaire du sec. */
+     function catalogueReception() {
+       const out = [];
+       const auSec = f => f.lieu === 'sec' || f.stock === 'sec';
+       PARFUMS.forEach(p => out.push({ nom:'Glace ' + p, lieu:'froid', fam:'glace', parfum:p, unite:'bac' }));
+       FAMILLES_PRODUIT.filter(f => f.id !== 'glace').forEach(f => {
+         const lieu = auSec(f) ? 'sec' : 'froid';
+         const unite = STOCK.unites.indexOf(f.unite) >= 0 ? f.unite : 'unité';
+         if (f.parfums && f.saveurs && f.saveurs.length) {
+           f.saveurs.forEach(sv => out.push({ nom:f.libelle + ' ' + sv, lieu:lieu, fam:f.id, parfum:sv, unite:unite }));
+         } else {
+           out.push({ nom:f.libelle, lieu:lieu, fam:f.id, parfum:'', unite:unite });
+         }
+       });
+       /* Les références du sec déjà couvertes par une famille (crème,
+          coulis, toppings) ne sont pas proposées deux fois. */
+       const dejaFam = FAMILLES_PRODUIT.filter(auSec).map(f => f.refSec || f.id);
+       (typeof catalogueSec === 'function' ? catalogueSec() : []).forEach(r => {
+         if (!r || r.masque || dejaFam.indexOf(r.id) >= 0) return;
+         const unite = STOCK.unites.indexOf(r.unite) >= 0 ? r.unite : 'unité';
+         (r.variantes && r.variantes.length ? r.variantes : ['']).forEach(v =>
+           out.push({ nom:r.nom + (v ? ' · ' + v : ''), lieu:'sec', fam:'', parfum:'', unite:unite }));
+       });
+       return out;
+     }
+
+     function lignesReception(bl, memo) {
+       const catalogue = catalogueReception();
+       const nrmC = x => String(x || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+       const propositions = (l, texte) => {
+         const mots = nrmC(texte).split(/\s+/).filter(Boolean);
+         return catalogue.filter(c => c.lieu === (l.lieu || 'froid') &&
+           mots.every(m => nrmC(c.nom).indexOf(m) >= 0)).slice(0, 8);
+       };
+       const puces = (l, i, texte) => propositions(l, texte).map(c =>
+         '<button type="button" class="chip' + (l.choix && l.choix.nom === c.nom ? ' on' : '') +
+         '" data-choix="' + i + '" data-nom="' + esc(c.nom) + '">' + esc(c.nom) + '</button>').join('');
        const lignes = (bl.lignes || []).map(l => ({
          /* Lot et unité lus sur le bon ; quantité illisible laissée vide, pour
             qu'elle soit saisie plutôt qu'enregistrée à 1 par défaut. */
-         produit:l.parfum || l.ref || '', qte:l.bacs || '', unite:l.unite || 'bac', lot:l.lot || '', lotCorrige:!!l.lotCorrige, qteDouteuse:!!l.qteDouteuse, dlc:'', taille:l.taille || ''
+         produit:l.parfum || l.ref || '', ref:l.ref || '', lu:l.parfum || l.ref || '', qte:l.bacs || '', unite:l.unite || 'bac', lot:l.lot || '', lotCorrige:!!l.lotCorrige, qteDouteuse:!!l.qteDouteuse, tailleDeduite:!!l.tailleDeduite, dlc:'', taille:l.taille || ''
        }));
        if (!lignes.length) lignes.push({ produit:'', qte:1, unite:'bac', lot:'', dlc:'' });
+       /* Référence déjà confirmée par un manager : l'article appris remplace
+          le nom lu, souvent abîmé (voir apprendreBL). */
+       lignes.forEach(l => {
+         const a = memo && l.ref && typeof cleMemoRef === 'function' ? memo[cleMemoRef(l.ref)] : null;
+         if (!a || !a.cle) return;
+         /* Une seule confirmation ne suffit pas à passer outre un nom bien lu :
+            une association fausse s'imposerait à chaque bon. */
+         if (!((a.vu || 1) >= 2 || !parfumDepuisDesignation(l.lu))) return;
+         const art = litArticle(a.cle);
+         l.appris = a.cle;
+         l.produit = l.lu = libelleArticle(a.cle);
+         if (art.taille) { l.taille = art.taille; l.tailleDeduite = false; }
+       });
    
        /* showSheet et non #sheet-corps : le scan d'une DLC remplace la feuille
           par celle du cadrage puis la ferme. Réécrite dans une feuille fermée,
@@ -454,7 +520,12 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
            (bl.refuse ? ' · <b style="color:var(--corail-d)">livraison refusée</b>' : '') + '</p>' +
            '<div class="stack">' + lignes.map((l, i) =>
              '<div class="card plat"><div class="champ"><label class="f">Produit</label>' +
-             '<input type="text" data-r="' + i + '.produit" value="' + esc(l.produit) + '" placeholder="Ex. Gelato pistache"></div>' +
+             '<div class="chips" style="margin-bottom:8px">' +
+             ['froid', 'sec'].map(z => '<button type="button" class="chip' + ((l.lieu || 'froid') === z ? ' on' : '') +
+               '" data-lieu="' + i + '" data-z="' + z + '">' + (z === 'froid' ? 'Froid' : 'Sec') + '</button>').join('') + '</div>' +
+             '<input type="search" data-r="' + i + '.produit" value="' + esc(l.produit) + '" placeholder="Chercher dans le catalogue ou écrire le nom" autocomplete="off">' +
+             '<div class="chips" data-sugg="' + i + '" style="margin-top:6px">' + (l.choix && l.produit === l.choix.nom ? '' : puces(l, i, l.produit)) + '</div>' +
+             (l.appris && l.produit === l.lu ? '<p class="mini" style="margin-top:4px">Reconnu grâce aux livraisons précédentes (' + esc(l.ref) + ')</p>' : '') + '</div>' +
              '<div class="grid g3" style="margin-top:10px">' +
              '<div class="champ"><label class="f">Quantité' + (l.qteDouteuse ? ' <b style="color:var(--corail-d)">à vérifier</b>' : '') + '</label><input type="number" min="1" data-r="' + i + '.qte" value="' + l.qte + '"></div>' +
              '<div class="champ"><label class="f">Unité</label><select data-r="' + i + '.unite">' +
@@ -464,7 +535,7 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
              '<div class="champ"><label class="f">DLC / DLUO</label>' +
              '<input type="date" data-r="' + i + '.dlc" value="' + l.dlc + '"></div>' +
              /* Sans ce choix, tout bac de glace reçu était compté en 5 L. */
-             '<div class="champ"><label class="f">Taille du bac (glace)</label><select data-r="' + i + '.taille">' +
+             '<div class="champ"><label class="f">Taille du bac (glace)' + (l.tailleDeduite ? ' <b style="color:var(--corail-d)">à vérifier</b>' : '') + '</label><select data-r="' + i + '.taille">' +
              '<option value="">Lue dans le nom, sinon ' + FOURNISSEUR.tailleParDefaut + ' L</option>' +
              FOURNISSEUR.taillesBac.map(t => '<option value="' + t + '"' + (String(l.taille) === String(t) ? ' selected' : '') + '>' + t + ' L</option>').join('') +
              '</select></div></div>' +
@@ -485,6 +556,31 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
            /* Lot retapé à la main : il n'est plus « corrigé par la lecture ». */
            if (k === 'lot') lignes[+i].lotCorrige = false;
            if (k === 'qte') lignes[+i].qteDouteuse = false;
+          if (k === 'taille') lignes[+i].tailleDeduite = false;
+           if (k === 'produit') {
+             const z = $('[data-sugg="' + i + '"]');
+             if (z) { z.innerHTML = puces(lignes[+i], i, inp.value); brancherChoix(); }
+           }
+         });
+         function brancherChoix() {
+           $$('[data-choix]').forEach(b => b.onclick = () => {
+             const l = lignes[+b.dataset.choix];
+             const c = catalogue.filter(x => x.lieu === (l.lieu || 'froid') && x.nom === b.dataset.nom)[0];
+             if (!c) return;
+             l.choix = c; l.produit = c.nom; l.unite = c.unite;
+             /* Le nom choisi ne porte pas de taille : sans taille saisie, le
+                bac par défaut est signalé à vérifier. */
+             if (c.fam === 'glace' && !num(l.taille)) l.tailleDeduite = true;
+             rendre2();
+           });
+         }
+         brancherChoix();
+         $$('[data-lieu]').forEach(b => b.onclick = () => {
+           const l = lignes[+b.dataset.lieu];
+           /* Un produit choisi dans l'autre zone ne vaut plus. */
+           if ((l.lieu || 'froid') !== b.dataset.z) l.choix = null;
+           l.lieu = b.dataset.z;
+           rendre2();
          });
          $$('[data-scandlc]').forEach(b => b.onclick = async () => {
            const i = +b.dataset.scandlc;
@@ -539,12 +635,36 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
    
          /* Glace non reconnue (lait, cornets, parfum hors catalogue) : tracée pour
             sa DLC, mais pas ajoutée aux bacs de la chambre froide. */
-         const horsStock = []; let auStock = 0;
+         const horsStock = [], auSecSeul = []; let auStock = 0;
          if (!bl.refuse) {
         /* La réception incrémente le stock réel. C'est le seul enregistrement :
            l'ancien « stock fermé » tenait une comptabilité parallèle que les
            ouvertures ne décrémentaient pas — elle dérivait en silence. */
         for (const l of valides) {
+          /* Article appris pour cette référence, nom non retouché : pris tel
+             quel, sans redeviner famille, parfum ni taille. */
+          if (l.appris && l.produit === l.lu) {
+            const a = litArticle(l.appris);
+            /* Taille changée à la main : même article, autre bac. */
+            const cleA = a.taille && num(l.taille) && String(num(l.taille)) !== String(a.taille)
+              ? cleArticle(a.famille, a.parfum, num(l.taille)) : l.appris;
+            auStock++;
+            aStocker.push({ cle:cleA, produit:l.produit.trim(), qte:num(l.qte), ref:l.ref || '',
+                            lot:l.lot || '', dlc:l.dlc || '', famille:a.famille });
+            continue;
+          }
+          /* Produit choisi dans le catalogue, nom non retouché : l'article est
+             connu, sans rien deviner. Sec hors famille : tracé au registre,
+             compté à l'inventaire du sec. */
+          if (l.choix && l.produit === l.choix.nom) {
+            const c = l.choix;
+            if (!c.fam) { auSecSeul.push(l.produit.trim()); continue; }
+            const cleC = cleArticle(c.fam, c.parfum, c.fam === 'glace' ? (num(l.taille) || FOURNISSEUR.tailleParDefaut) : '');
+            auStock++;
+            aStocker.push({ cle:cleC, produit:l.produit.trim(), qte:num(l.qte), ref:l.ref || '',
+                            lot:l.lot || '', dlc:l.dlc || '', famille:c.fam });
+            continue;
+          }
           const fam = devinerFamille(l.produit);
           /* Même clé que l'ouverture : « Gelato pistache 3 litres » doit
              alimenter glace|Pistache|3, pas un article fantôme en 5 L que
@@ -555,7 +675,10 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
              qui n'est aucun parfum (lait, cornets…) n'entre pas dans les bacs de
              la chambre froide : la réception reste tracée pour sa DLC. */
           const nrmP = x => String(x || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/\s+/g, ' ').trim();
+          /* La référence ne sert que si le libellé vient du bon tel quel :
+             un libellé retapé à la main dit ce que la personne a voulu. */
           const connu = glace ? (parfumDepuisDesignation(l.produit) ||
+            (l.ref && l.produit === l.lu ? parfumDepuisReference(l.ref) : null) ||
             PARFUMS.filter(p => nrmP(p) === nrmP(l.produit.replace(/\d+(?:[.,]\d+)?\s*(?:litres?|lt|l)\b/i, '')))[0] || null) : null;
           if (glace && !connu) { horsStock.push(l.produit.trim()); continue; }
           auStock++;
@@ -572,7 +695,7 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
           const cle = cleArticle(fam.id, fam.parfums ? parfum : '',
                                  glace ? (num(l.taille) || tailleDepuisDesignation(l.produit) ||
                                           FOURNISSEUR.tailleParDefaut) : '');
-          aStocker.push({ cle:cle, produit:l.produit.trim(), qte:num(l.qte),
+          aStocker.push({ cle:cle, produit:l.produit.trim(), qte:num(l.qte), ref:l.ref || '',
                           lot:l.lot || '', dlc:l.dlc || '', famille:fam.id });
         }
       }
@@ -591,7 +714,8 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
          closeSheet();
          toast(bl.refuse ? 'Réception refusée et tracée'
            : (auStock ? 'Réception tracée. ' + auStock + ' ' + accord(auStock, 'produit entrera', 'produits entreront') + ' au stock après confirmation d’un manager' : 'Réception tracée, DLC suivie') +
-             (horsStock.length ? '. Non reconnu, hors stock : ' + horsStock.join(', ') : ''));
+             (auSecSeul.length ? '. Sec, compté à l’inventaire du sec : ' + auSecSeul.join(', ') : '') +
+             (horsStock.length ? '. Non reconnu, hors stock (choisissez-le dans le catalogue) : ' + horsStock.join(', ') : ''));
          rendre('reception');
        }
    
@@ -1589,6 +1713,7 @@ V.hebdo = async function () {
   const rec = await DB.get('hebdo:' + j, {});
   const preuves = (await DB.get('preuves:' + j, [])).filter(p => !p.supprime);
   const resp = await DB.get('hebdo:responsables', {});
+  appliquerRoles(await DB.get('hebdo:roles', null));
   const faits = taches.filter(t => rec[t.id] && rec[t.id].ok).length;
 
   $('#vue-actions').innerHTML = '';
@@ -1987,14 +2112,16 @@ V.parametres = async function () {
           les tâches du plan de nettoyage et répondait « Jours enregistrés » :
           aucun écran ne lit ces jours (Tâches du jour et Nettoyage suivent
           « Organiser la semaine », ci-dessus). On ne garde que le rappel des
-          tâches qui ont leur propre rythme, modifiable par le manager. */
+          tâches qui ont leur propre rythme, que le manager modifie, ajoute
+          ou retire. */
        carte(entete('🔁', 'Tâches à rythme propre', 'Hors tableau de la semaine : jours fixes ou intervalle.') +
-         NETTOYAGE.asynchrones.map((a, i) =>
+         NETTOYAGE.asynchrones.map(a =>
            '<div class="tache"><span class="tx"><span class="tn">' + esc(a.nom) + '</span>' +
            '<span class="tm">' + (a.type === 'jours-fixes'
              ? a.jours.map(x => JOURS_SEMAINE[x]).join(', ')
              : 'tous les ' + a.intervalleJours + ' jours') + '</span></span>' +
-           '<button class="btn clair sm" data-asyn="' + i + '">Modifier</button></div>').join(''));
+           '<button class="btn clair sm" data-asyn="' + esc(a.id) + '">Modifier</button></div>').join('') +
+         '<button class="btn clair bloc" id="asyn-ajout" style="margin-top:12px">+ Ajouter une tâche</button>');
    
      $('#hv').onclick = async () => {
      /* Contrôle de cohérence avant d'enregistrer : un début de phase à 18:00
@@ -2027,7 +2154,8 @@ V.parametres = async function () {
 
   $('#hb-ouvrir').onclick = organiserSemaine;
   $('#hb-resp').onclick   = attribuerResponsables;
-  $$('[data-asyn]').forEach(b => b.onclick = () => modifierAsynchrone(+b.dataset.asyn));
+  $$('[data-asyn]').forEach(b => b.onclick = () => modifierAsynchrone(b.dataset.asyn));
+  $('#asyn-ajout').onclick = () => modifierAsynchrone(null);
    
      $$('[data-supp]').forEach(b => b.onclick = () => {
        const e = ENCEINTES[+b.dataset.supp];
@@ -2175,25 +2303,50 @@ async function organiserSemaine() {
 
 /* Changements du manager ({ id: { nom, type, jours, intervalleJours } })
    appliqués sur la référence d'usine : une tâche ajoutée ou une consigne
-   corrigée dans config.js arrive quand même dans les boutiques. */
+   corrigée dans config.js arrive quand même dans les boutiques.
+   Une tâche ajoutée par le manager porte « cree » ; une tâche retirée garde
+   une entrée { supprime:true } : la fusion par champ, à l'écriture comme au
+   rejeu hors ligne, ferait sinon revenir une clé simplement effacée. */
 function appliquerAsynchrones(surcharges) {
   const sc = surcharges || {};
-  NETTOYAGE.asynchrones = ASYNCHRONES_DEF.map(a =>
+  const usine = ASYNCHRONES_DEF.map(a =>
     Object.assign({}, a, { jours:(a.jours || []).slice() }, sc[a.id] || {}));
+  const ajouts = Object.keys(sc)
+    .filter(id => sc[id] && sc[id].cree && !ASYNCHRONES_DEF.some(a => a.id === id))
+    .map(id => Object.assign({ id:id, icone:'🔁', phase:'fermeture', jours:[] }, sc[id]))
+    .sort((x, y) => String(x.cree).localeCompare(String(y.cree)));
+  NETTOYAGE.asynchrones = usine.concat(ajouts).filter(a => !a.supprime);
+}
+
+/* Même principe pour les rôles des responsables de la semaine
+   ({ id: { libelle } | { supprime:true } | { libelle, cree } }). On
+   reconstruit RESPONSABLES en place : c'est une constante partagée. */
+function appliquerRoles(surcharges) {
+  const sc = surcharges || {};
+  const usine = RESPONSABLES_DEF.map(r => Object.assign({}, r, sc[r.id] || {}));
+  const ajouts = Object.keys(sc)
+    .filter(id => sc[id] && sc[id].cree && !RESPONSABLES_DEF.some(r => r.id === id))
+    .map(id => Object.assign({ id:id, icone:'👤' }, sc[id]))
+    .sort((x, y) => String(x.cree).localeCompare(String(y.cree)));
+  RESPONSABLES.splice(0, RESPONSABLES.length, ...usine.concat(ajouts).filter(r => !r.supprime));
 }
 
 /* Tâche à rythme propre : nom, jours fixes ou intervalle glissant. On
    travaille sur une copie ; rien n'est écrit tant que ce n'est pas valide.
-   L'identifiant ne change pas, le dernier passage (« async: ») reste lié. */
-function modifierAsynchrone(i) {
-  const a = NETTOYAGE.asynchrones[i];
+   L'identifiant ne change pas, le dernier passage (« async: ») reste lié.
+   id null : nouvelle tâche. */
+function modifierAsynchrone(id) {
+  const nouvelle = !id;
+  const a = nouvelle
+    ? { id:'a_' + uid(), nom:'', type:'jours-fixes', jours:[], intervalleJours:7 }
+    : NETTOYAGE.asynchrones.filter(x => x.id === id)[0];
   if (!a) return;
   const t = Object.assign({}, a, { jours:(a.jours || []).slice() });
   const JOURS_COURTS = ['', 'L', 'M', 'M', 'J', 'V', 'S', 'D'];
 
   const dessiner = () => {
     showSheet(
-      '<h2 id="sheet-titre">Modifier la tâche</h2>' +
+      '<h2 id="sheet-titre">' + (nouvelle ? 'Nouvelle tâche' : 'Modifier la tâche') + '</h2>' +
       '<div class="champ" style="margin-top:14px"><label class="f">Nom</label>' +
       '<input type="text" id="as-nom" maxlength="80" value="' + esc(t.nom) + '"></div>' +
       '<div class="champ" style="margin-top:14px"><label class="f">Rythme</label>' +
@@ -2209,7 +2362,8 @@ function modifierAsynchrone(i) {
           '<input type="number" id="as-int" min="1" max="60" step="1" value="' +
           esc(t.intervalleJours || 7) + '"></div>') +
       '<div class="actions"><button class="btn clair" data-fermer>Annuler</button>' +
-      '<button class="btn menthe" id="as-ok">Enregistrer</button></div>');
+      '<button class="btn menthe" id="as-ok">Enregistrer</button></div>' +
+      (nouvelle ? '' : '<button class="btn fantome bloc" id="as-supp" style="margin-top:8px">Supprimer cette tâche</button>'));
 
     /* Changer de rythme redessine la feuille : on garde le nom en cours. */
     $('#as-type').onchange = () => {
@@ -2217,6 +2371,7 @@ function modifierAsynchrone(i) {
       if ($('#as-int')) t.intervalleJours = $('#as-int').value;
       t.type = $('#as-type').value;
       dessiner();
+      _feuilleModifiee = true;
     };
     $$('[data-asj]').forEach(b => b.onclick = () => {
       const k = +b.dataset.asj, p = t.jours.indexOf(k);
@@ -2240,42 +2395,121 @@ function modifierAsynchrone(i) {
       /* Relu juste avant d'écrire : un changement fait entre-temps sur un
          autre appareil, pour une autre tâche, n'est pas effacé. */
       const sc = Object.assign({}, await DB.get('asynchrones', null));
+      if (nouvelle || (sc[a.id] && sc[a.id].cree)) out.cree = (sc[a.id] && sc[a.id].cree) || nowISO();
       sc[a.id] = out;
       await DB.set('asynchrones', sc);
       appliquerAsynchrones(sc);
-      await feed('ok', STATE.user.prenom + ' a modifié la tâche « ' + nom + ' »');
+      await feed('ok', STATE.user.prenom + (nouvelle ? ' a ajouté' : ' a modifié') + ' la tâche « ' + nom + ' »');
       closeSheet();
-      toast('Tâche modifiée');
+      toast(nouvelle ? 'Tâche ajoutée' : 'Tâche modifiée');
       rendre('parametres');
+    };
+
+    if ($('#as-supp')) $('#as-supp').onclick = () => {
+      t.nom = $('#as-nom').value;
+      if ($('#as-int')) t.intervalleJours = $('#as-int').value;
+      confirmer('Supprimer « ' + a.nom + ' » ?',
+        'La tâche disparaîtra des Paramètres et du registre exporté. Les passages déjà enregistrés sont conservés.',
+        'Supprimer', async () => {
+          const sc = Object.assign({}, await DB.get('asynchrones', null));
+          sc[a.id] = { supprime:true };
+          await DB.set('asynchrones', sc);
+          appliquerAsynchrones(sc);
+          await feed('ok', STATE.user.prenom + ' a supprimé la tâche « ' + a.nom + ' »');
+          closeSheet(); toast('Tâche supprimée'); rendre('parametres');
+        },
+        /* « Annuler » revient à la feuille, saisie en cours comprise. */
+        () => { dessiner(); _feuilleModifiee = true; });
     };
   };
   dessiner();
 }
 
-/* Les trois responsabilités de la semaine, en bas du tableau du mur */
+/* Les responsabilités de la semaine, en bas du tableau du mur. Le manager
+   désigne qui s'en charge, et peut renommer, retirer ou ajouter un rôle. */
 async function attribuerResponsables() {
   const resp = await DB.get('hebdo:responsables', {}) || {};
-  showSheet(
-    '<h2 id="sheet-titre">Responsables de la semaine</h2>' +
-    '<p class="sub">Trois rôles à désigner, comme au bas du tableau.</p>' +
-    RESPONSABLES.map(r =>
-      '<div class="champ" style="margin-top:14px"><label class="f">' + r.icone + ' ' + esc(r.libelle) + '</label>' +
-      '<select data-r="' + esc(r.id) + '"><option value="">Personne</option>' +
-      EQUIPE.map(e => '<option value="' + esc(e.id) + '"' +
-        (resp[r.id] === e.id ? ' selected' : '') + '>' + esc(e.prenom) + '</option>').join('') +
-      '</select></div>').join('') +
-    '<div class="actions"><button class="btn clair" data-fermer>Annuler</button>' +
-    '<button class="btn menthe" id="ar-ok">Enregistrer</button></div>');
+  appliquerRoles(await DB.get('hebdo:roles', null));
+  /* Copie de travail : rien n'est écrit avant « Enregistrer ». */
+  const roles = RESPONSABLES.map(r => ({ id:r.id, libelle:r.libelle, icone:r.icone,
+                                         qui:resp[r.id] || '', cree:r.cree || null }));
+  const retires = [];
 
-  $('#ar-ok').onclick = async () => {
-    const out = {};
-    $$('[data-r]').forEach(s => { if (s.value) out[s.dataset.r] = s.value; });
-    await DB.set('hebdo:responsables', out);
-    await feed('ok', STATE.user.prenom + ' a désigné les responsables de la semaine');
-    closeSheet();
-    toast('Responsables enregistrés');
-    rendre('parametres');
+  /* Redessiner la feuille (ajout, retrait) ne doit rien perdre de la saisie. */
+  const relire = () => {
+    $$('[data-rl]').forEach(i => {
+      const r = roles.filter(x => x.id === i.dataset.rl)[0];
+      if (r) r.libelle = i.value;
+    });
+    $$('[data-r]').forEach(s => {
+      const r = roles.filter(x => x.id === s.dataset.r)[0];
+      if (r) r.qui = s.value;
+    });
   };
+
+  const dessiner = () => {
+    showSheet(
+      '<h2 id="sheet-titre">Responsables de la semaine</h2>' +
+      '<p class="sub">Les rôles du bas du tableau : qui s’en charge cette semaine.</p>' +
+      roles.map(r =>
+        '<div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--line)">' +
+        '<div class="champ"><label class="f">' + esc(r.icone) + ' Rôle</label>' +
+        '<input type="text" maxlength="120" data-rl="' + esc(r.id) + '" value="' + esc(r.libelle) + '"></div>' +
+        '<div class="champ" style="margin-top:10px"><label class="f">Responsable</label>' +
+        '<select data-r="' + esc(r.id) + '"><option value="">Personne</option>' +
+        EQUIPE.map(e => '<option value="' + esc(e.id) + '"' +
+          (r.qui === e.id ? ' selected' : '') + '>' + esc(e.prenom) + '</option>').join('') +
+        '</select></div>' +
+        '<button class="btn fantome bloc sm" data-rs="' + esc(r.id) + '" style="margin-top:8px">Retirer ce rôle</button></div>').join('') +
+      '<button class="btn clair bloc" id="ar-ajout" style="margin-top:12px">+ Ajouter un rôle</button>' +
+      '<div class="actions"><button class="btn clair" data-fermer>Annuler</button>' +
+      '<button class="btn menthe" id="ar-ok">Enregistrer</button></div>');
+
+    $('#ar-ajout').onclick = () => {
+      relire();
+      roles.push({ id:'r_' + uid(), libelle:'', icone:'👤', qui:'', cree:nowISO() });
+      dessiner();
+      _feuilleModifiee = true;   // showSheet l'a remis à zéro : toucher le voile demandera confirmation
+      const champs = $$('[data-rl]');
+      if (champs.length) champs[champs.length - 1].focus();
+    };
+    $$('[data-rs]').forEach(b => b.onclick = () => {
+      relire();
+      const k = roles.findIndex(x => x.id === b.dataset.rs);
+      if (k < 0) return;
+      retires.push(roles[k]);
+      roles.splice(k, 1);
+      dessiner();
+      _feuilleModifiee = true;
+    });
+
+    $('#ar-ok').onclick = async () => {
+      relire();
+      roles.forEach(r => { r.libelle = String(r.libelle || '').trim(); });
+      if (roles.some(r => !r.libelle)) return toast('Donnez un nom à chaque rôle', 'erreur');
+      /* Relu juste avant d'écrire, comme les tâches à rythme propre. */
+      const sc = Object.assign({}, await DB.get('hebdo:roles', null));
+      roles.forEach(r => {
+        const usine = RESPONSABLES_DEF.filter(d => d.id === r.id)[0];
+        sc[r.id] = usine ? { libelle:r.libelle } : { libelle:r.libelle, cree:r.cree || nowISO() };
+      });
+      retires.forEach(r => { sc[r.id] = { supprime:true }; });
+      /* « hebdo:responsables » est fusionné champ par champ : une clé
+         absente gardait l'ancien responsable. On écrit donc '' pour
+         « Personne » et pour un rôle retiré. */
+      const out = {};
+      roles.forEach(r => { out[r.id] = r.qui || ''; });
+      retires.forEach(r => { out[r.id] = ''; });
+      await DB.set('hebdo:roles', sc);
+      await DB.set('hebdo:responsables', out);
+      appliquerRoles(sc);
+      await feed('ok', STATE.user.prenom + ' a mis à jour les responsables de la semaine');
+      closeSheet();
+      toast('Responsables enregistrés');
+      rendre('parametres');
+    };
+  };
+  dessiner();
 }
 
 /* =============================================================================
@@ -2596,6 +2830,7 @@ function formulaireAnomalie() {
        const hb = await DB.get('hebdo', null);
        if (hb) NETTOYAGE.zones.forEach(z => z.taches.forEach(t => { if (hb[t.id]) t.jours = hb[t.id]; }));
        appliquerAsynchrones(await DB.get('asynchrones', null));
+       appliquerRoles(await DB.get('hebdo:roles', null));
        /* Plan hebdomadaire décidé par le manager. On repart de la référence
           d'usine avant d'appliquer : sinon une tâche retirée du plan gardait
           ses anciens jours, puisqu'on ne faisait qu'ajouter par-dessus. */
