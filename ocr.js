@@ -431,12 +431,16 @@ async function lire(canvas, profil) {
     await w.setParameters(params);
     /* Pour un bon, on garde aussi la position de chaque ligne et de chaque
        mot : elle sert à relire la colonne Quantité case par case. */
-    r = page ? await w.recognize(canvas, {}, { text: true, blocks: true }) : await w.recognize(canvas);
+    r = (page || profil === 'code') ? await w.recognize(canvas, {}, { text: true, blocks: true }) : await w.recognize(canvas);
   } finally { reporterArret(); }
-  const lignes = [];
+  const lignes = [], mots = [];
   if (page) (r.data.blocks || []).forEach(b => (b.paragraphs || []).forEach(p => (p.lines || []).forEach(l =>
     lignes.push({ texte: l.text || '', bbox: l.bbox, mots: (l.words || []).map(m => ({ t: m.text, bbox: m.bbox })) }))));
-  return { texte: (r.data.text || '').trim(), confiance: (r.data.confidence || 0) / 100, lignes: lignes };
+  /* Étiquette : la position des mots sert à retrouver l'étiquette dans une
+     photo prise de loin (voir zoneEtiquette). */
+  else if (profil === 'code') (r.data.blocks || []).forEach(b => (b.paragraphs || []).forEach(p => (p.lines || []).forEach(l =>
+    (l.words || []).forEach(m => mots.push({ t: m.text || '', conf: m.confidence || 0, bbox: m.bbox })))));
+  return { texte: (r.data.text || '').trim(), confiance: (r.data.confidence || 0) / 100, lignes: lignes, mots: mots };
 }
 
 /* =============================================================================
@@ -587,7 +591,10 @@ function lotAutreFournisseur(T) {
                          limite) et « (10)00156746 » (lot ou commande, zéros
                          de remplissage). */
                       (s.length >= 8 && /^1[1357]\d{2}(0[1-9]|1[0-2])(0[1-9]|[12]\d|3[01])/.test(s)) ||
-                      /^00/.test(s);
+                      /^00/.test(s) ||
+                      /* Code-barres EAN-13 français (préfixe 300 à 379) lu en
+                         partie : « 3701621913 » passait pour un lot + heure. */
+                      /^3[0-7]\d{8,}$/.test(s);
 
   /* Du plus précis au plus vague : le premier format trouvé gagne. */
   const FORMES = [
@@ -647,8 +654,23 @@ const sansAccents = s => String(s).normalize('NFD').replace(/[\u0300-\u036f]/g, 
 /* Les chiffres qui traînent dans un mot sont des lettres mal lues */
 const CHIFFRE_EN_LETTRE = { '0':'o', '1':'i', '3':'e', '4':'a', '5':'s', '6':'g', '8':'b' };
 
+/* La liste des ingrédients cite d'autres parfums : « Bourbon vanilla pod »
+   sur l'Amarena, « HAZELNUT flour » sur le Tiramisu. Le nom du produit, lui,
+   est imprimé à part, après « ICE CREAM ». On cherche donc d'abord hors de
+   la liste, et sur tout le texte seulement si rien n'y est trouvé. */
 function extraireParfum(texte) {
   if (texte === null || texte === undefined) return null;
+  const hors = String(texte).replace(
+    /(?:in)?gr[eé]dien\w*[\s\S]*?(?=ice\s*cream|produced|made\s+in|$)/gi, ' ');
+  const tout = parfumDans(texte);
+  const dehors = hors !== String(texte) ? parfumDans(hors) : null;
+  /* Hors de la liste, un mot approchant ne doit pas battre un nom exact lu
+     ailleurs : on ne garde le tout que s'il est nettement meilleur. */
+  if (dehors && (!tout || tout.score < dehors.score + 0.25)) return dehors;
+  return tout;
+}
+
+function parfumDans(texte) {
   const nettoye = sansAccents(texte)
     .replace(/[0-9]/g, c => CHIFFRE_EN_LETTRE[c] !== undefined ? CHIFFRE_EN_LETTRE[c] : ' ')
     .replace(/[^a-z\s-]/g, ' ');
@@ -657,7 +679,10 @@ function extraireParfum(texte) {
      et la comparaison est en O(mots × cibles). Mesuré à 615 ms sur 18 Ko,
      soit une demi-seconde de gel après chaque scan. Une étiquette tient en
      quelques dizaines de mots : au-delà, c'est du bruit. */
-  const mots = nettoye.split(/\s+/).filter(m => m.length >= 3).slice(0, 120);
+  /* Mots d'emballage proches d'un parfum : « FRANCE » donnait « Fraise »
+     sur tous les cartons de cornets et de gobelets. */
+  const COURANTS = { france: 1, presse: 1, 'choco-cone': 1, 'choco-cones': 1 };
+  const mots = nettoye.split(/\s+/).filter(m => m.length >= 3 && !COURANTS[m]).slice(0, 120);
   if (!mots.length) return null;
 
   /* Cibles : le nom français plus tous ses alias anglais et italiens.
@@ -930,7 +955,9 @@ function rappelCadrage(type) {
      'bl'        → { fournisseur, numero, date, total, lignes, source:'ocr', confiance, texte }
                    (lignes : ref, parfum, lot, lotCorrige, bacs, taille, unite) — voir analyserBL
    ========================================================================== */
-async function analyserCanvas(type, canvas, nom, resolve) {
+/* original : facultatif, rend la photo en plus grande résolution pour la
+   lecture rapprochée de l'étiquette (photo de la galerie). */
+async function analyserCanvas(type, canvas, nom, resolve, original) {
   if (type === 'bl') return analyserBL(canvas, nom, resolve);
   let apercu = '', gris = null;
   const etape = (t, s) => showSheet(
@@ -946,12 +973,42 @@ async function analyserCanvas(type, canvas, nom, resolve) {
     try { apercu = canvas.toDataURL('image/jpeg', 0.6); } catch (e) {}
 
     etape('Lecture de l’étiquette', 'Reconnaissance du texte…');
-    const code   = await lireMeilleur(canvas, gris, 'code');
-    const parfum = await lireMeilleur(canvas, gris, 'parfum');
+    let { code, parfum, batch, mots } = await lireLot(canvas, gris);
+    /* Photo prise de loin (galerie) : l'étiquette n'occupe
+       qu'une partie de l'image et ses chiffres sont trop petits. On relit la
+       zone où se groupent les mots, agrandie, et sa lecture l'emporte : elle
+       est plus nette. Seule exception, un lot vraisemblable sur la photo
+       entière face à un lot douteux sur la zone, ou un lot déjà lu avec une
+       confiance élevée. */
+    const texteEntier = parfum.texte + '\n' + code.texte;
+    const sur = batch && lotVraisemblable(batch.code) && code.confiance >= 0.75;
+    const zone = sur ? null : zoneEtiquette(mots, gris.width, gris.height);
+    if (zone) {
+      etape('Lecture de l’étiquette', 'Lecture rapprochée de l’étiquette…');
+      /* Recadrer dans la photo d'origine : agrandir la version réduite ne
+         rend pas les détails perdus (IMG_4009, 14001A, n'est lu qu'ainsi). */
+      let grand = null, zg = null, zn = null;
+      if (original) { try { grand = (await original()).canvas; } catch (e) { grand = null; } }
+      try {
+        const k = grand ? grand.width / gris.width : 1;
+        zg = recadrer(grand || gris, { x: zone.x * k, y: zone.y * k, w: zone.w * k, h: zone.h * k });
+        if (grand) { libererCanvas(grand); grand = null; }
+        zn = copierCanvas(zg);
+        pretraiter(zn);
+        const z2 = await lireLot(zn, zg);
+        const garder = batch && lotVraisemblable(batch.code) && !lotVraisemblable(z2.batch ? z2.batch.code : '');
+        if (z2.batch && !garder) { batch = z2.batch; code = z2.code; parfum = z2.parfum; }
+      } finally {
+        if (grand) libererCanvas(grand);
+        if (zn) libererCanvas(zn);
+        if (zg) libererCanvas(zg);
+      }
+    }
     libererCanvas(gris); gris = null;
 
-    const batch = extraireBatch(code.texte + '\n' + parfum.texte);
-    const trouve = extraireParfum(parfum.texte + '\n' + code.texte);
+    /* Le nom du parfum peut sortir de la zone (titre loin du lot) : on le
+       cherche alors sur la photo entière. */
+    const trouve = extraireParfum(parfum.texte + '\n' + code.texte) || extraireParfum(texteEntier);
     const champs = extraireChamps(code.texte + '\n' + parfum.texte);
     const confiance = (code.confiance + parfum.confiance) / 2;
     libererCanvas(canvas);
@@ -1385,7 +1442,8 @@ function scannerPhoto(type, options) {
         '<div class="vide"><span class="vi">🔍</span>Mise à l’endroit de la photo…</div>');
       try {
         const chargee = await chargerImage(file, OCR.cotePx);
-        analyserCanvas(type, chargee.canvas, file.name, resolve);
+        analyserCanvas(type, chargee.canvas, file.name, resolve,
+          () => chargerImage(file, Math.round(OCR.cotePx * 1.8)));
       } catch (err) {
         saisieManuelle(type, err && err.message ? err.message : 'Image illisible', resolve);
       }
@@ -1452,6 +1510,87 @@ function scannerPhotoNatif(type) {
 
     cam.click();
   });
+}
+
+/* Passe « code » sur les deux versions de l'image, noir et blanc et gris, et
+   choix d'après le LOT trouvé, pas d'après la confiance globale de Tesseract.
+   Celle-ci départage mal : sur IMG_4009 recadrée, le gris l'emportait (0,16
+   contre 0,11) sans lot, alors que le noir et blanc lisait « 14001A ». */
+async function lireLot(nb, gris) {
+  const parfum = await lireMeilleur(nb, gris, 'parfum');
+  const a = await lire(nb, 'code');
+  const ba = extraireBatch(a.texte + '\n' + parfum.texte);
+  if (a.confiance >= 0.75 && ba) return { code: a, parfum, batch: ba, mots: a.mots };
+  let b = null;
+  try { b = await lire(gris, 'code'); } catch (e) { b = null; }
+  const bb = b ? extraireBatch(b.texte + '\n' + parfum.texte) : null;
+  const mots = (b && b.mots.length > a.mots.length) ? b.mots : a.mots;
+  const vrai = x => !!(x && lotVraisemblable(x.code));
+  let prendB;
+  if (ba && bb) prendB = vrai(bb) !== vrai(ba) ? vrai(bb) : b.confiance > a.confiance;
+  else if (ba || bb) prendB = !!bb;
+  else prendB = !!b && b.confiance > a.confiance;
+  return prendB ? { code: b, parfum, batch: bb, mots } : { code: a, parfum, batch: ba, mots };
+}
+
+/* Zone de l'étiquette dans une photo prise de loin, d'après la position des
+   mots lus par la passe « code ». Les mots d'une étiquette sont serrés les uns
+   contre les autres ; ceux du décor (vitrine, carton) sont rares et épars. On
+   garde le plus grand groupe de mots voisins. Rend null si l'étiquette remplit
+   déjà la photo : la relire ne gagnerait rien. */
+function zoneEtiquette(mots, l, h) {
+  /* Pas de seuil sur la confiance des mots : en psm 11, Tesseract la rend
+     souvent nulle, même sur un mot juste. */
+  const m = (mots || []).filter(x => x.bbox && /[0-9A-Z]{2,}/.test(x.t) && (x.bbox.x1 - x.bbox.x0) < l * 0.5);
+  if (m.length < 4) return null;
+  /* Hauteur médiane d'un mot : l'échelle du texte de l'étiquette. */
+  const hs = m.map(x => x.bbox.y1 - x.bbox.y0).sort((a, b) => a - b);
+  const hMed = hs[hs.length >> 1];
+  const pres = (a, b) => {
+    const dx = Math.max(0, Math.max(a.bbox.x0, b.bbox.x0) - Math.min(a.bbox.x1, b.bbox.x1));
+    const dy = Math.max(0, Math.max(a.bbox.y0, b.bbox.y0) - Math.min(a.bbox.y1, b.bbox.y1));
+    return dx < Math.max(hMed * 10, l * 0.15) && dy < Math.max(hMed * 4, h * 0.04);
+  };
+  /* Groupes de mots voisins, de proche en proche. */
+  const groupe = new Array(m.length).fill(-1);
+  let meilleur = null;
+  for (let i = 0; i < m.length; i++) {
+    if (groupe[i] >= 0) continue;
+    const pile = [i], membres = [];
+    groupe[i] = i;
+    while (pile.length) {
+      const a = pile.pop(); membres.push(m[a]);
+      for (let j = 0; j < m.length; j++) {
+        if (groupe[j] < 0 && pres(m[a], m[j])) { groupe[j] = i; pile.push(j); }
+      }
+    }
+    if (!meilleur || membres.length > meilleur.length) meilleur = membres;
+  }
+  if (meilleur.length < 4) return null;
+  let x0 = Infinity, y0 = Infinity, x1 = 0, y1 = 0;
+  meilleur.forEach(x => {
+    x0 = Math.min(x0, x.bbox.x0); y0 = Math.min(y0, x.bbox.y0);
+    x1 = Math.max(x1, x.bbox.x1); y1 = Math.max(y1, x.bbox.y1);
+  });
+  /* Marge : le lot est parfois un mot mal lu, donc absent du groupe. */
+  const mx = (x1 - x0) * 0.12 + hMed * 2, my = (y1 - y0) * 0.25 + hMed * 3;
+  x0 = Math.max(0, x0 - mx); y0 = Math.max(0, y0 - my);
+  x1 = Math.min(l, x1 + mx); y1 = Math.min(h, y1 + my);
+  if ((x1 - x0) * (y1 - y0) > l * h * 0.5) return null;
+  return { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
+}
+
+/* Extrait une zone, agrandie pour que le côté long revienne à OCR.cotePx
+   (trois fois au plus : au-delà, on agrandit du flou). */
+function recadrer(src, z) {
+  const r = Math.min(3, OCR.cotePx / Math.max(z.w, z.h));
+  const cv = document.createElement('canvas');
+  cv.width = Math.round(z.w * r); cv.height = Math.round(z.h * r);
+  const ctx = cv.getContext('2d', { willReadFrequently: true });
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = 'high';
+  ctx.drawImage(src, z.x, z.y, z.w, z.h, 0, 0, cv.width, cv.height);
+  return cv;
 }
 
 /* Copie d'un canvas avant binarisation : Tesseract lira les deux versions. */
