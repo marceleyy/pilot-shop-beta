@@ -50,7 +50,8 @@ const OCR = {
   cadreBL:       { largeur: 0.92, ratio: 0.707 }, // A4 portrait : 210/297
   margeCadre:    0.05,         // tolérance ajoutée autour du cadre au recadrage
   _worker: null,
-  _minuteur: null
+  _minuteur: null,
+  _file: null                  // file d’attente des lectures (voir avecMoteur)
 };
 
 /* =============================================================================
@@ -377,9 +378,26 @@ function reporterArret() {
   clearTimeout(OCR._minuteur);
   OCR._minuteur = setTimeout(async () => {
     if (!OCR._worker) return;
-    try { await OCR._worker.terminate(); } catch (e) {}
-    OCR._worker = null;
+    /* Détaché d'abord : un scan lancé pendant l'arrêt crée un worker neuf
+       au lieu de recevoir celui qui s'éteint. */
+    const w = OCR._worker; OCR._worker = null;
+    try { await w.terminate(); } catch (e) {}
   }, OCR.inactiviteMs);
+}
+
+/* Le worker est partagé et ses réglages (liste de caractères, mode de page)
+   restent posés entre deux appels. Deux lectures en même temps (feuille
+   d'attente fermée puis nouveau scan) entrelaçaient leurs setParameters et
+   recognize : l'une lisait avec la liste de l'autre. Chaque séquence
+   « réglages + lectures » passe donc à son tour, dans l'ordre d'arrivée. */
+function avecMoteur(travail) {
+  const tour = (OCR._file || Promise.resolve()).then(async () => {
+    clearTimeout(OCR._minuteur);
+    try { return await travail(await obtenirWorker()); }
+    finally { reporterArret(); }
+  });
+  OCR._file = tour.catch(() => {});
+  return tour;
 }
 
 const MAJUSCULES = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
@@ -403,9 +421,6 @@ async function lireMeilleur(canvasNB, canvasGris, profil) {
 }
 
 async function lire(canvas, profil) {
-  /* Le minuteur d'inactivité pourrait arrêter le worker en pleine lecture. */
-  clearTimeout(OCR._minuteur);
-  const w = await obtenirWorker();
   /* Profil « bl » : une page entière, tableau compris. Aucune liste de
      caractères (la liste vide efface celle de la passe précédente, le worker
      étant partagé) ; psm 6 lit chaque rangée du tableau comme une ligne, psm 4
@@ -426,13 +441,14 @@ async function lire(canvas, profil) {
         preserve_interword_spaces: '1' };
 
   const page = profil === 'bl' || profil === 'bl4';
-  let r;
-  try {
+  /* Le minuteur d'inactivité (relancé par avecMoteur) ne peut plus arrêter le
+     worker en pleine lecture. */
+  const r = await avecMoteur(async w => {
     await w.setParameters(params);
     /* Pour un bon, on garde aussi la position de chaque ligne et de chaque
        mot : elle sert à relire la colonne Quantité case par case. */
-    r = page ? await w.recognize(canvas, {}, { text: true, blocks: true }) : await w.recognize(canvas);
-  } finally { reporterArret(); }
+    return page ? await w.recognize(canvas, {}, { text: true, blocks: true }) : await w.recognize(canvas);
+  });
   const lignes = [];
   if (page) (r.data.blocks || []).forEach(b => (b.paragraphs || []).forEach(p => (p.lines || []).forEach(l =>
     lignes.push({ texte: l.text || '', bbox: l.bbox, mots: (l.words || []).map(m => ({ t: m.text, bbox: m.bbox })) }))));
@@ -1073,24 +1089,23 @@ async function lireQuantitesBL(canvas, res, lignesLues) {
     }
     cases.forEach(c => { c.nb = copierCanvas(c.gris); binariserOtsu(c.nb); });
 
-    clearTimeout(OCR._minuteur);
-    const w = await obtenirWorker();
-    for (const [source, psm] of [['gris', '7'], ['gris', '6'], ['nb', '7']]) {
-      await w.setParameters({ tessedit_char_whitelist: '0123456789,.', tessedit_pageseg_mode: psm });
-      for (let i = 0; i < cases.length; i++) {
-        const r = await w.recognize(cases[i][source]);
-        const v = valeurQuantite(r.data.text);
-        if (v) { cases[i].votes.push(v.v); if (v.rogne) cases[i].rogne = true; }
+    await avecMoteur(async w => {
+      for (const [source, psm] of [['gris', '7'], ['gris', '6'], ['nb', '7']]) {
+        await w.setParameters({ tessedit_char_whitelist: '0123456789,.', tessedit_pageseg_mode: psm });
+        for (let i = 0; i < cases.length; i++) {
+          const r = await w.recognize(cases[i][source]);
+          const v = valeurQuantite(r.data.text);
+          if (v) { cases[i].votes.push(v.v); if (v.rogne) cases[i].rogne = true; }
+        }
       }
-    }
-    if (caseTotal) {
-      await w.setParameters({ tessedit_char_whitelist: '0123456789,.=', tessedit_pageseg_mode: '7' });
-      const r = await w.recognize(caseTotal);
-      const m = String(r.data.text || '').replace(/\s+/g, '').match(/=?(\d{1,4})[.,](\d{2})$/);
-      if (m && +m[1] > 0 && +m[1] <= 5000) res.total = +m[1];
-    }
+      if (caseTotal) {
+        await w.setParameters({ tessedit_char_whitelist: '0123456789,.=', tessedit_pageseg_mode: '7' });
+        const r = await w.recognize(caseTotal);
+        const m = String(r.data.text || '').replace(/\s+/g, '').match(/=?(\d{1,4})[.,](\d{2})$/);
+        if (m && +m[1] > 0 && +m[1] <= 5000) res.total = +m[1];
+      }
+    });
   } finally {
-    reporterArret();
     cases.forEach(c => { libererCanvas(c.gris); if (c.nb) libererCanvas(c.nb); });
     if (caseTotal) libererCanvas(caseTotal);
   }
@@ -1131,22 +1146,22 @@ async function lireNumeroBL(canvas, res, lignesLues) {
   const h = Math.max(1, m.bbox.y1 - m.bbox.y0);
   const cv = decouper(canvas, Math.max(0, m.bbox.x0 - h * 0.6), Math.max(0, m.bbox.y0 - h * 0.35),
                       Math.min(canvas.width, m.bbox.x1 + h * 0.6), Math.min(canvas.height, m.bbox.y1 + h * 0.35), 60);
-  clearTimeout(OCR._minuteur);
-  const w = await obtenirWorker();
   try {
-    for (const psm of ['7', '6']) {
-      await w.setParameters({ tessedit_char_whitelist: 'BL0123456789', tessedit_pageseg_mode: psm });
-      const r = await w.recognize(cv);
-      /* Exactement six chiffres : un numéro client plus long n'en donne pas six. */
-      const t = String(r.data.text || '').replace(/\s+/g, '').match(/^(?:BL|8L|B1|L)?(\d{6})$/);
-      if (t) {
-        res.bl = 'BL' + t[1];
-        /* Le lot qui portait ce numéro n'en est pas un. */
-        res.lignes.forEach(l => { if (l.lot === t[1]) l.lot = ''; });
-        return;
+    await avecMoteur(async w => {
+      for (const psm of ['7', '6']) {
+        await w.setParameters({ tessedit_char_whitelist: 'BL0123456789', tessedit_pageseg_mode: psm });
+        const r = await w.recognize(cv);
+        /* Exactement six chiffres : un numéro client plus long n'en donne pas six. */
+        const t = String(r.data.text || '').replace(/\s+/g, '').match(/^(?:BL|8L|B1|L)?(\d{6})$/);
+        if (t) {
+          res.bl = 'BL' + t[1];
+          /* Le lot qui portait ce numéro n'en est pas un. */
+          res.lignes.forEach(l => { if (l.lot === t[1]) l.lot = ''; });
+          return;
+        }
       }
-    }
-  } finally { reporterArret(); libererCanvas(cv); }
+    });
+  } finally { libererCanvas(cv); }
 }
 
 /* Mot d'ancrage d'une ligne : le lot s'il est lu, sinon le dernier mot
