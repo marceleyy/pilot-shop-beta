@@ -459,7 +459,7 @@ function extraireBatch(texte) {
         « 2026 Litres » donnait 52026L, « 28 06 2026 » donnait 46700S. */
   const ancre = T.match(/BAT[CGO]H[^0-9A-Z]{0,12}(?:N[^0-9A-Z]{0,4})?([\s\S]{0,24})/);
 
-  const chercher = src => {
+  const chercher = (src, autonomeSeul) => {
     /* On travaille LIGNE PAR LIGNE. En aplatissant tout le texte, un nombre
        de fin de ligne se recollait à la lettre isolée de la ligne suivante :
        « M3345M45700 » puis « A » donnaient un lot « 45700A » qui n'existe pas,
@@ -478,6 +478,7 @@ function extraireBatch(texte) {
       }
     }
     if (candidats.length) return { code: candidats[0].code, corrige: false };
+    if (autonomeSeul) return null;
 
     /* Repli : motif non autonome, mais toujours à l'intérieur d'une seule ligne. */
     for (const ligne of lignes) {
@@ -492,7 +493,23 @@ function extraireBatch(texte) {
     return null;
   };
 
+  /* 0. Un lot Amorino autonome, n'importe où : c'est le cas le plus sûr. */
+  if (ancre) { const r = chercher(ancre[1], true); if (r) return r; }
+  const r0 = chercher(T, true);
+
+  /* 0 bis. Les AUTRES fournisseurs, AVANT les replis qui corrigent les
+     caractères : sans ça, « 26A1S21287 » devenait « 21287S » (corrigé, puis
+     écarté), et 49 photos réelles de la réserve ne rendaient aucun lot. */
+  /* Un « 80685A » (code emballeur des cornets) ou « 37700S » (code postal
+     collé) a la forme d'un lot Amorino sans en être un : la série Amorino
+     commence par 13 ou 14. */
+  /* Un « BATCH N » lu prouve une étiquette Amorino : son lot, même abîmé
+     (« 13995 A », « 1399SA »), passe avant tout autre nombre. */
   if (ancre) { const r = chercher(ancre[1]); if (r) return r; }
+  if (!r0 || !/^1[34]/.test(r0.code)) {
+    const autre = lotAutreFournisseur(T);
+    if (autre) return autre;
+  }
 
   /* 2. Repli sur tout le texte, dates et unités retirées au préalable. */
   const sansDates = T
@@ -523,6 +540,87 @@ function extraireBatch(texte) {
     const l0 = reste[0];
     const lettre = VERS_LETTRE[l0] !== undefined ? VERS_LETTRE[l0] : l0;
     if (/[A-Z]/.test(lettre)) return { code: chiffres + lettre, corrige: true };
+  }
+  return null;
+}
+
+/* -----------------------------------------------------------------------------
+   LOTS DES AUTRES FOURNISSEURS
+   Relevés sur les étiquettes de la réserve (photos du 12 et du 19/09) :
+     26A1S21287 pistaches · 26F1511703 éclats de caramel · L5227A macarons ·
+     L33925 chocolat chaud · VL260701 gaufres · V2501798 choco-cones ·
+     26040665 IRCA · 280220066 mocca beans · 17426 cornets (Tourniayre) ·
+     156746 barquettes · « Lot:2575 » gobelets et serviettes.
+   La lecture « code » ne garde que chiffres et majuscules : « Lot:2575 »
+   revient « L2575 », et « VL 260701 19:43 » revient « VL2607011948S ».
+
+   Chaque forme n'est acceptée que comme jeton autonome, et les nombres qu'on
+   trouve sur TOUTES les étiquettes Amorino sont écartés : l'estampille
+   « FR 94.054.006 UE » (huit chiffres), le téléphone 33 1 53 14 57 00, le
+   code postal d'Orly 94310 et les dates collées (29062026, 20260528).
+   Les lots courts (cinq ou six chiffres) ressemblent à trop de choses : on ne
+   les prend que s'ils sont confirmés par le code-barres GS1 imprimé dessous,
+   « (10)17426 », lu « …280630 10 17426 37… ».
+   -------------------------------------------------------------------------- */
+function lotAutreFournisseur(T) {
+  const jetons = [], lignes = String(T).toUpperCase().split(/[\r\n]+/);
+  lignes.forEach(l => l.replace(/[^0-9A-Z]/g, ' ').split(/\s+/).forEach(j => { if (j) jetons.push(j); }));
+
+  const estDate = s => /^(0[1-9]|[12]\d|3[01])(0[1-9]|1[0-2])20[2-4]\d$/.test(s) ||
+                       /^20[2-4]\d(0[1-9]|1[0-2])(0[1-9]|[12]\d|3[01])$/.test(s);
+  /* Une date peut revenir avec un chiffre parasite devant ou derrière, ou
+     un jour mal lu : « 44062028 », « 798032027 » (08/03/2027). Le mois et
+     l'année en fin de nombre suffisent à la reconnaître. */
+  const contientDate = s => estDate(s) ||
+    (s.length === 9 && (estDate(s.slice(1)) || estDate(s.slice(0, 8)))) ||
+    (s.length >= 8 && /(0[1-9]|1[0-2])20[2-4]\d$/.test(s)) ||
+    /* jjmmaa en tête, l'heure ou un chiffre collé derrière : « 28062614 ». */
+    (s.length >= 8 && /^\d{8,10}$/.test(s) && /^(0[1-9]|[12]\d|3[01])(0[1-9]|1[0-2])2[4-9]/.test(s)) ||
+    /* « L0727 », « L2026 » : une année ou un mois-année, pas un lot. */
+    /^L(0\d{3}|20[2-4]\d|1[0-2]2[4-9]|\d000)$/.test(s) ||
+    /* aammjj puis l'heure : « 2501151030 ». */
+    /^2[4-9](0[1-9]|1[0-2])(0[1-9]|[12]\d|3[01])([01]\d|2[0-3])[0-5]\d$/.test(s);
+  const commun = s => /^\d.054\d{3}$/.test(s) ||            // estampille 94054006, chiffres mal lus
+                      /3145700|1531457/.test(s) ||          // téléphone Amorino
+                      s === '94310' ||
+                      /* Morceaux du code-barres GS1 : « (15)280530 » (date
+                         limite) et « (10)00156746 » (lot ou commande, zéros
+                         de remplissage). */
+                      (s.length >= 8 && /^1[1357]\d{2}(0[1-9]|1[0-2])(0[1-9]|[12]\d|3[01])/.test(s)) ||
+                      /^00/.test(s);
+
+  /* Du plus précis au plus vague : le premier format trouvé gagne. */
+  const FORMES = [
+    { re: /^\d{2}[A-Z]\d[A-Z]\d{5}$/ },                  // 26A1S21287
+    { re: /^\d{2}[A-Z]\d{7}$/ },                         // 26F1511703
+    { re: /^L\d{4}[A-Z]$/ },                             // L5227A
+    { re: /^L\d{5}$/ },                                  // L33925
+    { re: /^(VL\d{6})(?:\d{4}[A-Z0-9]*)?$/, garde: 1 },  // VL260701, heure collée
+    { re: /^V\d{7}$/ },                                  // V2501798
+    /* IRCA : l'année en tête (26040665, 26260793). Exiger 24 à 29 écarte
+       les chiffres collés des ingrédients : « cacao 22/24 18% » revenait
+       « 02224184 » ou « 22241264 ». */
+    { re: /^2[4-9]\d{6}$/ },                             // 26040665
+    { re: /^[1-9]\d{8}$/ },                              // 280220066
+    /* Crêpes : « 210261 14:40 », le lot puis l'heure, lus collés. */
+    { re: /^(\d{6})(?:[01]\d|2[0-3])[0-5]\d$/, garde: 1 },  // 2102611440
+    { re: /^L(\d{4})$/, garde: 1 }                       // « Lot:2575 »
+  ];
+  for (const f of FORMES) {
+    for (const j of jetons) {
+      const m = j.match(f.re);
+      if (!m || commun(j) || contientDate(j)) continue;
+      return { code: f.garde ? m[f.garde] : j, corrige: false };
+    }
+  }
+
+  /* Lot court confirmé par le code-barres : (15)aammjj (10)LOT (37)quantité. */
+  /* Les parenthèses du code-barres sont lues comme des lettres ou des
+     espaces : on ne garde que les chiffres de chaque ligne. */
+  const gs1 = lignes.map(l => l.replace(/[^0-9]/g, '')).filter(g => g.length >= 12);
+  for (const j of jetons) {
+    if (!/^\d{5,6}$/.test(j) || commun(j)) continue;
+    if (gs1.some(g => g.indexOf('10' + j + '37') >= 0)) return { code: j, corrige: false };
   }
   return null;
 }
@@ -1602,6 +1700,13 @@ function lotVraisemblable(lot) {
   if (/^\d{9}$/.test(L)) return true;
   /* Éclats de caramel : deux chiffres, une lettre, sept chiffres — 26F1511703. */
   if (/^\d{2}[A-Z]\d{7}$/.test(L)) return true;
+  /* Formats relevés en réserve, que lotAutreFournisseur ne rend qu'après
+     contrôle (jeton autonome, dates et numéros communs écartés) :
+     pistaches 26A1S21287, chocolat chaud L33925, gaufres VL260701,
+     choco-cones V2501798, cornets 17426, gobelets 2575. */
+  if (/^\d{2}[A-Z]\d[A-Z]\d{5}$/.test(L)) return true;
+  if (/^L\d{5}$/.test(L) || /^VL\d{6}$/.test(L) || /^V\d{7}$/.test(L)) return true;
+  if (/^\d{4,5}$/.test(L)) return true;
   return false;
 }
 
