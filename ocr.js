@@ -567,8 +567,12 @@ function extraireBatch(texte) {
    « (10)17426 », lu « …280630 10 17426 37… ».
    -------------------------------------------------------------------------- */
 function lotAutreFournisseur(T) {
-  const jetons = [], lignes = String(T).toUpperCase().split(/[\r\n]+/);
-  lignes.forEach(l => l.replace(/[^0-9A-Z]/g, ' ').split(/\s+/).forEach(j => { if (j) jetons.push(j); }));
+  const jetons = [], ligneDe = [], seuls = {}, lignes = String(T).toUpperCase().split(/[\r\n]+/);
+  lignes.forEach((l, n) => {
+    const js = l.replace(/[^0-9A-Z]/g, ' ').split(/\s+/).filter(Boolean);
+    if (js.length === 1) seuls[n] = 1;
+    js.forEach(j => { jetons.push(j); ligneDe.push(n); });
+  });
 
   const estDate = s => /^(0[1-9]|[12]\d|3[01])(0[1-9]|1[0-2])20[2-4]\d$/.test(s) ||
                        /^20[2-4]\d(0[1-9]|1[0-2])(0[1-9]|[12]\d|3[01])$/.test(s);
@@ -611,7 +615,8 @@ function lotAutreFournisseur(T) {
     { re: /^[1-9]\d{8}$/ },                              // 280220066
     /* Crêpes : « 210261 14:40 », le lot puis l'heure, lus collés. */
     { re: /^(\d{6})(?:[01]\d|2[0-3])[0-5]\d$/, garde: 1 },  // 2102611440
-    { re: /^L(\d{4})$/, garde: 1 }                       // « Lot:2575 »
+    { re: /^L(\d{4})$/, garde: 1 },                      // « Lot:2575 »
+    { re: /^B(\d{6})$/, garde: 1 }                       // mocca B260220
   ];
   for (const f of FORMES) {
     for (const j of jetons) {
@@ -628,6 +633,27 @@ function lotAutreFournisseur(T) {
   for (const j of jetons) {
     if (!/^\d{5,6}$/.test(j) || commun(j)) continue;
     if (gs1.some(g => g.indexOf('10' + j + '37') >= 0)) return { code: j, corrige: false };
+  }
+
+  /* Lot court annoncé par sa mention, que la lecture abrège : « LOT 17426 »
+     lu « BN 17426 », « Lot: 2535 » lu « LS 2535 », ou « L » seul sur la
+     ligne au-dessus de « 156746 ». Une mention sur la ligne précédente ne
+     compte que seule sur sa ligne : « 5 L » puis « 75008 » est un volume et
+     un code postal. */
+  const MENTION = /^(L|LOT|LN|LS|LT|BN|BATCH)$/;
+  /* Pas sur une étiquette de glace (« ICE CREAM », estampille 94.054) :
+     son lot (14009A) a sa propre lecture, plus sûre, et « L 1930 » y est
+     un débris. */
+  const maison = /ICE ?CREAM|94\W?054/.test(String(T).toUpperCase());
+  for (let i = 1; i < jetons.length && !maison; i++) {
+    const j = jetons[i];
+    if (!/^\d{4,6}$/.test(j) || !MENTION.test(jetons[i - 1]) || commun(j) || contientDate('L' + j)) continue;
+    if (ligneDe[i - 1] !== ligneDe[i] && !seuls[ligneDe[i - 1]]) continue;
+    /* Année, mois-année, date jjmmaa, poids ou volume rond (2500, 3000). */
+    if (/^20[2-4]\d$/.test(j) || /^(0[1-9]|1[0-2])2[4-9]$/.test(j) || /^\d{2}00$/.test(j) ||
+        /^(0[1-9]|[12]\d|3[01])(0[1-9]|1[0-2])2[4-9]$/.test(j) ||
+        /^2[4-9](0[1-9]|1[0-2])(0[1-9]|[12]\d|3[01])$/.test(j)) continue;
+    return { code: j, corrige: false };
   }
   return null;
 }
@@ -1258,7 +1284,7 @@ async function lireQuantitesBL(canvas, res, lignesLues) {
 async function lireNumeroBL(canvas, res, lignesLues) {
   const reDate = /\d{2}[\/.]\d{2}[\/.]20\d{2}/;
   const L = (lignesLues || []).filter(x => x.bbox && reDate.test(x.texte))[0];
-  if (!L) return;
+  if (!L) return lireNumeroSousEntete(canvas, res, lignesLues);
   const mots = (L.mots || []).filter(m => m.bbox);
   const iDate = mots.findIndex(m => reDate.test(m.t));
   if (iDate < 1) return;
@@ -1281,6 +1307,35 @@ async function lireNumeroBL(canvas, res, lignesLues) {
       if (t) {
         res.bl = 'BL' + t[1];
         /* Le lot qui portait ce numéro n'en est pas un. */
+        res.lignes.forEach(l => { if (l.lot === t[1]) l.lot = ''; });
+        return;
+      }
+    }
+  } finally { reporterArret(); libererCanvas(cv); }
+}
+
+/* Ligne du numéro perdue en entier (BL219700, case trop pâle) : on relit
+   la case située sous l'en-tête « NUMERO » du tableau. */
+async function lireNumeroSousEntete(canvas, res, lignesLues) {
+  let e = null;
+  (lignesLues || []).some(l => (l.mots || []).some(m => {
+    /* « NUMERO » seul : pas « Numéro client » ni « Numéro de TVA ». */
+    if (m.bbox && /^\W*num[eé]ro\W*$/i.test(m.t) && !/client|tva|commande/i.test(l.texte)) { e = m.bbox; return true; }
+    return false;
+  }));
+  if (!e) return;
+  const h = Math.max(1, e.y1 - e.y0), w = e.x1 - e.x0;
+  const cv = decouper(canvas, Math.max(0, e.x0 - w * 0.4), Math.min(canvas.height - 2, e.y1),
+                      Math.min(canvas.width, e.x1 + w * 0.6), Math.min(canvas.height, e.y1 + h * 1.4), 60);
+  clearTimeout(OCR._minuteur);
+  const wk = await obtenirWorker();
+  try {
+    for (const psm of ['7', '6']) {
+      await wk.setParameters({ tessedit_char_whitelist: 'BL0123456789', tessedit_pageseg_mode: psm });
+      const r = await wk.recognize(cv);
+      const t = String(r.data.text || '').replace(/\s+/g, '').match(/^(?:BL|8L|B1|L)?(\d{6})$/);
+      if (t) {
+        res.bl = 'BL' + t[1];
         res.lignes.forEach(l => { if (l.lot === t[1]) l.lot = ''; });
         return;
       }
@@ -1663,10 +1718,11 @@ function extraireLignesBL(texte) {
     /* Débris de la marge avant la référence (« 4 SPISTAM25 », « AN SMANGO25 »,
        « > SVANIG25 ») : sans ce retrait, la référence n'était pas reconnue
        et finissait dans le nom du produit. */
-    const reRef = /^[\$s]{0,2}[A-Z][A-Z0-9$]{3,15}$/;
+    const reRef = /^[\$s]{0,2}[A-Z][A-Z0-9$_]{3,15}$/;
     for (let n = 0; n < 2; n++) {
       if (jetons.length > 2 && jetons[0].length <= 3 && !reRef.test(jetons[0]) &&
-          reRef.test(jetons[1]) && /\d/.test(jetons[1]) && !/^L\d{4}[A-Z]$/i.test(jetons[1])) { jetons.shift(); break; }
+          reRef.test(jetons[1]) && (/\d/.test(jetons[1]) || /[^A-Za-z0-9$]/.test(jetons[0])) &&
+          !/^L\d{4}[A-Z]$/i.test(jetons[1])) { jetons.shift(); break; }
       /* Deux débris (« e 3 STIRASG25 ») : on retire le premier et on recommence. */
       if (n === 0 && jetons.length > 3 && jetons[0].length <= 3 && jetons[1].length <= 3 &&
           reRef.test(jetons[2]) && /\d/.test(jetons[2])) jetons.shift();
@@ -1687,6 +1743,16 @@ function extraireLignesBL(texte) {
       const c = lotDepuisJeton(jetons[i], glace);
       /* Le numéro du bon lui-même (« BL 221970 ») n'est pas un lot. */
       if (c && !(mBL && c.lot === mBL[1])) { iLot = i; lot = c.lot; corrige = c.corrige; break; }
+    }
+    /* Lot court de cinq chiffres (cornets 17426, gaufrettes 26131), à défaut
+       d'un autre : seulement hors glace (un 14159 est un 14159A abîmé) et
+       juste avant la quantité, à sa place dans la colonne Lot. */
+    if (iLot < 0 && !glace) {
+      for (let i = jetons.length - 2; i > 2; i--) {
+        if (/^\d{5}$/.test(jetons[i]) && /^\d{1,3}[.,]\d{2}$/.test(jetons[i + 1].replace(/[()[\]{}]/g, ''))) {
+          iLot = i; lot = jetons[i]; break;
+        }
+      }
     }
 
     /* Quantité : un nombre à deux décimales APRÈS le lot (« 12,00 »). Les
@@ -1726,13 +1792,18 @@ function extraireLignesBL(texte) {
     /* Une ligne d'en-tête avec un nombre à six chiffres n'est pas un produit :
        il faut une référence en tête, un libellé de produit, ou lot ET quantité. */
     if (!(ref || produit || (lot && qte))) return;
-    if (!lot && !(ref && produit)) return;
+    /* Fournitures sans lot (gobelets, cuillères, lavettes) : une référence en
+       tête et une quantité nette suffisent. Sans ça, BL218582 ne rendait que
+       8 lignes sur 33. */
+    if (!lot && !(ref && (produit || (qtePropre && (/[\d$_]/.test(ref) ||
+        /\(\s*[\d.,\s]+\s*(?:p|g|gr|kg|ml|cl)\s*\)/i.test(design)))))) return;
 
     /* Contenance : « 3 litres » pour un bac, « (14x6p) » pour un carton. */
     const mL = design.match(/(\d+)\s*litres?/i);
     const mC = design.match(/\((\d+)\s*[x×]\s*(\d+)\s*p\)/i);
     const mU = design.match(/\((\d+)\s*p\)/i);
-    const taille = mL ? +mL[1] : null;
+    /* « Sauce Caramel (2 litres / 2.4kg) » est un bidon, pas un bac de 2 L. */
+    const taille = mL && !/sauce|topping|coulis|litres?\s*\/\s*[\d.,]+\s*kg/i.test(t) ? +mL[1] : null;
 
     lignes.push({
       designation: design,
@@ -1795,6 +1866,10 @@ function lotDepuisJeton(jeton, glace) {
   if (j.length < 6 || j.length > 10) return null;
   if (/^20[2-4]\d/.test(j) && j.length === 8) return null;   // une date collée
   if (/^1[34]\d{3}[A-Z]$/.test(j) || /^L\d{4}[A-Z]$/.test(j) || /^\d{8}$/.test(j)) return { lot: j, corrige: false };
+  /* Autres fournisseurs, tels qu'imprimés dans la colonne Lot du bon :
+     26F1305603, 26A1S21287, V2601256, 280220066, 0188/26. */
+  if (/^\d{2}[A-Z]\d{7}$/.test(j) || /^\d{2}[A-Z]\d[A-Z]\d{5}$/.test(j) || /^V\d{7}$/.test(j) ||
+      /^[1-9]\d{8}$/.test(j) || (/^\d{4}\/\d{2}$/.test(j) && !/^20[2-4]\d/.test(j))) return { lot: j, corrige: false };
   if (/^\d{6}$/.test(j) && !(glace && /^1[34]/.test(j))) return { lot: j, corrige: false };
   if (j.length !== 6) return null;
   const ch = c => VERS_CHIFFRE[c] !== undefined ? VERS_CHIFFRE[c] : c;
