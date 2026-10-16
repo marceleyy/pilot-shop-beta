@@ -431,12 +431,16 @@ async function lire(canvas, profil) {
     await w.setParameters(params);
     /* Pour un bon, on garde aussi la position de chaque ligne et de chaque
        mot : elle sert à relire la colonne Quantité case par case. */
-    r = page ? await w.recognize(canvas, {}, { text: true, blocks: true }) : await w.recognize(canvas);
+    r = (page || profil === 'code') ? await w.recognize(canvas, {}, { text: true, blocks: true }) : await w.recognize(canvas);
   } finally { reporterArret(); }
-  const lignes = [];
+  const lignes = [], mots = [];
   if (page) (r.data.blocks || []).forEach(b => (b.paragraphs || []).forEach(p => (p.lines || []).forEach(l =>
     lignes.push({ texte: l.text || '', bbox: l.bbox, mots: (l.words || []).map(m => ({ t: m.text, bbox: m.bbox })) }))));
-  return { texte: (r.data.text || '').trim(), confiance: (r.data.confidence || 0) / 100, lignes: lignes };
+  /* Étiquette : la position des mots sert à retrouver l'étiquette dans une
+     photo prise de loin (voir zoneEtiquette). */
+  else if (profil === 'code') (r.data.blocks || []).forEach(b => (b.paragraphs || []).forEach(p => (p.lines || []).forEach(l =>
+    (l.words || []).forEach(m => mots.push({ t: m.text || '', conf: m.confidence || 0, bbox: m.bbox })))));
+  return { texte: (r.data.text || '').trim(), confiance: (r.data.confidence || 0) / 100, lignes: lignes, mots: mots };
 }
 
 /* =============================================================================
@@ -459,7 +463,7 @@ function extraireBatch(texte) {
         « 2026 Litres » donnait 52026L, « 28 06 2026 » donnait 46700S. */
   const ancre = T.match(/BAT[CGO]H[^0-9A-Z]{0,12}(?:N[^0-9A-Z]{0,4})?([\s\S]{0,24})/);
 
-  const chercher = src => {
+  const chercher = (src, autonomeSeul) => {
     /* On travaille LIGNE PAR LIGNE. En aplatissant tout le texte, un nombre
        de fin de ligne se recollait à la lettre isolée de la ligne suivante :
        « M3345M45700 » puis « A » donnaient un lot « 45700A » qui n'existe pas,
@@ -478,6 +482,7 @@ function extraireBatch(texte) {
       }
     }
     if (candidats.length) return { code: candidats[0].code, corrige: false };
+    if (autonomeSeul) return null;
 
     /* Repli : motif non autonome, mais toujours à l'intérieur d'une seule ligne. */
     for (const ligne of lignes) {
@@ -492,7 +497,23 @@ function extraireBatch(texte) {
     return null;
   };
 
+  /* 0. Un lot Amorino autonome, n'importe où : c'est le cas le plus sûr. */
+  if (ancre) { const r = chercher(ancre[1], true); if (r) return r; }
+  const r0 = chercher(T, true);
+
+  /* 0 bis. Les AUTRES fournisseurs, AVANT les replis qui corrigent les
+     caractères : sans ça, « 26A1S21287 » devenait « 21287S » (corrigé, puis
+     écarté), et 49 photos réelles de la réserve ne rendaient aucun lot. */
+  /* Un « 80685A » (code emballeur des cornets) ou « 37700S » (code postal
+     collé) a la forme d'un lot Amorino sans en être un : la série Amorino
+     commence par 13 ou 14. */
+  /* Un « BATCH N » lu prouve une étiquette Amorino : son lot, même abîmé
+     (« 13995 A », « 1399SA »), passe avant tout autre nombre. */
   if (ancre) { const r = chercher(ancre[1]); if (r) return r; }
+  if (!r0 || !/^1[34]/.test(r0.code)) {
+    const autre = lotAutreFournisseur(T);
+    if (autre) return autre;
+  }
 
   /* 2. Repli sur tout le texte, dates et unités retirées au préalable. */
   const sansDates = T
@@ -527,6 +548,116 @@ function extraireBatch(texte) {
   return null;
 }
 
+/* -----------------------------------------------------------------------------
+   LOTS DES AUTRES FOURNISSEURS
+   Relevés sur les étiquettes de la réserve (photos du 12 et du 19/09) :
+     26A1S21287 pistaches · 26F1511703 éclats de caramel · L5227A macarons ·
+     L33925 chocolat chaud · VL260701 gaufres · V2501798 choco-cones ·
+     26040665 IRCA · 280220066 mocca beans · 17426 cornets (Tourniayre) ·
+     156746 barquettes · « Lot:2575 » gobelets et serviettes.
+   La lecture « code » ne garde que chiffres et majuscules : « Lot:2575 »
+   revient « L2575 », et « VL 260701 19:43 » revient « VL2607011948S ».
+
+   Chaque forme n'est acceptée que comme jeton autonome, et les nombres qu'on
+   trouve sur TOUTES les étiquettes Amorino sont écartés : l'estampille
+   « FR 94.054.006 UE » (huit chiffres), le téléphone 33 1 53 14 57 00, le
+   code postal d'Orly 94310 et les dates collées (29062026, 20260528).
+   Les lots courts (cinq ou six chiffres) ressemblent à trop de choses : on ne
+   les prend que s'ils sont confirmés par le code-barres GS1 imprimé dessous,
+   « (10)17426 », lu « …280630 10 17426 37… ».
+   -------------------------------------------------------------------------- */
+function lotAutreFournisseur(T) {
+  const jetons = [], ligneDe = [], seuls = {}, lignes = String(T).toUpperCase().split(/[\r\n]+/);
+  lignes.forEach((l, n) => {
+    const js = l.replace(/[^0-9A-Z]/g, ' ').split(/\s+/).filter(Boolean);
+    if (js.length === 1) seuls[n] = 1;
+    js.forEach(j => { jetons.push(j); ligneDe.push(n); });
+  });
+
+  const estDate = s => /^(0[1-9]|[12]\d|3[01])(0[1-9]|1[0-2])20[2-4]\d$/.test(s) ||
+                       /^20[2-4]\d(0[1-9]|1[0-2])(0[1-9]|[12]\d|3[01])$/.test(s);
+  /* Une date peut revenir avec un chiffre parasite devant ou derrière, ou
+     un jour mal lu : « 44062028 », « 798032027 » (08/03/2027). Le mois et
+     l'année en fin de nombre suffisent à la reconnaître. */
+  const contientDate = s => estDate(s) ||
+    (s.length === 9 && (estDate(s.slice(1)) || estDate(s.slice(0, 8)))) ||
+    (s.length >= 8 && /(0[1-9]|1[0-2])20[2-4]\d$/.test(s)) ||
+    /* jjmmaa en tête, l'heure ou un chiffre collé derrière : « 28062614 ». */
+    (s.length >= 8 && /^\d{8,10}$/.test(s) && /^(0[1-9]|[12]\d|3[01])(0[1-9]|1[0-2])2[4-9]/.test(s)) ||
+    /* « L0727 », « L2026 » : une année ou un mois-année, pas un lot. */
+    /^L(0\d{3}|20[2-4]\d|1[0-2]2[4-9]|\d000)$/.test(s) ||
+    /* aammjj puis l'heure : « 2501151030 ». */
+    /^2[4-9](0[1-9]|1[0-2])(0[1-9]|[12]\d|3[01])([01]\d|2[0-3])[0-5]\d$/.test(s);
+  const commun = s => /^\d.054\d{3}$/.test(s) ||            // estampille 94054006, chiffres mal lus
+                      /3145700|1531457/.test(s) ||          // téléphone Amorino
+                      s === '94310' ||
+                      /* Morceaux du code-barres GS1 : « (15)280530 » (date
+                         limite) et « (10)00156746 » (lot ou commande, zéros
+                         de remplissage). */
+                      (s.length >= 8 && /^1[1357]\d{2}(0[1-9]|1[0-2])(0[1-9]|[12]\d|3[01])/.test(s)) ||
+                      /^00/.test(s) ||
+                      /* Code-barres EAN-13 français (préfixe 300 à 379) lu en
+                         partie : « 3701621913 » passait pour un lot + heure. */
+                      /^3[0-7]\d{8,}$/.test(s);
+
+  /* Du plus précis au plus vague : le premier format trouvé gagne. */
+  const FORMES = [
+    { re: /^\d{2}[A-Z]\d[A-Z]\d{5}$/ },                  // 26A1S21287
+    { re: /^\d{2}[A-Z]\d{7}$/ },                         // 26F1511703
+    { re: /^L\d{4}[A-Z]$/ },                             // L5227A
+    { re: /^L\d{5}$/ },                                  // L33925
+    { re: /^(VL\d{6})(?:\d{4}[A-Z0-9]*)?$/, garde: 1 },  // VL260701, heure collée
+    { re: /^V\d{7}$/ },                                  // V2501798
+    /* IRCA : l'année en tête (26040665, 26260793). Exiger 24 à 29 écarte
+       les chiffres collés des ingrédients : « cacao 22/24 18% » revenait
+       « 02224184 » ou « 22241264 ». */
+    { re: /^2[4-9]\d{6}$/ },                             // 26040665
+    { re: /^[1-9]\d{8}$/ },                              // 280220066
+    /* Crêpes : « 210261 14:40 », le lot puis l'heure, lus collés. */
+    { re: /^(\d{6})(?:[01]\d|2[0-3])[0-5]\d$/, garde: 1 },  // 2102611440
+    { re: /^L(\d{4})$/, garde: 1 },                      // « Lot:2575 »
+    { re: /^B(\d{6})$/, garde: 1 }                       // mocca B260220
+  ];
+  for (const f of FORMES) {
+    for (const j of jetons) {
+      const m = j.match(f.re);
+      if (!m || commun(j) || contientDate(j)) continue;
+      return { code: f.garde ? m[f.garde] : j, corrige: false };
+    }
+  }
+
+  /* Lot court confirmé par le code-barres : (15)aammjj (10)LOT (37)quantité. */
+  /* Les parenthèses du code-barres sont lues comme des lettres ou des
+     espaces : on ne garde que les chiffres de chaque ligne. */
+  const gs1 = lignes.map(l => l.replace(/[^0-9]/g, '')).filter(g => g.length >= 12);
+  for (const j of jetons) {
+    if (!/^\d{5,6}$/.test(j) || commun(j)) continue;
+    if (gs1.some(g => g.indexOf('10' + j + '37') >= 0)) return { code: j, corrige: false };
+  }
+
+  /* Lot court annoncé par sa mention, que la lecture abrège : « LOT 17426 »
+     lu « BN 17426 », « Lot: 2535 » lu « LS 2535 », ou « L » seul sur la
+     ligne au-dessus de « 156746 ». Une mention sur la ligne précédente ne
+     compte que seule sur sa ligne : « 5 L » puis « 75008 » est un volume et
+     un code postal. */
+  const MENTION = /^(L|LOT|LN|LS|LT|BN|BATCH)$/;
+  /* Pas sur une étiquette de glace (« ICE CREAM », estampille 94.054) :
+     son lot (14009A) a sa propre lecture, plus sûre, et « L 1930 » y est
+     un débris. */
+  const maison = /ICE ?CREAM|94\W?054/.test(String(T).toUpperCase());
+  for (let i = 1; i < jetons.length && !maison; i++) {
+    const j = jetons[i];
+    if (!/^\d{4,6}$/.test(j) || !MENTION.test(jetons[i - 1]) || commun(j) || contientDate('L' + j)) continue;
+    if (ligneDe[i - 1] !== ligneDe[i] && !seuls[ligneDe[i - 1]]) continue;
+    /* Année, mois-année, date jjmmaa, poids ou volume rond (2500, 3000). */
+    if (/^20[2-4]\d$/.test(j) || /^(0[1-9]|1[0-2])2[4-9]$/.test(j) || /^\d{2}00$/.test(j) ||
+        /^(0[1-9]|[12]\d|3[01])(0[1-9]|1[0-2])2[4-9]$/.test(j) ||
+        /^2[4-9](0[1-9]|1[0-2])(0[1-9]|[12]\d|3[01])$/.test(j)) continue;
+    return { code: j, corrige: false };
+  }
+  return null;
+}
+
 /* Distance de Levenshtein, bornée : deux lignes de travail seulement */
 function distance(a, b) {
   a = a.toLowerCase(); b = b.toLowerCase();
@@ -549,8 +680,23 @@ const sansAccents = s => String(s).normalize('NFD').replace(/[\u0300-\u036f]/g, 
 /* Les chiffres qui traînent dans un mot sont des lettres mal lues */
 const CHIFFRE_EN_LETTRE = { '0':'o', '1':'i', '3':'e', '4':'a', '5':'s', '6':'g', '8':'b' };
 
+/* La liste des ingrédients cite d'autres parfums : « Bourbon vanilla pod »
+   sur l'Amarena, « HAZELNUT flour » sur le Tiramisu. Le nom du produit, lui,
+   est imprimé à part, après « ICE CREAM ». On cherche donc d'abord hors de
+   la liste, et sur tout le texte seulement si rien n'y est trouvé. */
 function extraireParfum(texte) {
   if (texte === null || texte === undefined) return null;
+  const hors = String(texte).replace(
+    /(?:in)?gr[eé]dien\w*[\s\S]*?(?=ice\s*cream|produced|made\s+in|$)/gi, ' ');
+  const tout = parfumDans(texte);
+  const dehors = hors !== String(texte) ? parfumDans(hors) : null;
+  /* Hors de la liste, un mot approchant ne doit pas battre un nom exact lu
+     ailleurs : on ne garde le tout que s'il est nettement meilleur. */
+  if (dehors && (!tout || tout.score < dehors.score + 0.25)) return dehors;
+  return tout;
+}
+
+function parfumDans(texte) {
   const nettoye = sansAccents(texte)
     .replace(/[0-9]/g, c => CHIFFRE_EN_LETTRE[c] !== undefined ? CHIFFRE_EN_LETTRE[c] : ' ')
     .replace(/[^a-z\s-]/g, ' ');
@@ -559,7 +705,10 @@ function extraireParfum(texte) {
      et la comparaison est en O(mots × cibles). Mesuré à 615 ms sur 18 Ko,
      soit une demi-seconde de gel après chaque scan. Une étiquette tient en
      quelques dizaines de mots : au-delà, c'est du bruit. */
-  const mots = nettoye.split(/\s+/).filter(m => m.length >= 3).slice(0, 120);
+  /* Mots d'emballage proches d'un parfum : « FRANCE » donnait « Fraise »
+     sur tous les cartons de cornets et de gobelets. */
+  const COURANTS = { france: 1, presse: 1, 'choco-cone': 1, 'choco-cones': 1 };
+  const mots = nettoye.split(/\s+/).filter(m => m.length >= 3 && !COURANTS[m]).slice(0, 120);
   if (!mots.length) return null;
 
   /* Cibles : le nom français plus tous ses alias anglais et italiens.
@@ -832,7 +981,9 @@ function rappelCadrage(type) {
      'bl'        → { fournisseur, numero, date, total, lignes, source:'ocr', confiance, texte }
                    (lignes : ref, parfum, lot, lotCorrige, bacs, taille, unite) — voir analyserBL
    ========================================================================== */
-async function analyserCanvas(type, canvas, nom, resolve) {
+/* original : facultatif, rend la photo en plus grande résolution pour la
+   lecture rapprochée de l'étiquette (photo de la galerie). */
+async function analyserCanvas(type, canvas, nom, resolve, original) {
   if (type === 'bl') return analyserBL(canvas, nom, resolve);
   let apercu = '', gris = null;
   const etape = (t, s) => showSheet(
@@ -848,12 +999,42 @@ async function analyserCanvas(type, canvas, nom, resolve) {
     try { apercu = canvas.toDataURL('image/jpeg', 0.6); } catch (e) {}
 
     etape('Lecture de l’étiquette', 'Reconnaissance du texte…');
-    const code   = await lireMeilleur(canvas, gris, 'code');
-    const parfum = await lireMeilleur(canvas, gris, 'parfum');
+    let { code, parfum, batch, mots } = await lireLot(canvas, gris);
+    /* Photo prise de loin (galerie) : l'étiquette n'occupe
+       qu'une partie de l'image et ses chiffres sont trop petits. On relit la
+       zone où se groupent les mots, agrandie, et sa lecture l'emporte : elle
+       est plus nette. Seule exception, un lot vraisemblable sur la photo
+       entière face à un lot douteux sur la zone, ou un lot déjà lu avec une
+       confiance élevée. */
+    const texteEntier = parfum.texte + '\n' + code.texte;
+    const sur = batch && lotVraisemblable(batch.code) && code.confiance >= 0.75;
+    const zone = sur ? null : zoneEtiquette(mots, gris.width, gris.height);
+    if (zone) {
+      etape('Lecture de l’étiquette', 'Lecture rapprochée de l’étiquette…');
+      /* Recadrer dans la photo d'origine : agrandir la version réduite ne
+         rend pas les détails perdus (IMG_4009, 14001A, n'est lu qu'ainsi). */
+      let grand = null, zg = null, zn = null;
+      if (original) { try { grand = (await original()).canvas; } catch (e) { grand = null; } }
+      try {
+        const k = grand ? grand.width / gris.width : 1;
+        zg = recadrer(grand || gris, { x: zone.x * k, y: zone.y * k, w: zone.w * k, h: zone.h * k });
+        if (grand) { libererCanvas(grand); grand = null; }
+        zn = copierCanvas(zg);
+        pretraiter(zn);
+        const z2 = await lireLot(zn, zg);
+        const garder = batch && lotVraisemblable(batch.code) && !lotVraisemblable(z2.batch ? z2.batch.code : '');
+        if (z2.batch && !garder) { batch = z2.batch; code = z2.code; parfum = z2.parfum; }
+      } finally {
+        if (grand) libererCanvas(grand);
+        if (zn) libererCanvas(zn);
+        if (zg) libererCanvas(zg);
+      }
+    }
     libererCanvas(gris); gris = null;
 
-    const batch = extraireBatch(code.texte + '\n' + parfum.texte);
-    const trouve = extraireParfum(parfum.texte + '\n' + code.texte);
+    /* Le nom du parfum peut sortir de la zone (titre loin du lot) : on le
+       cherche alors sur la photo entière. */
+    const trouve = extraireParfum(parfum.texte + '\n' + code.texte) || extraireParfum(texteEntier);
     const champs = extraireChamps(code.texte + '\n' + parfum.texte);
     const confiance = (code.confiance + parfum.confiance) / 2;
     libererCanvas(canvas);
@@ -1103,7 +1284,7 @@ async function lireQuantitesBL(canvas, res, lignesLues) {
 async function lireNumeroBL(canvas, res, lignesLues) {
   const reDate = /\d{2}[\/.]\d{2}[\/.]20\d{2}/;
   const L = (lignesLues || []).filter(x => x.bbox && reDate.test(x.texte))[0];
-  if (!L) return;
+  if (!L) return lireNumeroSousEntete(canvas, res, lignesLues);
   const mots = (L.mots || []).filter(m => m.bbox);
   const iDate = mots.findIndex(m => reDate.test(m.t));
   if (iDate < 1) return;
@@ -1126,6 +1307,35 @@ async function lireNumeroBL(canvas, res, lignesLues) {
       if (t) {
         res.bl = 'BL' + t[1];
         /* Le lot qui portait ce numéro n'en est pas un. */
+        res.lignes.forEach(l => { if (l.lot === t[1]) l.lot = ''; });
+        return;
+      }
+    }
+  } finally { reporterArret(); libererCanvas(cv); }
+}
+
+/* Ligne du numéro perdue en entier (BL219700, case trop pâle) : on relit
+   la case située sous l'en-tête « NUMERO » du tableau. */
+async function lireNumeroSousEntete(canvas, res, lignesLues) {
+  let e = null;
+  (lignesLues || []).some(l => (l.mots || []).some(m => {
+    /* « NUMERO » seul : pas « Numéro client » ni « Numéro de TVA ». */
+    if (m.bbox && /^\W*num[eé]ro\W*$/i.test(m.t) && !/client|tva|commande/i.test(l.texte)) { e = m.bbox; return true; }
+    return false;
+  }));
+  if (!e) return;
+  const h = Math.max(1, e.y1 - e.y0), w = e.x1 - e.x0;
+  const cv = decouper(canvas, Math.max(0, e.x0 - w * 0.4), Math.min(canvas.height - 2, e.y1),
+                      Math.min(canvas.width, e.x1 + w * 0.6), Math.min(canvas.height, e.y1 + h * 1.4), 60);
+  clearTimeout(OCR._minuteur);
+  const wk = await obtenirWorker();
+  try {
+    for (const psm of ['7', '6']) {
+      await wk.setParameters({ tessedit_char_whitelist: 'BL0123456789', tessedit_pageseg_mode: psm });
+      const r = await wk.recognize(cv);
+      const t = String(r.data.text || '').replace(/\s+/g, '').match(/^(?:BL|8L|B1|L)?(\d{6})$/);
+      if (t) {
+        res.bl = 'BL' + t[1];
         res.lignes.forEach(l => { if (l.lot === t[1]) l.lot = ''; });
         return;
       }
@@ -1287,7 +1497,8 @@ function scannerPhoto(type, options) {
         '<div class="vide"><span class="vi">🔍</span>Mise à l’endroit de la photo…</div>');
       try {
         const chargee = await chargerImage(file, OCR.cotePx);
-        analyserCanvas(type, chargee.canvas, file.name, resolve);
+        analyserCanvas(type, chargee.canvas, file.name, resolve,
+          () => chargerImage(file, Math.round(OCR.cotePx * 1.8)));
       } catch (err) {
         saisieManuelle(type, err && err.message ? err.message : 'Image illisible', resolve);
       }
@@ -1354,6 +1565,87 @@ function scannerPhotoNatif(type) {
 
     cam.click();
   });
+}
+
+/* Passe « code » sur les deux versions de l'image, noir et blanc et gris, et
+   choix d'après le LOT trouvé, pas d'après la confiance globale de Tesseract.
+   Celle-ci départage mal : sur IMG_4009 recadrée, le gris l'emportait (0,16
+   contre 0,11) sans lot, alors que le noir et blanc lisait « 14001A ». */
+async function lireLot(nb, gris) {
+  const parfum = await lireMeilleur(nb, gris, 'parfum');
+  const a = await lire(nb, 'code');
+  const ba = extraireBatch(a.texte + '\n' + parfum.texte);
+  if (a.confiance >= 0.75 && ba) return { code: a, parfum, batch: ba, mots: a.mots };
+  let b = null;
+  try { b = await lire(gris, 'code'); } catch (e) { b = null; }
+  const bb = b ? extraireBatch(b.texte + '\n' + parfum.texte) : null;
+  const mots = (b && b.mots.length > a.mots.length) ? b.mots : a.mots;
+  const vrai = x => !!(x && lotVraisemblable(x.code));
+  let prendB;
+  if (ba && bb) prendB = vrai(bb) !== vrai(ba) ? vrai(bb) : b.confiance > a.confiance;
+  else if (ba || bb) prendB = !!bb;
+  else prendB = !!b && b.confiance > a.confiance;
+  return prendB ? { code: b, parfum, batch: bb, mots } : { code: a, parfum, batch: ba, mots };
+}
+
+/* Zone de l'étiquette dans une photo prise de loin, d'après la position des
+   mots lus par la passe « code ». Les mots d'une étiquette sont serrés les uns
+   contre les autres ; ceux du décor (vitrine, carton) sont rares et épars. On
+   garde le plus grand groupe de mots voisins. Rend null si l'étiquette remplit
+   déjà la photo : la relire ne gagnerait rien. */
+function zoneEtiquette(mots, l, h) {
+  /* Pas de seuil sur la confiance des mots : en psm 11, Tesseract la rend
+     souvent nulle, même sur un mot juste. */
+  const m = (mots || []).filter(x => x.bbox && /[0-9A-Z]{2,}/.test(x.t) && (x.bbox.x1 - x.bbox.x0) < l * 0.5);
+  if (m.length < 4) return null;
+  /* Hauteur médiane d'un mot : l'échelle du texte de l'étiquette. */
+  const hs = m.map(x => x.bbox.y1 - x.bbox.y0).sort((a, b) => a - b);
+  const hMed = hs[hs.length >> 1];
+  const pres = (a, b) => {
+    const dx = Math.max(0, Math.max(a.bbox.x0, b.bbox.x0) - Math.min(a.bbox.x1, b.bbox.x1));
+    const dy = Math.max(0, Math.max(a.bbox.y0, b.bbox.y0) - Math.min(a.bbox.y1, b.bbox.y1));
+    return dx < Math.max(hMed * 10, l * 0.15) && dy < Math.max(hMed * 4, h * 0.04);
+  };
+  /* Groupes de mots voisins, de proche en proche. */
+  const groupe = new Array(m.length).fill(-1);
+  let meilleur = null;
+  for (let i = 0; i < m.length; i++) {
+    if (groupe[i] >= 0) continue;
+    const pile = [i], membres = [];
+    groupe[i] = i;
+    while (pile.length) {
+      const a = pile.pop(); membres.push(m[a]);
+      for (let j = 0; j < m.length; j++) {
+        if (groupe[j] < 0 && pres(m[a], m[j])) { groupe[j] = i; pile.push(j); }
+      }
+    }
+    if (!meilleur || membres.length > meilleur.length) meilleur = membres;
+  }
+  if (meilleur.length < 4) return null;
+  let x0 = Infinity, y0 = Infinity, x1 = 0, y1 = 0;
+  meilleur.forEach(x => {
+    x0 = Math.min(x0, x.bbox.x0); y0 = Math.min(y0, x.bbox.y0);
+    x1 = Math.max(x1, x.bbox.x1); y1 = Math.max(y1, x.bbox.y1);
+  });
+  /* Marge : le lot est parfois un mot mal lu, donc absent du groupe. */
+  const mx = (x1 - x0) * 0.12 + hMed * 2, my = (y1 - y0) * 0.25 + hMed * 3;
+  x0 = Math.max(0, x0 - mx); y0 = Math.max(0, y0 - my);
+  x1 = Math.min(l, x1 + mx); y1 = Math.min(h, y1 + my);
+  if ((x1 - x0) * (y1 - y0) > l * h * 0.5) return null;
+  return { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
+}
+
+/* Extrait une zone, agrandie pour que le côté long revienne à OCR.cotePx
+   (trois fois au plus : au-delà, on agrandit du flou). */
+function recadrer(src, z) {
+  const r = Math.min(3, OCR.cotePx / Math.max(z.w, z.h));
+  const cv = document.createElement('canvas');
+  cv.width = Math.round(z.w * r); cv.height = Math.round(z.h * r);
+  const ctx = cv.getContext('2d', { willReadFrequently: true });
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = 'high';
+  ctx.drawImage(src, z.x, z.y, z.w, z.h, 0, 0, cv.width, cv.height);
+  return cv;
 }
 
 /* Copie d'un canvas avant binarisation : Tesseract lira les deux versions. */
@@ -1426,10 +1718,11 @@ function extraireLignesBL(texte) {
     /* Débris de la marge avant la référence (« 4 SPISTAM25 », « AN SMANGO25 »,
        « > SVANIG25 ») : sans ce retrait, la référence n'était pas reconnue
        et finissait dans le nom du produit. */
-    const reRef = /^[\$s]{0,2}[A-Z][A-Z0-9$]{3,15}$/;
+    const reRef = /^[\$s]{0,2}[A-Z][A-Z0-9$_]{3,15}$/;
     for (let n = 0; n < 2; n++) {
       if (jetons.length > 2 && jetons[0].length <= 3 && !reRef.test(jetons[0]) &&
-          reRef.test(jetons[1]) && /\d/.test(jetons[1]) && !/^L\d{4}[A-Z]$/i.test(jetons[1])) { jetons.shift(); break; }
+          reRef.test(jetons[1]) && (/\d/.test(jetons[1]) || /[^A-Za-z0-9$]/.test(jetons[0])) &&
+          !/^L\d{4}[A-Z]$/i.test(jetons[1])) { jetons.shift(); break; }
       /* Deux débris (« e 3 STIRASG25 ») : on retire le premier et on recommence. */
       if (n === 0 && jetons.length > 3 && jetons[0].length <= 3 && jetons[1].length <= 3 &&
           reRef.test(jetons[2]) && /\d/.test(jetons[2])) jetons.shift();
@@ -1450,6 +1743,16 @@ function extraireLignesBL(texte) {
       const c = lotDepuisJeton(jetons[i], glace);
       /* Le numéro du bon lui-même (« BL 221970 ») n'est pas un lot. */
       if (c && !(mBL && c.lot === mBL[1])) { iLot = i; lot = c.lot; corrige = c.corrige; break; }
+    }
+    /* Lot court de cinq chiffres (cornets 17426, gaufrettes 26131), à défaut
+       d'un autre : seulement hors glace (un 14159 est un 14159A abîmé) et
+       juste avant la quantité, à sa place dans la colonne Lot. */
+    if (iLot < 0 && !glace) {
+      for (let i = jetons.length - 2; i > 2; i--) {
+        if (/^\d{5}$/.test(jetons[i]) && /^\d{1,3}[.,]\d{2}$/.test(jetons[i + 1].replace(/[()[\]{}]/g, ''))) {
+          iLot = i; lot = jetons[i]; break;
+        }
+      }
     }
 
     /* Quantité : un nombre à deux décimales APRÈS le lot (« 12,00 »). Les
@@ -1489,13 +1792,18 @@ function extraireLignesBL(texte) {
     /* Une ligne d'en-tête avec un nombre à six chiffres n'est pas un produit :
        il faut une référence en tête, un libellé de produit, ou lot ET quantité. */
     if (!(ref || produit || (lot && qte))) return;
-    if (!lot && !(ref && produit)) return;
+    /* Fournitures sans lot (gobelets, cuillères, lavettes) : une référence en
+       tête et une quantité nette suffisent. Sans ça, BL218582 ne rendait que
+       8 lignes sur 33. */
+    if (!lot && !(ref && (produit || (qtePropre && (/[\d$_]/.test(ref) ||
+        /\(\s*[\d.,\s]+\s*(?:p|g|gr|kg|ml|cl)\s*\)/i.test(design)))))) return;
 
     /* Contenance : « 3 litres » pour un bac, « (14x6p) » pour un carton. */
     const mL = design.match(/(\d+)\s*litres?/i);
     const mC = design.match(/\((\d+)\s*[x×]\s*(\d+)\s*p\)/i);
     const mU = design.match(/\((\d+)\s*p\)/i);
-    const taille = mL ? +mL[1] : null;
+    /* « Sauce Caramel (2 litres / 2.4kg) » est un bidon, pas un bac de 2 L. */
+    const taille = mL && !/sauce|topping|coulis|litres?\s*\/\s*[\d.,]+\s*kg/i.test(t) ? +mL[1] : null;
 
     lignes.push({
       designation: design,
@@ -1558,6 +1866,10 @@ function lotDepuisJeton(jeton, glace) {
   if (j.length < 6 || j.length > 10) return null;
   if (/^20[2-4]\d/.test(j) && j.length === 8) return null;   // une date collée
   if (/^1[34]\d{3}[A-Z]$/.test(j) || /^L\d{4}[A-Z]$/.test(j) || /^\d{8}$/.test(j)) return { lot: j, corrige: false };
+  /* Autres fournisseurs, tels qu'imprimés dans la colonne Lot du bon :
+     26F1305603, 26A1S21287, V2601256, 280220066, 0188/26. */
+  if (/^\d{2}[A-Z]\d{7}$/.test(j) || /^\d{2}[A-Z]\d[A-Z]\d{5}$/.test(j) || /^V\d{7}$/.test(j) ||
+      /^[1-9]\d{8}$/.test(j) || (/^\d{4}\/\d{2}$/.test(j) && !/^20[2-4]\d/.test(j))) return { lot: j, corrige: false };
   if (/^\d{6}$/.test(j) && !(glace && /^1[34]/.test(j))) return { lot: j, corrige: false };
   if (j.length !== 6) return null;
   const ch = c => VERS_CHIFFRE[c] !== undefined ? VERS_CHIFFRE[c] : c;
@@ -1602,6 +1914,13 @@ function lotVraisemblable(lot) {
   if (/^\d{9}$/.test(L)) return true;
   /* Éclats de caramel : deux chiffres, une lettre, sept chiffres — 26F1511703. */
   if (/^\d{2}[A-Z]\d{7}$/.test(L)) return true;
+  /* Formats relevés en réserve, que lotAutreFournisseur ne rend qu'après
+     contrôle (jeton autonome, dates et numéros communs écartés) :
+     pistaches 26A1S21287, chocolat chaud L33925, gaufres VL260701,
+     choco-cones V2501798, cornets 17426, gobelets 2575. */
+  if (/^\d{2}[A-Z]\d[A-Z]\d{5}$/.test(L)) return true;
+  if (/^L\d{5}$/.test(L) || /^VL\d{6}$/.test(L) || /^V\d{7}$/.test(L)) return true;
+  if (/^\d{4,5}$/.test(L)) return true;
   return false;
 }
 
