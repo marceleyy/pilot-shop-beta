@@ -24,6 +24,14 @@ const AUTH = {
 };
 
 let _session = null;      // { access_token, refresh_token, expires_at, site }
+/* Vrai quand la session en mémoire est aussi celle enregistrée : une mémoire
+   vide veut alors dire « détaché ailleurs », pas « écriture impossible ». */
+let _persistee = false;
+/* Boutique dont cette page porte l'équipe et les données. Une session d'une
+   autre boutique (changée dans une autre fenêtre) n'est jamais adoptée : la
+   page se recharge ; d'ici là, seul le jeton de sa propre boutique peut
+   encore servir. */
+let _sitePage = null, _pageObsolete = false;
 
 /* --- Mémoire locale ------------------------------------------------------- */
 /* La boutique vient du COMPTE, plus de config.js : un même déploiement sert
@@ -38,20 +46,28 @@ function appliquerSite(s) {
   }
 }
 function chargerSession() {
+  if (_pageObsolete) return (_session = null);
   try {
     const brut = localStorage.getItem(AUTH.cle);
     _session = brut ? JSON.parse(brut) : null;
-  } catch (e) { _session = null; }
+    _persistee = !!_session;
+  } catch (e) { _session = null; _persistee = false; }
+  if (_session && _session.site && _sitePage && _session.site !== _sitePage) {
+    _session = null; recommencerPage(); return null;
+  }
+  if (_session && _session.site) _sitePage = _session.site;
   appliquerSite(_session);
   return _session;
 }
 function enregistrerSession(s) {
   _session = s;
+  if (s && s.site) _sitePage = s.site;
   appliquerSite(s);
   try {
     if (s) localStorage.setItem(AUTH.cle, JSON.stringify(s));
     else localStorage.removeItem(AUTH.cle);
-  } catch (e) { /* mode privé : on garde en mémoire seulement */ }
+    _persistee = !!s;
+  } catch (e) { _persistee = false; /* mode privé : on garde en mémoire seulement */ }
 }
 
 /* --- Appels d'authentification -------------------------------------------- */
@@ -114,18 +130,35 @@ async function rattacherAppareil(email, motDePasse) {
    l'autre fenêtre a pu renouveler entre-temps. On relit donc la session
    enregistrée avant d'envoyer, et un refus n'efface la session que si le
    jeton refusé est toujours le jeton courant. */
+function recommencerPage() {
+  if (_pageObsolete) return;
+  _pageObsolete = true;
+  try { typeof recharger === 'function' ? recharger() : location.reload(); } catch (e) { location.reload(); }
+}
 let _renouvelleDirect = null;
 function renouveler() {
   if (_renouvelleDirect) return _renouvelleDirect;
   _renouvelleDirect = (async () => {
+    if (_pageObsolete) return null;
     try {
       const brut = localStorage.getItem(AUTH.cle);
       const s = brut ? JSON.parse(brut) : null;
+      /* Une autre fenêtre a détaché l'appareil : ne pas le rattacher en douce
+         avec le jeton gardé en mémoire. */
+      if (!s && _session && _persistee) { _session = null; return null; }
+      /* Une autre fenêtre a changé de boutique : cette page porte encore
+         l'équipe et les données de l'ancienne, et ses écritures partiraient
+         chez la nouvelle. On repart d'une page neuve. */
+      if (s && _session && s.site && _session.site && s.site !== _session.site) {
+        recommencerPage(); return null;
+      }
       /* Seulement si elle est PLUS RÉCENTE : mémoire pleine, l'écriture du
          dernier renouvellement a pu échouer, et la copie enregistrée porte
          alors un jeton déjà consommé. */
       if (s && s.refresh_token && (!_session ||
           (s.refresh_token !== _session.refresh_token && (s.expires_at || 0) > (_session.expires_at || 0)))) {
+        /* Après un détachement, l'autre fenêtre a pu se rattacher ailleurs. */
+        if (s.site && _sitePage && s.site !== _sitePage) { recommencerPage(); return null; }
         _session = s; appliquerSite(s);
         /* Déjà renouvelée par l'autre fenêtre : inutile de recommencer. */
         if (s.expires_at - Date.now() > AUTH.margeRenouvellementSec * 1000) return _session;
@@ -144,6 +177,9 @@ function renouveler() {
         try { const b = localStorage.getItem(AUTH.cle); enregistre = b && JSON.parse(b); } catch (x) {}
         if (!enregistre || enregistre.refresh_token === envoye) enregistrerSession(null);
         /* Course perdue contre l'autre fenêtre : sa session, toute neuve, sert. */
+        else if (enregistre.site && _session.site && enregistre.site !== _session.site) {
+          recommencerPage(); return null;
+        }
         else if (enregistre.refresh_token && enregistre.expires_at - Date.now() > AUTH.margeRenouvellementSec * 1000) {
           _session = enregistre; appliquerSite(enregistre);
           return _session;
@@ -173,6 +209,7 @@ function jetonPorteSite(jeton) {
 
 let _dernierEssaiSite = 0;   // hors de _session : chaque renouvellement la remplace
 async function jetonValide() {
+  if (_pageObsolete) return null;
   if (!_session) chargerSession();
   if (!_session) return null;
   /* Un renouvellement déjà parti : on l'attend. Sinon les appels lancés en
