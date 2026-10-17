@@ -8,7 +8,7 @@
    elle qui déclenche le re-téléchargement. Un appareil déjà installé garderait
    sinon l'ancien cache, et n'irait jamais chercher les fichiers ajoutés — le
    scan hors ligne ne marcherait que sur les appareils neufs. */
-const CACHE   = 'pilotshop-cache-v64';
+const CACHE   = 'pilotshop-cache-v65';
 /* Cache des ressources externes. Il ne sert plus : XLSX est désormais servi
    par l'application (vendor/). Son ancien contenu — la copie du CDN, gardée
    « cache d'abord » sous ce nom fixe et jamais revalidée — est purgé à
@@ -73,9 +73,13 @@ const FENETRE_MUET_MS = 20000;
 let muetJusqua = 0;
 
 /* -----------------------------------------------------------------------------
-   INSTALLATION — précache tolérant à l'échec unitaire
-   Un seul fichier absent ne doit pas faire échouer toute l'installation.
+   INSTALLATION — précache tolérant à l'échec des gros fichiers fixes
+   Un fichier lourd absent ne fait pas échouer l'installation ; le code de
+   l'application, lui, doit arriver en entier ou pas du tout.
    -------------------------------------------------------------------------- */
+const coquille = url => url === '/' || url === '/index.html' ||
+  (/^\/[^/]+\.(js|css)$/.test(url) && url !== '/env.js');
+
 self.addEventListener('install', event => {
   event.waitUntil((async () => {
     const cache = await caches.open(CACHE);
@@ -85,9 +89,17 @@ self.addEventListener('install', event => {
         if (!r || !r.ok) throw new Error('precache ' + url);
         await cache.put(url, r);
       } catch (e) {
-        /* Téléchargement raté (Wi-Fi faible) : on reprend la copie de l'ancienne
-           version, sinon l'activation la purgerait et le scan hors ligne
-           (plusieurs Mo de Tesseract) disparaîtrait. */
+        /* Code de l'application (page, scripts, styles) : une copie de
+           l'ancienne version mêlée aux nouveaux fichiers donnait, hors ligne,
+           un app.js qui ne connaît pas une fonction appelée par stock.js —
+           écran blanc en chambre froide. On fait échouer l'installation :
+           l'ancienne version, cohérente, reste en place, et le navigateur
+           retentera à la prochaine vérification. */
+        if (coquille(url)) throw e;
+        /* Gros fichiers qui ne changent pas (Tesseract, XLSX, police, icônes)
+           et env.js : on reprend la copie de l'ancienne version, sinon
+           l'activation la purgerait et le scan hors ligne (plusieurs Mo de
+           Tesseract) disparaîtrait. */
         const ancienne = await caches.match(url);
         if (ancienne) await cache.put(url, ancienne);
       }

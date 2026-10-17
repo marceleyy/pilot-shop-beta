@@ -366,7 +366,7 @@ V.preaudit = async function () {
   $('#page').innerHTML =
     '<div class="grid g3">' +
       '<div class="kpi ' + (dernier ? paClasse(dernier.score) : '') + '"><div class="k">Dernier score</div>' +
-        '<div class="v">' + (dernier ? dernier.score + '<span class="u">%</span>' : '—') + '</div>' +
+        '<div class="v">' + (dernier ? esc(dernier.score) + '<span class="u">%</span>' : '—') + '</div>' +
         '<div class="d">' + (dernier ? esc(fmtD(dernier.jour)) : 'Aucun pré-audit') + '</div></div>' +
       '<div class="kpi"><div class="k">Actions ouvertes</div><div class="v">' + ouvertes.length + '</div>' +
         '<div class="d">' + (actions.length - ouvertes.length) + ' ' + accord(actions.length - ouvertes.length, 'faite', 'faites') + '</div></div>' +
@@ -411,7 +411,10 @@ V.preaudit = async function () {
         }).join('') + '</div>'
       : vide('', 'Aucun pré-audit clôturé pour l’instant.'));
 
-  const nouveau = () => demarrerPreAudit();
+  /* Une seule création à la fois : un second tap pendant l'écriture créerait
+     un second pré-audit « en cours ». */
+  const nouveau = () => _paDemarrage ||
+    (_paDemarrage = Promise.resolve(demarrerPreAudit()).finally(() => { _paDemarrage = null; }));
   if ($('#pa-new')) $('#pa-new').onclick = nouveau;
   if ($('#pa-new2')) $('#pa-new2').onclick = nouveau;
   const ouvrir = id => { V.preaudit._id = id; V.preaudit._doc = null; paRedessiner(); window.scrollTo(0, 0); };
@@ -462,15 +465,19 @@ function brancherActions(as) {
     return a ? { a:a, x:(a.actions || {})[xid] } : null;
   };
   $$('[data-pa-act-fait]').forEach(b => b.onclick = async () => {
+    if (b.disabled) return;
     const t = trouver(b.dataset.paActFait);
     if (!t || !t.x) return;
-    const x = Object.assign({}, t.x, t.x.fait
-      ? { fait:false, faitPar:null, faitAt:null }
-      : { fait:true, faitPar:STATE.user.prenom, faitAt:nowISO() });
-    await ecrireAction(t.a, x);
-    if (x.fait) await feed('ok', STATE.user.prenom + ' a fait l’action de pré-audit « ' + x.texte + ' »');
-    toast(x.fait ? 'Action faite' : 'Action rouverte');
-    paRedessiner();
+    b.disabled = true;
+    try {
+      const x = Object.assign({}, t.x, t.x.fait
+        ? { fait:false, faitPar:null, faitAt:null }
+        : { fait:true, faitPar:STATE.user.prenom, faitAt:nowISO() });
+      await ecrireAction(t.a, x);
+      if (x.fait) await feed('ok', STATE.user.prenom + ' a fait l’action de pré-audit « ' + x.texte + ' »');
+      toast(x.fait ? 'Action faite' : 'Action rouverte');
+      paRedessiner();
+    } finally { b.disabled = false; }
   });
   $$('[data-pa-act-modif]').forEach(b => b.onclick = () => {
     const t = trouver(b.dataset.paActModif);
@@ -485,6 +492,7 @@ async function ecrireAction(a, x) {
 /* ---------------------------------------------------------------------------
    Démarrage
    ------------------------------------------------------------------------ */
+let _paDemarrage = null;
 async function demarrerPreAudit() {
   const as = await lirePreAudits();
   const deja = as.filter(a => a.statut === 'en cours')[0];
@@ -655,13 +663,19 @@ function feuilleAction(a, pid, x) {
     paEcrire(a, { ['r:' + pid]:val });
   };
   if ($('#pa-sans')) $('#pa-sans').onclick = () => { noter(); closeSheet(); paRedessiner(); };
-  if ($('#pa-act-sup')) $('#pa-act-sup').onclick = async () => {
+  if ($('#pa-act-sup')) $('#pa-act-sup').onclick = async ev => {
+    if (ev.currentTarget.disabled) return;
+    ev.currentTarget.disabled = true;
     await ecrireAction(a, Object.assign({}, x, { supprime:true, suppPar:STATE.user.prenom, suppAt:nowISO() }));
     noter(); closeSheet(); toast('Action supprimée'); paRedessiner();
   };
-  $('#pa-act-ok').onclick = async () => {
+  $('#pa-act-ok').onclick = async ev => {
+    const btn = ev.currentTarget;
+    if (btn.disabled) return;
     const texte = $('#pa-txt').value.trim();
     if (!texte) { toast('Décrivez l’action à mener', 'erreur'); return $('#pa-txt').focus(); }
+    /* Un second tap pendant l'écriture créerait une seconde action (nouvel id). */
+    btn.disabled = true;
     noter();
     const nx = Object.assign({ id:uid(), point:pid, fait:false, creePar:STATE.user.prenom, creeAt:nowISO() }, x || {},
       { texte:texte, resp:$('#pa-resp').value, echeance:$('#pa-ech').value || '' });
@@ -729,8 +743,8 @@ async function imprimerPreAudit(a, P) {
   const rep = id => paReponse((a.reponses[id] || {}).r);
   $('#printview').innerHTML =
     '<div class="pv-h"><h1>Pré-audit Amorino · ' + esc(APP.nom) + '</h1>' +
-    '<div>' + esc(APP.site) + ' · ' + (clos ? 'pré-audit du ' + fmtD(a.jour) + ', clôturé par ' + esc(a.closPar || '—')
-      : 'pré-audit en cours, commencé le ' + fmtD(a.jour) + ' (document provisoire)') +
+    '<div>' + esc(APP.site) + ' · ' + (clos ? 'pré-audit du ' + esc(fmtD(a.jour)) + ', clôturé par ' + esc(a.closPar || '—')
+      : 'pré-audit en cours, commencé le ' + esc(fmtD(a.jour)) + ' (document provisoire)') +
     '<br>Édité le ' + new Date().toLocaleString(APP.locale) + ' par ' + esc(STATE.user.prenom) + '</div></div>' +
 
     '<div class="pv-s">1. Score</div>' +
@@ -738,9 +752,9 @@ async function imprimerPreAudit(a, P) {
     PREAUDIT.themes.map(t => {
       const pts = paPoints().filter(p => p.theme.id === t.id);
       return '<tr><td>' + esc(t.nom) + '</td><td>' + pts.filter(p => rep(p.id)).length + ' / ' + pts.length + '</td>' +
-        '<td>' + paScoreTxt(s.themes[t.id]) + '</td></tr>';
+        '<td>' + esc(paScoreTxt(s.themes[t.id])) + '</td></tr>';
     }).join('') +
-    '<tr><th>Score global</th><th>' + s.notes + ' / ' + s.total + '</th><th>' + paScoreTxt(s.global) + '</th></tr></tbody></table>' +
+    '<tr><th>Score global</th><th>' + s.notes + ' / ' + s.total + '</th><th>' + esc(paScoreTxt(s.global)) + '</th></tr></tbody></table>' +
     '<div style="font-size:9.5px">Conforme = 1 point, à reprendre = ½, non conforme = 0 ; « sans objet » ne compte pas. ' +
     'Grille d’auto-contrôle inspirée des thèmes de l’audit trimestriel Amorino, pas la grille officielle.</div>' +
 

@@ -137,7 +137,9 @@ async function publierIndicateurs(force) {
     const r = await calculerIndicateurs();
     /* Une lecture a pu échouer pendant le calcul (délai, erreur serveur) :
        elle est alors revenue du cache ou vide, et le résumé serait faux. */
-    if (!STATE.enLigne || _lectureRatee || STATE.dernierEchec !== avant) return r;
+    /* Un appel réussi remet dernierEchec à null : seul un échec NOUVEAU compte. */
+    const echecNeuf = STATE.dernierEchec && STATE.dernierEchec !== avant;
+    if (!STATE.enLigne || _lectureRatee || echecNeuf) return r;
     await DB.set(FRANCHISE.cle, r);
     return r;
   } catch (e) { return null; }

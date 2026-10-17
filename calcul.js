@@ -993,7 +993,7 @@ const CALCUL = {
            (reg > 0 ? '<button type="button" class="btn clair sm" id="cp-reg" style="margin-top:6px">Reprendre le registre (' +
              n1(reg) + ' L)</button>' : '') : '') +
          '<div class="champ" style="margin-top:10px"><label class="f">Litres jetés</label>' +
-         '<input type="number" id="cp-l" min="0" step="0.1" inputmode="decimal" value="' + (w.perteL || '') + '" placeholder="0"></div>' +
+         '<input type="number" id="cp-l" min="0" step="0.1" inputmode="decimal" value="' + (num(w.perteL) || '') + '" placeholder="0"></div>' +
          '<div class="champ" style="margin-top:10px"><label class="f">Et/ou kg jetés (pesés)</label>' +
          '<input type="number" id="cp-k" min="0" step="0.01" inputmode="decimal" value="' + (w.perteKg || '') + '" placeholder="0"></div>' +
          '<p class="mini" id="cp-kg" style="margin-top:8px"></p>' +
@@ -1054,7 +1054,7 @@ const CALCUL = {
              '<button type="button" class="btn clair bloc" id="cv-plus" style="margin-top:10px">Ajouter un produit</button>'
            : v.mode === 'total'
            ? '<div class="champ"><label class="f">Poids de glace vendu (kg)</label>' +
-             '<input type="number" id="cv-kg" min="0" step="0.01" inputmode="decimal" value="' + (v.kg || '') + '" placeholder="0"></div>'
+             '<input type="number" id="cv-kg" min="0" step="0.01" inputmode="decimal" value="' + (num(v.kg) || '') + '" placeholder="0"></div>'
            : '<button type="button" class="btn ciel bloc xl" id="cv-imp">Choisir l’export de caisse (Excel ou CSV)</button>' +
              '<input type="file" id="cv-fichier" accept=".xlsx,.xls,.csv,.txt,text/csv" hidden>' +
              '<p class="mini" id="cv-lu" style="margin-top:10px">' +
