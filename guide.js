@@ -379,6 +379,7 @@ async function feuilleParfums() {
   const m = Object.assign({ masques:[], ajouts:[] }, (await DB.get('catalogue:parfums', null)) || {});
   const tous = PARFUMS_USINE.concat((m.ajouts || []).filter(p => PARFUMS_USINE.indexOf(p) < 0));
   const coches = new Set(tous.filter(p => (m.masques || []).indexOf(p) < 0));
+  let envoi = false;
 
   const dessiner = () => {
     showSheet(
@@ -421,12 +422,16 @@ async function feuilleParfums() {
     $('#gp-plus').onclick = ajouter;
     $('#gp-nom').onkeydown = ev => { if (ev.key === 'Enter') { ev.preventDefault(); ajouter(); } };
     $('#gp-ok').onclick = async () => {
+      /* Drapeau de fermeture plutôt que « disabled » : redessiner la feuille
+         pendant l'attente recrée un bouton actif. */
+      if (envoi) return;
       lire();
       if (!coches.size) return toast('Cochez au moins un parfum', 'erreur');
+      envoi = true;
+      $('#gp-ok').disabled = true;
       /* Revérification : la glace a pu être comptée sur un autre appareil. */
       const inv = await DB.get('stock:inventaire', null);
       if (inv && inv.at) { closeSheet(); toast('La glace est déjà comptée : la liste ne peut plus changer ici', 'erreur'); return rendre('miseenroute'); }
-      $('#gp-ok').disabled = true;
       const nouveau = {
         masques: PARFUMS_USINE.filter(p => !coches.has(p)),
         ajouts:  tous.filter(p => PARFUMS_USINE.indexOf(p) < 0 && coches.has(p))
