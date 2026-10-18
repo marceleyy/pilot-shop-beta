@@ -179,6 +179,7 @@ const CALCUL = {
       ------------------------------------------------------------------------ */
    async function lireCalculs() {
      const cles = (await DB.list('calcul:')).filter(k => /^calcul:\d{4}-\d{2}-\d{2}:/.test(k));
+     DB.prelire(cles);   // dans un dessin d'écran : une requête au lieu d'une par calcul
      const l = await Promise.all(cles.map(k => DB.get(k, null)));
      /* Un calcul supprimé est marqué, pas effacé : effacé, il revenait du
         cache d'un autre iPad, toujours « ouvert ». */
@@ -229,7 +230,12 @@ const CALCUL = {
    async function litresPertesRegistre(debut, fin) {
      let l = 0;
      const cles = (await DB.list('pertes:')).filter(k => { const d = k.slice(7); return d >= debut && d <= fin; });
-     for (const k of cles) (await DB.get(k, [])).forEach(w => { l += litresJetes(w); });
+     /* Par paquets de cinq plutôt qu'un jour après l'autre : une période d'un
+        mois faisait attendre 31 lectures à la suite avant d'afficher l'étape. */
+     for (let i = 0; i < cles.length; i += 5) {
+       (await Promise.all(cles.slice(i, i + 5).map(k => DB.get(k, []))))
+         .forEach(x => (Array.isArray(x) ? x : []).forEach(w => { l += litresJetes(w); }));
+     }
      return l;
    }
 
@@ -268,7 +274,14 @@ const CALCUL = {
        /* Périodes d'écarts lues en parallèle. */
        const cles = await DB.list('ecart:');
        const reception = v.livraisons.slice();
-       (await Promise.all(cles.map(k => DB.get(k, {}).catch(() => ({}))))).forEach(e => {
+       /* Par paquets de cinq : toutes les périodes d'une année d'un coup
+          saturaient un Wi-Fi lent, et deux délais dépassés font passer
+          l'appli hors ligne. */
+       const es = [];
+       for (let i = 0; i < cles.length; i += 5) {
+         es.push(...await Promise.all(cles.slice(i, i + 5).map(k => DB.get(k, {}).catch(() => ({})))));
+       }
+       es.forEach(e => {
          ((e && e.bl) || []).forEach(b => {
            const jour = /^\d{4}-\d{2}-\d{2}$/.test(b.date || '') ? b.date : (b.at ? isoOf(new Date(b.at)) : '');
            if (!dans(jour) || !(num(b.litres) > 0)) return;
@@ -577,7 +590,7 @@ const CALCUL = {
        if (!el.isConnected) return;
        const jours = Math.round((new Date(today()) - new Date(c.debut)) / 86400000);
        const recL = d.livraisons.reduce((t, x) => t + (x.doublon ? 0 : x.litres), 0);
-       const manque = d.livraisons.filter(p => !dejaCompte(livraisonsDe(c), p));
+       const manque = d.livraisons.filter(p => !p.doublon && !dejaCompte(livraisonsDe(c), p));
        el.innerHTML = '<b>Suivi</b> · jour ' + jours + ' · réceptions dans l’appli : ' + n1(recL) + ' L' +
          (manque.length ? ' (' + manque.length + ' ' + accord(manque.length, 'pas encore comptée', 'pas encore comptées') + ' ici)' : '') +
          ' · pertes au registre : ' + n1(d.pertesL) + ' L';

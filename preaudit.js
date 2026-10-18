@@ -148,6 +148,7 @@ async function paEcrire(a, champs) {
 
 async function lirePreAudits() {
   const cles = (await DB.list('preaudit:')).filter(k => PA_RE.test(k));
+  DB.prelire(cles);
   const l = (await Promise.all(cles.map(k => DB.get(k, null)))).map(paNormaliser);
   /* Supprimé : marqué, pas effacé, sinon il revenait d'un autre iPad. */
   return l.filter(a => a && a.id && a.jour && a.statut !== 'supprime')
@@ -236,6 +237,10 @@ async function preuvesPreAudit(fin) {
      en dizaines de secondes ; tous d'un coup, 150 requêtes saturaient un Wi-Fi
      lent, et deux délais dépassés font passer l'appli hors ligne. */
   const lus = [];
+  /* Dans un dessin d'écran, les cinq registres des 30 jours partent en
+     quelques requêtes groupées ; la boucle les reprend du lot. Hors dessin,
+     prelire ne fait rien et la lecture par paquets de cinq reste. */
+  DB.prelire([].concat(...jours.map(d => ['temp:' + d, 'pertes:' + d, 'reception:' + d, 'hebdo:' + d, 'clean:' + d])));
   for (let i = 0; i < jours.length; i += 5) {
     lus.push(...await Promise.all(jours.slice(i, i + 5).map(d => Promise.all([
       DB.get('temp:' + d, null), DB.get('pertes:' + d, []), DB.get('reception:' + d, []), etatNettoyage(d)
@@ -707,6 +712,11 @@ function cloturerPreAudit(a) {
     (sansAction ? sansAction + ' ' + accord(sansAction, 'point à corriger n’a', 'points à corriger n’ont') + ' pas d’action. ' : '') +
     'Les réponses et les preuves des registres seront figées. Les actions restent à suivre.',
     'Clôturer', async () => {
+      /* Une seule clôture à la fois : la lecture des registres prend du temps,
+         et une seconde confirmation passait aussi le contrôle « en cours ». */
+      if (_paCloture) return;
+      _paCloture = true;
+      try {
       /* Preuves relues au moment de clôturer : celles de l'ouverture peuvent
          dater de plusieurs jours. Score recalculé sur la copie relue. */
       toast('Lecture des registres…');
@@ -722,8 +732,10 @@ function cloturerPreAudit(a) {
       toast('Pré-audit clôturé : ' + s.global + ' %');
       paRedessiner();
       window.scrollTo(0, 0);
+      } finally { _paCloture = false; }
     });
 }
+let _paCloture = false;
 
 /* ---------------------------------------------------------------------------
    Export PDF (fenêtre d'impression, comme le registre sanitaire)

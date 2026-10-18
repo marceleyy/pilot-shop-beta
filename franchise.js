@@ -124,7 +124,23 @@ async function calculerIndicateurs() {
    sur une copie locale incomplète passerait pour la vérité. La limite d'une
    fois par heure se lit sur la copie locale du résumé : elle tient d'un
    rechargement à l'autre sur un même appareil. */
-async function publierIndicateurs(force) {
+/* Une seule publication à la fois : chaque passage sur la tour de contrôle
+   en programme une, et deux calculs en même temps partageaient _lectureRatee
+   (l'un effaçait l'échec de l'autre, qui publiait alors un résumé faux). */
+let _publiEnCours = null;
+function publierIndicateurs(force) {
+  /* Forcée pendant une publication non forcée (qui a pu s'arrêter à la limite
+     horaire) : on attend la fin, puis on relance si rien n'a été rendu. */
+  if (_publiEnCours && force) return _publiEnCours.then(r => r || publierIndicateurs(true));
+  return _publiEnCours ||
+    (_publiEnCours = publierIndicateurs0(force).finally(() => { _publiEnCours = null; }));
+}
+/* Calcul seul, après toute publication en cours : il remet _lectureRatee à
+   zéro et effacerait l'échec que cette publication doit voir. */
+function calculerApresPublication() {
+  return (_publiEnCours || Promise.resolve()).then(() => calculerIndicateurs());
+}
+async function publierIndicateurs0(force) {
   if (!STATE.user || !STATE.enLigne || !DB.configure) return null;
   if (!force) {
     try {
@@ -223,8 +239,8 @@ V.boutiques = async function () {
   /* Les deux en même temps : la boutique d'ici se calcule pendant que la
      base rend les résumés des autres. */
   const [ici, autres] = await Promise.all([
-    STATE.enLigne && DB.configure ? publierIndicateurs(true).then(r => r || calculerIndicateurs())
-                                  : calculerIndicateurs(),
+    STATE.enLigne && DB.configure ? publierIndicateurs(true).then(r => r || calculerApresPublication())
+                                  : calculerApresPublication(),
     STATE.enLigne && DB.configure ? resumesFranchise().catch(e => ({ erreur:e })) : Promise.resolve({ erreur:'horsligne' })
   ]);
   if (STATE.view !== 'boutiques') return;
