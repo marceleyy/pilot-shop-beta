@@ -69,7 +69,8 @@ V.donnees = async function () {
       'votre prénom sur les relevés que vous validez (températures, nettoyage, réceptions, pertes, caisse)',
       'les messages et signalements que vous écrivez',
       'les photos de preuve de nettoyage',
-      'pour les managers qui activent les alertes : le prénom et l’adresse technique d’envoi du téléphone'
+      'pour les managers qui activent les alertes : le prénom et l’adresse technique d’envoi du téléphone ' +
+        '(transmise au service de notifications d’Apple, de Google ou de Mozilla)'
     ])) +
     bloc('Pourquoi ?', liste([
       'tenir les registres d’hygiène exigés par la réglementation sanitaire (obligation légale)',
@@ -80,9 +81,13 @@ V.donnees = async function () {
       'Ce compteur sert à répartir les tâches. Il ne mesure pas la qualité du travail et ne sert pas, seul, ' +
       'à une évaluation ou à une sanction.</p>') +
     bloc('Qui y a accès ?',
-      '<p>Les managers de la boutique, et le prestataire pour la maintenance. Les données sont hébergées par ' +
-      'Supabase (base de données) et Vercel (application). Si vous utilisez la dictée vocale, votre voix est ' +
-      'transcrite par le service du fabricant de l’appareil (Apple ou Google).</p>') +
+      '<p>Les managers de la boutique, et le prestataire pour la maintenance. Les appareils de la boutique ' +
+      'partagent un même compte : les registres et la liste de l’équipe' +
+      (PIN_HACHAGE ? '' : ', codes d’accès compris,') + ' sont techniquement lisibles depuis chacun d’eux. ' +
+      'Les données sont hébergées par Supabase (base de données) et Vercel (application). Vercel est une société ' +
+      'américaine : le transfert est encadré par le Data Privacy Framework et les clauses contractuelles types de ' +
+      'la Commission européenne. Si vous utilisez la dictée vocale, votre voix est transcrite par le service du ' +
+      'fabricant de l’appareil (Apple ou Google).</p>') +
     bloc('Combien de temps ?', liste([
       'heures de service : ' + val('dureeHeures'),
       'journal d’activité, photos, messages : ' + val('dureeJournal'),

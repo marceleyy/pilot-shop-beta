@@ -85,7 +85,7 @@ function i18nIgnore(el) {
   /* Une option sans « value » rend son texte : le traduire changerait la valeur lue. */
   if (el && el.tagName === 'OPTION' && !el.hasAttribute('value')) return true;
   return !el || el.closest('script,style,textarea,[contenteditable],[data-i18n-non]') ||
-    (el.closest('#page, #vue-actions, #vue-titre, #vue-sous') && document.body.dataset.vueFr === '1');
+    (el.closest('#page, #vue-actions, #vue-titre, #vue-sous, #sheet') && document.body.dataset.vueFr === '1');
 }
 function traduireNoeud(racine) {
   if (!racine) return;

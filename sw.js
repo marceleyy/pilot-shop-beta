@@ -304,7 +304,8 @@ self.addEventListener('notificationclick', event => {
   const vue = (event.notification.data && event.notification.data.vue) || 'controle';
   event.waitUntil((async () => {
     const l = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
-    const c = l[0];
+    /* La fenêtre de l'application, pas un PDF ouvert à côté. */
+    const c = l.filter(x => { try { const p = new URL(x.url).pathname; return p === '/' || p === '/index.html'; } catch (e) { return false; } })[0];
     if (c) {
       try { await c.focus(); } catch (e) {}
       c.postMessage({ type: 'OUVRIR_VUE', vue: vue });

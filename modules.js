@@ -1088,8 +1088,10 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
     const total2 = toutes2.length;
     const faits2 = toutes2.filter(estFaite).length;
     const cs = $('#page .card .cs');
-    if (cs && /sur \d+ tâches/.test(cs.textContent)) {
-      cs.textContent = cs.textContent.replace(/^\d+ sur \d+/, faits2 + ' sur ' + total2);
+    /* Texte recalculé en entier : en anglais, l'écran affiche « 0 of 10 tasks »
+       (i18n.js) et un remplacement sur le texte français ne trouvait rien. */
+    if (cs && /^\d+ (sur|of) \d+ (tâches|tasks)$/.test(cs.textContent.trim())) {
+      cs.textContent = faits2 + ' sur ' + total2 + ' tâches';
     }
     const barre = $('#page .jauge i');
     if (barre && total2) barre.style.width = Math.round(faits2 / total2 * 100) + '%';
@@ -1100,7 +1102,9 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
     }
 
     await DB.set('checklist:' + j, rec);
-    if (actif) await feed('ok', STATE.user.prenom + ' : ' + ligne2.querySelector('.tn').textContent);
+    /* Libellé lu dans la donnée, pas dans la page : traduite (i18n.js), elle
+       écrivait le journal partagé en anglais. */
+    if (actif) await feed('ok', STATE.user.prenom + ' : ' + (tache.t || ligne2.querySelector('.tn').textContent));
   });
    
      brancherVignettes(() => rendre('accueil'));

@@ -60,6 +60,13 @@ function rest(chemin: string, init: RequestInit = {}) {
   });
 }
 const enc = encodeURIComponent;
+/* Comparaison à temps constant du secret de pg_cron. */
+function egal(a: string, b: string) {
+  if (a.length !== b.length) return false;
+  let d = 0;
+  for (let i = 0; i < a.length; i++) d |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return d === 0;
+}
 const court = (s: unknown, n: number) => String(s ?? '').slice(0, n);
 
 /* Réserve la clé de l'alerte. Faux si elle est déjà partie. */
@@ -83,13 +90,15 @@ async function diffuser(site: string, cle: string, a: Alerte) {
   const cibles = abos.filter((x) => {
     const d = x.data || {};
     if (!d.endpoint || !d.keys) return false;
-    if (a.type === 'essai') return x.id === a.abonnement;
+    /* L'essai ne vise que le téléphone de la personne qui le demande. */
+    if (a.type === 'essai') return x.id === a.abonnement && d.prenom === a.auteur;
     if (Array.isArray(d.types) && d.types.indexOf(a.type) < 0) return false;
     /* On ne se prévient pas soi-même de ce qu'on vient de faire. */
     return !a.auteur || d.prenom !== a.auteur;
   });
   const message = JSON.stringify({ titre: a.titre, texte: a.texte, vue: a.vue || 'controle', tag: cle });
   let envoyes = 0;
+  if (!cibles.length) return { envoyes: 0, cibles: 0 };
   for (const c of cibles) {
     try {
       const statut = await envoyer({ endpoint: c.data.endpoint, keys: c.data.keys }, message, VAPID);
@@ -98,15 +107,28 @@ async function diffuser(site: string, cle: string, a: Alerte) {
       } else if (statut < 300) envoyes++;
     } catch (_) { /* un téléphone injoignable ne bloque pas les autres */ }
   }
-  return envoyes;
+  return { envoyes, cibles: cibles.length };
+}
+
+/* Réserve, envoie, et rend la clé si aucun téléphone n'a pu être joint :
+   sinon l'alerte serait marquée « partie » sans être arrivée nulle part. */
+async function reserverEtDiffuser(site: string, cle: string, a: Alerte) {
+  if (!(await reserver(site, cle))) return null;
+  let r;
+  try { r = await diffuser(site, cle, a); } catch (e) { r = { envoyes: 0, cibles: 1, erreur: e }; }
+  if (r.cibles > 0 && r.envoyes === 0) {
+    await rest('alertes_envoyees?site=eq.' + enc(site) + '&id=eq.' + enc(cle), { method: 'DELETE' });
+    throw new Error('Aucun téléphone joignable');
+  }
+  return r.envoyes;
 }
 
 /* Heure de la boutique : date ISO, minutes depuis minuit, jour 1 (lundi) à 7. */
-function maintenant() {
+function maintenant(decalageJours = 0) {
   const p = Object.fromEntries(new Intl.DateTimeFormat('en-GB', {
     timeZone: FUSEAU, year: 'numeric', month: '2-digit', day: '2-digit',
     hour: '2-digit', minute: '2-digit', weekday: 'short', hourCycle: 'h23',
-  }).formatToParts(new Date()).map((x) => [x.type, x.value]));
+  }).formatToParts(new Date(Date.now() + decalageJours * 864e5)).map((x) => [x.type, x.value]));
   const jours: Record<string, number> = { Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6, Sun: 7 };
   return { jour: p.year + '-' + p.month + '-' + p.day, minutes: +p.hour * 60 + +p.minute, js: jours[p.weekday] };
 }
@@ -119,32 +141,53 @@ async function lireDonnee(table: string, site: string, id: string) {
   return l && l.length ? l[0].data : null;
 }
 
+async function envoyerTout(site: string, aFaire: [string, Alerte][], bilan: Record<string, unknown>) {
+  for (const [cle, a] of aFaire) {
+    try {
+      const n = await reserverEtDiffuser(site, cle, a);
+      if (n !== null) bilan[site + ' ' + cle] = n;
+    } catch (e) { bilan[site + ' ' + cle] = 'échec : ' + (e as Error).message; }
+  }
+}
+
 async function tourneeFrigos() {
   const r = await rest('abonnements_push?select=site');
   if (!r.ok) throw new Error('abonnements_push ' + r.status);
   const sites = [...new Set(((await r.json()) as { site: string }[]).map((x) => x.site))];
   const t = maintenant();
-  const bilan: Record<string, number> = {};
+  const bilan: Record<string, unknown> = {};
   for (const site of sites) {
     const h = { ...HORAIRES_DEF, ...((await lireDonnee('reglages', site, 'horaires')) || {}) };
     const ouverts = Array.isArray(h.joursOuverture) ? h.joursOuverture : HORAIRES_DEF.joursOuverture;
-    if (ouverts.indexOf(t.js) < 0) continue;
-    const releve = (await lireDonnee('releves_temperature', site, 'temp:' + t.jour)) || {};
-    const v = releve.valide || {};
     const o = enMinutes(h.ouverture), f = enMinutes(h.fermeture);
     const aFaire: [string, Alerte][] = [];
+    /* Fermeture tardive (23:45 et après, minuit, après minuit) : l'alerte du
+       soir ne peut pas tomber le jour même. On regarde le relevé de la veille,
+       le lendemain entre fermeture + 15 min et l'ouverture. */
+    const tardive = f !== null && (f + RETARD.soir >= 1440 || (o !== null && f <= o));
+    if (tardive && o !== null) {
+      const hier = maintenant(-1);
+      const limite = (f! + RETARD.soir) % 1440;
+      if (ouverts.indexOf(hier.js) >= 0 && t.minutes >= limite && t.minutes < o) {
+        const rh = (await lireDonnee('releves_temperature', site, 'temp:' + hier.jour)) || {};
+        if (!(rh.valide || {}).s) {
+          aFaire.push(['frigos-s:' + hier.jour, { type: 'frigos', titre: 'Frigos du soir non relevés',
+            texte: 'Fermeture d’hier à ' + h.fermeture + ' et aucun relevé validé.', vue: 'temp' }]);
+        }
+      }
+    }
+    if (ouverts.indexOf(t.js) < 0) { await envoyerTout(site, aFaire, bilan); continue; }
+    const releve = (await lireDonnee('releves_temperature', site, 'temp:' + t.jour)) || {};
+    const v = releve.valide || {};
     if (o !== null && t.minutes >= o + RETARD.matin && !v.m) {
       aFaire.push(['frigos-m:' + t.jour, { type: 'frigos', titre: 'Frigos du matin non relevés',
         texte: 'Ouverture à ' + h.ouverture + ' et aucun relevé validé.', vue: 'temp' }]);
     }
-    /* Fermeture après minuit (« 00:30 ») : pas d'alerte du soir, elle tomberait sur le jour suivant. */
-    if (f !== null && (o === null || f > o) && t.minutes >= f + RETARD.soir && !v.s) {
+    if (f !== null && !tardive && t.minutes >= f + RETARD.soir && !v.s) {
       aFaire.push(['frigos-s:' + t.jour, { type: 'frigos', titre: 'Frigos du soir non relevés',
         texte: 'Fermeture à ' + h.fermeture + ' et aucun relevé validé.', vue: 'temp' }]);
     }
-    for (const [cle, a] of aFaire) {
-      if (await reserver(site, cle)) bilan[site + ' ' + cle] = await diffuser(site, cle, a);
-    }
+    await envoyerTout(site, aFaire, bilan);
   }
   /* Les clés de plus de 30 jours ne servent plus à rien. */
   await rest('alertes_envoyees?created_at=lt.' + enc(new Date(Date.now() - 30 * 864e5).toISOString()),
@@ -169,7 +212,7 @@ Deno.serve(async (req) => {
 
   try {
     /* 1. Tournée planifiée */
-    if (CRON && req.headers.get('x-cle-cron') === CRON) {
+    if (CRON && egal(req.headers.get('x-cle-cron') || '', CRON)) {
       return reponse(200, { ok: true, envoyes: await tourneeFrigos() });
     }
 
@@ -197,8 +240,11 @@ Deno.serve(async (req) => {
     if (!a.titre) return reponse(400, { erreur: 'Titre manquant' });
     /* L'essai est propre à un téléphone : sa clé en tient compte. */
     const cleComplete = b.type + ':' + cle;
-    if (!(await reserver(site, cleComplete))) return reponse(200, { ok: true, deja: true });
-    return reponse(200, { ok: true, envoyes: await diffuser(site, cleComplete, a) });
+    let n;
+    try { n = await reserverEtDiffuser(site, cleComplete, a); }
+    catch (_) { return reponse(502, { erreur: 'Aucun téléphone joignable' }); }
+    if (n === null) return reponse(200, { ok: true, deja: true });
+    return reponse(200, { ok: true, envoyes: n });
   } catch (e) {
     return reponse(500, { erreur: String((e as Error).message || e).slice(0, 200) });
   }

@@ -420,14 +420,17 @@ const TRAD_EN = {
   'votre prénom sur les relevés que vous validez (températures, nettoyage, réceptions, pertes, caisse)': 'your first name on the records you validate (temperatures, cleaning, deliveries, waste, till)',
   'les messages et signalements que vous écrivez': 'the messages and reports you write',
   'les photos de preuve de nettoyage': 'cleaning proof photos',
-  'pour les managers qui activent les alertes : le prénom et l’adresse technique d’envoi du téléphone': 'for managers who turn on alerts: their first name and the phone’s technical delivery address',
+  'pour les managers qui activent les alertes : le prénom et l’adresse technique d’envoi du téléphone (transmise au service de notifications d’Apple, de Google ou de Mozilla)':
+    'for managers who turn on alerts: their first name and the phone’s technical delivery address (passed to Apple’s, Google’s or Mozilla’s notification service)',
   'tenir les registres d’hygiène exigés par la réglementation sanitaire (obligation légale)': 'keeping the hygiene records required by food safety rules (legal obligation)',
   'décompter le temps de travail (obligation légale, article L3171-2 du Code du travail)': 'recording working time (legal obligation, article L3171-2 of the French Labour Code)',
   'organiser le travail de la boutique (intérêt légitime de l’employeur)': 'organising work in the shop (the employer’s legitimate interest)',
   'L’écran « Équipe » affiche le nombre de relevés validés par personne. Ce compteur sert à répartir les tâches. Il ne mesure pas la qualité du travail et ne sert pas, seul, à une évaluation ou à une sanction.':
     'The “Team” screen shows how many records each person has validated. This counter is used to share out tasks. It does not measure the quality of work and is never used on its own for an appraisal or a sanction.',
-  'Les managers de la boutique, et le prestataire pour la maintenance. Les données sont hébergées par Supabase (base de données) et Vercel (application). Si vous utilisez la dictée vocale, votre voix est transcrite par le service du fabricant de l’appareil (Apple ou Google).':
-    'The shop’s managers, and the provider for maintenance. Data is hosted by Supabase (database) and Vercel (app). If you use voice dictation, your voice is transcribed by the device maker’s service (Apple or Google).',
+  'Les managers de la boutique, et le prestataire pour la maintenance. Les appareils de la boutique partagent un même compte : les registres et la liste de l’équipe, codes d’accès compris, sont techniquement lisibles depuis chacun d’eux. Les données sont hébergées par Supabase (base de données) et Vercel (application). Vercel est une société américaine : le transfert est encadré par le Data Privacy Framework et les clauses contractuelles types de la Commission européenne. Si vous utilisez la dictée vocale, votre voix est transcrite par le service du fabricant de l’appareil (Apple ou Google).':
+    'The shop’s managers, and the provider for maintenance. The shop’s devices share one account: the records and the team list, access codes included, can technically be read from each of them. Data is hosted by Supabase (database) and Vercel (app). Vercel is a US company: the transfer is covered by the Data Privacy Framework and the European Commission’s standard contractual clauses. If you use voice dictation, your voice is transcribed by the device maker’s service (Apple or Google).',
+  'Les managers de la boutique, et le prestataire pour la maintenance. Les appareils de la boutique partagent un même compte : les registres et la liste de l’équipe sont techniquement lisibles depuis chacun d’eux. Les données sont hébergées par Supabase (base de données) et Vercel (application). Vercel est une société américaine : le transfert est encadré par le Data Privacy Framework et les clauses contractuelles types de la Commission européenne. Si vous utilisez la dictée vocale, votre voix est transcrite par le service du fabricant de l’appareil (Apple ou Google).':
+    'The shop’s managers, and the provider for maintenance. The shop’s devices share one account: the records and the team list can technically be read from each of them. Data is hosted by Supabase (database) and Vercel (app). Vercel is a US company: the transfer is covered by the Data Privacy Framework and the European Commission’s standard contractual clauses. If you use voice dictation, your voice is transcribed by the device maker’s service (Apple or Google).',
   'registres d’hygiène :': 'hygiene records:',
   'Vous pouvez demander l’accès à vos données, leur rectification, leur effacement quand rien n’oblige à les garder, ou vous opposer au traitement fondé sur l’intérêt légitime. Adressez-vous à':
     'You can ask to access your data, correct it, delete it when nothing requires it to be kept, or object to processing based on legitimate interest. Contact',
@@ -619,6 +622,7 @@ const TRAD_EN_MOTIFS = [
   [/^(.+) doit d’abord fixer la date de départ et le type de période\..*$/,
     '$1 must first set the start date and the period type. Until then this screen would be wrong. The other pages work normally.'],
   [/^heures de service : (.+)$/, (_, d) => 'shift hours: ' + d.replace(/\bans\b/, 'years').replace(/\ban\b/, 'year')],
+  [/^registres d’hygiène : (.+)$/, (_, d) => 'hygiene records: ' + d.replace(/\bans\b/, 'years').replace(/\ban\b/, 'year')],
   [/^journal d’activité, photos, messages : (.+)$/, (_, d) => 'activity log, photos, messages: ' + d.replace(/\bans\b/, 'years').replace(/\ban\b/, 'year')],
   /* Fournitures : « Cornets — Petit », « Cornets, Petit (carton) », « Pailles (carton) » */
   [/^(.+) — (.+)$/, (t, a, b) => _tp(a) + ' — ' + _tp(b)],

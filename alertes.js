@@ -224,7 +224,8 @@ V.alertes = async function () {
         '<span><b>' + esc(t[1]) + '</b><span class="mini" style="display:block">' + esc(t[2]) + '</span></span>' +
       '</label>').join('') + '</div>' +
     '<p class="mini" style="margin-top:14px">Vous n’êtes pas prévenu de ce que vous faites vous-même. ' +
-      'Une même alerte ne part qu’une fois.</p>';
+      'Une même alerte ne part qu’une fois. Un relevé validé hors ligne n’est vu par le serveur qu’au retour du ' +
+      'réseau : en attendant, « Frigos non relevés » peut partir à tort.</p>';
 
   const choisis = () => $$('#page [data-type]').filter(c => c.checked).map(c => c.dataset.type);
   const on = $('#al-on'), off = $('#al-off'), essai = $('#al-essai');

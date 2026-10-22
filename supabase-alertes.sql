@@ -53,9 +53,13 @@ notify pgrst, 'reload schema';
 create extension if not exists pg_cron;
 create extension if not exists pg_net;
 
-/* Le secret reste dans le coffre (Vault), pas en clair dans la tâche. */
-select vault.create_secret('SECRET', 'alertes_cron_secret')
- where not exists (select 1 from vault.secrets where name = 'alertes_cron_secret');
+/* Le secret reste dans le coffre (Vault), pas en clair dans la tâche.
+   Rejoué avec un nouveau secret, il remplace l'ancien. */
+select case
+  when exists (select 1 from vault.secrets where name = 'alertes_cron_secret')
+  then (select vault.update_secret(id, 'SECRET') from vault.secrets where name = 'alertes_cron_secret')::text
+  else vault.create_secret('SECRET', 'alertes_cron_secret')::text
+end;
 
 select cron.unschedule('pilotshop-alertes-frigos')
  where exists (select 1 from cron.job where jobname = 'pilotshop-alertes-frigos');
@@ -67,7 +71,8 @@ select cron.schedule('pilotshop-alertes-frigos', '*/10 * * * *', $$
                  'Content-Type', 'application/json',
                  'x-cle-cron', (select decrypted_secret from vault.decrypted_secrets
                                  where name = 'alertes_cron_secret')),
-    body    := '{}'::jsonb)
+    body    := '{}'::jsonb,
+    timeout_milliseconds := 30000)
 $$);
 
 -- Attendu : un numéro de tâche. Pour vérifier :
