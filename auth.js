@@ -185,7 +185,7 @@ function ecranRattachement() {
       '<div class="in">' +
       '<div class="lg"><h1>Pilot-Shop</h1><p>Premier démarrage</p></div>' +
       '<div class="card solide">' +
-      '<h2>Rattacher cet appareil</h2>' +
+      '<h2>Connecter la boutique</h2>' +
       '<div class="cs">À faire une seule fois. Ensuite, l’équipe se connecte ' +
       'simplement avec son prénom et son code.</div>' +
       /* Un vrai formulaire : la touche Entrée valide, comme partout ailleurs.
@@ -197,7 +197,7 @@ function ecranRattachement() {
       'spellcheck="false" placeholder="adresse e-mail du compte boutique"></div>' +
       '<div class="champ" style="margin-top:14px"><label class="f" for="rt-mdp">Mot de passe</label>' +
       '<input type="password" id="rt-mdp" autocomplete="current-password"></div>' +
-      '<button type="submit" class="btn menthe bloc xl" id="rt-ok" style="margin-top:18px">Rattacher</button>' +
+      '<button type="submit" class="btn menthe bloc xl" id="rt-ok" style="margin-top:18px">Se connecter</button>' +
       '</form>' +
       '<p class="mini" id="rt-etat" role="status" style="text-align:center;margin-top:14px"></p>' +
       '</div>' +
