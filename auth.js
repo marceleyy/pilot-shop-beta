@@ -185,7 +185,7 @@ function ecranRattachement() {
       '<div class="in">' +
       '<div class="lg"><h1>Pilot-Shop</h1><p>Premier démarrage</p></div>' +
       '<div class="card solide">' +
-      '<h2>Rattacher cet appareil</h2>' +
+      '<h2>Connecter la boutique</h2>' +
       '<div class="cs">À faire une seule fois. Ensuite, l’équipe se connecte ' +
       'simplement avec son prénom et son code.</div>' +
       /* Un vrai formulaire : la touche Entrée valide, comme partout ailleurs.
@@ -197,15 +197,22 @@ function ecranRattachement() {
       'spellcheck="false" placeholder="adresse e-mail du compte boutique"></div>' +
       '<div class="champ" style="margin-top:14px"><label class="f" for="rt-mdp">Mot de passe</label>' +
       '<input type="password" id="rt-mdp" autocomplete="current-password"></div>' +
-      '<button type="submit" class="btn menthe bloc xl" id="rt-ok" style="margin-top:18px">Rattacher</button>' +
+      '<button type="submit" class="btn menthe bloc xl" id="rt-ok" style="margin-top:18px">Se connecter</button>' +
       '</form>' +
       '<p class="mini" id="rt-etat" role="status" style="text-align:center;margin-top:14px"></p>' +
       '</div>' +
       '<p class="mini" style="text-align:center;margin-top:18px">Ces identifiants ' +
       'sont ceux de la boutique, pas les vôtres. Demandez-les à votre manager.</p>' +
+      /* Arrivé depuis la page d'accueil publique : retour possible, sinon un
+         prospect sans identifiants n'avait plus de chemin vers l'essai. */
+      (typeof vitrineAMontrer === 'function' && vitrineAMontrer()
+        ? '<button type="button" class="btn fantome bloc" id="rt-vitrine" style="margin-top:10px">Retour à la présentation</button>' : '') +
       '</div>';
     document.body.appendChild(d);
 
+    const rv = d.querySelector('#rt-vitrine');
+    /* Même effet que le bouton retour du navigateur (vitrine.js). */
+    if (rv) rv.onclick = () => (typeof revenirVitrine === 'function' ? revenirVitrine() : location.reload());
     const etat = m => { const e = d.querySelector('#rt-etat'); if (e) e.textContent = m; };
     const bouton = d.querySelector('#rt-ok');
 
@@ -228,12 +235,12 @@ function ecranRattachement() {
            neuve plutôt que de continuer avec l'équipe et la session d'avant. */
         if (avant && s && s.site && s.site !== avant && typeof quitterAncienneBoutique === 'function') {
           const n = quitterAncienneBoutique(avant);
-          etat('Rattaché à ' + s.site + '.' + (n ? ' ' + n + (n > 1 ? ' saisies de ' + avant + ' attendent' : ' saisie de ' + avant + ' attend') +
+          etat('Connecté à ' + s.site + '.' + (n ? ' ' + n + (n > 1 ? ' saisies de ' + avant + ' attendent' : ' saisie de ' + avant + ' attend') +
                ' : ' + (n > 1 ? 'elles partiront' : 'elle partira') + ' quand l’appareil sera de nouveau rattaché à ' + avant + '.' : ''));
           setTimeout(() => (typeof recharger === 'function' ? recharger() : location.reload()), n ? 4000 : 300);
           return;
         }
-        etat('Rattaché. Chargement de l’équipe…');
+        etat('Connecté. Chargement de l’équipe…');
         if (typeof appliquerReglages === 'function') appliquerReglages();
         /* On charge l'équipe AVANT de retirer l'écran : sinon la liste des
            prénoms apparaît vide le temps de l'aller-retour. */
@@ -246,7 +253,7 @@ function ecranRattachement() {
         /* Messages en français : « Failed to fetch » ne disait rien à l'équipe. */
         etat(e.statut === 400 ? 'Identifiants refusés.'
            : e.statut === 429 ? 'Trop d’essais : patientez une minute avant de réessayer.'
-           : e.statut ? 'La base refuse le rattachement (erreur ' + e.statut + '). Réessayez plus tard.'
+           : e.statut ? 'La base refuse la connexion (erreur ' + e.statut + '). Réessayez plus tard.'
            : 'Base injoignable. Vérifiez le Wi-Fi, puis réessayez.');
       }
     };

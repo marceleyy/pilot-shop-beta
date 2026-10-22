@@ -1208,3 +1208,173 @@ button.fr-ligne{cursor:pointer;border-radius:0}
 button.fr-ligne:active{background:var(--creme-2)}
 button.fr-ligne:focus-visible{outline:2px solid var(--cacao);outline-offset:-2px}
 .fr-va{flex:0 0 auto;font-weight:800;color:var(--brume);margin-left:-2px}
+
+/* --- Accueil public (vitrine.js) ------------------------------------------
+   Montré seulement sur un appareil neuf : la classe « vitrine » est posée sur
+   <html> avant le premier affichage, et retirée par « Se connecter ». Au-dessus
+   de l'écran des prénoms (250), sous la feuille et le rattachement (900).
+   Mise en page de page produit (grands titres, beaucoup d'air, sections
+   alternées, boutons en pilule), mais à l'habillage de l'appli : crème,
+   chocolat, titres en serif, filet or. Du site à l'écran des prénoms, on
+   reste dans la même maison. */
+#vitrine{display:none}
+html.vitrine #login,html.vitrine #offline{visibility:hidden}
+html.vitrine #vitrine{
+  --vt-texte:var(--chocolat); --vt-gris:var(--cacao); --vt-fond2:var(--creme-2);
+  --vt-bleu:var(--chocolat); --vt-bleu-d:#4A3022; --vt-filet:var(--filet);
+  --vt-or:#765822;   /* or lisible en texte : 5,4:1 même sur crème-2 */
+  display:block;position:fixed;inset:0;z-index:252;overflow-y:auto;overflow-x:hidden;
+  background:var(--creme);color:var(--vt-texte);font-family:var(--sans);
+  -webkit-font-smoothing:antialiased;scroll-behavior:smooth;
+}
+#vitrine h1,#vitrine h2,#vitrine b{font-family:inherit;color:var(--vt-texte)}
+/* Titres en serif, comme « Pilot-Shop » et les titres de page de l'appli. */
+#vitrine h1,#vitrine h2,#vitrine .vt-bandeau p{font-family:var(--serif);font-weight:600}
+#vitrine p{margin:0}
+#vitrine figure{margin:0}
+#vitrine img{display:block;max-width:100%;height:auto}
+
+/* Barre du haut, translucide */
+#vitrine .vt-nav{position:sticky;top:0;z-index:2;background:rgba(248,243,234,.82);
+  backdrop-filter:saturate(1.8) blur(20px);-webkit-backdrop-filter:saturate(1.8) blur(20px);
+  border-bottom:1px solid var(--filet);padding-top:var(--safe-t)}
+#vitrine .vt-nav-in{max-width:1024px;margin:0 auto;height:52px;padding:0 16px;
+  display:flex;align-items:center;gap:16px}
+#vitrine .vt-marque{display:flex;align-items:center;gap:9px;font-family:var(--serif);font-weight:600;font-size:20px;letter-spacing:-.01em}
+#vitrine .vt-logo{width:28px;height:28px;border-radius:8px;display:block;
+  box-shadow:inset 0 0 0 1px rgba(201,164,100,.45);
+  background:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 40'%3E%3Cg fill='%23F6EEE2'%3E%3Ccircle cx='20' cy='12.5' r='7.5'/%3E%3Ccircle cx='12.8' cy='17.2' r='5.6'/%3E%3Ccircle cx='27.2' cy='17.2' r='5.6'/%3E%3Crect x='8.6' y='16.6' width='22.8' height='5.6' rx='2.8'/%3E%3C/g%3E%3Cpath d='M10.2 22.6h19.6L20 38.4z' fill='%23C9A464'/%3E%3C/svg%3E") center 55%/19px 19px no-repeat,linear-gradient(155deg,#4A3022,var(--chocolat) 70%)}
+#vitrine .vt-liens{display:flex;gap:4px;margin-left:auto}
+#vitrine .vt-liens button{background:none;border:0;padding:8px 10px;font-size:14px;color:var(--cacao);cursor:pointer}
+#vitrine .vt-liens button:hover{color:var(--chocolat)}
+
+/* Boutons */
+#vitrine .vt-pilule{display:inline-flex;align-items:center;justify-content:center;min-height:48px;
+  padding:0 24px;border:0;border-radius:980px;background:var(--vt-bleu);color:#fff;
+  font-size:17px;font-weight:500;cursor:pointer;transition:background-color .2s}
+#vitrine .vt-pilule:hover{background:var(--vt-bleu-d)}
+#vitrine .vt-pilule.petite{min-height:32px;padding:0 14px;font-size:13px}
+#vitrine .vt-pilule.large{width:100%;margin-top:20px}
+#vitrine .vt-lien{background:none;border:0;padding:8px 4px;color:var(--vt-or);font-weight:600;font-size:17px;cursor:pointer}
+#vitrine .vt-lien:hover{text-decoration:underline}
+#vitrine .vt-cta{display:flex;flex-wrap:wrap;align-items:center;justify-content:center;gap:12px 24px}
+#vitrine .vt-surtitre{font-size:12px;font-weight:650;letter-spacing:.16em;text-transform:uppercase;color:var(--vt-or);margin-bottom:14px}
+
+/* Ouverture */
+#vitrine .vt-hero{text-align:center;padding:72px 16px 0;position:relative}
+/* Mêmes halos que l'écran des prénoms et le rattachement. */
+#vitrine .vt-hero::before{content:'';position:absolute;inset:0 0 30% 0;pointer-events:none;
+  background:
+    radial-gradient(70vw 50vh at 10% -5%, rgba(201,216,168,.42), transparent 62%),
+    radial-gradient(50vw 40vh at 85% 0%,  rgba(234,219,188,.45), transparent 60%)}
+#vitrine .vt-hero > *{position:relative;max-width:1024px;margin-left:auto;margin-right:auto}
+#vitrine .vt-hero h1::after{content:'';display:block;width:84px;height:10px;margin:22px auto 0;
+  background:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 84 10'%3E%3Cpath d='M0 5h34M50 5h34' stroke='%23B08A4A' stroke-width='1'/%3E%3Cpath d='M42 1l4 4-4 4-4-4z' fill='%23B08A4A'/%3E%3C/svg%3E") center/contain no-repeat}
+#vitrine .vt-hero h1{font-size:clamp(40px,7.4vw,78px);line-height:1.05;letter-spacing:-.02em}
+#vitrine .vt-chapo{font-size:clamp(19px,2.4vw,23px);line-height:1.45;color:var(--vt-gris);
+  max-width:680px;margin:22px auto 28px}
+#vitrine .vt-rassure{font-size:14px;color:var(--vt-gris);margin-top:16px}
+/* Photos en situation (comptoir, lumière chaude, fond de boutique flou). */
+#vitrine .vt-photo img{width:100%;border-radius:clamp(14px,2.4vw,28px);
+  box-shadow:0 30px 80px -34px rgba(42,26,18,.55)}
+#vitrine .vt-photo-hero{max-width:1100px;margin:56px auto 0;padding-bottom:24px}
+/* Sur téléphone, une photo 16:9 rend l'écran illisible : on recadre au
+   centre, là où se trouve l'appareil. Images en lazy, jamais en eager : un
+   appareil rattaché ne doit pas les télécharger. */
+@media (max-width:819px){
+  #vitrine .vt-photo img{aspect-ratio:4/5;object-fit:cover;object-position:center}
+  #vitrine .vt-photo.carre img{aspect-ratio:1/1}
+  #vitrine .vt-photo-hero img{aspect-ratio:4/3}
+}
+
+/* Bandeau sombre */
+#vitrine .vt-bandeau{background:linear-gradient(155deg,#4A3022,var(--chocolat) 70%);margin-top:80px;padding:96px 16px;text-align:center}
+#vitrine .vt-bandeau p{color:#F6EEE2;font-size:clamp(28px,4.6vw,46px);line-height:1.15;letter-spacing:-.015em;
+  max-width:860px;margin:0 auto}
+
+/* Fonctions, en alternance */
+#vitrine .vt-fonction{max-width:1100px;margin:0 auto;padding:96px 16px;display:grid;gap:40px}
+#vitrine .vt-fonction + .vt-fonction{border-top:1px solid var(--vt-filet)}
+#vitrine .vt-fonction h2,#vitrine .vt-grille-zone h2,#vitrine .vt-etapes h2,#vitrine .vt-offre h2,
+#vitrine .vt-faq h2,#vitrine .vt-final h2{font-size:clamp(34px,5.2vw,54px);line-height:1.08;letter-spacing:-.02em}
+#vitrine .vt-texte p:last-child{font-size:clamp(17px,1.9vw,21px);line-height:1.45;color:var(--vt-gris);margin-top:18px;max-width:460px}
+@media (min-width:820px){
+  /* Titre à gauche, texte à droite, puis la photo en grand dessous. */
+  #vitrine .vt-texte{display:grid;grid-template-columns:1fr 1fr;column-gap:64px;align-items:end}
+  #vitrine .vt-texte .vt-surtitre{grid-column:1 / -1}
+  #vitrine .vt-texte p:last-child{margin-top:0}
+}
+
+/* Grille de tuiles */
+#vitrine .vt-grille-zone{background:var(--vt-fond2);padding:96px 16px}
+#vitrine .vt-grille-zone h2{text-align:center;max-width:1024px;margin:0 auto 48px}
+#vitrine .vt-grille{max-width:1024px;margin:0 auto;display:grid;gap:16px;grid-template-columns:1fr}
+#vitrine .vt-tuile{background:var(--porcelaine);border:1px solid var(--filet);border-radius:24px;padding:32px 28px}
+#vitrine .vt-tuile b{display:block;font-family:var(--serif);font-size:25px;font-weight:600;letter-spacing:-.01em}
+#vitrine .vt-tuile p{font-size:17px;line-height:1.45;color:var(--vt-gris);margin-top:10px}
+#vitrine .vt-tuile.sombre{background:linear-gradient(155deg,#4A3022,var(--chocolat) 70%);border-color:transparent}
+#vitrine .vt-tuile.sombre b{color:#F6EEE2}
+#vitrine .vt-tuile.sombre p{color:#D9C9B4}
+@media (min-width:640px){ #vitrine .vt-grille{grid-template-columns:1fr 1fr} }
+@media (min-width:960px){ #vitrine .vt-grille{grid-template-columns:repeat(3,1fr)} }
+
+/* Étapes */
+#vitrine .vt-etapes{max-width:1024px;margin:0 auto;padding:96px 16px;text-align:center}
+#vitrine .vt-etapes ol{list-style:none;padding:0;margin:48px 0 0;display:grid;gap:32px}
+#vitrine .vt-etapes li span{display:inline-grid;place-items:center;width:44px;height:44px;border-radius:50%;
+  background:var(--porcelaine);border:1px solid var(--or);color:var(--vt-or);font-family:var(--serif);font-weight:600;font-size:20px;margin-bottom:14px}
+#vitrine .vt-etapes li b{display:block;font-size:21px;font-weight:650}
+#vitrine .vt-etapes li p{color:var(--vt-gris);font-size:17px;margin-top:6px}
+@media (min-width:720px){ #vitrine .vt-etapes ol{grid-template-columns:repeat(3,1fr)} }
+
+/* Offre et formulaire */
+#vitrine .vt-offre{background:var(--vt-fond2);padding:96px 16px;display:grid;gap:40px;
+}
+#vitrine .vt-offre > *{max-width:520px;width:100%;margin:0 auto}
+#vitrine .vt-offre ul{list-style:none;padding:0;margin:24px 0 0}
+#vitrine .vt-offre li{font-size:19px;padding:12px 0 12px 32px;border-bottom:1px solid var(--vt-filet);position:relative}
+#vitrine .vt-offre li::before{content:'✓';position:absolute;left:4px;color:var(--pistache);font-weight:700}
+@media (min-width:900px){
+  #vitrine .vt-offre{grid-template-columns:1fr 1fr;max-width:none;padding-left:max(16px,calc(50% - 512px));padding-right:max(16px,calc(50% - 512px))}
+  #vitrine .vt-offre > *{margin:0}
+}
+#vitrine .vt-form{background:var(--porcelaine);border:1px solid var(--filet);border-radius:24px;padding:28px 24px}
+#vitrine .vt-form .champ{margin-top:14px}
+#vitrine .vt-form .champ:first-child{margin-top:0}
+#vitrine .vt-form .vt-ligne{display:grid;gap:14px;margin-top:14px}
+#vitrine .vt-form .vt-ligne:first-child{margin-top:0}
+#vitrine .vt-form .vt-ligne .champ{margin-top:0}
+@media (min-width:520px){ #vitrine .vt-form .vt-ligne{grid-template-columns:1fr 1fr} }
+#vitrine .vt-form label.f{color:var(--vt-gris);text-transform:none;letter-spacing:0;font-size:14px;font-weight:500}
+#vitrine .vt-form input,#vitrine .vt-form textarea{width:100%;min-height:48px;padding:12px 14px;font-size:17px;
+  background:#fff;border:1px solid var(--contour);border-radius:12px;color:var(--vt-texte);appearance:none;-webkit-appearance:none}
+#vitrine .vt-form input:focus,#vitrine .vt-form textarea:focus{outline:0;border-color:var(--chocolat);box-shadow:0 0 0 4px rgba(176,138,74,.25)}
+#vitrine .vt-note{font-size:13px;line-height:1.45;color:var(--vt-gris);margin-top:12px}
+#vitrine .vt-note:empty{display:none}
+#vitrine .vt-note a{color:var(--vt-or)}
+
+/* Questions */
+#vitrine .vt-faq{max-width:780px;margin:0 auto;padding:96px 16px}
+#vitrine .vt-faq h2{margin-bottom:32px}
+#vitrine .vt-faq details{border-bottom:1px solid var(--vt-filet)}
+#vitrine .vt-faq summary{list-style:none;cursor:pointer;padding:22px 32px 22px 0;font-size:19px;font-weight:600;position:relative;color:var(--chocolat)}
+#vitrine .vt-faq summary::-webkit-details-marker{display:none}
+#vitrine .vt-faq summary::after{content:'+';position:absolute;right:4px;top:50%;transform:translateY(-50%);
+  font-size:26px;font-weight:300;color:var(--vt-or);transition:transform .2s}
+#vitrine .vt-faq details[open] summary::after{transform:translateY(-50%) rotate(45deg)}
+#vitrine .vt-faq details p{font-size:17px;line-height:1.5;color:var(--vt-gris);padding:0 0 22px}
+
+/* Fin de page */
+#vitrine .vt-final{text-align:center;padding:80px 16px 96px;background:var(--vt-fond2)}
+#vitrine .vt-final h2{margin-bottom:28px}
+#vitrine .vt-pied{max-width:1024px;margin:0 auto;padding:20px 16px calc(24px + var(--safe-b));
+  display:flex;flex-wrap:wrap;gap:8px 16px;justify-content:space-between;align-items:center;
+  font-size:12px;color:var(--vt-gris);border-top:1px solid var(--vt-filet)}
+#vitrine .vt-pied .vt-lien{font-size:12px}
+@media (max-width:560px){
+  #vitrine .vt-liens{display:none}
+  #vitrine .vt-nav .vt-pilule{margin-left:auto}
+  #vitrine .vt-fonction,#vitrine .vt-grille-zone,#vitrine .vt-etapes,#vitrine .vt-offre,#vitrine .vt-faq{padding-top:72px;padding-bottom:72px}
+}
+#vitrine section[id]{scroll-margin-top:calc(52px + var(--safe-t))}
+@media (prefers-reduced-motion:reduce){ html.vitrine #vitrine{scroll-behavior:auto} }
