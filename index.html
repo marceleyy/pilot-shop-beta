@@ -23,6 +23,9 @@
 
 <link rel="stylesheet" href="style.css">
 <link rel="stylesheet" href="premium.css">
+<!-- Sans defer : décide avant le premier affichage si l'on montre la page
+     d'accueil publique (appareil neuf) ou directement les prénoms. -->
+<script src="vitrine.js"></script>
 </head>
 
 <body>
@@ -31,6 +34,65 @@
 <div id="offline" role="status" aria-live="polite">
   <span class="msg">Hors ligne, vos saisies sont gardées et partiront toutes seules</span>
   <span class="sync" id="offline-n"></span>
+</div>
+
+
+<!-- ===================== ACCUEIL PUBLIC ===================== -->
+<!-- Visible seulement sur un appareil neuf (vitrine.js). Un appareil déjà
+     utilisé en boutique arrive directement sur les prénoms. -->
+<div id="vitrine">
+  <div class="in">
+
+    <header class="lg">
+      <h1>Pilot-Shop</h1>
+      <p>Le registre de votre boutique</p>
+    </header>
+
+    <p class="vt-accroche">Traçabilité, frigos, réceptions, inventaires et écarts de caisse
+      réunis sur une tablette. Pensé pour les glaciers et commerces alimentaires,
+      et utilisable même sans réseau, jusque dans la chambre froide.</p>
+
+    <div class="vt-actions">
+      <button type="button" class="btn menthe bloc xl" data-vitrine="connexion">J’ai déjà un compte : me connecter</button>
+      <button type="button" class="btn clair bloc xl" data-vitrine="essai">Demander un essai gratuit de 2 mois</button>
+    </div>
+
+    <ul class="vt-points">
+      <li><b>Traçabilité des lots</b><span>Photographiez l’étiquette : le numéro de lot est lu et classé tout seul.</span></li>
+      <li><b>Frigos et HACCP</b><span>Relevés de température guidés, alertes et registre prêt pour le contrôle.</span></li>
+      <li><b>Réceptions et inventaires</b><span>Stock froid et sec, comptage simple, écarts expliqués.</span></li>
+      <li><b>Caisse et écarts</b><span>Import de l’export de caisse, comparaison avec le stock par période.</span></li>
+      <li><b>Allergènes au comptoir</b><span>La fiche du parfum en deux appuis, même hors ligne.</span></li>
+      <li><b>Toute l’équipe</b><span>Chacun se connecte avec son prénom et un code, le manager suit tout.</span></li>
+    </ul>
+
+    <section id="vt-essai" class="card solide" hidden>
+      <h2>Essai gratuit de 2 mois</h2>
+      <p class="cs">Mise en place offerte, sans carte bancaire et sans engagement.
+        Laissez vos coordonnées : je vous recontacte pour installer Pilot-Shop dans votre boutique.</p>
+      <form id="vt-form" novalidate>
+        <div class="champ"><label class="f" for="vt-nom">Votre nom</label>
+          <input type="text" id="vt-nom" autocomplete="name"></div>
+        <div class="champ"><label class="f" for="vt-boutique">Nom de la boutique</label>
+          <input type="text" id="vt-boutique" autocomplete="organization"></div>
+        <div class="champ"><label class="f" for="vt-ville">Ville</label>
+          <input type="text" id="vt-ville" autocomplete="address-level2"></div>
+        <div class="champ"><label class="f" for="vt-courriel">E-mail</label>
+          <input type="email" id="vt-courriel" autocomplete="email" autocapitalize="none" spellcheck="false"></div>
+        <div class="champ"><label class="f" for="vt-tel">Téléphone</label>
+          <input type="tel" id="vt-tel" autocomplete="tel"></div>
+        <div class="champ"><label class="f" for="vt-msg">Message (facultatif)</label>
+          <textarea id="vt-msg" rows="3"></textarea></div>
+        <button type="submit" class="btn menthe bloc xl">Préparer ma demande</button>
+      </form>
+      <p class="mini" id="vt-etat" role="status" aria-live="polite"></p>
+      <p class="mini">Le bouton ouvre votre messagerie avec la demande déjà rédigée.
+        Vous pouvez aussi écrire directement à <a id="vt-mail" href="#">l’adresse de contact</a>.
+        Vos coordonnées servent uniquement à répondre à votre demande.</p>
+    </section>
+
+    <button type="button" class="btn fantome bloc" data-vitrine="connexion">Se connecter</button>
+  </div>
 </div>
 
 

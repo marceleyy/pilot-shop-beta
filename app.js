@@ -3738,6 +3738,11 @@ window.addEventListener('error', function (ev) {
        return;
      }
 
+     /* Appareil neuf : la page d'accueil publique (vitrine.js) passe d'abord.
+        Rien ne se pose par-dessus tant que le visiteur n'a pas choisi
+        « Se connecter ». Un appareil déjà utilisé n'attend pas. */
+     if (typeof attendreVitrine === 'function') await attendreVitrine();
+
      /* Wi-Fi connecté mais sans Internet, ou trop lent : le service worker
         vient de servir la page depuis son cache. L'application démarre donc
         hors ligne, au lieu de découvrir la panne lecture après lecture (8 s
