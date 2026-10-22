@@ -203,9 +203,15 @@ function ecranRattachement() {
       '</div>' +
       '<p class="mini" style="text-align:center;margin-top:18px">Ces identifiants ' +
       'sont ceux de la boutique, pas les vôtres. Demandez-les à votre manager.</p>' +
+      /* Arrivé depuis la page d'accueil publique : retour possible, sinon un
+         prospect sans identifiants n'avait plus de chemin vers l'essai. */
+      (typeof vitrineAMontrer === 'function' && vitrineAMontrer()
+        ? '<button type="button" class="btn fantome bloc" id="rt-vitrine" style="margin-top:10px">Retour à la présentation</button>' : '') +
       '</div>';
     document.body.appendChild(d);
 
+    const rv = d.querySelector('#rt-vitrine');
+    if (rv) rv.onclick = () => location.reload();
     const etat = m => { const e = d.querySelector('#rt-etat'); if (e) e.textContent = m; };
     const bouton = d.querySelector('#rt-ok');
 

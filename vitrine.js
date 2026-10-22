@@ -19,8 +19,8 @@ const VITRINE = {
   /* Adresse publique déjà affichée sur le site de l'entreprise. */
   contact: 'marcele.monpole@gmail.com',
   /* Clés qui prouvent que l'appareil sert déjà en boutique. */
-  cles: ['pilotshop.v3:auth', 'pilotshop.v3:boutique-rattachee', 'pilotshop.v3:equipe'],
-  passee: 'pilotshop.v3:vitrine-passee'
+  cles: ['pilotshop.v3:auth', 'pilotshop.v3:boutique-rattachee', 'pilotshop.v3:equipe',
+         'pilotshop.v3:session', 'pilotshop.v3:pilotshop.queue']
 };
 
 /* Appareil neuf ? Stockage illisible (navigation privée stricte) : on montre
@@ -28,7 +28,6 @@ const VITRINE = {
 function vitrineAMontrer() {
   if (/[?&]reset\b/.test(location.search)) return false;
   try {
-    if (localStorage.getItem(VITRINE.passee)) return false;
     return !VITRINE.cles.some(k => localStorage.getItem(k));
   } catch (e) { return true; }
 }
@@ -45,8 +44,10 @@ function attendreVitrine() {
     const v = document.getElementById('vitrine');
     if (!v) { document.documentElement.classList.remove('vitrine'); return resolve(); }
 
+    /* Rien n'est retenu ici : tant que l'appareil n'est pas rattaché, la
+       vitrine revient au prochain chargement. Un prospect curieux qui tombe
+       sur le rattachement sans identifiants peut toujours demander un essai. */
     const entrer = () => {
-      try { localStorage.setItem(VITRINE.passee, '1'); } catch (e) {}
       document.documentElement.classList.remove('vitrine');
       resolve();
     };
@@ -81,10 +82,10 @@ function attendreVitrine() {
         'Je souhaite essayer Pilot-Shop gratuitement pendant 2 mois.', '',
         'Nom : ' + nom,
         'Boutique : ' + boutique + (ville ? ' (' + ville + ')' : ''),
-        mail ? 'E-mail : ' + mail : '',
-        tel ? 'Téléphone : ' + tel : '',
-        msg ? '\n' + msg : ''
-      ].filter(l => l !== '').join('\n');
+        mail ? 'E-mail : ' + mail : null,
+        tel ? 'Téléphone : ' + tel : null,
+        msg ? '\n' + msg : null
+      ].filter(l => l !== null).join('\n');
       const url = 'mailto:' + VITRINE.contact +
         '?subject=' + encodeURIComponent('Demande d’essai Pilot-Shop : ' + boutique) +
         '&body=' + encodeURIComponent(corps);

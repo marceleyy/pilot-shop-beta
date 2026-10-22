@@ -1218,7 +1218,8 @@ html.vitrine #vitrine{
   display:block;position:fixed;inset:0;z-index:252;overflow-y:auto;background:var(--creme);
   padding:max(48px, calc(var(--safe-t) + 40px)) 22px calc(28px + var(--safe-b));
 }
-html.vitrine #login{visibility:hidden}
+html.vitrine #login,html.vitrine #offline{visibility:hidden}
+#vitrine .vt-mention{text-align:center;margin-top:18px}
 #vitrine .in{max-width:560px;margin:0 auto}
 #vitrine .vt-accroche{text-align:center;font-size:17px;line-height:1.55;color:var(--chocolat-2);margin:0 0 24px}
 #vitrine .vt-actions{display:flex;flex-direction:column;gap:12px;margin-bottom:28px}
