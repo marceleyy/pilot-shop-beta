@@ -39,61 +39,164 @@
 
 <!-- ===================== ACCUEIL PUBLIC ===================== -->
 <!-- Visible seulement sur un appareil neuf (vitrine.js). Un appareil déjà
-     utilisé en boutique arrive directement sur les prénoms. -->
+     utilisé en boutique arrive directement sur les prénoms. Les images sont
+     en loading="lazy" : masquées, elles ne sont jamais téléchargées. -->
 <div id="vitrine">
-  <div class="in">
 
-    <header class="lg">
-      <h1>Pilot-Shop</h1>
-      <p>Le registre de votre boutique</p>
-    </header>
-
-    <p class="vt-accroche">Traçabilité, frigos, réceptions, inventaires et écarts de caisse
-      réunis sur une tablette. Pensé pour les boutiques franchisées Amorino,
-      et utilisable même sans réseau, jusque dans la chambre froide.</p>
-
-    <div class="vt-actions">
-      <button type="button" class="btn menthe bloc xl" data-vitrine="connexion">J’ai déjà un compte : me connecter</button>
-      <button type="button" class="btn clair bloc xl" data-vitrine="essai">Demander un essai gratuit de 2 mois</button>
+  <nav class="vt-nav" aria-label="Présentation">
+    <div class="vt-nav-in">
+      <span class="vt-marque"><i class="vt-logo" aria-hidden="true"></i>Pilot-Shop</span>
+      <div class="vt-liens">
+        <button type="button" data-aller="vt-fonctions">Fonctions</button>
+        <button type="button" data-aller="vt-etapes">Démarrer</button>
+        <button type="button" data-aller="vt-faq">Questions</button>
+      </div>
+      <button type="button" class="vt-pilule petite" data-vitrine="connexion">Se connecter</button>
     </div>
+  </nav>
 
-    <ul class="vt-points">
-      <li><b>Traçabilité des lots</b><span>Photographiez l’étiquette : le numéro de lot est lu et classé tout seul.</span></li>
-      <li><b>Frigos et HACCP</b><span>Relevés de température guidés, alertes et registre prêt pour le contrôle.</span></li>
-      <li><b>Réceptions et inventaires</b><span>Stock froid et sec, comptage simple, écarts expliqués.</span></li>
-      <li><b>Caisse et écarts</b><span>Import de l’export de caisse, comparaison avec le stock par période.</span></li>
-      <li><b>Allergènes au comptoir</b><span>La fiche du parfum en deux appuis, même hors ligne.</span></li>
-      <li><b>Toute l’équipe</b><span>Chacun se connecte avec son prénom et un code, le manager suit tout.</span></li>
-    </ul>
+  <header class="vt-hero">
+    <p class="vt-surtitre">Pour les boutiques franchisées Amorino</p>
+    <h1>Toute la boutique.<br>Dans une tablette.</h1>
+    <p class="vt-chapo">Traçabilité, frigos, nettoyage, réassort et écarts de caisse. L’équipe saisit
+      en deux appuis, le responsable voit tout en direct. Même sans réseau.</p>
+    <div class="vt-cta">
+      <button type="button" class="vt-pilule" data-vitrine="essai">Essayer gratuitement 2 mois</button>
+      <button type="button" class="vt-lien" data-vitrine="connexion">J’ai déjà un compte ›</button>
+    </div>
+    <p class="vt-rassure">Mise en place offerte · Sans carte bancaire · Sans engagement</p>
 
-    <section id="vt-essai" class="card solide" hidden>
-      <h2>Essai gratuit de 2 mois</h2>
-      <p class="cs">Mise en place offerte, sans carte bancaire et sans engagement.
-        Laissez vos coordonnées : je vous recontacte pour installer Pilot-Shop dans votre boutique.</p>
-      <form id="vt-form" novalidate>
+    <div class="vt-appareils">
+      <figure class="vt-tablette">
+        <img src="vitrine/tablette-journee.webp" width="1028" height="771" loading="lazy"
+             alt="Écran « Ma journée » : tâches du service à cocher, alerte frigos du matin">
+      </figure>
+      <figure class="vt-telephone">
+        <img src="vitrine/telephone-controle.webp" width="390" height="900" loading="lazy"
+             alt="Tour de contrôle sur téléphone : écart de caisse, ruptures, périmés et alertes">
+      </figure>
+    </div>
+  </header>
+
+  <section class="vt-bandeau">
+    <p>Fini les classeurs, les dates au feutre et les écarts qu’on n’explique pas.</p>
+  </section>
+
+  <section class="vt-fonction" id="vt-fonctions">
+    <div class="vt-texte">
+      <p class="vt-surtitre">Traçabilité</p>
+      <h2>Scannez.<br>C’est tracé.</h2>
+      <p>Photographiez l’étiquette du bac : le numéro de lot est lu et rangé tout seul.
+        Ce qui part en vitrine, ce qui attend à l’armoire, ce qui est périmé : tout est daté,
+        et le registre est prêt pour le contrôle.</p>
+    </div>
+    <figure class="vt-ecran"><img src="vitrine/tracabilite.webp" width="820" height="780" loading="lazy"
+      alt="Écran Traçabilité : scanner une étiquette, produits à l’armoire et dernières ouvertures"></figure>
+  </section>
+
+  <section class="vt-fonction inverse">
+    <div class="vt-texte">
+      <p class="vt-surtitre">Tour de contrôle</p>
+      <h2>Vous n’êtes pas&nbsp;là.<br>Vous savez tout.</h2>
+      <p>Écart de caisse, ruptures, produits périmés, frigos pas relevés, nettoyage en retard :
+        le responsable voit l’essentiel en un coup d’œil, sur sa tablette ou son téléphone.</p>
+    </div>
+    <figure class="vt-ecran etroit"><img src="vitrine/telephone-controle.webp" width="390" height="900" loading="lazy"
+      alt="Tour de contrôle : indicateurs de la semaine et alertes"></figure>
+  </section>
+
+  <section class="vt-fonction">
+    <div class="vt-texte">
+      <p class="vt-surtitre">Allergènes</p>
+      <h2>La bonne réponse,<br>au comptoir.</h2>
+      <p>Un client demande ce que contient un parfum&nbsp;? La fiche s’ouvre en deux appuis,
+        tirée du document officiel de l’enseigne, qui reste la référence. Même hors ligne.</p>
+    </div>
+    <figure class="vt-ecran etroit"><img src="vitrine/allergenes.webp" width="520" height="801" loading="lazy"
+      alt="Fiche allergènes d’un parfum : contient, gluten, vegan, à savoir"></figure>
+  </section>
+
+  <section class="vt-grille-zone">
+    <h2>Et tout le reste du quotidien.</h2>
+    <div class="vt-grille">
+      <div class="vt-tuile"><b>Frigos</b><p>Relevés de température guidés matin et soir, avec alerte quand ils manquent.</p></div>
+      <div class="vt-tuile"><b>Nettoyage</b><p>Les tâches du jour à cocher, à leur rythme : quotidien, hebdomadaire ou mensuel.</p></div>
+      <div class="vt-tuile"><b>Réassort et inventaire</b><p>Stock froid et sec, comptage simple, et un résumé avant de valider.</p></div>
+      <div class="vt-tuile"><b>Écarts de caisse</b><p>L’export de caisse comparé au stock, période par période, avec les réceptions et les pertes.</p></div>
+      <div class="vt-tuile sombre"><b>Hors ligne</b><p>Pas de réseau en chambre froide&nbsp;? Les saisies sont gardées et partent toutes seules au retour du Wi-Fi.</p></div>
+      <div class="vt-tuile"><b>Chacun son code</b><p>Chaque équipier se connecte avec son prénom et un code à quatre chiffres. On sait qui a fait quoi.</p></div>
+    </div>
+  </section>
+
+  <section class="vt-etapes" id="vt-etapes">
+    <h2>Prête en une matinée.</h2>
+    <ol>
+      <li><span>1</span><b>Vous demandez l’essai</b><p>Deux minutes avec le formulaire ci-dessous.</p></li>
+      <li><span>2</span><b>Je l’installe avec vous</b><p>Sur votre tablette, avec votre équipe et vos frigos.</p></li>
+      <li><span>3</span><b>Vous l’utilisez 2 mois</b><p>Gratuitement. Ensuite, vous décidez de continuer ou non.</p></li>
+    </ol>
+  </section>
+
+  <section class="vt-offre" id="vt-essai">
+    <div class="vt-offre-texte">
+      <p class="vt-surtitre">Essai gratuit</p>
+      <h2>2 mois offerts.</h2>
+      <ul>
+        <li>Mise en place et formation de l’équipe offertes</li>
+        <li>Sans carte bancaire</li>
+        <li>Sans engagement : rien n’est prélevé à la fin</li>
+      </ul>
+    </div>
+    <form id="vt-form" class="vt-form" novalidate>
+      <div class="vt-ligne">
         <div class="champ"><label class="f" for="vt-nom">Votre nom</label>
           <input type="text" id="vt-nom" autocomplete="name"></div>
-        <div class="champ"><label class="f" for="vt-boutique">Nom de la boutique</label>
+        <div class="champ"><label class="f" for="vt-boutique">Boutique</label>
           <input type="text" id="vt-boutique" autocomplete="organization"></div>
-        <div class="champ"><label class="f" for="vt-ville">Ville</label>
-          <input type="text" id="vt-ville" autocomplete="address-level2"></div>
+      </div>
+      <div class="champ"><label class="f" for="vt-ville">Ville</label>
+        <input type="text" id="vt-ville" autocomplete="address-level2"></div>
+      <div class="vt-ligne">
         <div class="champ"><label class="f" for="vt-courriel">E-mail</label>
           <input type="email" id="vt-courriel" autocomplete="email" autocapitalize="none" spellcheck="false"></div>
         <div class="champ"><label class="f" for="vt-tel">Téléphone</label>
           <input type="tel" id="vt-tel" autocomplete="tel"></div>
-        <div class="champ"><label class="f" for="vt-msg">Message (facultatif)</label>
-          <textarea id="vt-msg" rows="3"></textarea></div>
-        <button type="submit" class="btn menthe bloc xl">Préparer ma demande</button>
-      </form>
-      <p class="mini" id="vt-etat" role="status" aria-live="polite"></p>
-      <p class="mini">Le bouton ouvre votre messagerie avec la demande déjà rédigée.
-        Vous pouvez aussi écrire directement à <a id="vt-mail" href="#">l’adresse de contact</a>.
-        Vos coordonnées servent uniquement à répondre à votre demande.</p>
-    </section>
+      </div>
+      <div class="champ"><label class="f" for="vt-msg">Message (facultatif)</label>
+        <textarea id="vt-msg" rows="3"></textarea></div>
+      <button type="submit" class="vt-pilule large">Demander mon essai</button>
+      <p class="vt-note" id="vt-etat" role="status" aria-live="polite"></p>
+      <p class="vt-note">Le bouton ouvre votre messagerie avec la demande déjà rédigée. Vous pouvez aussi
+        écrire à <a id="vt-mail" href="#">l’adresse de contact</a>. Vos coordonnées servent uniquement à répondre.</p>
+    </form>
+  </section>
 
-    <button type="button" class="btn fantome bloc" data-vitrine="connexion">Se connecter</button>
-    <p class="mini vt-mention">Pilot-Shop est un outil indépendant, non affilié à Amorino.</p>
-  </div>
+  <section class="vt-faq" id="vt-faq">
+    <h2>Questions fréquentes</h2>
+    <details><summary>Faut-il une connexion Internet&nbsp;?</summary>
+      <p>Non. L’application s’ouvre et enregistre sans réseau, y compris en chambre froide. Les saisies partent toutes seules dès que le Wi-Fi revient.</p></details>
+    <details><summary>Sur quel appareil&nbsp;?</summary>
+      <p>Tablette, téléphone ou ordinateur, dans le navigateur. Elle s’ajoute à l’écran d’accueil comme une application, sans passer par un magasin d’applis.</p></details>
+    <details><summary>Qui voit nos données&nbsp;?</summary>
+      <p>Chaque boutique a son propre compte et ne voit que ses données. L’équipe se connecte avec son prénom et son code ; le compte de la boutique reste chez le responsable.</p></details>
+    <details><summary>Que se passe-t-il après les 2&nbsp;mois&nbsp;?</summary>
+      <p>Vous choisissez de continuer ou non. Aucune carte bancaire n’est demandée pour l’essai, donc rien n’est prélevé automatiquement.</p></details>
+    <details><summary>Est-ce un outil officiel Amorino&nbsp;?</summary>
+      <p>Non. Pilot-Shop est un outil indépendant, pensé pour le quotidien des boutiques franchisées. Les documents officiels de l’enseigne restent la référence.</p></details>
+  </section>
+
+  <section class="vt-final">
+    <h2>Essayez-la dans votre boutique.</h2>
+    <div class="vt-cta">
+      <button type="button" class="vt-pilule" data-vitrine="essai">Essayer gratuitement 2 mois</button>
+      <button type="button" class="vt-lien" data-vitrine="connexion">Se connecter ›</button>
+    </div>
+  </section>
+
+  <footer class="vt-pied">
+    <span>Pilot-Shop · outil indépendant, non affilié à Amorino.</span>
+    <button type="button" class="vt-lien" data-vitrine="connexion">Se connecter</button>
+  </footer>
 </div>
 
 

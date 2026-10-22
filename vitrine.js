@@ -53,13 +53,19 @@ function attendreVitrine() {
     };
     v.querySelectorAll('[data-vitrine="connexion"]').forEach(b => { b.onclick = entrer; });
 
-    const essai = v.querySelector('#vt-essai');
+    /* Liens internes sans changer l'adresse : un « #ancre » resterait dans
+       l'historique de l'application après la connexion. */
+    const aller = id => {
+      const c = v.querySelector('#' + id);
+      if (c) c.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      return c;
+    };
+    v.querySelectorAll('[data-aller]').forEach(b => { b.onclick = () => aller(b.dataset.aller); });
     v.querySelectorAll('[data-vitrine="essai"]').forEach(b => {
       b.onclick = () => {
-        essai.hidden = false;
-        essai.scrollIntoView({ behavior: 'smooth', block: 'start' });
-        const p = essai.querySelector('input');
-        if (p) setTimeout(() => p.focus({ preventScroll: true }), 350);
+        const essai = aller('vt-essai');
+        const p = essai && essai.querySelector('input');
+        if (p) setTimeout(() => p.focus({ preventScroll: true }), 500);
       };
     });
 

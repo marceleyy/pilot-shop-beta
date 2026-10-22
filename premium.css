@@ -876,23 +876,23 @@ select,select:focus{
 #login .in{margin:auto;max-width:560px}
 
 /* La marque : serif, filet or et losange, lieu en petites capitales. */
-#login .lg,#rattach .lg,#amorcage .lg,#vitrine .lg{text-align:center;margin-bottom:32px}
-#login .lg h1,#rattach .lg h1,#amorcage .lg h1,#vitrine .lg h1{
+#login .lg,#rattach .lg,#amorcage .lg{text-align:center;margin-bottom:32px}
+#login .lg h1,#rattach .lg h1,#amorcage .lg h1{
   font-family:var(--serif);font-size:var(--t-marque);font-weight:600;
   letter-spacing:-.015em;line-height:1.05;color:var(--chocolat);
 }
-#login .lg h1::after,#rattach .lg h1::after,#amorcage .lg h1::after,#vitrine .lg h1::after{
+#login .lg h1::after,#rattach .lg h1::after,#amorcage .lg h1::after{
   content:'';display:block;width:84px;height:10px;margin:14px auto 0;
   background:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 84 10'%3E%3Cpath d='M0 5h34M50 5h34' stroke='%23B08A4A' stroke-width='1'/%3E%3Cpath d='M42 1l4 4-4 4-4-4z' fill='%23B08A4A'/%3E%3C/svg%3E") center/contain no-repeat;
 }
-#login .lg p,#rattach .lg p,#amorcage .lg p,#vitrine .lg p{
+#login .lg p,#rattach .lg p,#amorcage .lg p{
   font-size:12px;font-weight:650;letter-spacing:.16em;text-transform:uppercase;
   color:var(--noisette);margin-top:12px;
 }
 /* Sceau de la maison : le cornet de l'icône, redessiné aux couleurs de la
    palette (boule porcelaine, cornet or, tuile chocolat) — l'icône d'origine,
    sarcelle sur bleu nuit, jurait avec l'ivoire. Pur CSS, rien à charger. */
-#login .lg::before,#rattach .lg::before,#amorcage .lg::before,#vitrine .lg::before{
+#login .lg::before,#rattach .lg::before,#amorcage .lg::before{
   content:'';display:block;width:58px;height:58px;margin:0 auto 16px;border-radius:17px;
   background:
     url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 40'%3E%3Cg fill='%23F6EEE2'%3E%3Ccircle cx='20' cy='12.5' r='7.5'/%3E%3Ccircle cx='12.8' cy='17.2' r='5.6'/%3E%3Ccircle cx='27.2' cy='17.2' r='5.6'/%3E%3Crect x='8.6' y='16.6' width='22.8' height='5.6' rx='2.8'/%3E%3C/g%3E%3Cpath d='M10.2 22.6h19.6L20 38.4z' fill='%23C9A464'/%3E%3Cpath d='M15.2 26.6h9.6M17.4 30.6h5.2' stroke='%232A1A12' stroke-width='1.7' stroke-linecap='round'/%3E%3C/svg%3E") center 52%/36px 36px no-repeat,
@@ -1212,31 +1212,150 @@ button.fr-ligne:focus-visible{outline:2px solid var(--cacao);outline-offset:-2px
 /* --- Accueil public (vitrine.js) ------------------------------------------
    Montré seulement sur un appareil neuf : la classe « vitrine » est posée sur
    <html> avant le premier affichage, et retirée par « Se connecter ». Au-dessus
-   de l'écran des prénoms (250), sous la feuille et le rattachement (900). */
+   de l'écran des prénoms (250), sous la feuille et le rattachement (900).
+   Style de page produit : grands titres serrés, beaucoup d'air, sections
+   alternées blanc et gris clair, boutons en pilule. */
 #vitrine{display:none}
-html.vitrine #vitrine{
-  display:block;position:fixed;inset:0;z-index:252;overflow-y:auto;background:var(--creme);
-  padding:max(48px, calc(var(--safe-t) + 40px)) 22px calc(28px + var(--safe-b));
-}
 html.vitrine #login,html.vitrine #offline{visibility:hidden}
-#vitrine .vt-mention{text-align:center;margin-top:18px}
-#vitrine .in{max-width:560px;margin:0 auto}
-#vitrine .vt-accroche{text-align:center;font-size:17px;line-height:1.55;color:var(--chocolat-2);margin:0 0 24px}
-#vitrine .vt-actions{display:flex;flex-direction:column;gap:12px;margin-bottom:28px}
-#vitrine .vt-points{list-style:none;margin:0 0 24px;padding:0;display:grid;gap:10px}
-#vitrine .vt-points li{background:var(--porcelaine);border:1px solid var(--filet);border-radius:16px;padding:14px 16px}
-#vitrine .vt-points b{display:block;color:var(--chocolat);font-size:15.5px}
-#vitrine .vt-points span{display:block;color:var(--noisette);font-size:14px;margin-top:2px}
-#vitrine #vt-essai{margin-bottom:18px;scroll-margin-top:24px}
-#vitrine #vt-essai h2{margin-bottom:6px}
-#vitrine #vt-form{margin-top:14px}
-#vitrine #vt-form .btn{margin-top:18px}
-#vitrine #vt-essai .mini{margin-top:12px}
-#vitrine #vt-etat:empty{display:none}
-#vitrine input[type=tel]{
-  width:100%;min-height:var(--tap);padding:12px 14px;font-size:16px;appearance:none;-webkit-appearance:none;
-  background:var(--blanc);border:1px solid var(--line-fort);border-radius:var(--r-btn);
+html.vitrine #vitrine{
+  --vt-texte:#1d1d1f; --vt-gris:#6e6e73; --vt-fond2:#f5f5f7; --vt-bleu:#0071e3; --vt-bleu-d:#0062c4;
+  --vt-filet:#d2d2d7;
+  display:block;position:fixed;inset:0;z-index:252;overflow-y:auto;overflow-x:hidden;
+  background:#fff;color:var(--vt-texte);
+  font-family:-apple-system,BlinkMacSystemFont,"SF Pro Display",Inter,"Segoe UI",Roboto,sans-serif;
+  -webkit-font-smoothing:antialiased;scroll-behavior:smooth;
 }
-@media (min-width:720px){
-  #vitrine .vt-points{grid-template-columns:1fr 1fr}
+#vitrine h1,#vitrine h2,#vitrine b{font-family:inherit;color:var(--vt-texte)}
+#vitrine p{margin:0}
+#vitrine figure{margin:0}
+#vitrine img{display:block;max-width:100%;height:auto}
+
+/* Barre du haut, translucide */
+#vitrine .vt-nav{position:sticky;top:0;z-index:2;background:rgba(255,255,255,.78);
+  backdrop-filter:saturate(1.8) blur(20px);-webkit-backdrop-filter:saturate(1.8) blur(20px);
+  border-bottom:1px solid rgba(0,0,0,.08);padding-top:var(--safe-t)}
+#vitrine .vt-nav-in{max-width:1024px;margin:0 auto;height:52px;padding:0 16px;
+  display:flex;align-items:center;gap:16px}
+#vitrine .vt-marque{display:flex;align-items:center;gap:8px;font-weight:650;font-size:17px;letter-spacing:-.01em}
+#vitrine .vt-logo{width:26px;height:26px;border-radius:7px;display:block;
+  background:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 40'%3E%3Cg fill='%23F6EEE2'%3E%3Ccircle cx='20' cy='12.5' r='7.5'/%3E%3Ccircle cx='12.8' cy='17.2' r='5.6'/%3E%3Ccircle cx='27.2' cy='17.2' r='5.6'/%3E%3Crect x='8.6' y='16.6' width='22.8' height='5.6' rx='2.8'/%3E%3C/g%3E%3Cpath d='M10.2 22.6h19.6L20 38.4z' fill='%23C9A464'/%3E%3C/svg%3E") center 55%/18px 18px no-repeat,#2A1A12}
+#vitrine .vt-liens{display:flex;gap:4px;margin-left:auto}
+#vitrine .vt-liens button{background:none;border:0;padding:8px 10px;font-size:13px;color:var(--vt-texte);opacity:.8;cursor:pointer}
+#vitrine .vt-liens button:hover{opacity:1}
+
+/* Boutons */
+#vitrine .vt-pilule{display:inline-flex;align-items:center;justify-content:center;min-height:48px;
+  padding:0 24px;border:0;border-radius:980px;background:var(--vt-bleu);color:#fff;
+  font-size:17px;font-weight:500;cursor:pointer;transition:background-color .2s}
+#vitrine .vt-pilule:hover{background:var(--vt-bleu-d)}
+#vitrine .vt-pilule.petite{min-height:32px;padding:0 14px;font-size:13px}
+#vitrine .vt-pilule.large{width:100%;margin-top:20px}
+#vitrine .vt-lien{background:none;border:0;padding:8px 4px;color:var(--vt-bleu);font-size:17px;cursor:pointer}
+#vitrine .vt-lien:hover{text-decoration:underline}
+#vitrine .vt-cta{display:flex;flex-wrap:wrap;align-items:center;justify-content:center;gap:12px 24px}
+#vitrine .vt-surtitre{font-size:17px;font-weight:600;color:#bf4800;margin-bottom:8px}
+
+/* Ouverture */
+#vitrine .vt-hero{text-align:center;padding:72px 16px 0;max-width:1024px;margin:0 auto}
+#vitrine .vt-hero h1{font-size:clamp(40px,7.4vw,80px);font-weight:700;line-height:1.05;letter-spacing:-.035em}
+#vitrine .vt-chapo{font-size:clamp(19px,2.4vw,24px);line-height:1.4;color:var(--vt-gris);
+  max-width:680px;margin:20px auto 28px}
+#vitrine .vt-rassure{font-size:14px;color:var(--vt-gris);margin-top:16px}
+#vitrine .vt-appareils{position:relative;max-width:900px;margin:56px auto 0;padding:0 6% 40px 0}
+#vitrine .vt-tablette{background:#1d1d1f;border-radius:clamp(18px,3vw,34px);padding:clamp(8px,1.4vw,14px);
+  box-shadow:0 30px 80px -30px rgba(0,0,0,.45)}
+#vitrine .vt-tablette img{border-radius:clamp(10px,1.8vw,22px);width:100%}
+#vitrine .vt-telephone{position:absolute;right:0;bottom:0;width:24%;background:#1d1d1f;
+  border-radius:clamp(16px,3.4vw,38px);padding:clamp(4px,.8vw,8px);box-shadow:0 24px 60px -20px rgba(0,0,0,.5)}
+#vitrine .vt-telephone img{border-radius:clamp(12px,2.8vw,31px);width:100%}
+
+/* Bandeau sombre */
+#vitrine .vt-bandeau{background:#000;margin-top:80px;padding:96px 16px;text-align:center}
+#vitrine .vt-bandeau p{color:#f5f5f7;font-size:clamp(28px,4.6vw,48px);font-weight:700;line-height:1.12;letter-spacing:-.025em;
+  max-width:860px;margin:0 auto}
+
+/* Fonctions, en alternance */
+#vitrine .vt-fonction{max-width:1024px;margin:0 auto;padding:96px 16px;display:grid;gap:40px;align-items:center}
+#vitrine .vt-fonction + .vt-fonction{border-top:1px solid var(--vt-filet)}
+#vitrine .vt-fonction h2,#vitrine .vt-grille-zone h2,#vitrine .vt-etapes h2,#vitrine .vt-offre h2,
+#vitrine .vt-faq h2,#vitrine .vt-final h2{font-size:clamp(34px,5.2vw,56px);font-weight:700;line-height:1.07;letter-spacing:-.03em}
+#vitrine .vt-texte p:last-child{font-size:clamp(17px,1.9vw,21px);line-height:1.45;color:var(--vt-gris);margin-top:18px;max-width:460px}
+#vitrine .vt-ecran img{border-radius:22px;box-shadow:0 20px 60px -24px rgba(0,0,0,.28);border:1px solid rgba(0,0,0,.06);margin:0 auto}
+#vitrine .vt-ecran.etroit img{max-width:320px}
+@media (min-width:820px){
+  #vitrine .vt-fonction{grid-template-columns:1fr 1fr;gap:64px}
+  #vitrine .vt-fonction.inverse .vt-texte{order:2}
 }
+
+/* Grille de tuiles */
+#vitrine .vt-grille-zone{background:var(--vt-fond2);padding:96px 16px}
+#vitrine .vt-grille-zone h2{text-align:center;max-width:1024px;margin:0 auto 48px}
+#vitrine .vt-grille{max-width:1024px;margin:0 auto;display:grid;gap:16px;grid-template-columns:1fr}
+#vitrine .vt-tuile{background:#fff;border-radius:24px;padding:32px 28px}
+#vitrine .vt-tuile b{display:block;font-size:24px;font-weight:700;letter-spacing:-.02em}
+#vitrine .vt-tuile p{font-size:17px;line-height:1.45;color:var(--vt-gris);margin-top:10px}
+#vitrine .vt-tuile.sombre{background:#1d1d1f}
+#vitrine .vt-tuile.sombre b{color:#f5f5f7}
+#vitrine .vt-tuile.sombre p{color:#a1a1a6}
+@media (min-width:640px){ #vitrine .vt-grille{grid-template-columns:1fr 1fr} }
+@media (min-width:960px){ #vitrine .vt-grille{grid-template-columns:repeat(3,1fr)} }
+
+/* Étapes */
+#vitrine .vt-etapes{max-width:1024px;margin:0 auto;padding:96px 16px;text-align:center}
+#vitrine .vt-etapes ol{list-style:none;padding:0;margin:48px 0 0;display:grid;gap:32px}
+#vitrine .vt-etapes li span{display:inline-grid;place-items:center;width:44px;height:44px;border-radius:50%;
+  background:var(--vt-fond2);font-weight:700;font-size:19px;margin-bottom:14px}
+#vitrine .vt-etapes li b{display:block;font-size:21px;font-weight:650}
+#vitrine .vt-etapes li p{color:var(--vt-gris);font-size:17px;margin-top:6px}
+@media (min-width:720px){ #vitrine .vt-etapes ol{grid-template-columns:repeat(3,1fr)} }
+
+/* Offre et formulaire */
+#vitrine .vt-offre{background:var(--vt-fond2);padding:96px 16px;display:grid;gap:40px;
+  scroll-margin-top:52px}
+#vitrine .vt-offre > *{max-width:520px;width:100%;margin:0 auto}
+#vitrine .vt-offre ul{list-style:none;padding:0;margin:24px 0 0}
+#vitrine .vt-offre li{font-size:19px;padding:12px 0 12px 32px;border-bottom:1px solid var(--vt-filet);position:relative}
+#vitrine .vt-offre li::before{content:'✓';position:absolute;left:4px;color:#1d8a3a;font-weight:700}
+@media (min-width:900px){
+  #vitrine .vt-offre{grid-template-columns:1fr 1fr;max-width:none;padding-left:max(16px,calc(50% - 512px));padding-right:max(16px,calc(50% - 512px))}
+  #vitrine .vt-offre > *{margin:0}
+}
+#vitrine .vt-form{background:#fff;border-radius:24px;padding:28px 24px}
+#vitrine .vt-form .champ{margin-top:14px}
+#vitrine .vt-form .champ:first-child{margin-top:0}
+#vitrine .vt-form .vt-ligne{display:grid;gap:14px;margin-top:14px}
+#vitrine .vt-form .vt-ligne:first-child{margin-top:0}
+#vitrine .vt-form .vt-ligne .champ{margin-top:0}
+@media (min-width:520px){ #vitrine .vt-form .vt-ligne{grid-template-columns:1fr 1fr} }
+#vitrine .vt-form label.f{color:var(--vt-gris);text-transform:none;letter-spacing:0;font-size:14px;font-weight:500}
+#vitrine .vt-form input,#vitrine .vt-form textarea{width:100%;min-height:48px;padding:12px 14px;font-size:17px;
+  background:#fff;border:1px solid var(--vt-filet);border-radius:12px;color:var(--vt-texte);appearance:none;-webkit-appearance:none}
+#vitrine .vt-form input:focus,#vitrine .vt-form textarea:focus{outline:0;border-color:var(--vt-bleu);box-shadow:0 0 0 4px rgba(0,113,227,.18)}
+#vitrine .vt-note{font-size:13px;line-height:1.45;color:var(--vt-gris);margin-top:12px}
+#vitrine .vt-note:empty{display:none}
+#vitrine .vt-note a{color:var(--vt-bleu)}
+
+/* Questions */
+#vitrine .vt-faq{max-width:780px;margin:0 auto;padding:96px 16px}
+#vitrine .vt-faq h2{margin-bottom:32px}
+#vitrine .vt-faq details{border-bottom:1px solid var(--vt-filet)}
+#vitrine .vt-faq summary{list-style:none;cursor:pointer;padding:22px 32px 22px 0;font-size:19px;font-weight:600;position:relative}
+#vitrine .vt-faq summary::-webkit-details-marker{display:none}
+#vitrine .vt-faq summary::after{content:'+';position:absolute;right:4px;top:50%;transform:translateY(-50%);
+  font-size:26px;font-weight:300;color:var(--vt-gris);transition:transform .2s}
+#vitrine .vt-faq details[open] summary::after{transform:translateY(-50%) rotate(45deg)}
+#vitrine .vt-faq details p{font-size:17px;line-height:1.5;color:var(--vt-gris);padding:0 0 22px}
+
+/* Fin de page */
+#vitrine .vt-final{text-align:center;padding:80px 16px 96px;background:var(--vt-fond2)}
+#vitrine .vt-final h2{margin-bottom:28px}
+#vitrine .vt-pied{max-width:1024px;margin:0 auto;padding:20px 16px calc(24px + var(--safe-b));
+  display:flex;flex-wrap:wrap;gap:8px 16px;justify-content:space-between;align-items:center;
+  font-size:12px;color:var(--vt-gris);border-top:1px solid var(--vt-filet)}
+#vitrine .vt-pied .vt-lien{font-size:12px}
+@media (max-width:560px){
+  #vitrine .vt-liens{display:none}
+  #vitrine .vt-nav .vt-pilule{margin-left:auto}
+  #vitrine .vt-fonction,#vitrine .vt-grille-zone,#vitrine .vt-etapes,#vitrine .vt-offre,#vitrine .vt-faq{padding-top:72px;padding-bottom:72px}
+}
+#vitrine section[id]{scroll-margin-top:52px}
