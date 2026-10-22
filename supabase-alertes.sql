@@ -78,3 +78,7 @@ $$);
 -- Attendu : un numéro de tâche. Pour vérifier :
 --   select * from cron.job_run_details order by start_time desc limit 5;
 --   select * from net._http_response order by created desc limit 5;
+
+-- À savoir : un relevé du soir validé après minuit est daté du lendemain.
+-- Avec une fermeture entre 23:45 et 23:59, la tournée peut alors signaler à
+-- tort la veille comme « non relevée ».

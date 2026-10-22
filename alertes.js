@@ -247,7 +247,10 @@ V.alertes = async function () {
       const r = await alPoster({ type:'essai', cle:uid(), titre:'Essai Pilot-Shop',
         texte:'Les alertes arrivent bien sur ce téléphone.', vue:'alertes',
         auteur:STATE.user.prenom, abonnement:moi.id });
-      toast(r && r.envoyes ? 'Essai envoyé' : 'Essai parti, mais ce téléphone n’est plus inscrit : désactivez puis réactivez', r && r.envoyes ? '' : 'erreur');
+      const autre = moi.prenom && moi.prenom !== STATE.user.prenom;
+      toast(r && r.envoyes ? 'Essai envoyé'
+        : autre ? 'Ce téléphone est inscrit au nom de ' + moi.prenom + ' : réactivez les alertes pour vous'
+        : 'Essai parti, mais ce téléphone n’est plus inscrit : désactivez puis réactivez', r && r.envoyes ? '' : 'erreur');
     } catch (e) { toast('Envoi impossible (réseau ou serveur)', 'erreur'); }
     essai.disabled = false;
   };

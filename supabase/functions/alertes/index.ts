@@ -97,17 +97,21 @@ async function diffuser(site: string, cle: string, a: Alerte) {
     return !a.auteur || d.prenom !== a.auteur;
   });
   const message = JSON.stringify({ titre: a.titre, texte: a.texte, vue: a.vue || 'controle', tag: cle });
-  let envoyes = 0;
-  if (!cibles.length) return { envoyes: 0, cibles: 0 };
+  let envoyes = 0, temporaires = 0;
+  if (!cibles.length) return { envoyes: 0, cibles: 0, temporaires: 0 };
   for (const c of cibles) {
     try {
       const statut = await envoyer({ endpoint: c.data.endpoint, keys: c.data.keys }, message, VAPID);
-      if (statut === 404 || statut === 410) {
+      /* 404, 410 : abonnement expiré. 403 : il a été créé avec d'autres clés
+         VAPID. Dans les deux cas il ne servira plus : on l'oublie. */
+      if (statut === 404 || statut === 410 || statut === 403) {
         await rest('abonnements_push?site=eq.' + enc(site) + '&id=eq.' + enc(c.id), { method: 'DELETE' });
       } else if (statut < 300) envoyes++;
-    } catch (_) { /* un téléphone injoignable ne bloque pas les autres */ }
+      else if (statut === 429 || statut >= 500) temporaires++;
+      /* Autre refus (400, 413…) : le renvoyer ne changerait rien. */
+    } catch (_) { temporaires++; /* réseau : un téléphone injoignable ne bloque pas les autres */ }
   }
-  return { envoyes, cibles: cibles.length };
+  return { envoyes, cibles: cibles.length, temporaires };
 }
 
 /* Réserve, envoie, et rend la clé si aucun téléphone n'a pu être joint :
@@ -115,8 +119,10 @@ async function diffuser(site: string, cle: string, a: Alerte) {
 async function reserverEtDiffuser(site: string, cle: string, a: Alerte) {
   if (!(await reserver(site, cle))) return null;
   let r;
-  try { r = await diffuser(site, cle, a); } catch (e) { r = { envoyes: 0, cibles: 1, erreur: e }; }
-  if (r.cibles > 0 && r.envoyes === 0) {
+  try { r = await diffuser(site, cle, a); } catch (_) { r = { envoyes: 0, cibles: 1, temporaires: 1 }; }
+  /* On ne rend la clé que pour une panne passagère : un refus définitif
+     relancé chaque minute contournerait aussi le plafond d'alertes. */
+  if (r.envoyes === 0 && r.temporaires > 0) {
     await rest('alertes_envoyees?site=eq.' + enc(site) + '&id=eq.' + enc(cle), { method: 'DELETE' });
     throw new Error('Aucun téléphone joignable');
   }
@@ -124,11 +130,11 @@ async function reserverEtDiffuser(site: string, cle: string, a: Alerte) {
 }
 
 /* Heure de la boutique : date ISO, minutes depuis minuit, jour 1 (lundi) à 7. */
-function maintenant(decalageJours = 0) {
+function maintenant() {
   const p = Object.fromEntries(new Intl.DateTimeFormat('en-GB', {
     timeZone: FUSEAU, year: 'numeric', month: '2-digit', day: '2-digit',
     hour: '2-digit', minute: '2-digit', weekday: 'short', hourCycle: 'h23',
-  }).formatToParts(new Date(Date.now() + decalageJours * 864e5)).map((x) => [x.type, x.value]));
+  }).formatToParts(new Date()).map((x) => [x.type, x.value]));
   const jours: Record<string, number> = { Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6, Sun: 7 };
   return { jour: p.year + '-' + p.month + '-' + p.day, minutes: +p.hour * 60 + +p.minute, js: jours[p.weekday] };
 }
@@ -166,7 +172,9 @@ async function tourneeFrigos() {
        le lendemain entre fermeture + 15 min et l'ouverture. */
     const tardive = f !== null && (f + RETARD.soir >= 1440 || (o !== null && f <= o));
     if (tardive && o !== null) {
-      const hier = maintenant(-1);
+      /* La veille calculée sur la date, pas en retirant 24 h (changement d'heure). */
+      const dh = new Date(t.jour + 'T12:00:00Z'); dh.setUTCDate(dh.getUTCDate() - 1);
+      const hier = { jour: dh.toISOString().slice(0, 10), js: dh.getUTCDay() || 7 };
       const limite = (f! + RETARD.soir) % 1440;
       if (ouverts.indexOf(hier.js) >= 0 && t.minutes >= limite && t.minutes < o) {
         const rh = (await lireDonnee('releves_temperature', site, 'temp:' + hier.jour)) || {};
