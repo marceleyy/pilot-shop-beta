@@ -1221,7 +1221,7 @@ button.fr-ligne:focus-visible{outline:2px solid var(--cacao);outline-offset:-2px
 html.vitrine #login,html.vitrine #offline{visibility:hidden}
 html.vitrine #vitrine{
   --vt-texte:var(--chocolat); --vt-gris:var(--cacao); --vt-fond2:var(--creme-2);
-  --vt-bleu:var(--chocolat); --vt-bleu-d:#000; --vt-filet:var(--filet);
+  --vt-bleu:var(--chocolat); --vt-bleu-d:#4A3022; --vt-filet:var(--filet);
   --vt-or:#765822;   /* or lisible en texte : 5,4:1 même sur crème-2 */
   display:block;position:fixed;inset:0;z-index:252;overflow-y:auto;overflow-x:hidden;
   background:var(--creme);color:var(--vt-texte);font-family:var(--sans);
@@ -1362,7 +1362,7 @@ html.vitrine #vitrine{
 /* Fin de page */
 #vitrine .vt-final{text-align:center;padding:80px 16px 96px;background:var(--vt-fond2)}
 #vitrine .vt-final h2{margin-bottom:28px}
-#vitrine .vt-pied{max-width:1024px;margin:0 auto;padding:20px 16px calc(24px + var(--safe-b));color:var(--noisette);
+#vitrine .vt-pied{max-width:1024px;margin:0 auto;padding:20px 16px calc(24px + var(--safe-b));
   display:flex;flex-wrap:wrap;gap:8px 16px;justify-content:space-between;align-items:center;
   font-size:12px;color:var(--vt-gris);border-top:1px solid var(--vt-filet)}
 #vitrine .vt-pied .vt-lien{font-size:12px}

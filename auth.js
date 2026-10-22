@@ -211,7 +211,8 @@ function ecranRattachement() {
     document.body.appendChild(d);
 
     const rv = d.querySelector('#rt-vitrine');
-    if (rv) rv.onclick = () => location.reload();
+    /* Même effet que le bouton retour du navigateur (vitrine.js). */
+    if (rv) rv.onclick = () => (typeof revenirVitrine === 'function' ? revenirVitrine() : location.reload());
     const etat = m => { const e = d.querySelector('#rt-etat'); if (e) e.textContent = m; };
     const bouton = d.querySelector('#rt-ok');
 
@@ -234,12 +235,12 @@ function ecranRattachement() {
            neuve plutôt que de continuer avec l'équipe et la session d'avant. */
         if (avant && s && s.site && s.site !== avant && typeof quitterAncienneBoutique === 'function') {
           const n = quitterAncienneBoutique(avant);
-          etat('Rattaché à ' + s.site + '.' + (n ? ' ' + n + (n > 1 ? ' saisies de ' + avant + ' attendent' : ' saisie de ' + avant + ' attend') +
+          etat('Connecté à ' + s.site + '.' + (n ? ' ' + n + (n > 1 ? ' saisies de ' + avant + ' attendent' : ' saisie de ' + avant + ' attend') +
                ' : ' + (n > 1 ? 'elles partiront' : 'elle partira') + ' quand l’appareil sera de nouveau rattaché à ' + avant + '.' : ''));
           setTimeout(() => (typeof recharger === 'function' ? recharger() : location.reload()), n ? 4000 : 300);
           return;
         }
-        etat('Rattaché. Chargement de l’équipe…');
+        etat('Connecté. Chargement de l’équipe…');
         if (typeof appliquerReglages === 'function') appliquerReglages();
         /* On charge l'équipe AVANT de retirer l'écran : sinon la liste des
            prénoms apparaît vide le temps de l'aller-retour. */
@@ -252,7 +253,7 @@ function ecranRattachement() {
         /* Messages en français : « Failed to fetch » ne disait rien à l'équipe. */
         etat(e.statut === 400 ? 'Identifiants refusés.'
            : e.statut === 429 ? 'Trop d’essais : patientez une minute avant de réessayer.'
-           : e.statut ? 'La base refuse le rattachement (erreur ' + e.statut + '). Réessayez plus tard.'
+           : e.statut ? 'La base refuse la connexion (erreur ' + e.statut + '). Réessayez plus tard.'
            : 'Base injoignable. Vérifiez le Wi-Fi, puis réessayez.');
       }
     };

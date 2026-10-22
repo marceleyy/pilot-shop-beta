@@ -48,6 +48,9 @@ function attendreVitrine() {
        vitrine revient au prochain chargement. Un prospect curieux qui tombe
        sur le rattachement sans identifiants peut toujours demander un essai. */
     const entrer = () => {
+      /* Une entrée d'historique : le bouton retour du navigateur ramène à
+         la présentation au lieu de quitter le site (voir plus bas). */
+      try { history.pushState({ vitrine: 'connexion' }, '', location.pathname + location.search); } catch (e) {}
       document.documentElement.classList.remove('vitrine');
       resolve();
     };
@@ -102,3 +105,18 @@ function attendreVitrine() {
     };
   });
 }
+
+/* Retour depuis la connexion. Tant que l'appareil n'est ni rattaché ni
+   utilisé, on recharge : la vitrine revient, et l'écran de rattachement
+   ouvert (et le démarrage qui l'attend) repart de zéro. Une fois l'appareil
+   rattaché, ce retour ne concerne plus la vitrine : app.js gère l'historique. */
+function revenirVitrine() {
+  if (history.state && history.state.vitrine === 'connexion') { history.back(); return; }
+  location.reload();
+}
+window.addEventListener('popstate', function () {
+  if (typeof STATE !== 'undefined' && STATE && STATE.user) return;
+  if (document.documentElement.classList.contains('vitrine')) return;
+  if (!document.getElementById('vitrine') || !vitrineAMontrer()) return;
+  location.reload();
+});
