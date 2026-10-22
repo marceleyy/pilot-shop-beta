@@ -537,9 +537,9 @@ select{background-image:linear-gradient(45deg,transparent 50%,var(--brume) 50%),
 @media(prefers-reduced-motion:reduce){#vs-prendre,#vs-flash{transition:none}}
 
 /* Lien discret de remise à zéro, sur l'écran de connexion */
-#lg-reset,#lg-boutique{display:block;width:100%;margin-top:20px;padding:12px;
+#lg-reset,#lg-boutique,#langue-connexion{display:block;width:100%;margin-top:20px;padding:12px;
   background:none;border:0;color:var(--brume);font-size:13px;text-decoration:underline}
-#lg-reset:active,#lg-boutique:active{color:var(--corail-d)}
+#lg-reset:active,#lg-boutique:active,#langue-connexion:active{color:var(--corail-d)}
 
 /* --- Saisie de température : pas à pas, sur une seule ligne ------------- */
 .tmoment{display:flex;align-items:center;gap:8px;padding:10px 0}

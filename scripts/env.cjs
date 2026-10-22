@@ -23,6 +23,9 @@ const path = require('path');
 
 const url = process.env.SUPABASE_URL || '';
 const key = process.env.SUPABASE_ANON_KEY || '';
+/* Clé publique VAPID des alertes (alertes.js). Facultative : sans elle,
+   l'écran « Alertes sur ce téléphone » dit que le serveur n'est pas prêt. */
+const vapid = process.env.VAPID_PUBLIC_KEY || '';
 const cible = path.join(__dirname, '..', 'env.js');
 const enLigne = !!process.env.VERCEL;
 
@@ -67,7 +70,8 @@ const contenu =
   '/* Build ' + new Date().toISOString() + ' */\n' +
   'window.__ENV__ = ' + JSON.stringify({
     SUPABASE_URL: url.replace(/\/$/, ''),
-    SUPABASE_ANON_KEY: key
+    SUPABASE_ANON_KEY: key,
+    VAPID_PUBLIC_KEY: vapid
   }, null, 2) + ';\n';
 
 fs.writeFileSync(cible, contenu, 'utf8');

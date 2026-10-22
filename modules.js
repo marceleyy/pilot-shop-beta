@@ -711,6 +711,13 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
            STATE.user.prenom + (bl.refuse ? ' a REFUSÉ la livraison ' : ' a réceptionné ') + bl.numero +
            ' (' + valides.length + ' réf.)');
          if (bl.refuse && typeof feedEcrit === 'function') await feedEcrit();
+         if (typeof signalerManager === 'function') {
+           if (bl.refuse) signalerManager('incident', 'refus:' + rec.id, 'Livraison refusée : ' + bl.numero,
+             'Refusée par ' + STATE.user.prenom + (bl.fournisseur ? ' · ' + bl.fournisseur : ''), 'reception');
+           else if (rec.aConfirmer && STATE.user.role !== 'manager') signalerManager('valider', 'reception:' + rec.id,
+             'Réception à confirmer : ' + bl.numero,
+             aStocker.length + ' ' + accord(aStocker.length, 'produit') + ' attendent un manager pour entrer au stock', 'reception');
+         }
          closeSheet();
          toast(bl.refuse ? 'Réception refusée et tracée'
            : (auStock ? 'Réception tracée. ' + auStock + ' ' + accord(auStock, 'produit entrera', 'produits entreront') + ' au stock après confirmation d’un manager' : 'Réception tracée, DLC suivie') +
@@ -1436,6 +1443,9 @@ V.caisse = async function () {
       if (sg) sg.onclick = async () => {
         await feed('bad', STATE.user.prenom + ' signale un écart de fond de caisse : ' +
           eur(fondVeille) + ' laissés hier, ' + eur(num(compte)) + ' comptés ce matin (' + eur(d) + ')');
+        if (typeof signalerManager === 'function') signalerManager('incident', 'fond:' + today(),
+          'Écart de fond de caisse : ' + eur(d),
+          eur(fondVeille) + ' laissés hier, ' + eur(num(compte)) + ' comptés ce matin par ' + STATE.user.prenom, 'caisse');
         await DB.push('anomalies', { id:uid(), categorie:'autre', gravite:'gene',
           titre:'Écart de fond de caisse : ' + eur(d),
           detail: eur(fondVeille) + ' laissés hier soir' +
@@ -2054,6 +2064,13 @@ V.temp = async function () {
       rec.valide[mom.id] = { par:STATE.user.prenom, id:STATE.user.id, at:nowISO() };
       await sauver();
       await feed('ok', STATE.user.prenom + ' a validé les températures du ' + mom.label.toLowerCase());
+      /* Téléphone du manager (alertes.js) : une alerte par relevé validé. */
+      const critiques = ENCEINTES.filter(e => etatTemp(e, brut(e)) === 'crit');
+      if (critiques.length && typeof signalerManager === 'function') {
+        signalerManager('temp', j + ':' + mom.id,
+          critiques.length + ' ' + accord(critiques.length, 'enceinte') + ' en limite critique',
+          critiques.map(e => e.nom).join(', ') + ' · relevé du ' + mom.label.toLowerCase() + ' par ' + STATE.user.prenom, 'temp');
+      }
       toast('Relevé du ' + mom.label.toLowerCase() + ' validé');
       /* Le manager revient à sa Tour de contrôle, pas à la vue équipier. */
       rendre(vueAccueil());
@@ -2796,6 +2813,10 @@ function formulaireAnomalie() {
       await DB.set('anomalies', liste);
       await feed(gravite === 'bloquant' ? 'bad' : 'warn',
         STATE.user.prenom + ' signale : ' + memo.titre);
+      if (gravite === 'bloquant' && typeof signalerManager === 'function') {
+        signalerManager('incident', 'anomalie:' + liste[liste.length - 1].id, 'Anomalie bloquante',
+          memo.titre + ' · signalée par ' + STATE.user.prenom, 'controle');
+      }
       closeSheet();
       toast(messageEnvoi('anomalies', 'Signalement transmis'));
       rendre('anomalie');

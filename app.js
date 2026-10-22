@@ -142,7 +142,9 @@
      ['franchise:',   'reglages'],
      ['async:',       'reglages'],
      /* Tâches à rythme propre modifiées par le manager (Paramètres). */
-     ['asynchrones',  'reglages']
+     ['asynchrones',  'reglages'],
+     /* Notice d'information des salariés (rgpd.js). */
+     ['rgpd:',        'reglages']
    ].filter(function (r) {
      /* Une route dont la table est introuvable est retirée dès le chargement :
         mieux vaut garder la clé en local que d'interroger « undefined ». */
@@ -2619,6 +2621,10 @@ async function purgerLocalAncien() {
                                      par:STATE.user.prenom, at:nowISO(), traite:false });
          await feed('bad', STATE.user.prenom + ' signale une rupture : ' + nomComplet +
                     (reste === 0 ? ' (plus rien)' : ' (reste ' + reste + ' ' + accord(reste, art.unite) + ')'));
+         if (typeof signalerManager === 'function') signalerManager('rupture', j + ':' + cle,
+           'Rupture : ' + nomComplet,
+           (reste === 0 ? 'Plus rien en stock' : 'Reste ' + reste + ' ' + accord(reste, art.unite)) +
+           ' · signalé par ' + STATE.user.prenom, 'controle');
          closeSheet();
          toast(messageEnvoi('ruptures', 'Alerte transmise à ' + nomManager()));
          rendre('reas');
@@ -3681,7 +3687,8 @@ window.addEventListener('error', function (ev) {
   /* Une première entrée d'historique, pour que le tout premier « retour »
      ramène à l'accueil au lieu de sortir de l'application. */
   try { history.replaceState({ vue:vueAccueil() }, '', location.pathname); } catch (e) {}
-  rendre(STATE.user.role === 'manager' ? 'controle' : 'accueil');
+  /* Application ouverte par une notification (alertes.js) : l'écran concerné. */
+  rendre((typeof vueDemandee === 'function' && vueDemandee()) || (STATE.user.role === 'manager' ? 'controle' : 'accueil'));
 }
    
    /* Résolue quand modules.js, stock.js et ocr.js ont été exécutés : les
