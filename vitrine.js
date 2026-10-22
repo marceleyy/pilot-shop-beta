@@ -51,6 +51,7 @@ function attendreVitrine() {
       /* Une entrée d'historique : le bouton retour du navigateur ramène à
          la présentation au lieu de quitter le site (voir plus bas). */
       try { history.pushState({ vitrine: 'connexion' }, '', location.pathname + location.search); } catch (e) {}
+      _vitrineQuittee = true;
       document.documentElement.classList.remove('vitrine');
       resolve();
     };
@@ -110,11 +111,18 @@ function attendreVitrine() {
    utilisé, on recharge : la vitrine revient, et l'écran de rattachement
    ouvert (et le démarrage qui l'attend) repart de zéro. Une fois l'appareil
    rattaché, ce retour ne concerne plus la vitrine : app.js gère l'historique. */
+let _vitrineQuittee = false;   // « Se connecter » appuyé pendant cette visite
 function revenirVitrine() {
   if (history.state && history.state.vitrine === 'connexion') { history.back(); return; }
   location.reload();
 }
-window.addEventListener('popstate', function () {
+window.addEventListener('popstate', function (ev) {
+  /* Seul le retour qui suit « Se connecter » nous concerne : pas celui d'une
+     feuille (remise à zéro obligatoire, closeSheet), que gère app.js. */
+  if (!_vitrineQuittee) return;
+  if (ev.state && ev.state.feuille) return;
+  const f = document.getElementById('sheet');
+  if (f && !f.hidden) return;
   if (typeof STATE !== 'undefined' && STATE && STATE.user) return;
   if (document.documentElement.classList.contains('vitrine')) return;
   if (!document.getElementById('vitrine') || !vitrineAMontrer()) return;
