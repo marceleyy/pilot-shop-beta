@@ -1250,7 +1250,7 @@ html.vitrine #vitrine{
 #vitrine .vt-pilule:hover{background:var(--vt-bleu-d)}
 #vitrine .vt-pilule.petite{min-height:32px;padding:0 14px;font-size:13px}
 #vitrine .vt-pilule.large{width:100%;margin-top:20px}
-#vitrine .vt-lien{background:none;border:0;padding:8px 4px;color:var(--vt-bleu);font-size:17px;cursor:pointer}
+#vitrine .vt-lien{background:none;border:0;padding:8px 4px;color:#0066cc;font-size:17px;cursor:pointer}
 #vitrine .vt-lien:hover{text-decoration:underline}
 #vitrine .vt-cta{display:flex;flex-wrap:wrap;align-items:center;justify-content:center;gap:12px 24px}
 #vitrine .vt-surtitre{font-size:17px;font-weight:600;color:#bf4800;margin-bottom:8px}
@@ -1311,7 +1311,7 @@ html.vitrine #vitrine{
 
 /* Offre et formulaire */
 #vitrine .vt-offre{background:var(--vt-fond2);padding:96px 16px;display:grid;gap:40px;
-  scroll-margin-top:52px}
+}
 #vitrine .vt-offre > *{max-width:520px;width:100%;margin:0 auto}
 #vitrine .vt-offre ul{list-style:none;padding:0;margin:24px 0 0}
 #vitrine .vt-offre li{font-size:19px;padding:12px 0 12px 32px;border-bottom:1px solid var(--vt-filet);position:relative}
@@ -1358,4 +1358,5 @@ html.vitrine #vitrine{
   #vitrine .vt-nav .vt-pilule{margin-left:auto}
   #vitrine .vt-fonction,#vitrine .vt-grille-zone,#vitrine .vt-etapes,#vitrine .vt-offre,#vitrine .vt-faq{padding-top:72px;padding-bottom:72px}
 }
-#vitrine section[id]{scroll-margin-top:52px}
+#vitrine section[id]{scroll-margin-top:calc(52px + var(--safe-t))}
+@media (prefers-reduced-motion:reduce){ html.vitrine #vitrine{scroll-behavior:auto} }

@@ -40,7 +40,8 @@
 <!-- ===================== ACCUEIL PUBLIC ===================== -->
 <!-- Visible seulement sur un appareil neuf (vitrine.js). Un appareil déjà
      utilisé en boutique arrive directement sur les prénoms. Les images sont
-     en loading="lazy" : masquées, elles ne sont jamais téléchargées. -->
+     en loading="lazy" : tant que la vitrine est masquée, les navigateurs
+     récents ne les téléchargent pas. -->
 <div id="vitrine">
 
   <nav class="vt-nav" aria-label="Présentation">
@@ -56,10 +57,10 @@
   </nav>
 
   <header class="vt-hero">
-    <p class="vt-surtitre">Pour les boutiques franchisées Amorino</p>
+    <p class="vt-surtitre">Pensé pour les glaciers franchisés</p>
     <h1>Toute la boutique.<br>Dans une tablette.</h1>
-    <p class="vt-chapo">Traçabilité, frigos, nettoyage, réassort et écarts de caisse. L’équipe saisit
-      en deux appuis, le responsable voit tout en direct. Même sans réseau.</p>
+    <p class="vt-chapo">Traçabilité, frigos, nettoyage, réassort et écarts de stock. L’équipe coche
+      et scanne, le responsable voit tout en direct. Même sans réseau.</p>
     <div class="vt-cta">
       <button type="button" class="vt-pilule" data-vitrine="essai">Essayer gratuitement 2 mois</button>
       <button type="button" class="vt-lien" data-vitrine="connexion">J’ai déjà un compte ›</button>
@@ -68,11 +69,11 @@
 
     <div class="vt-appareils">
       <figure class="vt-tablette">
-        <img src="vitrine/tablette-journee.webp" width="1028" height="771" loading="lazy"
-             alt="Écran « Ma journée » : tâches du service à cocher, alerte frigos du matin">
+        <img src="vitrine/tablette-journee.webp" width="2048" height="1536" loading="lazy"
+             alt="Écran « Ma journée » : procédure d’ouverture à cocher, alerte frigos du matin">
       </figure>
       <figure class="vt-telephone">
-        <img src="vitrine/telephone-controle.webp" width="390" height="900" loading="lazy"
+        <img src="vitrine/telephone-controle.webp" width="780" height="1688" loading="lazy"
              alt="Tour de contrôle sur téléphone : écart de caisse, ruptures, périmés et alertes">
       </figure>
     </div>
@@ -101,7 +102,7 @@
       <p>Écart de caisse, ruptures, produits périmés, frigos pas relevés, nettoyage en retard :
         le responsable voit l’essentiel en un coup d’œil, sur sa tablette ou son téléphone.</p>
     </div>
-    <figure class="vt-ecran etroit"><img src="vitrine/telephone-controle.webp" width="390" height="900" loading="lazy"
+    <figure class="vt-ecran etroit"><img src="vitrine/telephone-controle.webp" width="780" height="1688" loading="lazy"
       alt="Tour de contrôle : indicateurs de la semaine et alertes"></figure>
   </section>
 
@@ -109,7 +110,7 @@
     <div class="vt-texte">
       <p class="vt-surtitre">Allergènes</p>
       <h2>La bonne réponse,<br>au comptoir.</h2>
-      <p>Un client demande ce que contient un parfum&nbsp;? La fiche s’ouvre en deux appuis,
+      <p>Un client demande ce que contient un parfum&nbsp;? La fiche s’ouvre en quelques secondes,
         tirée du document officiel de l’enseigne, qui reste la référence. Même hors ligne.</p>
     </div>
     <figure class="vt-ecran etroit"><img src="vitrine/allergenes.webp" width="520" height="801" loading="lazy"
@@ -122,7 +123,7 @@
       <div class="vt-tuile"><b>Frigos</b><p>Relevés de température guidés matin et soir, avec alerte quand ils manquent.</p></div>
       <div class="vt-tuile"><b>Nettoyage</b><p>Les tâches du jour à cocher, à leur rythme : quotidien, hebdomadaire ou mensuel.</p></div>
       <div class="vt-tuile"><b>Réassort et inventaire</b><p>Stock froid et sec, comptage simple, et un résumé avant de valider.</p></div>
-      <div class="vt-tuile"><b>Écarts de caisse</b><p>L’export de caisse comparé au stock, période par période, avec les réceptions et les pertes.</p></div>
+      <div class="vt-tuile"><b>Écarts de stock</b><p>L’export de caisse comparé au stock, période par période, avec les réceptions et les pertes.</p></div>
       <div class="vt-tuile sombre"><b>Hors ligne</b><p>Pas de réseau en chambre froide&nbsp;? Les saisies sont gardées et partent toutes seules au retour du Wi-Fi.</p></div>
       <div class="vt-tuile"><b>Chacun son code</b><p>Chaque équipier se connecte avec son prénom et un code à quatre chiffres. On sait qui a fait quoi.</p></div>
     </div>

@@ -57,7 +57,8 @@ function attendreVitrine() {
        l'historique de l'application après la connexion. */
     const aller = id => {
       const c = v.querySelector('#' + id);
-      if (c) c.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      const doux = !(window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches);
+      if (c) c.scrollIntoView({ behavior: doux ? 'smooth' : 'auto', block: 'start' });
       return c;
     };
     v.querySelectorAll('[data-aller]').forEach(b => { b.onclick = () => aller(b.dataset.aller); });
