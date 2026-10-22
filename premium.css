@@ -967,7 +967,7 @@ select,select:focus{
 #pin-retour{margin-top:12px}
 #login-etat{color:var(--noisette)}
 #login-etat:empty{display:none}
-#lg-reset,#lg-boutique{min-height:48px;margin-top:8px;color:var(--noisette);text-underline-offset:3px}
+#lg-reset,#lg-boutique,#langue-connexion{min-height:48px;margin-top:8px;color:var(--noisette);text-underline-offset:3px}
 
 /* Paysage iPad : le code se compose à droite, l'identité reste à gauche.
    Le pavé tient sans défilement dans 768 px de haut. */

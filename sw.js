@@ -8,7 +8,7 @@
    elle qui déclenche le re-téléchargement. Un appareil déjà installé garderait
    sinon l'ancien cache, et n'irait jamais chercher les fichiers ajoutés — le
    scan hors ligne ne marcherait que sur les appareils neufs. */
-const CACHE   = 'pilotshop-cache-v64';
+const CACHE   = 'pilotshop-cache-v65';
 /* Cache des ressources externes. Il ne sert plus : XLSX est désormais servi
    par l'application (vendor/). Son ancien contenu — la copie du CDN, gardée
    « cache d'abord » sous ce nom fixe et jamais revalidée — est purgé à
@@ -38,6 +38,11 @@ const PRECACHE = [
   '/allergenes.js',
   '/commande.js',
   '/preaudit.js',
+  '/rgpd.js',
+  '/alertes.js',
+  /* Interface en anglais (i18n.js) et son dictionnaire. */
+  '/i18n-en.js',
+  '/i18n.js',
   /* Reconnaissance de texte embarquée : sans elle, le scan ne marche pas
      hors ligne, alors que c'est là qu'on en a le plus besoin. */
   '/vendor/tesseract.min.js',
@@ -273,6 +278,41 @@ self.addEventListener('message', event => {
   if (d.type === 'PURGE') {
     event.waitUntil(caches.keys().then(k => Promise.all(k.map(n => caches.delete(n)))));
   }
+});
+
+/* -----------------------------------------------------------------------------
+   ALERTES — notifications envoyées au téléphone du manager (alertes.js)
+   Le message est chiffré pour ce téléphone : { titre, texte, vue, tag }.
+   -------------------------------------------------------------------------- */
+self.addEventListener('push', event => {
+  let d = {};
+  try { d = event.data ? event.data.json() : {}; } catch (e) { d = { titre: 'Pilot-Shop', texte: event.data ? event.data.text() : '' }; }
+  event.waitUntil(self.registration.showNotification(d.titre || 'Pilot-Shop', {
+    body: d.texte || '',
+    tag: d.tag || undefined,
+    icon: '/icons/icon-192.png',
+    badge: '/icons/icon-192.png',
+    data: { vue: d.vue || 'controle' }
+  }));
+});
+
+/* Appui sur la notification : on ramène l'application au premier plan et on
+   lui demande l'écran concerné. Fermée, elle s'ouvre (l'écran sera choisi
+   après la connexion, voir alertes.js). */
+self.addEventListener('notificationclick', event => {
+  event.notification.close();
+  const vue = (event.notification.data && event.notification.data.vue) || 'controle';
+  event.waitUntil((async () => {
+    const l = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+    /* La fenêtre de l'application, pas un PDF ouvert à côté. */
+    const c = l.filter(x => { try { const p = new URL(x.url).pathname; return p === '/' || p === '/index.html'; } catch (e) { return false; } })[0];
+    if (c) {
+      try { await c.focus(); } catch (e) {}
+      c.postMessage({ type: 'OUVRIR_VUE', vue: vue });
+      return;
+    }
+    await self.clients.openWindow('/?vue=' + encodeURIComponent(vue));
+  })());
 });
 
 /* -----------------------------------------------------------------------------

@@ -2388,6 +2388,10 @@ V.inventaire = async function () {
           STATE.user.prenom + ' a compté la chambre froide : ' + t.bacs + ' ' + accord(t.bacs, 'bac') + ', ' + n1(t.kg) + ' kg' +
           (manq ? ' · ' + manq + ' ' + accord(manq, 'bac manquant', 'bacs manquants') : '') + ' · à confirmer');
         toast('Inventaire enregistré, à confirmer par un manager');
+        if (!estManager && typeof signalerManager === 'function') signalerManager('valider', 'inv-froid:' + a.at,
+          'Inventaire de la chambre froide à confirmer',
+          'Compté par ' + STATE.user.prenom + ' : ' + t.bacs + ' ' + accord(t.bacs, 'bac') +
+          (manq ? ', ' + manq + ' ' + accord(manq, 'bac manquant', 'bacs manquants') : ''), 'inventaire');
         /* Le manager enchaîne sur la vérification ; l'équipier retourne au stock. */
         if (estManager) { await rendre('inventaire'); verifierInventaire('froid'); }
         else rendre('stock');
@@ -2432,6 +2436,9 @@ V.inventaire = async function () {
         oublierBrouillon('sec');
         await feed('ok', STATE.user.prenom + ' a compté le sec : ' + cptes.length + ' ' + accord(cptes.length, 'référence') + ' · à confirmer');
         toast('Inventaire enregistré, à confirmer par un manager');
+        if (!estManager && typeof signalerManager === 'function') signalerManager('valider', 'inv-sec:' + a.at,
+          'Inventaire du sec à confirmer',
+          'Compté par ' + STATE.user.prenom + ' : ' + cptes.length + ' ' + accord(cptes.length, 'référence'), 'inventaire');
         if (estManager) { STATE.inventairePartie = 'sec'; await rendre('inventaire'); verifierInventaire('sec'); }
         else rendre('stock');
       });
