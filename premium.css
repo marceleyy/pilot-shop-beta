@@ -1278,6 +1278,14 @@ html.vitrine #vitrine{
 #vitrine .vt-photo img{width:100%;border-radius:clamp(14px,2.4vw,28px);
   box-shadow:0 30px 80px -34px rgba(42,26,18,.55)}
 #vitrine .vt-photo-hero{max-width:1100px;margin:56px auto 0;padding-bottom:24px}
+/* Sur téléphone, une photo 16:9 rend l'écran illisible : on recadre au
+   centre, là où se trouve l'appareil. Images en lazy, jamais en eager : un
+   appareil rattaché ne doit pas les télécharger. */
+@media (max-width:819px){
+  #vitrine .vt-photo img{aspect-ratio:4/5;object-fit:cover;object-position:center}
+  #vitrine .vt-photo.carre img{aspect-ratio:1/1}
+  #vitrine .vt-photo-hero img{aspect-ratio:4/3}
+}
 
 /* Bandeau sombre */
 #vitrine .vt-bandeau{background:linear-gradient(155deg,#4A3022,var(--chocolat) 70%);margin-top:80px;padding:96px 16px;text-align:center}
