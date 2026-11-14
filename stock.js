@@ -454,6 +454,8 @@ async function purgerJournal(l) {
    comptage (les mouvements tracés depuis s'y ajoutent) et dit qui l'a compté
    et qui l'a confirmé. */
 async function enregistrerInventaire(lignes, note, avant, meta) {
+  /* Prix du jour à jour avant de les figer dans l'inventaire. */
+  await chargerPrixAchat().catch(() => {});
   const ecarts = {};
   let manquants = 0, surplus = 0;
   if (avant) {
@@ -473,6 +475,7 @@ async function enregistrerInventaire(lignes, note, avant, meta) {
   }, meta || {}, {
     note: note || '',
     lignes: lignes,            // { cleArticle : quantité }
+    prix: prixDuComptage(lignes),  // prix du jour : la valeur ne bouge plus ensuite
     ecarts: ecarts,            // écart constaté par article
     manquants: manquants,      // bacs disparus sans traçabilité
     surplus: surplus           // bacs trouvés en trop : réception non saisie
@@ -873,7 +876,8 @@ async function confirmerInventaire(a, partie) {
       const cleV = cleVivanteSec(c, cur.avant);
       if (cleV && vivant[cleV] !== undefined) lignes[c] = Math.max(0, num(vivant[cleV]) - await mouvementsDepuis(cleV, cur.at));
     }
-    const inv = Object.assign({}, meta, { note: cur.note || '', lignes: lignes });
+    await chargerPrixAchat().catch(() => {});
+    const inv = Object.assign({}, meta, { note: cur.note || '', lignes: lignes, prix: prixDuComptage(lignes) });
     await DB.set('stock:sec', inv);
     invaliderStock();
     /* Historique du sec : une correction du même jour remplace son entrée. */
@@ -1524,7 +1528,7 @@ function catalogueSec() {
 
 /* À appeler avant de dessiner un écran qui s'en sert. */
 async function chargerCatalogueSec() {
-  const m = await DB.get('catalogue:sec', null);
+  const [m] = await Promise.all([DB.get('catalogue:sec', null), chargerPrixAchat().catch(() => {})]);
   const base = catalogueSecBrut();
   if (!m) { _catalogueSec = base; return base; }
   const out = base.map(r => {
@@ -1554,6 +1558,133 @@ async function enregistrerCatalogueSec(m) {
 }
 
 /* -----------------------------------------------------------------------------
+   PRIX D'ACHAT ET VALEUR DU STOCK (manager)
+   Prix de base : PRIX_ACHAT (factures fournisseur). Corrections du manager
+   sous « catalogue:prix » : { clé de prix: prix HT }, 0 = pas de prix ;
+   une clé absente reprend le prix du fichier.
+   Chaque inventaire enregistré garde les prix du jour (champ « prix ») :
+   sa valeur ne change pas quand un prix change ensuite.
+   Les prix ne s'affichent qu'au manager. Renommer une déclinaison lui fait
+   perdre son prix : il se ressaisit avec le bouton €.
+   Clé de prix : « sec|id|déclinaison » pour le sec, « glace||3 » pour un bac
+   (le prix dépend de la taille, pas du parfum), « famille|| » pour le reste
+   de la chambre froide.
+   -------------------------------------------------------------------------- */
+let _prixAchat = {};
+
+async function chargerPrixAchat() {
+  const m = await DB.get('catalogue:prix', null);
+  _prixAchat = (m && typeof m === 'object') ? m : {};
+  return _prixAchat;
+}
+
+function clePrix(cle) {
+  const a = litArticle(cle);
+  if (a.famille === 'sec') return cle;
+  return cleArticle(a.famille, '', a.famille === 'glace' ? a.taille : '');
+}
+
+/* Prix de base, avant correction du manager. */
+function prixAchatDefaut(cp) {
+  const P = (typeof PRIX_ACHAT !== 'undefined') ? PRIX_ACHAT : {};
+  const a = litArticle(cp);
+  const v = a.famille === 'sec' ? (P.sec || {})[cp]
+    : a.famille === 'glace' ? (P.glace || {})[a.taille]
+    : (P.froid || {})[a.famille];
+  return num(v) > 0 ? num(v) : null;
+}
+
+/* Prix d'une ligne d'inventaire, ou null si elle n'en a pas. */
+const corrige = cp => _prixAchat[cp] !== undefined && _prixAchat[cp] !== null;
+
+function prixArticle(cle) {
+  const cp = clePrix(cle);
+  if (corrige(cp)) {
+    const v = num(_prixAchat[cp]);
+    return v > 0 ? v : null;
+  }
+  return prixAchatDefaut(cp);
+}
+
+/* Prix d'une ligne d'un inventaire passé : celui gardé ce jour-là, sinon
+   (inventaire d'avant les prix) le prix actuel. */
+function prixLigne(cle, fige) {
+  return (fige && fige[cle] !== undefined) ? (num(fige[cle]) > 0 ? num(fige[cle]) : null) : prixArticle(cle);
+}
+
+function prixDuComptage(lignes) {
+  const out = {};
+  Object.keys(lignes || {}).forEach(c => {
+    if (num(lignes[c]) <= 0) return;
+    const p = prixArticle(c);
+    out[c] = p === null ? 0 : p;
+  });
+  return out;
+}
+
+/* Valeur d'un comptage : total, et lignes comptées (> 0) restées sans prix. */
+function valeurStock(lignes, fige) {
+  let total = 0, sansPrix = 0;
+  Object.keys(lignes || {}).forEach(c => {
+    const q = num(lignes[c]);
+    if (q <= 0) return;
+    const p = prixLigne(c, fige);
+    if (p === null) sansPrix++; else total += q * p;
+  });
+  return { total: total, sansPrix: sansPrix };
+}
+
+async function enregistrerPrixAchat(modifs) {
+  const m = Object.assign({}, (await DB.get('catalogue:prix', null)) || {}, modifs);
+  Object.keys(m).forEach(k => { if (m[k] === null) delete m[k]; });
+  await DB.set('catalogue:prix', m);
+  _prixAchat = m;
+}
+
+/* Saisie « 26,47 » ou « 26.47 » ; vide = pas de prix. */
+function lirePrix(txt) {
+  let t = String(txt || '').replace(/[\s\u00a0€]/g, '');
+  /* « 1.234,50 » : le point sépare les milliers. */
+  if (t.indexOf(',') >= 0) t = t.replace(/\./g, '').replace(',', '.');
+  if (!t) return 0;
+  const v = Number(t);
+  return (isFinite(v) && v >= 0) ? Math.round(v * 100) / 100 : NaN;
+}
+
+/* Fiche de prix : une ligne par clé. lignes = [{ cp, nom, unite }]. */
+function editerPrix(titre, lignes, apres) {
+  const val = cp => { const p = corrige(cp) ? num(_prixAchat[cp]) : prixAchatDefaut(cp); return p > 0 ? String(p).replace('.', ',') : ''; };
+  showSheet(
+    '<h2 id="sheet-titre">' + esc(titre) + '</h2>' +
+    '<p class="cs">Prix d’achat HT, par unité comptée à l’inventaire. Laissez vide pour ne pas valoriser. ' +
+    'Les prix ne s’affichent qu’au manager ; les inventaires déjà faits gardent leurs prix du jour.</p>' +
+    lignes.map((x, i) =>
+      '<div class="champ" style="margin-top:12px"><label class="f" for="px-' + i + '">' + esc(x.nom) +
+      (x.unite ? ' · € par ' + esc(x.unite) : '') + '</label>' +
+      '<input type="text" inputmode="decimal" id="px-' + i + '" value="' + esc(val(x.cp)) + '" placeholder="—"></div>').join('') +
+    '<div class="actions"><button class="btn clair" data-fermer>Annuler</button>' +
+    '<button class="btn menthe" id="px-ok">Enregistrer</button></div>');
+  let enCours = false;
+  $('#px-ok').onclick = async () => {
+    if (enCours) return;
+    const modifs = {};
+    for (let i = 0; i < lignes.length; i++) {
+      const v = lirePrix($('#px-' + i).value);
+      if (isNaN(v)) return toast('Prix illisible : ' + lignes[i].nom, 'erreur');
+      const d = prixAchatDefaut(lignes[i].cp);
+      /* Égal au prix du fichier : pas de correction à garder. */
+      modifs[lignes[i].cp] = (d !== null && v === d) || (d === null && v === 0) ? null : v;
+    }
+    enCours = true; $('#px-ok').disabled = true;
+    try { await enregistrerPrixAchat(modifs); }
+    catch (e) { enCours = false; $('#px-ok').disabled = false; return toast('Enregistrement impossible, réessayez', 'erreur'); }
+    await feed('ok', STATE.user.prenom + ' a modifié les prix : ' + titre);
+    closeSheet();
+    if (apres) apres();
+  };
+}
+
+/* -----------------------------------------------------------------------------
    VUE — CATALOGUE (manager)
    -------------------------------------------------------------------------- */
 V.catalogue = async function () {
@@ -1568,8 +1699,26 @@ V.catalogue = async function () {
     ? SEC_SECTIONS.map(s => typeof s === 'string' ? { id:s } : s) : [];
   const UNITES = ['carton','ramette','pack','boîte','brique','flacon','pot','rouleau','sachet','unité'];
 
+  const declis = r => (r.variantes && r.variantes.length ? r.variantes : ['']);
+  /* « 26,47 €/carton », une fourchette, ou « sans prix ». */
+  const prixResume = r => {
+    const ps = declis(r).map(v => prixArticle('sec|' + r.id + '|' + v)).filter(p => p !== null);
+    if (!ps.length) return 'sans prix';
+    const lo = Math.min.apply(null, ps), hi = Math.max.apply(null, ps);
+    return (lo === hi ? eur(lo) : eur(lo) + ' à ' + eur(hi)) + '/' + esc(r.unite) +
+      (ps.length < declis(r).length ? ' (incomplet)' : '');
+  };
+  const froidPrix = () => (FOURNISSEUR.taillesBac || TAILLES_BAC || []).map(t =>
+      ({ cp: cleArticle('glace', '', t), nom: 'Bac de glace ' + t + ' L', unite: 'bac' }))
+    .concat(FAMILLES_PRODUIT.filter(f => f.id !== 'glace' && f.lieu !== 'sec' && f.stock !== 'sec')
+      .map(f => ({ cp: cleArticle(f.id, '', ''), nom: f.libelle, unite: f.unite })));
+
   $('#vue-actions').innerHTML = '';
   $('#page').innerHTML =
+    carte('<div class="rang"><div style="flex:1;min-width:0"><b>Prix chambre froide</b>' +
+      '<div class="mini">' + froidPrix().map(x => { const p = prixArticle(x.cp);
+        return esc(x.nom) + ' ' + (p !== null ? eur(p) : '—'); }).join(' · ') + '</div></div>' +
+      '<button class="btn clair sm" id="ct-prix-froid">Modifier</button></div>') +
     carte('<h2>Catalogue du sec</h2>' +
       '<div class="cs">Ce que l’inventaire et le réassort proposent. Retirez ce que ' +
       'vous ne comptez plus, ajoutez ce qui manque, changez une unité ou une ' +
@@ -1588,8 +1737,10 @@ V.catalogue = async function () {
             esc(r.nom) + '</b>' +
             '<div class="mini">' + esc(r.unite) + (r.decimal === false ? ' · entiers' : ' · demi possible') +
             (r.variantes && r.variantes.length ? ' · ' + r.variantes.length + ' déclinaisons' : '') +
+            ' · ' + prixResume(r) +
             '</div></div>' +
             '<div class="duo compact">' +
+            '<button class="btn clair" data-prix="' + esc(r.id) + '" aria-label="Prix d’achat">€</button>' +
             '<button class="btn clair" data-edit="' + esc(r.id) + '" aria-label="Modifier">✎</button>' +
             '<button class="btn ' + (r.masque ? 'menthe' : 'clair') + '" data-masque="' + esc(r.id) + '" ' +
             'aria-label="' + (r.masque ? 'Réafficher' : 'Retirer') + '">' + (r.masque ? '↺' : '−') + '</button>' +
@@ -1661,6 +1812,12 @@ V.catalogue = async function () {
     editer(cat.filter(r => r.id === b.dataset.edit)[0]);
   });
   $$('[data-ajout]').forEach(b => b.onclick = () => editer(null, b.dataset.ajout));
+  $$('[data-prix]').forEach(b => b.onclick = () => {
+    const r = cat.filter(x => x.id === b.dataset.prix)[0];
+    if (r) editerPrix(r.nom, declis(r).map(v =>
+      ({ cp: 'sec|' + r.id + '|' + v, nom: v || r.nom, unite: r.unite })), () => rendre('catalogue'));
+  });
+  $('#ct-prix-froid').onclick = () => editerPrix('Prix chambre froide', froidPrix(), () => rendre('catalogue'));
 };
 
 /* Un inventaire passé, en entier : TOUS les produits du catalogue, comptés
@@ -1673,10 +1830,13 @@ function voirInventaire(h, partie) {
   const groupes = [];          // [{ titre, lignes:[{ nom, q, saisi, ecart, unite }] }]
   const nb = v => Number.isInteger(num(v)) ? String(num(v)) : n1(v);
   const vus = new Set();
+  const estManager = !!(STATE.user && STATE.user.role === 'manager');
   const ligne = (cle, nom, unite) => {
     vus.add(cle);
-    return { nom: nom, q: num(l[cle] || 0), saisi: l[cle] !== undefined,
-             ecart: ecarts[cle] || 0, unite: unite || '' };
+    const q = num(l[cle] || 0), p = prixLigne(cle, h.prix);
+    return { nom: nom, q: q, saisi: l[cle] !== undefined,
+             ecart: ecarts[cle] || 0, unite: unite || '',
+             val: (p !== null && q > 0) ? q * p : 0 };
   };
 
   if (partie === 'froid') {
@@ -1694,6 +1854,7 @@ function voirInventaire(h, partie) {
       const parT = tailles.map(t => ligne(cleArticle('glace', p, t), '', ''));
       return { nom: p, saisi: parT.some(x => x.saisi),
                ecart: parT.reduce((s2, x) => s2 + num(x.ecart), 0),
+               val: parT.reduce((s2, x) => s2 + x.val, 0),
                texte: tailles.map((t, k) => t + ' L : ' + nb(parT[k].q)).join(' · ') };
     }) });
     /* Les autres familles comptées en chambre froide (macarons, gaufres…),
@@ -1733,20 +1894,29 @@ function voirInventaire(h, partie) {
   }
 
   const nbSaisis = Object.keys(l).length;
+  const v0 = estManager ? valeurStock(l, h.prix) : null;
+  const valeur = v0 && (v0.total > 0 || v0.sansPrix) ? v0 : null;
+  groupes.forEach(g => { g.val = g.lignes.reduce((s2, x) => s2 + num(x.val), 0); });
   showSheet(
     '<h2 id="sheet-titre">Inventaire ' + (partie === 'froid' ? 'chambre froide' : 'sec') +
     ' du ' + esc(fmtD(h.jour)) + '</h2>' +
     '<p class="cs">' + esc(h.par || '—') + (h.at ? ' · ' + heure(h.at) : '') + ' · ' +
     nbSaisis + ' ' + accord(nbSaisis, 'produit saisi', 'produits saisis') + '. Les produits non saisis sont à 0, en grisé.</p>' +
     (h.note ? '<div class="rappel" style="margin-top:10px">' + esc(h.note) + '</div>' : '') +
+    (valeur ? '<div class="rappel" style="margin-top:10px"><b>Valeur du stock : ' + eur(valeur.total) + ' HT</b>' +
+      (valeur.sansPrix ? '<br><span class="mini">' + valeur.sansPrix + ' ' +
+        accord(valeur.sansPrix, 'produit compté', 'produits comptés') + ' sans prix, hors total. ' +
+        'Prix à compléter dans le catalogue.</span>' : '') + '</div>' : '') +
     groupes.filter(g => g.lignes.length).map(g =>
-      '<div class="entete" style="margin-top:16px"><h3>' + esc(g.titre) + '</h3></div>' +
+      '<div class="entete" style="margin-top:16px"><h3>' + esc(g.titre) + '</h3>' +
+      (estManager && g.val > 0 ? '<span class="mini">' + eur(g.val) + '</span>' : '') + '</div>' +
       '<div class="stack">' + g.lignes.map(x =>
         '<div class="invl"' + (x.saisi ? '' : ' style="opacity:.45"') + '>' +
         '<span class="invn">' + esc(x.nom) +
         (x.ecart ? '<small>écart ' + (x.ecart > 0 ? '+' : '') + n1(x.ecart) + '</small>' : '') + '</span>' +
         '<span class="invc">' + (x.texte !== undefined ? esc(x.texte)
-          : nb(x.q) + (x.unite ? ' ' + esc(accord(x.q, x.unite)) : '')) + '</span></div>').join('') +
+          : nb(x.q) + (x.unite ? ' ' + esc(accord(x.q, x.unite)) : '')) +
+        (estManager && x.val > 0 ? '<br>' + eur(x.val) : '') + '</span></div>').join('') +
       '</div>').join('') +
     '<div class="actions"><button class="btn clair" data-fermer>Fermer</button></div>');
 }
@@ -2130,11 +2300,13 @@ V.inventaire = async function () {
           ? '<div class="entete" style="margin-top:22px"><h3>Inventaires précédents de la chambre froide</h3></div>' +
             '<div class="stack">' + historique.slice().reverse().map((h, i) => {
               const t = totauxStock(h.lignes || {});
+              const v = estManager ? valeurStock(h.lignes, h.prix).total : 0;
               return '<div class="invl">' +
                 '<span class="invn">' + esc(fmtD(h.jour)) +
                 '<small>' + esc(h.par || '—') + ' · ' + heure(h.at) +
                 (h.manquants ? ' · ' + h.manquants + ' ' + accord(h.manquants, 'manquant') : '') + '</small></span>' +
-                '<span class="invc">' + t.bacs + ' bacs · ' + n1(t.kg) + ' kg<br>' +
+                '<span class="invc">' + t.bacs + ' bacs · ' + n1(t.kg) + ' kg' +
+                (v > 0 ? ' · ' + eur(v) : '') + '<br>' +
                 '<button type="button" class="btn clair sm" data-hist="froid|' + i + '">Voir tout</button></span></div>';
             }).join('') + '</div>'
           : '')
@@ -2144,10 +2316,12 @@ V.inventaire = async function () {
               const l = h.lignes || {};
               const refs = Object.keys(l).length;
               const tot = Object.keys(l).reduce((s, k) => s + num(l[k]), 0);
+              const v = estManager ? valeurStock(l, h.prix).total : 0;
               return '<div class="invl">' +
                 '<span class="invn">' + esc(fmtD(h.jour)) +
                 '<small>' + esc(h.par || '—') + ' · ' + heure(h.at) + '</small></span>' +
-                '<span class="invc">' + refs + ' réf. · ' + n1(tot) + ' unités<br>' +
+                '<span class="invc">' + refs + ' réf. · ' + n1(tot) + ' unités' +
+                (v > 0 ? ' · ' + eur(v) : '') + '<br>' +
                 '<button type="button" class="btn clair sm" data-hist="sec|' + i + '">Voir tout</button></span></div>';
             }).join('') + '</div>'
           : ''));

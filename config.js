@@ -508,7 +508,11 @@ const PARFUMS = [
   'Chocolat bio (sorbet)','Citron bio','Citron vert basilic','Dulce de leche',
   'Fraise','Framboise',
   'Fruit de la passion','Inimitable','Mangue','Noisette','Noix de coco','Orange sanguine',
-  'Pistache','Stracciatella','Tiramisu','Vanille','Yogurt'
+  'Pistache','Stracciatella','Tiramisu','Vanille','Yogurt',
+  /* Achetés en 2026 (factures Chamonix), ajoutés à stock zéro. */
+  /* La Fleur de lait seule n'existe qu'en Cremini 2,15 L : famille à part. */
+  'Cheesecake myrtilles','Chocolat blanc pécan','Crema di caffè',
+  'Fleur de lait exotique','Fruits rouges','Menthe chocolat'
 ];
 
 /* Les étiquettes Amorino sont imprimées en anglais et en italien, jamais en
@@ -544,7 +548,14 @@ const PARFUMS_ALIAS = {
   'Stracciatella':          ['stracciatella'],
   'Tiramisu':               ['tiramisu', 'tirami su'],
   'Vanille':                ['vanilla', 'vaniglia', 'bourbon vanilla'],
-  'Yogurt':                 ['yogurt', 'yoghurt', 'yaourt', 'greek yogurt']
+  'Yogurt':                 ['yogurt', 'yoghurt', 'yaourt', 'greek yogurt'],
+  'Cheesecake myrtilles':   ['cheesecake', 'blueberry cheesecake', 'cheesecake mirtilli'],
+  'Chocolat blanc pécan':   ['white chocolate pecan', 'cioccolato bianco', 'pecan'],
+  /* « crema di caffe » et non « caffe » seul : ce mot appartient au Café. */
+  'Crema di caffè':         ['crema di caffe', 'coffee cream', 'crema caffe'],
+  'Fleur de lait exotique': ['fior di latte esotico', 'fior di latte exotic', 'exotic fior di latte'],
+  'Fruits rouges':          ['red fruits', 'frutti rossi', 'frutti di bosco', 'mixed berries'],
+  'Menthe chocolat':        ['mint chocolate', 'mint choc', 'menta cioccolato', 'menta']
 };
 
 /* Références fournisseur, format du bon de livraison Jetfreeze */
@@ -643,9 +654,30 @@ const INVENTAIRE_SEC = [
   { id:'desinfectant',sec:'Entretien', nom:'Désinfectants',           unite:'flacon', decimal:true,
     variantes:['Bactalim','Moussana','Savon main','Produit sol','Produit à vitres'] },
   { id:'lavette',   sec:'Entretien', nom:'Lavettes',                  unite:'pack', decimal:true,
-    variantes:['Rose','Jaune','Bleue'] },
+    variantes:['Rose','Jaune','Bleue','Verte'] },
   { id:'guillere',  sec:'Entretien', nom:'Guillère à glace',          unite:'pack', decimal:true },
-  { id:'sacpoubelle',sec:'Entretien', nom:'Sacs poubelle',            unite:'rouleau', decimal:false }
+  { id:'sacpoubelle',sec:'Entretien', nom:'Sacs poubelle',            unite:'rouleau', decimal:false },
+
+  /* Achetés en 2026 (factures Chamonix) mais absents de la fiche : ajoutés à
+     stock zéro, au conditionnement facturé. Un manager retire d'un « − » ce
+     qu'il ne veut pas compter. */
+  { id:'spatule',   sec:'Service', nom:'Spatules en bois 11 cm',     unite:'carton', decimal:true },
+  { id:'cialdi',    sec:'Service', nom:'Mini wafers emballés',       unite:'carton', decimal:true },
+  { id:'gaufrette', sec:'Service', nom:'Mini gaufrettes choco-noisette', unite:'carton', decimal:true },
+  { id:'garniture', sec:'Coulis et toppings', nom:'Garnitures gaufres et crêpes', unite:'pot', decimal:true,
+    variantes:['Sauce caramel 2 L','Sauce caramel 700 g','Chocolat de couverture 5 kg','Crème gianduja 5 kg',
+               'Crème pistache 3 kg','Noisettes caramélisées 1 kg','Dulce de leche 1,2 kg'] },
+  { id:'decor',     sec:'Coulis et toppings', nom:'Décors et crèmes glace', unite:'pot', decimal:true,
+    variantes:['Cremino pistache 5,5 kg','Cremino noisette 5,5 kg','Amarena 3 kg',
+               'Céréales chocolat 800 g','Chocolat en poudre 1 kg'] },
+  { id:'filmiso',   sec:'Emballages', nom:'Films ISO bacs',             unite:'pack', decimal:true,
+    variantes:['1100 ml','550 ml'] },
+  { id:'bagueiso',  sec:'Emballages', nom:'Bagues ISO box',             unite:'pack', decimal:true },
+  { id:'bouteille', sec:'Emballages', nom:'Bouteilles souples 473 ml',  unite:'unité', decimal:false },
+  { id:'biscuit',   sec:'Biscuits', nom:'Biscuits italiens',            unite:'sachet', decimal:false,
+    variantes:['Baci di Dama','Brutti e buoni'] },
+  { id:'gaufrier',  sec:'Entretien', nom:'Entretien gaufrier et crêpière', unite:'unité', decimal:false,
+    variantes:['Pierre abrasive crêpière','Brosse gaufrier'] }
 ];
 
 /* Les produits surgelés — macarons, gianduiotti, crêpes, gaufres, cookies —
@@ -662,12 +694,65 @@ const SEC_SECTIONS = [
   { id:'Boissons et frais',   couleur:'ciel',    teinte:'#DBEAFE' },
   { id:'Coulis et toppings',  couleur:'lavande', teinte:'#EDE9FE' },
   { id:'Emballages',          couleur:'menthe',  teinte:'#D1FAE5' },
+  { id:'Biscuits',            couleur:'sable',   teinte:'#FDF3E3' },
   { id:'Entretien',           couleur:'gris',    teinte:'#F1F5F9' }
 ];
 
 /* Nombre de lignes réellement à compter, déclinaisons comprises. */
 const SEC_LIGNES = INVENTAIRE_SEC.reduce(
   (n, r) => n + (r.variantes ? r.variantes.length : 1), 0);
+
+/* Prix d'achat HT, par unité COMPTÉE, tirés des factures Amorino 2026
+   (Chamonix). Clé = celle de l'inventaire : « sec|id|déclinaison » pour le sec,
+   la famille pour la chambre froide, la taille en litres pour les bacs.
+   Une référence absente n'a pas de prix : elle ne compte pas dans la valeur.
+   Le manager les corrige dans Catalogue › ✎ (sec) et « Prix chambre froide ». */
+const PRIX_ACHAT = {
+  glace: { 3: 22.52, 5: 36.44, 7: 51.01 },
+  froid: {
+    mac_classico: 5.77,   // carton 8×10 à 46,14 € → la boîte de 10
+    mac_grandioso: 7.55,  // carton 4×6 à 30,20 € → la boîte de 6
+    gianduiotto: 7.55,    // carton 15×12 à 113,22 € → la boîte de 12
+    gaufre: 11.69,        // paquet de 24
+    crepe: 3.26,          // carton 14×6 à 45,61 € → le paquet de 6
+    cremini: 16.14,       // bac de 2,15 L
+    mac_trad: 9.04,       // carton de 20 coffrets à 180,76 €
+    cookie: 14.5,         // carton de 20
+    cake: 53              // carton de 45 parts
+  },
+  sec: {
+    'sec|cornet|Petit': 37.67, 'sec|cornet|Classique': 26.47, 'sec|cornet|Grand': 35.63,
+    'sec|chococone|Petit': 29.73, 'sec|chococone|Classique': 34.07, 'sec|chococone|Grand': 28.16,
+    'sec|cornetsg|': 17.31,
+    'sec|conepapier|Petit': 55.35, 'sec|conepapier|Grand': 63.47,
+    'sec|cuillere|': 70, 'sec|serviette|': 80.1, 'sec|barquette|': 63.48,
+    'sec|gobelet|Expresso': 2, 'sec|gobelet|Petit': 2.69, 'sec|gobelet|Moyen': 3.66, 'sec|gobelet|Grand': 5.58,
+    'sec|bague|Petit': 4.2, 'sec|bague|Moyen': 4.26, 'sec|bague|Grand': 4.26,
+    'sec|paille|': 4.8,
+    'sec|chocochaud|Noir': 12.5, 'sec|chocochaud|Lait': 12.5, 'sec|chocochaud|Noisette': 12.5,
+    'sec|chocochaud|Amande': 12.5, 'sec|chocochaud|Blanc': 12.5, 'sec|chocochaud|Caramel': 12.5,
+    'sec|chocochaud|Aztèque': 12.5, 'sec|chocochaud|Orange cannelle': 12.5, 'sec|chocochaud|Gianduja': 12.5,
+    'sec|chocochaud|Coco': 12.5, 'sec|chocochaud|Panettone': 12.5,
+    'sec|tablette|Lait': 106.7,
+    'sec|the|Breakfast': 15, 'sec|the|Vert': 15, 'sec|the|Vert Yuanne': 15,
+    'sec|topping|Pistache': 6, 'sec|topping|Caramel': 3, 'sec|topping|Café': 9,
+    'sec|macaroncarton|Petit 2p': 18.49, 'sec|macaroncarton|Moyen 4p': 10.87,
+    'sec|isobac|1100 ml': 58, 'sec|isobac|550 ml': 49,
+    'sec|lavette|Rose': 7.05, 'sec|lavette|Jaune': 7.05, 'sec|lavette|Bleue': 7.05, 'sec|lavette|Verte': 8.65,
+    'sec|topping|Noisette': 1.15,   // sachet de 150 g (carton 20 × 150 g à 23 €)
+    'sec|spatule|': 3.89, 'sec|cialdi|': 14.5, 'sec|gaufrette|': 32,
+    'sec|garniture|Sauce caramel 2 L': 17, 'sec|garniture|Sauce caramel 700 g': 4.96,
+    'sec|garniture|Chocolat de couverture 5 kg': 38.75, 'sec|garniture|Crème gianduja 5 kg': 32,
+    'sec|garniture|Crème pistache 3 kg': 38.1, 'sec|garniture|Noisettes caramélisées 1 kg': 13.15,
+    'sec|garniture|Dulce de leche 1,2 kg': 8.9,
+    'sec|decor|Cremino pistache 5,5 kg': 63.34, 'sec|decor|Cremino noisette 5,5 kg': 63.34,
+    'sec|decor|Amarena 3 kg': 34, 'sec|decor|Céréales chocolat 800 g': 16.88,
+    'sec|decor|Chocolat en poudre 1 kg': 6.8,
+    'sec|filmiso|1100 ml': 3, 'sec|filmiso|550 ml': 2, 'sec|bagueiso|': 14, 'sec|bouteille|': 4.85,
+    'sec|biscuit|Baci di Dama': 3.9, 'sec|biscuit|Brutti e buoni': 3.8,
+    'sec|gaufrier|Pierre abrasive crêpière': 22.6, 'sec|gaufrier|Brosse gaufrier': 15
+  }
+};
 
 const MOTIFS_PERTE = [
   { id: 'perime',    label: 'Périmé',    icone: '📅', mots: ['périm','perim','dlc','date','dépassé'] },
@@ -846,7 +931,7 @@ const FAMILLES_PRODUIT = [
     unite:'boîte',  unites:'boîtes',
     saveurs:['Cioccolato Amorino','Pistacchio','Vaniglia','Caramello','Lampone',
              'Tiramisù','Fior di latte & coulis exotique','Litchi framboise rose',
-             'Cacahuète','Mangue'] },
+             'Cacahuète','Mangue','Noisette','Cheesecake myrtilles'] },
   { id:'mac_grandioso',libelle:'Macarons Grandioso', parfums:true,  dlc:'macaron_gelato',
     unite:'boîte',  unites:'boîtes',
     saveurs:['Cioccolato','Pistacchio','Vaniglia','Lampone'] },
@@ -857,6 +942,18 @@ const FAMILLES_PRODUIT = [
     unite:'paquet', unites:'paquets' },
   { id:'crepe',        libelle:'Crêpe',              parfums:false, dlc:'crepe_negatif',
     unite:'paquet', unites:'paquets' },
+  /* Achetés en 2026 (factures Chamonix), ajoutés à stock zéro. */
+  /* Cremini : bac spécial Amorino de 2,15 L. Famille à part, comptée en bacs
+     sans litrage : elle ne change rien au calcul des écarts glaces, qui reste
+     celui du classeur Excel (bacs de 3, 5 et 7 L). */
+  { id:'cremini',      libelle:'Cremini 2,15 L',     parfums:true,  dlc:'gelato',
+    unite:'bac',    unites:'bacs', saveurs:['Fleur de lait','Noisette'] },
+  { id:'mac_trad',     libelle:'Coffrets 12 macarons traditionnels', parfums:false, dlc:'macaron_traditionnel',
+    unite:'coffret', unites:'coffrets' },
+  { id:'cookie',       libelle:'Cookies',            parfums:false, dlc:'cookie',
+    unite:'carton', unites:'cartons' },
+  { id:'cake',         libelle:'Cakes',              parfums:true,  dlc:'cake',
+    unite:'carton', unites:'cartons', saveurs:['Amande citron','Chocolat','Noisette'] },
   { id:'chantilly',    libelle:'Chantilly',          parfums:false, dlc:'chantilly',
     unite:'brique', unites:'briques', lieu:'sec', refSec:'creme' },
   /* Coulis et toppings sont au SEC : ils se comptent dans l'inventaire du sec,
@@ -1200,7 +1297,7 @@ const CONFIG = {
   JOURS_SEMAINE, NETTOYAGE, REASSORT, REASSORT_CATS, RUPTURE,
   PHASES, RELEVE, FICHES, PARFUMS, PARFUMS_ALIAS, FAMILLES_PRODUIT, ANOMALIES,
   FOURNISSEUR, TAILLES_BAC,
-  INVENTAIRE_SEC, MOTIFS_PERTE, VOIX, SCANNER, PERIODES,
+  INVENTAIRE_SEC, PRIX_ACHAT, MOTIFS_PERTE, VOIX, SCANNER, PERIODES,
   SEUILS, FRAUDE, METEO, TABS, MENU_PLUS, PAGES, UI
 };
 
