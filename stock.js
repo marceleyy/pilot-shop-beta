@@ -3127,3 +3127,197 @@ function confirmerOuverture(r) {
     dessiner();
   });
 }
+
+/* =============================================================================
+   ÉCART DU SEC (manager)
+   Pour les produits d'ECART_SEC (cornets, choco-cônes, pots, chocolat chaud) :
+   consommé = inventaire de début + reçu − inventaire de fin, en pièces ;
+   vendu = quantités de l'export de caisse ; écart = consommé − vendu.
+   Les réceptions du sec ne passent pas au stock (elles restent au registre) :
+   le reçu se saisit ici, en unités comptées (cartons, ramettes, boîtes).
+   Les clés d'ECART_SEC sont celles du catalogue d'usine : une déclinaison
+   renommée dans le catalogue n'y est plus comptée.
+   Calcul À PART de l'écart glaces, qu'il ne touche pas.
+   État sous « catalogue:ecartsec » : { debut, fin, recu, ventes, pieces,
+   fichier, at }.
+   ========================================================================== */
+PAGES.ecartsec = { titre:'Écart du sec', sous:'Cornets, pots et chocolat chaud : consommé contre vendu' };
+if (MENU_PLUS.manager.indexOf('ecartsec') < 0) MENU_PLUS.manager.push('ecartsec');
+
+/* Ventes du sec dans l'export de caisse : { id produit: quantité }. */
+async function lireVentesSec(file) {
+  if (!(await chargerXLSX())) throw new Error('Lecture des fichiers de caisse indisponible : réessayez avec le réseau');
+  let wb;
+  try { wb = lireClasseur(new Uint8Array(await file.arrayBuffer())); }
+  catch (e) { throw new Error(typeof IMPORT_ILLISIBLE !== 'undefined' ? IMPORT_ILLISIBLE : 'Fichier illisible'); }
+  const feuille = wb.Sheets[wb.SheetNames[0]];
+  if (!feuille) throw new Error('Classeur vide');
+  const rows = XLSX.utils.sheet_to_json(feuille, { defval:'' });
+  if (!rows.length) throw new Error('Aucune ligne de vente dans le fichier');
+  const cols = Object.keys(rows[0]);
+  const trouve = re => cols.filter(c => re.test(c))[0];
+  const cQte = trouve(/qte|qté|quantit|nombre|nb\.?$/i);
+  const cNom = trouve(/produit|libell|désignation|designation|article|nom/i);
+  /* Même règle que l'écart glaces : les unités vendues en option comptent. */
+  const cOpt = cols.filter(c => c !== cQte && /qt[eé]\s*option/i.test(c))[0];
+  if (!cQte || !cNom) throw new Error('Il faut une colonne de libellé et une colonne de quantité.');
+  const regles = ECART_SEC.map(p => ({ id: p.id, re: new RegExp(p.caisse) }));
+  const ventes = {}, libelles = {};
+  rows.forEach(r => {
+    const q = num(r[cQte]) + (cOpt ? num(r[cOpt]) : 0);
+    if (!(q > 0)) return;
+    const n0 = nomCaisse(r[cNom]);
+    const p = regles.filter(x => x.re.test(n0))[0];
+    if (!p) return;
+    ventes[p.id] = (ventes[p.id] || 0) + q;
+    (libelles[p.id] = libelles[p.id] || {})[n0] = 1;
+  });
+  return { ventes: ventes, libelles: Object.keys(libelles).reduce((o, k) => (o[k] = Object.keys(libelles[k]), o), {}) };
+}
+
+V.ecartsec = async function () {
+  if (!STATE.user || STATE.user.role !== 'manager') {
+    $('#page').innerHTML = vide('', 'Réservé au manager.'); return;
+  }
+  await chargerCatalogueSec();
+  const hist = ((await DB.get('stock:secs', [])) || []).filter(h => h && h.jour)
+    .slice().sort((a, b) => String(a.jour).localeCompare(String(b.jour)));
+  const etat = Object.assign({ recu:{}, ventes:{}, pieces:{}, libelles:{} },
+    (await DB.get('catalogue:ecartsec', null)) || {});
+  const parJour = j => hist.filter(h => h.jour === j)[0];
+  /* Par défaut : les deux derniers inventaires du sec. */
+  if (!parJour(etat.debut)) etat.debut = hist.length >= 2 ? hist[hist.length - 2].jour : '';
+  if (!parJour(etat.fin) || etat.fin <= etat.debut) etat.fin = hist.length ? hist[hist.length - 1].jour : '';
+
+  const enregistrer = async () => {
+    etat.at = nowISO();
+    try { await DB.set('catalogue:ecartsec', etat); }
+    catch (e) { toast('Enregistrement impossible, réessayez', 'erreur'); }
+  };
+  const nb = v => Number.isInteger(num(v)) ? String(num(v)) : n1(v);
+
+  const dessiner = () => {
+    const deb = parJour(etat.debut), fin = parJour(etat.fin);
+    /* Période valide : deux inventaires, la fin après le début. Sinon rien
+       n'est calculé (un début vide valait 0 et donnait des écarts absurdes). */
+    const valide = !!(deb && fin && etat.fin > etat.debut);
+    /* Ventes importées pour une autre période : ignorées. */
+    const ventesOk = !!etat.fichier && etat.ventesPour === etat.debut + '|' + etat.fin;
+    const unites = (inv, p) => p.cles.reduce((s, c) => s + num(((inv && inv.lignes) || {})[c]), 0);
+    let manque = 0, surplus = 0, sansPieces = 0;
+    const lignes = ECART_SEC.map(p => {
+      const pcs = num(etat.pieces[p.id] > 0 ? etat.pieces[p.id] : p.pieces);
+      const d = unites(deb, p), f = unites(fin, p), r = num(etat.recu[p.id]);
+      const vendu = ventesOk ? num(etat.ventes[p.id]) : 0;
+      /* Prix figés avec l'inventaire de fin (comme la valeur du stock). */
+      const prix = p.cles.map(c => prixLigne(c, fin && fin.prix)).filter(x => x !== null)[0];
+      if (!(pcs > 0)) sansPieces++;
+      if (!valide || !(pcs > 0)) return { p, pcs, d, f, r, vendu, conso: null };
+      const conso = (d + r - f) * pcs;
+      const ecart = conso - vendu;
+      const eurE = prix ? ecart * prix / pcs : null;
+      /* Manques et surplus à part : un surplus (vente saisie sur la mauvaise
+         taille) ne doit pas cacher une perte. */
+      if (eurE !== null) { if (eurE > 0) manque += eurE; else surplus -= eurE; }
+      return { p, pcs, d, f, r, vendu, conso, ecart, eurE };
+    });
+    const opts = sel => hist.map(h => '<option value="' + esc(h.jour) + '"' + (h.jour === sel ? ' selected' : '') + '>' +
+      esc(fmtD(h.jour)) + '</option>').join('');
+
+    $('#vue-actions').innerHTML = '';
+    $('#page').innerHTML =
+      carte('<h2>Écart du sec</h2>' +
+        '<div class="cs">Consommé (début + reçu − fin) contre vendu en caisse, en pièces. ' +
+        'Un écart positif : des pièces sont sorties sans vente (casse, erreur, oubli en caisse). ' +
+        'L’écart glaces n’est pas concerné.</div>' +
+        (hist.length < 2
+          ? '<div class="alerte warn" style="margin-top:12px"><span class="ai">●</span><div><b>Il faut deux inventaires du sec</b>' +
+            '<p>Un au début et un à la fin de la période, au moins pour les cornets, pots et chocolat chaud.</p></div></div>'
+          : '<div class="grid g2" style="margin-top:12px">' +
+            '<div class="champ"><label class="f" for="es-deb">Inventaire de début</label><select id="es-deb">' + opts(etat.debut) + '</select></div>' +
+            '<div class="champ"><label class="f" for="es-fin">Inventaire de fin</label><select id="es-fin">' + opts(etat.fin) + '</select></div></div>') +
+        '<div style="margin-top:12px"><label class="btn clair bloc" for="es-fichier">' +
+        (etat.fichier ? 'Remplacer l’export de caisse (' + esc(etat.fichier) + ')' : 'Importer l’export de caisse de la période') +
+        '</label><input type="file" id="es-fichier" accept=".xlsx,.xls,.csv" hidden></div>', 'solide') +
+
+      (valide
+        ? carte('<div class="cs">Écart du ' + esc(fmtD(etat.debut)) + ' au ' + esc(fmtD(etat.fin)) + '</div>' +
+            '<h2 style="margin-top:2px">' + eur(manque) + ' HT sortis sans vente</h2>' +
+            '<div class="mini">' + (surplus > 0 ? 'Vendu en plus du consommé : ' + eur(surplus) + ' (souvent une taille mal saisie en caisse) · ' : '') +
+            (ventesOk ? 'Ventes : ' + esc(etat.fichier)
+              : etat.fichier ? 'L’export importé correspond à une autre période : importez celui du ' + esc(fmtD(etat.debut)) + ' au ' + esc(fmtD(etat.fin)) + '.'
+              : 'Ventes pas encore importées : tout le consommé apparaît en écart.') +
+            (sansPieces ? ' · ' + sansPieces + ' ' + accord(sansPieces, 'produit') + ' sans nombre de pièces, hors calcul' : '') + '</div>')
+        : hist.length >= 2 ? carte('<div class="alerte warn"><span class="ai">●</span><div><b>Période impossible</b>' +
+            '<p>L’inventaire de fin doit être postérieur à celui de début.</p></div></div>') : '') +
+
+      '<div class="stack">' + lignes.map(x =>
+        carte('<div class="rang"><div style="flex:1;min-width:0"><b>' + esc(x.p.nom) + '</b>' +
+          '<div class="mini">Début ' + nb(x.d) + ' · reçu ' + nb(x.r) + ' · fin ' + nb(x.f) +
+          (x.conso !== null ? ' → consommé ' + nb(x.conso) + ' · vendu ' + nb(x.vendu) + ' pièces' : '') + '</div>' +
+          (etat.libelles && etat.libelles[x.p.id] ? '<div class="mini">Caisse : ' + esc(etat.libelles[x.p.id].slice(0, 4).join(', ')) + '</div>' : '') +
+          '</div>' +
+          '<div style="text-align:right">' + (x.conso === null ? '<span class="mini">pièces ?</span>'
+            : '<b>' + (x.ecart > 0 ? '+' : '') + nb(x.ecart) + '</b>' +
+              (x.eurE !== null ? '<div class="mini">' + eur(x.eurE) + '</div>' : '')) + '</div></div>' +
+          '<div class="grid g2" style="margin-top:8px">' +
+          '<div class="champ"><label class="f" for="es-r-' + x.p.id + '">Reçu (unités comptées)</label>' +
+          '<input type="text" inputmode="decimal" id="es-r-' + x.p.id + '" data-recu="' + x.p.id + '" value="' + (x.r ? nb(x.r) : '') + '" placeholder="0"></div>' +
+          '<div class="champ"><label class="f" for="es-p-' + x.p.id + '">Pièces par unité</label>' +
+          '<input type="text" inputmode="numeric" id="es-p-' + x.p.id + '" data-pcs="' + x.p.id + '" value="' + (x.pcs > 0 ? x.pcs : '') + '" placeholder="?"></div>' +
+          '</div>')).join('') + '</div>';
+
+    const bDeb = $('#es-deb'), bFin = $('#es-fin');
+    /* Autre période : le reçu saisi pour l'ancienne ne vaut plus. */
+    const changerPeriode = async () => { etat.recu = {}; await enregistrer(); dessiner(); };
+    if (bDeb) bDeb.onchange = () => { etat.debut = bDeb.value; changerPeriode(); };
+    if (bFin) bFin.onchange = () => { etat.fin = bFin.value; changerPeriode(); };
+    /* Redessin sans perdre le champ où l'on vient de passer (iPad). */
+    const redessiner = () => setTimeout(() => {
+      const a = document.activeElement, id = a && a.id && $('#page').contains(a) ? a.id : null;
+      dessiner();
+      if (id && $('#' + id)) $('#' + id).focus();
+    }, 0);
+    $$('[data-recu]').forEach(i => i.onchange = async () => {
+      const v = num(i.value);
+      etat.recu[i.dataset.recu] = v > 0 ? v : 0; await enregistrer(); redessiner();
+    });
+    $$('[data-pcs]').forEach(i => i.onchange = async () => {
+      const v = Math.round(num(i.value));
+      /* Vide : retour au nombre du fichier fournisseur (0 = pas de correction). */
+      etat.pieces[i.dataset.pcs] = v > 0 ? v : 0;
+      await enregistrer(); redessiner();
+    });
+    $('#es-fichier').onchange = async ev => {
+      const f = ev.target.files && ev.target.files[0];
+      /* Le même fichier, rechoisi après un changement de période, doit relire. */
+      ev.target.value = '';
+      if (!f) return;
+      try {
+        const r = await lireVentesSec(f);
+        etat.ventes = r.ventes; etat.libelles = r.libelles; etat.fichier = f.name;
+        etat.ventesPour = etat.debut + '|' + etat.fin;
+        await enregistrer();
+        const n = Object.keys(r.ventes).length;
+        toast(n ? n + ' ' + accord(n, 'produit') + ' du sec trouvé' + (n > 1 ? 's' : '') + ' dans les ventes'
+                : 'Aucune vente de cornet, pot ou chocolat chaud reconnue', n ? '' : 'erreur');
+      } catch (e) { toast(e && e.message ? e.message : 'Fichier illisible', 'erreur'); }
+      dessiner();
+    };
+  };
+  dessiner();
+};
+
+/* L'écran Écarts mène aussi à l'écart du sec. */
+(function () {
+  const ancien = V.ecarts;
+  if (typeof ancien !== 'function') return;
+  V.ecarts = async function () {
+    await ancien.apply(this, arguments);
+    const a = $('#vue-actions');
+    if (STATE.view !== 'ecarts' || !a || $('#es-ouvrir')) return;
+    if (!(STATE.user && STATE.user.role === 'manager')) return;
+    a.insertAdjacentHTML('beforeend', '<button class="btn sm clair" id="es-ouvrir">Écart du sec</button>');
+    $('#es-ouvrir').onclick = () => rendre('ecartsec');
+  };
+})();
