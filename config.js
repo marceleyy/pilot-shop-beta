@@ -510,7 +510,8 @@ const PARFUMS = [
   'Fruit de la passion','Inimitable','Mangue','Noisette','Noix de coco','Orange sanguine',
   'Pistache','Stracciatella','Tiramisu','Vanille','Yogurt',
   /* Achetés en 2026 (factures Chamonix), ajoutés à stock zéro. */
-  'Cheesecake myrtilles','Chocolat blanc pécan','Crema di caffè','Fleur de lait',
+  /* La Fleur de lait seule n'existe qu'en Cremini 2,15 L : famille à part. */
+  'Cheesecake myrtilles','Chocolat blanc pécan','Crema di caffè',
   'Fleur de lait exotique','Fruits rouges','Menthe chocolat'
 ];
 
@@ -552,7 +553,6 @@ const PARFUMS_ALIAS = {
   'Chocolat blanc pécan':   ['white chocolate pecan', 'cioccolato bianco', 'pecan'],
   /* « crema di caffe » et non « caffe » seul : ce mot appartient au Café. */
   'Crema di caffè':         ['crema di caffe', 'coffee cream', 'crema caffe'],
-  'Fleur de lait':          ['fior di latte', 'milk flower', 'fleur de lait'],
   'Fleur de lait exotique': ['fior di latte esotico', 'fior di latte exotic', 'exotic fior di latte'],
   'Fruits rouges':          ['red fruits', 'frutti rossi', 'frutti di bosco', 'mixed berries'],
   'Menthe chocolat':        ['mint chocolate', 'mint choc', 'menta cioccolato', 'menta']
@@ -715,6 +715,7 @@ const PRIX_ACHAT = {
     gianduiotto: 7.55,    // carton 15×12 à 113,22 € → la boîte de 12
     gaufre: 11.69,        // paquet de 24
     crepe: 3.26,          // carton 14×6 à 45,61 € → le paquet de 6
+    cremini: 16.14,       // bac de 2,15 L
     mac_trad: 9.04,       // carton de 20 coffrets à 180,76 €
     cookie: 14.5,         // carton de 20
     cake: 53              // carton de 45 parts
@@ -942,6 +943,11 @@ const FAMILLES_PRODUIT = [
   { id:'crepe',        libelle:'Crêpe',              parfums:false, dlc:'crepe_negatif',
     unite:'paquet', unites:'paquets' },
   /* Achetés en 2026 (factures Chamonix), ajoutés à stock zéro. */
+  /* Cremini : bac spécial Amorino de 2,15 L. Famille à part, comptée en bacs
+     sans litrage : elle ne change rien au calcul des écarts glaces, qui reste
+     celui du classeur Excel (bacs de 3, 5 et 7 L). */
+  { id:'cremini',      libelle:'Cremini 2,15 L',     parfums:true,  dlc:'gelato',
+    unite:'bac',    unites:'bacs', saveurs:['Fleur de lait','Noisette'] },
   { id:'mac_trad',     libelle:'Coffrets 12 macarons traditionnels', parfums:false, dlc:'macaron_traditionnel',
     unite:'coffret', unites:'coffrets' },
   { id:'cookie',       libelle:'Cookies',            parfums:false, dlc:'cookie',
