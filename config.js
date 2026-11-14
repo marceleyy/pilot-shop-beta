@@ -754,6 +754,31 @@ const PRIX_ACHAT = {
   }
 };
 
+/* Écart du sec : les produits où une vente en caisse consomme une pièce.
+   « cles » : lignes de l'inventaire du sec, additionnées ; « pieces » : pièces
+   dans une unité comptée (modifiable à l'écran) ; « caisse » : libellés de
+   l'export de caisse (en majuscules, sans accent) qui consomment une pièce.
+   Le reste du sec (serviettes, cuillères…) n'a pas d'écart : on n'en suit
+   que la valeur. Ce calcul est À PART de l'écart glaces, qu'il ne touche pas. */
+const ECART_SEC = [
+  { id:'cornet_p',  nom:'Cornet petit',      cles:['sec|cornet|Petit'],        pieces:432,  caisse:'^CORNET (ENFANT|PETIT)' },
+  { id:'cornet_c',  nom:'Cornet classique',  cles:['sec|cornet|Classique'],    pieces:275,  caisse:'^CORNET CLASSI' },
+  { id:'cornet_g',  nom:'Cornet grand',      cles:['sec|cornet|Grand'],        pieces:256,  caisse:'^CORNET GRAND' },
+  { id:'choco_p',   nom:'Choco-cône petit',  cles:['sec|chococone|Petit'],     pieces:225,  caisse:'^CHOCO ?CONE (ENFANT|PETIT)' },
+  { id:'choco_c',   nom:'Choco-cône classique', cles:['sec|chococone|Classique'], pieces:175, caisse:'^CHOCO ?CONE CLASSI' },
+  { id:'choco_g',   nom:'Choco-cône grand',  cles:['sec|chococone|Grand'],     pieces:128,  caisse:'^CHOCO ?CONE GRAND' },
+  /* Pièces par ramette inconnues : à saisir à l'écran. */
+  { id:'pot_p',     nom:'Pot petit',         cles:['sec|pot|Petit'],           pieces:null, caisse:'^POT (ENFANT|PETIT)' },
+  { id:'pot_c',     nom:'Pot classique',     cles:['sec|pot|Classique'],       pieces:null, caisse:'^POT CLASSI' },
+  { id:'pot_g',     nom:'Pot grand',         cles:['sec|pot|Grand'],           pieces:null, caisse:'^POT GRAND' },
+  { id:'pot_x',     nom:'Pot géant',         cles:['sec|pot|Géant'],           pieces:null, caisse:'^POT GEANT' },
+  { id:'pot_a',     nom:'Pot à partager',    cles:['sec|pot|À partager'],      pieces:null, caisse:'^POT (A )?PARTAG' },
+  { id:'chocochaud',nom:'Chocolat chaud (sachets)',
+    cles:['Noir','Lait','Noisette','Amande','Blanc','Caramel','Aztèque','Orange cannelle',
+          'Gianduja','Coco','Panettone'].map(v => 'sec|chocochaud|' + v),
+    pieces:15, caisse:'^CHOCO(LAT)? CHAUD' }
+];
+
 const MOTIFS_PERTE = [
   { id: 'perime',    label: 'Périmé',    icone: '📅', mots: ['périm','perim','dlc','date','dépassé'] },
   { id: 'casse',     label: 'Cassé',     icone: '💥', mots: ['cass','tomb','renvers','brisé'] },
@@ -1297,7 +1322,7 @@ const CONFIG = {
   JOURS_SEMAINE, NETTOYAGE, REASSORT, REASSORT_CATS, RUPTURE,
   PHASES, RELEVE, FICHES, PARFUMS, PARFUMS_ALIAS, FAMILLES_PRODUIT, ANOMALIES,
   FOURNISSEUR, TAILLES_BAC,
-  INVENTAIRE_SEC, PRIX_ACHAT, MOTIFS_PERTE, VOIX, SCANNER, PERIODES,
+  INVENTAIRE_SEC, PRIX_ACHAT, ECART_SEC, MOTIFS_PERTE, VOIX, SCANNER, PERIODES,
   SEUILS, FRAUDE, METEO, TABS, MENU_PLUS, PAGES, UI
 };
 
