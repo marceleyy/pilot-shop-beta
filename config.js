@@ -669,6 +669,42 @@ const SEC_SECTIONS = [
 const SEC_LIGNES = INVENTAIRE_SEC.reduce(
   (n, r) => n + (r.variantes ? r.variantes.length : 1), 0);
 
+/* Prix d'achat HT, par unité COMPTÉE, tirés des factures Amorino 2026
+   (Chamonix). Clé = celle de l'inventaire : « sec|id|déclinaison » pour le sec,
+   la famille pour la chambre froide, la taille en litres pour les bacs.
+   Une référence absente n'a pas de prix : elle ne compte pas dans la valeur.
+   Le manager les corrige dans Catalogue › ✎ (sec) et « Prix chambre froide ». */
+const PRIX_ACHAT = {
+  glace: { 3: 22.52, 5: 36.44, 7: 51.01 },
+  froid: {
+    mac_classico: 5.77,   // carton 8×10 à 46,14 € → la boîte de 10
+    mac_grandioso: 7.55,  // carton 4×6 à 30,20 € → la boîte de 6
+    gianduiotto: 7.55,    // carton 15×12 à 113,22 € → la boîte de 12
+    gaufre: 11.69,        // paquet de 24
+    crepe: 3.26           // carton 14×6 à 45,61 € → le paquet de 6
+  },
+  sec: {
+    'sec|cornet|Petit': 37.67, 'sec|cornet|Classique': 26.47, 'sec|cornet|Grand': 35.63,
+    'sec|chococone|Petit': 29.73, 'sec|chococone|Classique': 34.07, 'sec|chococone|Grand': 28.16,
+    'sec|cornetsg|': 17.31,
+    'sec|conepapier|Petit': 55.35, 'sec|conepapier|Grand': 63.47,
+    'sec|cuillere|': 70, 'sec|serviette|': 80.1, 'sec|barquette|': 63.48,
+    'sec|gobelet|Expresso': 2, 'sec|gobelet|Petit': 2.69, 'sec|gobelet|Moyen': 3.66, 'sec|gobelet|Grand': 5.58,
+    'sec|bague|Petit': 4.2, 'sec|bague|Moyen': 4.26, 'sec|bague|Grand': 4.26,
+    'sec|paille|': 4.8,
+    'sec|chocochaud|Noir': 12.5, 'sec|chocochaud|Lait': 12.5, 'sec|chocochaud|Noisette': 12.5,
+    'sec|chocochaud|Amande': 12.5, 'sec|chocochaud|Blanc': 12.5, 'sec|chocochaud|Caramel': 12.5,
+    'sec|chocochaud|Aztèque': 12.5, 'sec|chocochaud|Orange cannelle': 12.5, 'sec|chocochaud|Gianduja': 12.5,
+    'sec|chocochaud|Coco': 12.5, 'sec|chocochaud|Panettone': 12.5,
+    'sec|tablette|Lait': 106.7,
+    'sec|the|Breakfast': 15, 'sec|the|Vert': 15, 'sec|the|Vert Yuanne': 15,
+    'sec|topping|Pistache': 6, 'sec|topping|Caramel': 3, 'sec|topping|Café': 9,
+    'sec|macaroncarton|Petit 2p': 18.49, 'sec|macaroncarton|Moyen 4p': 10.87,
+    'sec|isobac|1100 ml': 58, 'sec|isobac|550 ml': 49,
+    'sec|lavette|Rose': 7.05, 'sec|lavette|Jaune': 7.05, 'sec|lavette|Bleue': 7.05
+  }
+};
+
 const MOTIFS_PERTE = [
   { id: 'perime',    label: 'Périmé',    icone: '📅', mots: ['périm','perim','dlc','date','dépassé'] },
   { id: 'casse',     label: 'Cassé',     icone: '💥', mots: ['cass','tomb','renvers','brisé'] },
@@ -1200,7 +1236,7 @@ const CONFIG = {
   JOURS_SEMAINE, NETTOYAGE, REASSORT, REASSORT_CATS, RUPTURE,
   PHASES, RELEVE, FICHES, PARFUMS, PARFUMS_ALIAS, FAMILLES_PRODUIT, ANOMALIES,
   FOURNISSEUR, TAILLES_BAC,
-  INVENTAIRE_SEC, MOTIFS_PERTE, VOIX, SCANNER, PERIODES,
+  INVENTAIRE_SEC, PRIX_ACHAT, MOTIFS_PERTE, VOIX, SCANNER, PERIODES,
   SEUILS, FRAUDE, METEO, TABS, MENU_PLUS, PAGES, UI
 };
 
