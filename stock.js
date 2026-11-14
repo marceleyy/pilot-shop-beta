@@ -2221,6 +2221,22 @@ V.inventaire = async function () {
     }).join('');
   };
 
+  /* Valeur totale du stock (manager) : dernier inventaire confirmé de la
+     chambre froide + dernier du sec, chacun à ses prix du jour. */
+  const valeurTotale = (() => {
+    if (!estManager) return '';
+    const vf = precedent ? valeurStock(precedent.lignes, precedent.prix) : { total: 0, sansPrix: 0 };
+    const vs = secPrec ? valeurStock(secPrec.lignes, secPrec.prix) : { total: 0, sansPrix: 0 };
+    if (!(vf.total + vs.total > 0)) return '';
+    const sp = vf.sansPrix + vs.sansPrix;
+    return carte('<div class="cs">Valeur totale du stock</div>' +
+      '<h2 style="margin-top:2px">' + eur(vf.total + vs.total) + ' HT</h2>' +
+      '<div class="mini">Chambre froide ' + eur(vf.total) + (precedent ? ' (' + esc(fmtD(precedent.jour)) + ')' : '') +
+      ' · Sec ' + eur(vs.total) + (secPrec ? ' (' + esc(fmtD(secPrec.jour)) + ')' : '') +
+      (sp ? ' · ' + sp + ' ' + accord(sp, 'produit compté', 'produits comptés') + ' sans prix' : '') +
+      '</div>', 'solide');
+  })();
+
   const dessiner = () => {
     $('#vue-actions').innerHTML = '';
     const enAttente = partie === 'froid' ? attente : attenteSec;
@@ -2229,7 +2245,7 @@ V.inventaire = async function () {
     const dejaCeJour = partie === 'froid' ? dejaFaitAujourdhui : secDejaFait;
     const ouvert = partie === 'froid' ? ouvertFroid : ouvertSec;
 
-    $('#page').innerHTML =
+    $('#page').innerHTML = valeurTotale +
       carte('<h2>' + (dejaCeJour && !ouvert ? 'Inventaire du jour'
                     : ouvert && dejaCeJour ? 'Corriger l’inventaire'
                     : 'Faire l’inventaire') + '</h2>' +
