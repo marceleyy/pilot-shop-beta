@@ -2294,6 +2294,7 @@ V.inventaire = async function () {
   /* Recherche dans le sec : nom du catalogue, déclinaison, nom de
      l'étiquette ou code Amorino (« wafer », « nocciolata », « CIALDI »). */
   let recherche = '';
+  let minuterieRech = null;
   const nrmR = x => String(x || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
   const texteRech = c => {
     const f = (typeof INFO_PRODUITS !== 'undefined' && INFO_PRODUITS[c]) || {};
@@ -2334,17 +2335,22 @@ V.inventaire = async function () {
       : [...new Set(catalogue.map(r => r.sec || 'Autres'))].map(s => ({ id:s }));
 
     return sections.map(section => {
-      const q = nrmR(recherche).trim();
-      /* Déclinaisons qui répondent à la recherche (toutes si le nom répond). */
+      /* Déclinaisons qui répondent à la recherche : chaque mot tapé doit se
+         trouver dans le nom, la déclinaison, l'étiquette ou le
+         code (« pot grand », « nocciolata 5 kg »). */
+      const mots = nrmR(recherche).split(/\s+/).filter(Boolean);
       const varsVues = r => {
         const vs = r.variantes && r.variantes.length ? r.variantes : [''];
-        if (!q || nrmR(r.nom + ' ' + section.id).includes(q)) return vs;
-        return vs.filter(v => nrmR(v).includes(q) || texteRech(cleSec(r, v)).includes(q));
+        if (!mots.length) return vs;
+        return vs.filter(v => {
+          const t = nrmR(r.nom + ' ' + v) + ' ' + texteRech(cleSec(r, v));
+          return mots.every(m => t.includes(m));
+        });
       };
       const refs = catalogue.filter(r =>
         typeof r === 'object' && (r.sec || 'Autres') === section.id && !r.masque && varsVues(r).length);
       if (!refs.length) return '';
-      const nb = refs.reduce((n, r) => n + (r.variantes ? r.variantes.length : 1), 0);
+      const nb = refs.reduce((n, r) => n + varsVues(r).length, 0);
       const teinte = section.teinte ? ' style="--sec-teinte:' + section.teinte + '"' : '';
 
       return '<div class="sec-bloc"' + teinte + '>' +
@@ -2361,7 +2367,7 @@ V.inventaire = async function () {
               champSec(r, c, r.nom) + '</div>';
           }
 
-          const ouvert = deplies[r.id] || !!q;
+          const ouvert = deplies[r.id] || mots.length > 0;
           const saisis = r.variantes.filter(v => saisieSec[cleSec(r, v)] !== undefined).length;
           const total  = r.variantes.reduce((s, v) => s + num(saisieSec[cleSec(r, v)] || 0), 0);
 
@@ -2512,6 +2518,8 @@ V.inventaire = async function () {
           : ''));
 
     $$('[data-deplier]').forEach(b => b.onclick = () => {
+      /* Pendant une recherche tout est ouvert : rien à replier. */
+      if (partie === 'sec' && recherche.trim() && !b.dataset.deplier.startsWith('f:')) return;
       deplies[b.dataset.deplier] = !deplies[b.dataset.deplier];
       dessiner();
     });
@@ -2609,6 +2617,7 @@ V.inventaire = async function () {
       if (b.dataset.partie === partie) return;
       partie = b.dataset.partie;
       note = '';
+      recherche = '';
       dessiner();
     });
 
@@ -2623,12 +2632,21 @@ V.inventaire = async function () {
     });
     $$('[data-info]').forEach(b => b.onclick = () => ficheProduit(b.dataset.info));
     const zc = $('#sec-cherche');
-    if (zc) zc.oninput = () => {
+    if (zc) zc.oninput = e => {
       recherche = zc.value;
-      dessiner();
-      const z = $('#sec-cherche');
-      if (z) { z.focus(); z.setSelectionRange(z.value.length, z.value.length); }
+      /* Clavier mobile en cours de saisie (accents, prédiction) : on attend la
+         fin du mot. Sinon un court délai, pour ne pas tout redessiner à chaque
+         lettre. */
+      if (e && e.isComposing) return;
+      clearTimeout(minuterieRech);
+      minuterieRech = setTimeout(() => {
+        const pos = zc.selectionStart;
+        dessiner();
+        const z = $('#sec-cherche');
+        if (z) { z.focus(); try { z.setSelectionRange(pos, pos); } catch (er) {} }
+      }, 250);
     };
+    if (zc) zc.addEventListener('compositionend', () => zc.oninput());
     $$('[data-sec]').forEach(i => {
       i.disabled = !ouvert;
       i.oninput = () => {

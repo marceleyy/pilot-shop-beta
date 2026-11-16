@@ -752,18 +752,16 @@ const PRIX_ACHAT = {
     'sec|decor|Chocolat en poudre 1 kg': 6.8,
     'sec|filmiso|1100 ml': 3, 'sec|filmiso|550 ml': 2, 'sec|bagueiso|': 14, 'sec|bouteille|': 4.85,
     'sec|biscuit|Baci di Dama': 3.9, 'sec|biscuit|Brutti e buoni': 3.8,
-    /* Pots (coupes) : la ramette de 250, carton de 8 (98,96 € et 103,35 €
-       les 2 000) ; Géant et Waffle stick en blister (15,02 € et 17,26 €). */
-    'sec|pot|Petit': 12.37, 'sec|pot|Classique': 12.92, 'sec|pot|Géant': 15.02, 'sec|pot|Waffle stick': 17.26,
+    /* Pots : prix d'une RAMETTE, l'unité comptée. Petit et Classique :
+       carton de 8 ramettes de 250 (98,96 € et 103,35 €). Grand : carton de
+       1 400 = 7 ramettes de 200 (85,02 €). Géant (Grandissimo) : ramette de
+       160 à 15,02 €. Waffle stick : 150 coupes à 17,26 €. */
+    'sec|pot|Petit': 12.37, 'sec|pot|Classique': 12.92, 'sec|pot|Grand': 12.15,
+    'sec|pot|Géant': 15.02, 'sec|pot|Waffle stick': 17.26,
     'sec|gaufrier|Pierre abrasive crêpière': 22.6, 'sec|gaufrier|Brosse gaufrier': 15
   }
 };
 
-/* Fiches produit du sec : le « ? » à côté d'une ligne de l'inventaire.
-   Le nom du catalogue n'est pas celui de l'étiquette (« Crème gianduja 5 kg »
-   est un seau marqué « Pasta Nocciolata ») : l'équipe ne trouvait pas la
-   ligne. Photo prise en réserve, nom lu sur l'étiquette, code Amorino des
-   factures, et comment compter. Clé = celle de l'inventaire. */
 /* Ce que contient une unité comptée, lu sur les factures Amorino 2026 et
    en réserve. Affiché sous le nom pendant l'inventaire : « 1 carton =
    432 cornets ». Clé « sec|id|déclinaison », ou « sec|id| » pour toutes les
@@ -775,8 +773,8 @@ const CONTENU_SEC = {
   'sec|cornetsg|': '1 carton = 25 cornets',
   'sec|conepapier|Petit': '1 carton = 3 000 cônes', 'sec|conepapier|Grand': '1 carton = 2 800 cônes',
   'sec|pot|Petit': '1 ramette = 250 pots · carton de 8 ramettes', 'sec|pot|Classique': '1 ramette = 250 pots · carton de 8 ramettes',
-  'sec|pot|Grand': '1 carton = 1 400 pots', 'sec|pot|Géant': '1 blister = 160 pots',
-  'sec|pot|Waffle stick': '1 blister = 150 coupes Waffle stick (le « waffle carré »)',
+  'sec|pot|Grand': '1 ramette = 200 pots · carton de 7 ramettes', 'sec|pot|Géant': '1 ramette = 160 pots (Grandissimo)',
+  'sec|pot|Waffle stick': '1 ramette = 150 coupes Waffle stick (le « waffle carré »)',
   'sec|cuillere|': '1 carton = 3 600 cuillères',
   'sec|serviette|': '24×24 : 6 000 · 25×25 : 3 600 · 30×30 : 3 200 par carton',
   'sec|barquette|': '1 carton = 330 barquettes (210 en kraft)',
@@ -794,6 +792,11 @@ const CONTENU_SEC = {
 };
 const contenuSec = c => CONTENU_SEC[c] || CONTENU_SEC[String(c).split('|').slice(0, 2).join('|') + '|'] || '';
 
+/* Fiches produit du sec : le « ? » à côté d'une ligne de l'inventaire.
+   Le nom du catalogue n'est pas celui de l'étiquette (« Crème gianduja 5 kg »
+   est un seau marqué « Pasta Nocciolata ») : l'équipe ne trouvait pas la
+   ligne. Photo prise en réserve, nom lu sur l'étiquette, code Amorino des
+   factures, et comment compter. Clé = celle de l'inventaire. */
 const INFO_PRODUITS = {
   'sec|sucrecristal|': { photo: 'produits/sucre-buchettes.jpg', etiquette: 'Sucre blond bio en bûchettes, 1000 × 4 g', code: 'SUCREBR',
     compter: 'Un carton entier = 1 pack. Un carton entamé à moitié = 0,5.' },
