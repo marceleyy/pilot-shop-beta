@@ -853,10 +853,11 @@ async function verifierInventaire(partie) {
          : motif === 'non_scanne' ? ' ' + nbManq + ' ' + accord(nbManq, 'bac est noté', 'bacs sont notés') +
            ' consommés sans scan, hors pertes.' : '') +
         ' Le calcul des écarts ne change pas.',
-        'Mettre à jour le stock', () => confirmerInventaire(a, partie, motif), () => dessinerV(), 'Retour');
+        'Mettre à jour le stock', () => confirmerInventaire(a, partie, motif, nbManq),
+        () => (nbManq ? choix() : dessinerV()), 'Retour');
       if (!nbManq) return majStock('');
       /* Des bacs manquent : le manager dit ce qu'ils sont devenus. */
-      showSheet(
+      const choix = () => { showSheet(
         '<h2 id="sheet-titre">' + nbManq + ' ' + accord(nbManq, 'bac manquant', 'bacs manquants') + '</h2>' +
         '<p class="sub">Par rapport au stock attendu le ' + esc(fmtD(a.jour)) + '. Que sont-ils devenus ?</p>' +
         '<div class="stack" style="margin-top:12px">' + manquants.map(x =>
@@ -873,12 +874,14 @@ async function verifierInventaire(partie) {
       $('#ce-recompter').onclick = () => { toast('Touchez « Recompter » sur la ligne à revoir'); dessinerV(); };
       const ret = $('#sheet-corps [data-fermer]');
       if (ret) ret.onclick = () => dessinerV();
+      };
+      choix();
     };
   };
   dessinerV();
 }
 
-async function confirmerInventaire(a, partie, motif) {
+async function confirmerInventaire(a, partie, motif, nbVu) {
   partie = partie === 'sec' ? 'sec' : 'froid';
   const CLE = INV_ATTENTE[partie].cle;
   const cur = await inventaireEnAttente(partie);
@@ -931,14 +934,34 @@ async function confirmerInventaire(a, partie, motif) {
   }
   /* « pertes » : les bacs manquants vont au registre. « non_scanne » :
      consommés sans scan, notés sur l'inventaire seulement. */
-  motif = motif === 'pertes' ? 'pertes' : 'non_scanne';
-  const inv = await enregistrerInventaire(lignesAReprendre(cur, 'froid', theo), cur.note, theo,
-    Object.assign(meta, { motifEcart: motif }));
+  const aReprendre = lignesAReprendre(cur, 'froid', theo);
+  /* Le manager a choisi pour un nombre de bacs manquants : si un mouvement
+     synchronisé entre-temps le change, il revoit l'écran avant d'enregistrer. */
+  const nbMaintenant = Object.keys(theo).concat(Object.keys(aReprendre))
+    .filter((c, i, t) => t.indexOf(c) === i && litArticle(c).taille)
+    .reduce((s, c) => s + Math.max(0, num(theo[c] || 0) - num(aReprendre[c] || 0)), 0);
+  if (nbVu !== undefined && nbMaintenant !== nbVu) {
+    toast('Le stock a bougé depuis la vérification : revoyez les bacs manquants', 'erreur');
+    return verifierInventaire('froid');
+  }
+  motif = nbMaintenant ? (motif === 'pertes' ? 'pertes' : 'non_scanne') : '';
+  const inv = await enregistrerInventaire(aReprendre, cur.note, theo,
+    motif ? Object.assign(meta, { motifEcart: motif }) : meta);
 
   /* En pertes réelles, chaque bac manquant devient une perte du jour du
      comptage. L'id dérive du comptage : confirmer deux fois n'en ajoute pas
      de seconde. */
   const manquants = Object.keys(inv.ecarts).filter(c => inv.ecarts[c] < 0 && litArticle(c).taille);
+  if (manquants.length && motif === 'non_scanne') {
+    /* Revalidé autrement après un premier choix « pertes » : on retire ses lignes. */
+    const cle = 'pertes:' + cur.jour;
+    const liste = await DB.get(cle, []);
+    const reste = liste.filter(w => !(w && String(w.id || '').indexOf('inv|' + cur.at + '|') === 0));
+    if (reste.length !== liste.length) {
+      await DB.set(cle, reste);
+      if (typeof cumulerPertesMois === 'function') await cumulerPertesMois(cur.jour);
+    }
+  }
   if (manquants.length && motif === 'pertes') {
     const cle = 'pertes:' + cur.jour;
     const liste = await DB.get(cle, []);
@@ -955,7 +978,7 @@ async function confirmerInventaire(a, partie, motif) {
   }
   await DB.del(CLE);
   const bacsPerdus = manquants.reduce((s, c) => s - inv.ecarts[c], 0);
-  await feed(bacsPerdus ? 'warn' : 'ok',
+  await feed(bacsPerdus && motif === 'pertes' ? 'warn' : 'ok',
     STATE.user.prenom + ' a validé l’inventaire du ' + fmtD(cur.jour) + ' (' + (cur.par || '—') + ')' +
     (bacsPerdus ? ' · ' + bacsPerdus + ' ' + accord(bacsPerdus, 'bac', 'bacs') +
       (motif === 'pertes' ? ' en perte' : ' consommés sans scan') : ''));
