@@ -1879,10 +1879,6 @@ V.catalogue = async function () {
   $('#ct-prix-froid').onclick = () => editerPrix('Prix chambre froide', froidPrix(), () => rendre('catalogue'));
 };
 
-/* Un inventaire passé, en entier : TOUS les produits du catalogue, comptés
-   ou non. Un produit absent de la saisie s'affiche à 0, en grisé — l'écran
-   ne montrait que les totaux, impossible de retrouver ce qui avait été
-   compté pour un parfum donné. */
 /* Fiche d'un produit du sec : ce qu'on voit sur l'étagère. */
 function ficheProduit(c) {
   const f = (typeof INFO_PRODUITS !== 'undefined') && INFO_PRODUITS[c];
@@ -1897,6 +1893,10 @@ function ficheProduit(c) {
     '</div><div class="actions"><button class="btn clair" data-fermer>Fermer</button></div>');
 }
 
+/* Un inventaire passé, en entier : TOUS les produits du catalogue, comptés
+   ou non. Un produit absent de la saisie s'affiche à 0, en grisé — l'écran
+   ne montrait que les totaux, impossible de retrouver ce qui avait été
+   compté pour un parfum donné. */
 function voirInventaire(h, partie) {
   const l = h.lignes || {};
   const ecarts = h.ecarts || {};
@@ -2018,12 +2018,17 @@ function voirInventaire(h, partie) {
       if (tg > 0) rows.push([g.titre, 'Total ' + g.titre, '', '', '', dec(tg)]);
       total += tg;
     });
-    rows.push(['', 'TOTAL ' + (partie === 'froid' ? 'CHAMBRE FROIDE' : 'SEC'), '', '', '', dec(total)]);
+    /* Même total que « Valeur du stock » à l'écran : un produit d'un ancien
+       catalogue, compté mais absent des groupes, va sur une ligne à part. */
+    const vt = valeurStock(l, h.prix).total;
+    if (Math.abs(vt - total) >= 0.005) rows.push(['Autres', 'Produits hors catalogue', '', '', '', dec(vt - total)]);
+    rows.push(['', 'TOTAL ' + (partie === 'froid' ? 'CHAMBRE FROIDE' : 'SEC'), '', '', '', dec(vt)]);
     const csv = rows.map(r => r.map(q).join(';')).join('\n');
     const a = document.createElement('a');
     a.href = URL.createObjectURL(new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8' }));
     a.download = 'inventaire-' + (partie === 'froid' ? 'chambre-froide' : 'sec') + '-' + h.jour + '.csv';
     a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
     toast('Fichier téléchargé');
   };
 }
@@ -2261,7 +2266,7 @@ V.inventaire = async function () {
   const cleSec = (r, v) => 'sec|' + r.id + '|' + (v || '');
   /* « ? » : fiche produit (photo, nom de l'étiquette, code, comment compter). */
   const infoSec = (c, nom) => (typeof INFO_PRODUITS !== 'undefined' && INFO_PRODUITS[c])
-    ? ' <button type="button" class="info-p" data-info="' + esc(c) + '" aria-label="' +
+    ? '<button type="button" class="info-p" data-info="' + esc(c) + '" aria-label="' +
       esc('Comment reconnaître ' + nom) + '">?</button>' : '';
 
   /* nom : ce qu'un lecteur d'écran annonce, la ligne n'ayant pas d'étiquette. */
@@ -2302,7 +2307,7 @@ V.inventaire = async function () {
           if (!r.variantes || !r.variantes.length) {
             const c = cleSec(r, '');
             return '<div class="invl">' +
-              '<span class="invn">' + esc(r.nom) + infoSec(c, r.nom) + '</span>' +
+              '<span class="invn">' + esc(r.nom) + '</span>' + infoSec(c, r.nom) +
               (anc[c] !== undefined ? '<span class="invc faible">préc. ' + n1(anc[c]) + '</span>' : '') +
               champSec(r, c, r.nom) + '</div>';
           }
@@ -2322,7 +2327,7 @@ V.inventaire = async function () {
               ? '<div class="stack" style="margin-top:8px">' + r.variantes.map(v => {
                   const c = cleSec(r, v);
                   return '<div class="invl">' +
-                    '<span class="invn">' + esc(v) + infoSec(c, r.nom + ', ' + v) + '</span>' +
+                    '<span class="invn">' + esc(v) + '</span>' + infoSec(c, r.nom + ', ' + v) +
                     (anc[c] !== undefined ? '<span class="invc faible">préc. ' + n1(anc[c]) + '</span>' : '') +
                     champSec(r, c, r.nom + ', ' + v) + '</div>';
                 }).join('') + '</div>'
