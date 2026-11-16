@@ -754,6 +754,42 @@ const PRIX_ACHAT = {
   }
 };
 
+/* Fiches produit du sec : le « ? » à côté d'une ligne de l'inventaire.
+   Le nom du catalogue n'est pas celui de l'étiquette (« Crème gianduja 5 kg »
+   est un seau marqué « Pasta Nocciolata ») : l'équipe ne trouvait pas la
+   ligne. Photo prise en réserve, nom lu sur l'étiquette, code Amorino des
+   factures, et comment compter. Clé = celle de l'inventaire. */
+const INFO_PRODUITS = {
+  'sec|sucrecristal|': { photo: 'produits/sucre-buchettes.jpg', etiquette: 'Sucre blond bio en bûchettes, 1000 × 4 g', code: 'SUCREBR',
+    compter: 'Un carton entier = 1 pack. Un carton entamé à moitié = 0,5.' },
+  'sec|topping|Caramel': { photo: 'produits/eclats-caramel.jpg', etiquette: 'Éclats de caramel (Caramel flakes), pot de 500 g', code: 'CARAMP',
+    compter: 'Un pot = 1.' },
+  'sec|topping|Pistache': { photo: 'produits/pistaches-500g.jpg', etiquette: 'Pistaches concassées (Chopped pistachio kernels), sachet de 500 g', code: 'TOPPISTA500',
+    compter: 'Un sachet = 1.' },
+  'sec|topping|Noisette': { photo: 'produits/noisettes-150g.jpg', etiquette: 'Noisettes torréfiées (Roasted hazelnuts), sachet de 150 g, carton de 20', code: 'TOPNOIS150',
+    compter: 'Un sachet = 1. Un carton plein = 20.' },
+  'sec|cialdi|': { photo: 'produits/cialdina.jpg', etiquette: 'La Cialdina, mini wafers emballés un par un, carton de 2 kg (400 pièces)', code: 'CIALDI',
+    compter: 'Un carton = 1. Un sac à moitié plein = 0,5.' },
+  'sec|gaufrette|': { photo: 'produits/wafer-gianduja.jpg', etiquette: 'Wafer al Gianduja, boîte de 400 g, carton de 12 boîtes', code: 'WAFERN',
+    compter: 'Un carton de 12 boîtes = 1. Six boîtes seules = 0,5.' },
+  'sec|garniture|Crème pistache 3 kg': { photo: 'produits/chococream-pistache.jpg', etiquette: 'Chococream Pistacchio 15 %, seau de 3 kg', code: 'TOPPISTAC',
+    compter: 'Un seau = 1.' },
+  'sec|garniture|Sauce caramel 2 L': { photo: 'produits/caramel-guerande.jpg', etiquette: 'Caramel au beurre salé de Guérande, bidon de 2,4 kg', code: 'TOPCARAM (CB76S)',
+    compter: 'Un bidon = 1.' },
+  'sec|garniture|Chocolat de couverture 5 kg': { photo: 'produits/crema-fondente.jpg', etiquette: 'Crema Fondente 18 (Irca), seau de 5 kg', code: 'TOPCHOCG2',
+    compter: 'Un seau = 1.' },
+  'sec|garniture|Crème gianduja 5 kg': { photo: 'produits/pasta-nocciolata.jpg', etiquette: 'Pasta Nocciolata (Irca), seau de 5 kg', code: 'TOPNOCCIO',
+    compter: 'Un seau = 1.' },
+  'sec|decor|Cremino pistache 5,5 kg': { photo: 'produits/cremino-pistache.jpg', etiquette: 'Cremino Pistachio « TOPCREMINOLP », seau de 5,5 kg', code: 'TOPCREMINOLP',
+    compter: 'Un seau = 1.' },
+  'sec|decor|Amarena 3 kg': { photo: 'produits/amarena.jpg', etiquette: 'Variegato Amarena « Amorino », boîte de 3 kg', code: 'TOPAMARENA',
+    compter: 'Une boîte = 1.' },
+  'sec|biscuit|Baci di Dama': { photo: 'produits/baci-di-dama.jpg', etiquette: 'Biscuits sablés fourrés chocolat et noisette (Baci di Dama)', code: 'BACI',
+    compter: 'Une boîte ou un sachet = 1.' },
+  'sec|biscuit|Brutti e buoni': { photo: 'produits/brutti-e-buoni.jpg', etiquette: 'Brutti e Buoni, sachet de 120 g', code: 'B_BRUTTI',
+    compter: 'Un sachet = 1.' }
+};
+
 const MOTIFS_PERTE = [
   { id: 'perime',    label: 'Périmé',    icone: '📅', mots: ['périm','perim','dlc','date','dépassé'] },
   { id: 'casse',     label: 'Cassé',     icone: '💥', mots: ['cass','tomb','renvers','brisé'] },

@@ -1883,6 +1883,20 @@ V.catalogue = async function () {
    ou non. Un produit absent de la saisie s'affiche à 0, en grisé — l'écran
    ne montrait que les totaux, impossible de retrouver ce qui avait été
    compté pour un parfum donné. */
+/* Fiche d'un produit du sec : ce qu'on voit sur l'étagère. */
+function ficheProduit(c) {
+  const f = (typeof INFO_PRODUITS !== 'undefined') && INFO_PRODUITS[c];
+  if (!f) return;
+  showSheet('<h2 id="sheet-titre">' + esc(libelleSec(c)) + '</h2>' +
+    (f.photo ? '<img src="' + esc(f.photo) + '" alt="' + esc(f.etiquette || '') + '" loading="lazy" ' +
+      'style="display:block;width:100%;max-height:52vh;object-fit:contain;border-radius:12px;margin-top:10px;background:#eee">' : '') +
+    '<div class="stack" style="margin-top:12px">' +
+    (f.etiquette ? '<p><b>Sur l’étiquette :</b> ' + esc(f.etiquette) + '</p>' : '') +
+    (f.code ? '<p><b>Code Amorino :</b> ' + esc(f.code) + '</p>' : '') +
+    (f.compter ? '<p><b>Comment compter :</b> ' + esc(f.compter) + '</p>' : '') +
+    '</div><div class="actions"><button class="btn clair" data-fermer>Fermer</button></div>');
+}
+
 function voirInventaire(h, partie) {
   const l = h.lignes || {};
   const ecarts = h.ecarts || {};
@@ -1894,7 +1908,7 @@ function voirInventaire(h, partie) {
     vus.add(cle);
     const q = num(l[cle] || 0), p = prixLigne(cle, h.prix);
     return { nom: nom, q: q, saisi: l[cle] !== undefined,
-             ecart: ecarts[cle] || 0, unite: unite || '',
+             ecart: ecarts[cle] || 0, unite: unite || '', prix: p,
              val: (p !== null && q > 0) ? q * p : 0 };
   };
 
@@ -1911,7 +1925,8 @@ function voirInventaire(h, partie) {
     /* Une ligne par parfum, tailles côte à côte, comme à la saisie. */
     groupes.push({ titre: 'Glaces', lignes: PARFUMS.map(p => {
       const parT = tailles.map(t => ligne(cleArticle('glace', p, t), '', ''));
-      return { nom: p, saisi: parT.some(x => x.saisi),
+      parT.forEach((x, k) => { x.nom = p + ' ' + tailles[k] + ' L'; x.unite = 'bac'; });
+      return { nom: p, saisi: parT.some(x => x.saisi), det: parT,
                ecart: parT.reduce((s2, x) => s2 + num(x.ecart), 0),
                val: parT.reduce((s2, x) => s2 + x.val, 0),
                texte: tailles.map((t, k) => t + ' L : ' + nb(parT[k].q)).join(' · ') };
@@ -1977,7 +1992,40 @@ function voirInventaire(h, partie) {
           : nb(x.q) + (x.unite ? ' ' + esc(accord(x.q, x.unite)) : '')) +
         (estManager && x.val > 0 ? '<br>' + eur(x.val) : '') + '</span></div>').join('') +
       '</div>').join('') +
-    '<div class="actions"><button class="btn clair" data-fermer>Fermer</button></div>');
+    '<div class="actions">' +
+    (estManager ? '<button class="btn clair" id="inv-csv">Exporter pour le comptable</button>' : '') +
+    '<button class="btn clair" data-fermer>Fermer</button></div>');
+
+  /* Le comptable veut le détail par parfum et les totaux : un fichier
+     tableur, une ligne par produit compté, prix et valeur HT figés au
+     comptage, puis le total de chaque groupe et le total général. */
+  const bCsv = $('#inv-csv');
+  if (bCsv) bCsv.onclick = () => {
+    const q = x => { x = String(x == null ? '' : x);
+                     if (/^[=+\-@\t\r]/.test(x)) x = "'" + x;
+                     return '"' + x.replace(/"/g, '""') + '"'; };
+    const dec = v => (Math.round(num(v) * 100) / 100).toFixed(2).replace('.', ',');
+    const rows = [['Groupe', 'Produit', 'Quantité', 'Unité', 'Prix HT', 'Valeur HT']];
+    let total = 0;
+    groupes.filter(g => g.lignes.length).forEach(g => {
+      let tg = 0;
+      g.lignes.forEach(x => (x.det || [x]).forEach(y => {
+        if (!(num(y.q) > 0)) return;
+        rows.push([g.titre, y.nom, String(y.q).replace('.', ','), y.unite ? accord(y.q, y.unite) : '',
+                   y.prix !== null && y.prix !== undefined ? dec(y.prix) : 'sans prix', dec(y.val)]);
+        tg += num(y.val);
+      }));
+      if (tg > 0) rows.push([g.titre, 'Total ' + g.titre, '', '', '', dec(tg)]);
+      total += tg;
+    });
+    rows.push(['', 'TOTAL ' + (partie === 'froid' ? 'CHAMBRE FROIDE' : 'SEC'), '', '', '', dec(total)]);
+    const csv = rows.map(r => r.map(q).join(';')).join('\n');
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8' }));
+    a.download = 'inventaire-' + (partie === 'froid' ? 'chambre-froide' : 'sec') + '-' + h.jour + '.csv';
+    a.click();
+    toast('Fichier téléchargé');
+  };
 }
 
 V.inventaire = async function () {
@@ -2211,6 +2259,10 @@ V.inventaire = async function () {
   /* La note survit au redessin : ouvrir une famille redessine l'écran. */
   let note = '';
   const cleSec = (r, v) => 'sec|' + r.id + '|' + (v || '');
+  /* « ? » : fiche produit (photo, nom de l'étiquette, code, comment compter). */
+  const infoSec = (c, nom) => (typeof INFO_PRODUITS !== 'undefined' && INFO_PRODUITS[c])
+    ? ' <button type="button" class="info-p" data-info="' + esc(c) + '" aria-label="' +
+      esc('Comment reconnaître ' + nom) + '">?</button>' : '';
 
   /* nom : ce qu'un lecteur d'écran annonce, la ligne n'ayant pas d'étiquette. */
   const champSec = (r, c, nom) => {
@@ -2250,7 +2302,7 @@ V.inventaire = async function () {
           if (!r.variantes || !r.variantes.length) {
             const c = cleSec(r, '');
             return '<div class="invl">' +
-              '<span class="invn">' + esc(r.nom) + '</span>' +
+              '<span class="invn">' + esc(r.nom) + infoSec(c, r.nom) + '</span>' +
               (anc[c] !== undefined ? '<span class="invc faible">préc. ' + n1(anc[c]) + '</span>' : '') +
               champSec(r, c, r.nom) + '</div>';
           }
@@ -2270,7 +2322,7 @@ V.inventaire = async function () {
               ? '<div class="stack" style="margin-top:8px">' + r.variantes.map(v => {
                   const c = cleSec(r, v);
                   return '<div class="invl">' +
-                    '<span class="invn">' + esc(v) + '</span>' +
+                    '<span class="invn">' + esc(v) + infoSec(c, r.nom + ', ' + v) + '</span>' +
                     (anc[c] !== undefined ? '<span class="invc faible">préc. ' + n1(anc[c]) + '</span>' : '') +
                     champSec(r, c, r.nom + ', ' + v) + '</div>';
                 }).join('') + '</div>'
@@ -2511,6 +2563,7 @@ V.inventaire = async function () {
         majTotaux();
       };
     });
+    $$('[data-info]').forEach(b => b.onclick = () => ficheProduit(b.dataset.info));
     $$('[data-sec]').forEach(i => {
       i.disabled = !ouvert;
       i.oninput = () => {
