@@ -525,8 +525,12 @@ async function enregistrerInventaire(lignes, note, avant, meta) {
    Avant de confirmer, le manager voit l'écart article par article et peut
    recompter (le lendemain s'il le veut). À la confirmation, le stock prend
    les quantités comptées.
-   Chambre froide : chaque bac manquant part au registre des pertes, où les
-   écarts s'additionnent au fil des inventaires.
+   Chambre froide : les bacs manquants ne partent plus d'office en pertes. Le
+   manager valide l'inventaire, voit la liste des bacs manquants, dit ce
+   qu'ils sont devenus (consommés sans scan, pertes réelles, ou mal compté :
+   il recompte), puis valide la mise à jour du stock. Seules les pertes
+   réelles vont au registre. Le calcul des écarts de période ne change pas :
+   il ne lit pas ces lignes (litresJetes les met à 0).
    Sec : rien n'y trace la consommation (cornets, gobelets), la différence
    avec le comptage précédent est donc de la consommation, pas une perte.
    Un seul inventaire en attente par partie : un nouveau comptage remplace
@@ -774,7 +778,7 @@ async function verifierInventaire(partie) {
           '<div class="stack">' + justes.map(rang).join('') + '</div></details>'
         : '') +
       '<div class="actions"><button class="btn clair" data-fermer>Laisser en attente</button>' +
-      '<button class="btn menthe" id="ci-ok">Reprendre sur le stock réel</button></div>' +
+      '<button class="btn menthe" id="ci-ok">Valider l’inventaire</button></div>' +
       '<button type="button" class="btn fantome bloc sm" id="ci-ecarter" style="margin-top:8px">Écarter ce comptage</button>');
 
     if (enCours && justes.some(x => x.c === enCours)) {
@@ -838,17 +842,46 @@ async function verifierInventaire(partie) {
       /* Livraison confirmée ailleurs pendant que l'écran était ouvert. */
       if (!sec && th.livraisons.length) { invaliderStock(); th = await theoriqueAuComptage(a, (await stockReel()).articles || {}); }
       if (th.livraisons.length) return toast('Confirmez d’abord la livraison en attente : une quantité corrigée fausserait les écarts', 'erreur');
-      confirmer('Reprendre cet inventaire sur le stock réel ?',
-      'Le stock prend les quantités comptées le ' + fmtD(a.jour) + '.' +
-      (manq ? ' ' + manq + ' ' + accord(manq, 'bac manquant part', 'bacs manquants partent') +
-              ' au registre des pertes.' : ''),
-      'Reprendre', () => confirmerInventaire(a, partie), () => dessinerV(), 'Retour');
+      const lieu = sec ? 'du sec' : 'de la chambre froide';
+      /* Bacs manquants, recalculés sur l'attendu à jour. */
+      const manquants = sec ? [] : lignesAttente(Object.assign({}, a, { avant: th.theo }), partie)
+        .filter(x => x.d < 0 && bacs(x));
+      const nbManq = manquants.reduce((s, x) => s - x.d, 0);
+      const majStock = motif => confirmer('Mettre à jour le stock ' + lieu + ' ?',
+        'Le stock prend les quantités comptées le ' + fmtD(a.jour) + '.' +
+        (motif === 'pertes' ? ' ' + nbManq + ' ' + accord(nbManq, 'bac va', 'bacs vont') + ' au registre des pertes.'
+         : motif === 'non_scanne' ? ' ' + nbManq + ' ' + accord(nbManq, 'bac est noté', 'bacs sont notés') +
+           ' consommés sans scan, hors pertes.' : '') +
+        ' Le calcul des écarts ne change pas.',
+        'Mettre à jour le stock', () => confirmerInventaire(a, partie, motif, nbManq),
+        () => (nbManq ? choix() : dessinerV()), 'Retour');
+      if (!nbManq) return majStock('');
+      /* Des bacs manquent : le manager dit ce qu'ils sont devenus. */
+      const choix = () => { showSheet(
+        '<h2 id="sheet-titre">' + nbManq + ' ' + accord(nbManq, 'bac manquant', 'bacs manquants') + '</h2>' +
+        '<p class="sub">Par rapport au stock attendu le ' + esc(fmtD(a.jour)) + '. Que sont-ils devenus ?</p>' +
+        '<div class="stack" style="margin-top:12px">' + manquants.map(x =>
+          '<div class="invl"><span class="invn">' + esc(lib(x.c)) + '</span><span class="invc">' + nb(-x.d) + '</span></div>'
+        ).join('') + '</div>' +
+        '<div class="stack" style="margin-top:16px">' +
+        '<button type="button" class="btn menthe bloc" id="ce-scan">Consommés, sortie non scannée</button>' +
+        '<button type="button" class="btn clair bloc" id="ce-pertes">Pertes réelles (cassés, jetés, disparus)</button>' +
+        '<button type="button" class="btn clair bloc" id="ce-recompter">Mal compté : recompter</button>' +
+        '</div>' +
+        '<button type="button" class="btn fantome bloc sm" data-fermer style="margin-top:8px">Retour</button>');
+      $('#ce-scan').onclick = () => majStock('non_scanne');
+      $('#ce-pertes').onclick = () => majStock('pertes');
+      $('#ce-recompter').onclick = () => { toast('Touchez « Recompter » sur la ligne à revoir'); dessinerV(); };
+      const ret = $('#sheet-corps [data-fermer]');
+      if (ret) ret.onclick = () => dessinerV();
+      };
+      choix();
     };
   };
   dessinerV();
 }
 
-async function confirmerInventaire(a, partie) {
+async function confirmerInventaire(a, partie, motif, nbVu) {
   partie = partie === 'sec' ? 'sec' : 'froid';
   const CLE = INV_ATTENTE[partie].cle;
   const cur = await inventaireEnAttente(partie);
@@ -887,7 +920,7 @@ async function confirmerInventaire(a, partie) {
     await DB.set('stock:secs', hist.slice(-36));
     await DB.del(CLE);
     await feed('ok', STATE.user.prenom + ' a confirmé l’inventaire du sec du ' + fmtD(cur.jour) + ' (' + (cur.par || '—') + ')');
-    toast('Inventaire du sec repris sur le stock');
+    toast('Inventaire du sec validé, stock à jour');
     return rendre(STATE.view);
   }
 
@@ -899,12 +932,37 @@ async function confirmerInventaire(a, partie) {
     toast('Confirmez d’abord la livraison en attente', 'erreur');
     return rendre(STATE.view);
   }
-  const inv = await enregistrerInventaire(lignesAReprendre(cur, 'froid', theo), cur.note, theo, meta);
+  /* « pertes » : les bacs manquants vont au registre. « non_scanne » :
+     consommés sans scan, notés sur l'inventaire seulement. */
+  const aReprendre = lignesAReprendre(cur, 'froid', theo);
+  /* Le manager a choisi pour un nombre de bacs manquants : si un mouvement
+     synchronisé entre-temps le change, il revoit l'écran avant d'enregistrer. */
+  const nbMaintenant = Object.keys(theo).concat(Object.keys(aReprendre))
+    .filter((c, i, t) => t.indexOf(c) === i && litArticle(c).taille)
+    .reduce((s, c) => s + Math.max(0, num(theo[c] || 0) - num(aReprendre[c] || 0)), 0);
+  if (nbVu !== undefined && nbMaintenant !== nbVu) {
+    toast('Le stock a bougé depuis la vérification : revoyez les bacs manquants', 'erreur');
+    return verifierInventaire('froid');
+  }
+  motif = nbMaintenant ? (motif === 'pertes' ? 'pertes' : 'non_scanne') : '';
+  const inv = await enregistrerInventaire(aReprendre, cur.note, theo,
+    motif ? Object.assign(meta, { motifEcart: motif }) : meta);
 
-  /* Chaque bac manquant devient une perte du jour du comptage. L'id dérive
-     du comptage : confirmer deux fois n'en ajoute pas de seconde. */
+  /* En pertes réelles, chaque bac manquant devient une perte du jour du
+     comptage. L'id dérive du comptage : confirmer deux fois n'en ajoute pas
+     de seconde. */
   const manquants = Object.keys(inv.ecarts).filter(c => inv.ecarts[c] < 0 && litArticle(c).taille);
-  if (manquants.length) {
+  if (manquants.length && motif === 'non_scanne') {
+    /* Revalidé autrement après un premier choix « pertes » : on retire ses lignes. */
+    const cle = 'pertes:' + cur.jour;
+    const liste = await DB.get(cle, []);
+    const reste = liste.filter(w => !(w && String(w.id || '').indexOf('inv|' + cur.at + '|') === 0));
+    if (reste.length !== liste.length) {
+      await DB.set(cle, reste);
+      if (typeof cumulerPertesMois === 'function') await cumulerPertesMois(cur.jour);
+    }
+  }
+  if (manquants.length && motif === 'pertes') {
     const cle = 'pertes:' + cur.jour;
     const liste = await DB.get(cle, []);
     manquants.forEach(c => {
@@ -920,10 +978,11 @@ async function confirmerInventaire(a, partie) {
   }
   await DB.del(CLE);
   const bacsPerdus = manquants.reduce((s, c) => s - inv.ecarts[c], 0);
-  await feed(bacsPerdus ? 'warn' : 'ok',
-    STATE.user.prenom + ' a confirmé l’inventaire du ' + fmtD(cur.jour) + ' (' + (cur.par || '—') + ')' +
-    (bacsPerdus ? ' · ' + bacsPerdus + ' ' + accord(bacsPerdus, 'bac', 'bacs') + ' en perte' : ''));
-  toast('Inventaire repris sur le stock');
+  await feed(bacsPerdus && motif === 'pertes' ? 'warn' : 'ok',
+    STATE.user.prenom + ' a validé l’inventaire du ' + fmtD(cur.jour) + ' (' + (cur.par || '—') + ')' +
+    (bacsPerdus ? ' · ' + bacsPerdus + ' ' + accord(bacsPerdus, 'bac', 'bacs') +
+      (motif === 'pertes' ? ' en perte' : ' consommés sans scan') : ''));
+  toast('Inventaire validé, stock de la chambre froide à jour');
   rendre(STATE.view);
 }
 
@@ -1820,6 +1879,20 @@ V.catalogue = async function () {
   $('#ct-prix-froid').onclick = () => editerPrix('Prix chambre froide', froidPrix(), () => rendre('catalogue'));
 };
 
+/* Fiche d'un produit du sec : ce qu'on voit sur l'étagère. */
+function ficheProduit(c) {
+  const f = (typeof INFO_PRODUITS !== 'undefined') && INFO_PRODUITS[c];
+  if (!f) return;
+  showSheet('<h2 id="sheet-titre">' + esc(libelleSec(c)) + '</h2>' +
+    (f.photo ? '<img src="' + esc(f.photo) + '" alt="' + esc(f.etiquette || '') + '" loading="lazy" ' +
+      'style="display:block;width:100%;max-height:52vh;object-fit:contain;border-radius:12px;margin-top:10px;background:#eee">' : '') +
+    '<div class="stack" style="margin-top:12px">' +
+    (f.etiquette ? '<p><b>Sur l’étiquette :</b> ' + esc(f.etiquette) + '</p>' : '') +
+    (f.code ? '<p><b>Code Amorino :</b> ' + esc(f.code) + '</p>' : '') +
+    (f.compter ? '<p><b>Comment compter :</b> ' + esc(f.compter) + '</p>' : '') +
+    '</div><div class="actions"><button class="btn clair" data-fermer>Fermer</button></div>');
+}
+
 /* Un inventaire passé, en entier : TOUS les produits du catalogue, comptés
    ou non. Un produit absent de la saisie s'affiche à 0, en grisé — l'écran
    ne montrait que les totaux, impossible de retrouver ce qui avait été
@@ -1835,7 +1908,7 @@ function voirInventaire(h, partie) {
     vus.add(cle);
     const q = num(l[cle] || 0), p = prixLigne(cle, h.prix);
     return { nom: nom, q: q, saisi: l[cle] !== undefined,
-             ecart: ecarts[cle] || 0, unite: unite || '',
+             ecart: ecarts[cle] || 0, unite: unite || '', prix: p,
              val: (p !== null && q > 0) ? q * p : 0 };
   };
 
@@ -1852,7 +1925,8 @@ function voirInventaire(h, partie) {
     /* Une ligne par parfum, tailles côte à côte, comme à la saisie. */
     groupes.push({ titre: 'Glaces', lignes: PARFUMS.map(p => {
       const parT = tailles.map(t => ligne(cleArticle('glace', p, t), '', ''));
-      return { nom: p, saisi: parT.some(x => x.saisi),
+      parT.forEach((x, k) => { x.nom = p + ' ' + tailles[k] + ' L'; x.unite = 'bac'; });
+      return { nom: p, saisi: parT.some(x => x.saisi), det: parT,
                ecart: parT.reduce((s2, x) => s2 + num(x.ecart), 0),
                val: parT.reduce((s2, x) => s2 + x.val, 0),
                texte: tailles.map((t, k) => t + ' L : ' + nb(parT[k].q)).join(' · ') };
@@ -1918,7 +1992,45 @@ function voirInventaire(h, partie) {
           : nb(x.q) + (x.unite ? ' ' + esc(accord(x.q, x.unite)) : '')) +
         (estManager && x.val > 0 ? '<br>' + eur(x.val) : '') + '</span></div>').join('') +
       '</div>').join('') +
-    '<div class="actions"><button class="btn clair" data-fermer>Fermer</button></div>');
+    '<div class="actions">' +
+    (estManager ? '<button class="btn clair" id="inv-csv">Exporter pour le comptable</button>' : '') +
+    '<button class="btn clair" data-fermer>Fermer</button></div>');
+
+  /* Le comptable veut le détail par parfum et les totaux : un fichier
+     tableur, une ligne par produit compté, prix et valeur HT figés au
+     comptage, puis le total de chaque groupe et le total général. */
+  const bCsv = $('#inv-csv');
+  if (bCsv) bCsv.onclick = () => {
+    const q = x => { x = String(x == null ? '' : x);
+                     if (/^[=+\-@\t\r]/.test(x)) x = "'" + x;
+                     return '"' + x.replace(/"/g, '""') + '"'; };
+    const dec = v => (Math.round(num(v) * 100) / 100).toFixed(2).replace('.', ',');
+    const rows = [['Groupe', 'Produit', 'Quantité', 'Unité', 'Prix HT', 'Valeur HT']];
+    let total = 0;
+    groupes.filter(g => g.lignes.length).forEach(g => {
+      let tg = 0;
+      g.lignes.forEach(x => (x.det || [x]).forEach(y => {
+        if (!(num(y.q) > 0)) return;
+        rows.push([g.titre, y.nom, String(y.q).replace('.', ','), y.unite ? accord(y.q, y.unite) : '',
+                   y.prix !== null && y.prix !== undefined ? dec(y.prix) : 'sans prix', dec(y.val)]);
+        tg += num(y.val);
+      }));
+      if (tg > 0) rows.push([g.titre, 'Total ' + g.titre, '', '', '', dec(tg)]);
+      total += tg;
+    });
+    /* Même total que « Valeur du stock » à l'écran : un produit d'un ancien
+       catalogue, compté mais absent des groupes, va sur une ligne à part. */
+    const vt = valeurStock(l, h.prix).total;
+    if (Math.abs(vt - total) >= 0.005) rows.push(['Autres', 'Produits hors catalogue', '', '', '', dec(vt - total)]);
+    rows.push(['', 'TOTAL ' + (partie === 'froid' ? 'CHAMBRE FROIDE' : 'SEC'), '', '', '', dec(vt)]);
+    const csv = rows.map(r => r.map(q).join(';')).join('\n');
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8' }));
+    a.download = 'inventaire-' + (partie === 'froid' ? 'chambre-froide' : 'sec') + '-' + h.jour + '.csv';
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+    toast('Fichier téléchargé');
+  };
 }
 
 V.inventaire = async function () {
@@ -2152,6 +2264,10 @@ V.inventaire = async function () {
   /* La note survit au redessin : ouvrir une famille redessine l'écran. */
   let note = '';
   const cleSec = (r, v) => 'sec|' + r.id + '|' + (v || '');
+  /* « ? » : fiche produit (photo, nom de l'étiquette, code, comment compter). */
+  const infoSec = (c, nom) => (typeof INFO_PRODUITS !== 'undefined' && INFO_PRODUITS[c])
+    ? '<button type="button" class="info-p" data-info="' + esc(c) + '" aria-label="' +
+      esc('Comment reconnaître ' + nom) + '">?</button>' : '';
 
   /* nom : ce qu'un lecteur d'écran annonce, la ligne n'ayant pas d'étiquette. */
   const champSec = (r, c, nom) => {
@@ -2191,7 +2307,7 @@ V.inventaire = async function () {
           if (!r.variantes || !r.variantes.length) {
             const c = cleSec(r, '');
             return '<div class="invl">' +
-              '<span class="invn">' + esc(r.nom) + '</span>' +
+              '<span class="invn">' + esc(r.nom) + '</span>' + infoSec(c, r.nom) +
               (anc[c] !== undefined ? '<span class="invc faible">préc. ' + n1(anc[c]) + '</span>' : '') +
               champSec(r, c, r.nom) + '</div>';
           }
@@ -2211,7 +2327,7 @@ V.inventaire = async function () {
               ? '<div class="stack" style="margin-top:8px">' + r.variantes.map(v => {
                   const c = cleSec(r, v);
                   return '<div class="invl">' +
-                    '<span class="invn">' + esc(v) + '</span>' +
+                    '<span class="invn">' + esc(v) + '</span>' + infoSec(c, r.nom + ', ' + v) +
                     (anc[c] !== undefined ? '<span class="invc faible">préc. ' + n1(anc[c]) + '</span>' : '') +
                     champSec(r, c, r.nom + ', ' + v) + '</div>';
                 }).join('') + '</div>'
@@ -2452,6 +2568,7 @@ V.inventaire = async function () {
         majTotaux();
       };
     });
+    $$('[data-info]').forEach(b => b.onclick = () => ficheProduit(b.dataset.info));
     $$('[data-sec]').forEach(i => {
       i.disabled = !ouvert;
       i.oninput = () => {

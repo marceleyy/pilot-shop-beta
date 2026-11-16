@@ -8,7 +8,7 @@
    elle qui déclenche le re-téléchargement. Un appareil déjà installé garderait
    sinon l'ancien cache, et n'irait jamais chercher les fichiers ajoutés — le
    scan hors ligne ne marcherait que sur les appareils neufs. */
-const CACHE   = 'pilotshop-cache-v68';
+const CACHE   = 'pilotshop-cache-v69';
 /* Cache des ressources externes. Il ne sert plus : XLSX est désormais servi
    par l'application (vendor/). Son ancien contenu — la copie du CDN, gardée
    « cache d'abord » sous ce nom fixe et jamais revalidée — est purgé à
@@ -38,6 +38,21 @@ const PRECACHE = [
   '/allergenes.js',
   '/commande.js',
   '/preaudit.js',
+  /* Fiches produit du sec (« ? ») : l'inventaire se fait en réserve, sans réseau. */
+  '/produits/amarena.jpg',
+  '/produits/baci-di-dama.jpg',
+  '/produits/brutti-e-buoni.jpg',
+  '/produits/caramel-guerande.jpg',
+  '/produits/chococream-pistache.jpg',
+  '/produits/cialdina.jpg',
+  '/produits/crema-fondente.jpg',
+  '/produits/cremino-pistache.jpg',
+  '/produits/eclats-caramel.jpg',
+  '/produits/noisettes-150g.jpg',
+  '/produits/pasta-nocciolata.jpg',
+  '/produits/pistaches-500g.jpg',
+  '/produits/sucre-buchettes.jpg',
+  '/produits/wafer-gianduja.jpg',
   /* Reconnaissance de texte embarquée : sans elle, le scan ne marche pas
      hors ligne, alors que c'est là qu'on en a le plus besoin. */
   '/vendor/tesseract.min.js',
