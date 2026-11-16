@@ -1480,6 +1480,23 @@ V.controle = async function () {
     const bv = br.querySelector('#rc-verif'); if (bv) bv.onclick = verifierReceptions;
   }
 
+  /* Valeur du stock, sans passer par Inventaire : derniers comptages validés
+     (chambre froide et sec), à leurs prix du jour. */
+  if (STATE.user && STATE.user.role === 'manager') {
+    await chargerCatalogueSec().catch(() => {});
+    const [pf, ps] = await Promise.all([DB.get('stock:inventaire', null), DB.get('stock:sec', null)]);
+    if (STATE.view !== 'controle' || page !== $('#page')) return;
+    const html = carteValeurStock(pf, ps, true);
+    if (html && page.firstChild) {
+      const bvs = document.createElement('div');
+      bvs.style.marginTop = '14px';
+      bvs.innerHTML = html;
+      page.insertBefore(bvs, page.firstChild.nextSibling);
+      const go = bvs.querySelector('[data-valstock]');
+      if (go) go.onclick = () => { STATE.inventairePartie = 'sec'; rendre('inventaire'); };
+    }
+  }
+
   /* -----------------------------------------------------------------------------
      ANOMALIES SIGNALÉES
      Elles étaient enregistrées et affichées à l'équipe, mais la tour de contrôle
@@ -2059,6 +2076,25 @@ function voirInventaire(h, partie) {
   };
 }
 
+/* Valeur totale du stock (manager) : dernier inventaire confirmé de la
+   chambre froide + dernier du sec, chacun à ses prix du jour. Montrée sur
+   l'écran Inventaire et sur la tour de contrôle (sans aller la générer).
+   « bouton » ajoute un lien vers l'inventaire et son export. '' sans valeur. */
+function carteValeurStock(precedent, secPrec, bouton) {
+  const vf = precedent ? valeurStock(precedent.lignes, precedent.prix) : { total: 0, sansPrix: 0 };
+  const vs = secPrec ? valeurStock(secPrec.lignes, secPrec.prix) : { total: 0, sansPrix: 0 };
+  if (!(vf.total + vs.total > 0)) return '';
+  const sp = vf.sansPrix + vs.sansPrix;
+  return carte('<div class="cs">Valeur totale du stock</div>' +
+    '<h2 style="margin-top:2px">' + eur(vf.total + vs.total) + ' HT</h2>' +
+    '<div class="mini">Chambre froide ' + eur(vf.total) + (precedent ? ' (' + esc(fmtD(precedent.jour)) + ')' : '') +
+    ' · Sec ' + eur(vs.total) + (secPrec ? ' (' + esc(fmtD(secPrec.jour)) + ')' : '') +
+    (sp ? ' · ' + sp + ' ' + accord(sp, 'produit compté', 'produits comptés') + ' sans prix' : '') +
+    '</div>' +
+    (bouton ? '<button class="btn clair sm" style="margin-top:10px" data-valstock>Voir le détail et exporter</button>' : ''),
+    'solide');
+}
+
 V.inventaire = async function () {
   await chargerCatalogueSec();
   const { articles } = await stockReel();
@@ -2403,21 +2439,7 @@ V.inventaire = async function () {
   const listeSec = () => blocSec() ||
     '<p class="mini" style="margin-top:12px">Aucun produit ne correspond à « ' + esc(recherche) + ' ».</p>';
 
-  /* Valeur totale du stock (manager) : dernier inventaire confirmé de la
-     chambre froide + dernier du sec, chacun à ses prix du jour. */
-  const valeurTotale = (() => {
-    if (!estManager) return '';
-    const vf = precedent ? valeurStock(precedent.lignes, precedent.prix) : { total: 0, sansPrix: 0 };
-    const vs = secPrec ? valeurStock(secPrec.lignes, secPrec.prix) : { total: 0, sansPrix: 0 };
-    if (!(vf.total + vs.total > 0)) return '';
-    const sp = vf.sansPrix + vs.sansPrix;
-    return carte('<div class="cs">Valeur totale du stock</div>' +
-      '<h2 style="margin-top:2px">' + eur(vf.total + vs.total) + ' HT</h2>' +
-      '<div class="mini">Chambre froide ' + eur(vf.total) + (precedent ? ' (' + esc(fmtD(precedent.jour)) + ')' : '') +
-      ' · Sec ' + eur(vs.total) + (secPrec ? ' (' + esc(fmtD(secPrec.jour)) + ')' : '') +
-      (sp ? ' · ' + sp + ' ' + accord(sp, 'produit compté', 'produits comptés') + ' sans prix' : '') +
-      '</div>', 'solide');
-  })();
+  const valeurTotale = estManager ? carteValeurStock(precedent, secPrec) : '';
 
   /* Liaisons des lignes (repli, fiche « ? », saisie du sec), dans tout l'écran
      ou seulement dans la liste du sec refaite par la recherche. */
