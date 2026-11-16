@@ -755,9 +755,10 @@ const PRIX_ACHAT = {
     /* Pots : prix d'une RAMETTE, l'unité comptée. Petit et Classique :
        carton de 8 ramettes de 250 (98,96 € et 103,35 €). Grand : carton de
        1 400 = 7 ramettes de 200 (85,02 €). Géant (Grandissimo) : ramette de
-       160 à 15,02 €. Waffle stick : 150 coupes à 17,26 €. */
+       160 à 15,02 €. À partager : 17,26 € (prix vu en boutique le 16/11).
+       Waffle stick : 150 coupes à 17,26 €. */
     'sec|pot|Petit': 12.37, 'sec|pot|Classique': 12.92, 'sec|pot|Grand': 12.15,
-    'sec|pot|Géant': 15.02, 'sec|pot|Waffle stick': 17.26,
+    'sec|pot|Géant': 15.02, 'sec|pot|À partager': 17.26, 'sec|pot|Waffle stick': 17.26,
     'sec|gaufrier|Pierre abrasive crêpière': 22.6, 'sec|gaufrier|Brosse gaufrier': 15
   }
 };

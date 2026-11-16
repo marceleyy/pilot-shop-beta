@@ -1472,8 +1472,10 @@ V.controle = async function () {
      scanné par l'équipe attendait sans que personne ne le voie. */
   const recAttente = typeof receptionsEnAttente === 'function' ? await receptionsEnAttente() : [];
   if (STATE.view !== 'controle' || page !== $('#page')) return;
+  let apresReceptions = null;
   if (recAttente.length && typeof bandeauReceptions === 'function' && page.firstChild) {
     const br = document.createElement('div');
+    apresReceptions = br;
     br.style.marginTop = '14px';
     br.innerHTML = bandeauReceptions(recAttente);
     page.insertBefore(br, page.firstChild.nextSibling);
@@ -1483,17 +1485,24 @@ V.controle = async function () {
   /* Valeur du stock, sans passer par Inventaire : derniers comptages validés
      (chambre froide et sec), à leurs prix du jour. */
   if (STATE.user && STATE.user.role === 'manager') {
-    await chargerCatalogueSec().catch(() => {});
-    const [pf, ps] = await Promise.all([DB.get('stock:inventaire', null), DB.get('stock:sec', null)]);
+    const [, pf, ps] = await Promise.all([chargerPrixAchat().catch(() => {}),
+      DB.get('stock:inventaire', null), DB.get('stock:sec', null)]);
     if (STATE.view !== 'controle' || page !== $('#page')) return;
+    /* Deux dessins rapprochés (« Traité », retour d'un écran) : une seule carte. */
+    const ancienne = $('#valeur-stock'); if (ancienne) ancienne.remove();
     const html = carteValeurStock(pf, ps, true);
     if (html && page.firstChild) {
       const bvs = document.createElement('div');
+      bvs.id = 'valeur-stock';
       bvs.style.marginTop = '14px';
       bvs.innerHTML = html;
-      page.insertBefore(bvs, page.firstChild.nextSibling);
+      /* Sous les réceptions à confirmer, qui restent l'alerte du haut. */
+      const ref = apresReceptions && apresReceptions.parentNode === page ? apresReceptions.nextSibling : page.firstChild.nextSibling;
+      page.insertBefore(bvs, ref);
       const go = bvs.querySelector('[data-valstock]');
-      if (go) go.onclick = () => { STATE.inventairePartie = 'sec'; rendre('inventaire'); };
+      /* L'onglet qui porte la valeur : le sec s'il en a, sinon la chambre froide. */
+      const secVal = ps ? valeurStock(ps.lignes, ps.prix).total : 0;
+      if (go) go.onclick = () => { STATE.inventairePartie = secVal > 0 ? 'sec' : 'froid'; rendre('inventaire'); };
     }
   }
 
@@ -2091,7 +2100,7 @@ function carteValeurStock(precedent, secPrec, bouton) {
     ' · Sec ' + eur(vs.total) + (secPrec ? ' (' + esc(fmtD(secPrec.jour)) + ')' : '') +
     (sp ? ' · ' + sp + ' ' + accord(sp, 'produit compté', 'produits comptés') + ' sans prix' : '') +
     '</div>' +
-    (bouton ? '<button class="btn clair sm" style="margin-top:10px" data-valstock>Voir le détail et exporter</button>' : ''),
+    (bouton ? '<button class="btn clair sm" style="margin-top:10px" data-valstock>Ouvrir l’inventaire (export dans l’historique)</button>' : ''),
     'solide');
 }
 
