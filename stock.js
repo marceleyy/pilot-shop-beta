@@ -729,12 +729,14 @@ async function verifierInventaire(partie) {
     const rang = x => {
       const k = corr[x.c];
       const r = sec ? refSec(x.c) : null;
+      /* Jamais compté avant : pas de chiffre précédent dans « avant ». */
+      const dt = sec ? secDouteux(x.c, x.compte, (a.avant || {})[x.c], true) : '';
       return '<div class="invl">' +
         '<span class="invn">' + esc(lib(x.c)) +
         '<small>compté ' + nb(x.compte) + (sec ? ' · précédent ' : ' · attendu ') + nb(x.attendu) +
         (r && r.unite ? ' ' + esc(accord(x.attendu, r.unite)) : '') +
         (k ? ' · recompté ' + nb(num(k.q)) + ' le ' + esc(fmtD(String(k.at).slice(0, 10))) + ' par ' + esc(k.par || '—') : '') +
-        (sec && secDouteux(x.c, x.compte, x.attendu || undefined) ? '<br><b>À vérifier : ' + esc(secDouteux(x.c, x.compte, x.attendu || undefined)) + '</b>' : '') +
+        (dt ? '<br><b>À vérifier : ' + esc(dt) + '</b>' : '') +
         '</small></span>' +
         '<span class="invc">' + (x.d ? (sec ? '' : 'écart ') + (x.d > 0 ? '+' : '') + nb(x.d) : (sec ? 'inchangé' : 'juste')) + '<br>' +
         '<button type="button" class="btn clair sm" data-recompter="' + esc(x.c) + '">Recompter</button></span></div>' +
@@ -1882,20 +1884,23 @@ V.catalogue = async function () {
 
 /* Quantité du sec à revoir avant de valider : l'unité est souvent un carton
    (« Wafer al Gianduja : 4 » = 48 boîtes). Signalée quand elle fait plus du
-   double du comptage précédent (et au moins 2 de plus), ou, sans comptage
-   précédent, quand elle vaut 100 € HT ou plus. Renvoie le texte, ou ''. */
-function secDouteux(c, q, prec) {
+   double du dernier comptage et au moins 2 de plus, ou, sans comptage
+   précédent, quand elle vaut 100 € HT ou plus. Renvoie le texte, ou ''.
+   Le comptage de l'équipier reste à l'aveugle : ni le chiffre précédent ni
+   le prix ne lui sont montrés (manager = false). */
+function secDouteux(c, q, prec, manager) {
   q = num(q);
   if (!(q > 0)) return '';
   const n = v => Number.isInteger(num(v)) ? String(num(v)) : n1(v);
   const r = catalogueSec().filter(x => typeof x === 'object' && x.id === String(c).split('|')[1])[0];
   const u = r && r.unite ? ' ' + accord(q, r.unite) : '';
   const p = prixLigne(c, null);
-  const val = p !== null ? ' (' + eur(q * p) + ' HT)' : '';
-  if (prec !== undefined && num(prec) > 0) {
-    return q >= 2 * num(prec) + 2 ? n(q) + u + val + ', contre ' + n(prec) + ' la dernière fois' : '';
-  }
-  return p !== null && q * p >= 100 ? n(q) + u + val + ', jamais compté avant' : '';
+  const connu = prec !== undefined && prec !== null && prec !== '';
+  const douteux = connu ? (q > 2 * num(prec) && q >= num(prec) + 2) : (p !== null && q * p >= 100);
+  if (!douteux) return '';
+  if (!manager) return n(q) + u + ', vérifiez l’unité';
+  return n(q) + u + (p !== null ? ' (' + eur(q * p) + ' HT)' : '') +
+    (connu ? ', contre ' + n(prec) + ' la dernière fois' : ', jamais compté avant');
 }
 
 /* Fiche d'un produit du sec : ce qu'on voit sur l'étagère. */
@@ -2628,13 +2633,18 @@ V.inventaire = async function () {
     /* Sec : une référence pas comptée du tout garde son ancien stock. On les
        nomme (celles qui ont une fiche « ? » d'abord : elles sont en réserve),
        et on montre les quantités qui ressemblent à une erreur d'unité. */
+    const mgr = !!(STATE.user && STATE.user.role === 'manager');
     const douteux = p === 'sec' ? Object.keys(lignes)
-      .map(c => ({ c: c, t: secDouteux(c, lignes[c], (avant || {})[c]) })).filter(x => x.t) : [];
+      .map(c => ({ c: c, t: secDouteux(c, lignes[c], (avant || {})[c], mgr) })).filter(x => x.t) : [];
+    /* Pas comptées : celles qui avaient du stock, et celles qui ont une fiche
+       « ? » (vues en réserve). Les autres, vides depuis toujours, noieraient
+       la liste. */
+    const cles = r => (r.variantes && r.variantes.length ? r.variantes : ['']).map(v => 'sec|' + r.id + '|' + v);
+    const aFiche = r => typeof INFO_PRODUITS !== 'undefined' && cles(r).some(k => INFO_PRODUITS[k]);
+    const aStock = r => cles(r).some(k => num((avant || {})[k]) > 0);
     const pasComptes = p === 'sec' ? catalogueSec()
-      .filter(r => typeof r === 'object' && !r.masque && !parGroupe[r.id])
-      .sort((x, y) => (+!!INFO_PRODUITS['sec|' + y.id + '|' + ((y.variantes || [])[0] || '')] -
-                       +!!INFO_PRODUITS['sec|' + x.id + '|' + ((x.variantes || [])[0] || '')]) ||
-                      x.nom.localeCompare(y.nom))
+      .filter(r => typeof r === 'object' && !r.masque && !parGroupe[r.id] && (aStock(r) || aFiche(r)))
+      .sort((x, y) => (+aFiche(y) - +aFiche(x)) || x.nom.localeCompare(y.nom))
       .map(r => r.nom) : [];
     showSheet(
       '<h2 id="sheet-titre">' + esc(titre) + '</h2>' +
