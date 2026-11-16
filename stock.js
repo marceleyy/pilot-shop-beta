@@ -2294,6 +2294,7 @@ V.inventaire = async function () {
   /* Recherche dans le sec : nom du catalogue, déclinaison, nom de
      l'étiquette ou code Amorino (« wafer », « nocciolata », « CIALDI »). */
   let recherche = '';
+  let minuterieRech = null;
   const nrmR = x => String(x || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
   const texteRech = c => {
     const f = (typeof INFO_PRODUITS !== 'undefined' && INFO_PRODUITS[c]) || {};
@@ -2346,10 +2347,15 @@ V.inventaire = async function () {
           return mots.every(m => t.includes(m));
         });
       };
-      const refs = catalogue.filter(r =>
-        typeof r === 'object' && (r.sec || 'Autres') === section.id && !r.masque && varsVues(r).length);
+      const vuesDe = new Map();
+      const refs = catalogue.filter(r => {
+        if (typeof r !== 'object' || (r.sec || 'Autres') !== section.id || r.masque) return false;
+        const vs = varsVues(r);
+        vuesDe.set(r, vs);
+        return vs.length > 0;
+      });
       if (!refs.length) return '';
-      const nb = refs.reduce((n, r) => n + varsVues(r).length, 0);
+      const nb = refs.reduce((n, r) => n + vuesDe.get(r).length, 0);
       const teinte = section.teinte ? ' style="--sec-teinte:' + section.teinte + '"' : '';
 
       return '<div class="sec-bloc"' + teinte + '>' +
@@ -2367,7 +2373,7 @@ V.inventaire = async function () {
           }
 
           const ouvert = deplies[r.id] || mots.length > 0;
-          const vues = varsVues(r);
+          const vues = vuesDe.get(r);
           const saisis = r.variantes.filter(v => saisieSec[cleSec(r, v)] !== undefined).length;
           const total  = r.variantes.reduce((s, v) => s + num(saisieSec[cleSec(r, v)] || 0), 0);
 
@@ -2375,7 +2381,8 @@ V.inventaire = async function () {
             '<button type="button" class="invp-h depliable" data-deplier="' + esc(r.id) + '">' +
             '<b>' + esc(r.nom) + '</b>' +
             '<span class="invc">' + (saisis
-              ? n1(total) + ' ' + esc(r.unite) + (total > 1 ? 's' : '') + ' · ' + saisis + '/' + r.variantes.length
+              ? n1(total) + ' ' + esc(r.unite) + (total > 1 ? 's' : '') + ' · ' + saisis + '/' + r.variantes.length +
+                (vues.length < r.variantes.length ? ' · ' + vues.length + ' affichée' + (vues.length > 1 ? 's' : '') : '')
               : (vues.length < r.variantes.length ? vues.length + ' sur ' : '') +
                 r.variantes.length + ' déclinaisons · en ' + esc(r.unite)) + '</span>' +
             '<span class="chev">' + (ouvert ? '−' : '+') + '</span></button>' +
@@ -2659,8 +2666,11 @@ V.inventaire = async function () {
       zc.oninput = e => {
         recherche = zc.value;
         if (e && e.isComposing) return;
-        const l = $('#sec-liste');
-        if (l) { l.innerHTML = listeSec(); lierLignes(l); }
+        clearTimeout(minuterieRech);
+        minuterieRech = setTimeout(() => {
+          const l = $('#sec-liste');
+          if (l && l.isConnected) { l.innerHTML = listeSec(); lierLignes(l); }
+        }, 120);
       };
       zc.addEventListener('compositionend', () => zc.oninput());
     }
