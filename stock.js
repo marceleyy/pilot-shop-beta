@@ -525,8 +525,12 @@ async function enregistrerInventaire(lignes, note, avant, meta) {
    Avant de confirmer, le manager voit l'écart article par article et peut
    recompter (le lendemain s'il le veut). À la confirmation, le stock prend
    les quantités comptées.
-   Chambre froide : chaque bac manquant part au registre des pertes, où les
-   écarts s'additionnent au fil des inventaires.
+   Chambre froide : les bacs manquants ne partent plus d'office en pertes. Le
+   manager valide l'inventaire, voit la liste des bacs manquants, dit ce
+   qu'ils sont devenus (consommés sans scan, pertes réelles, ou mal compté :
+   il recompte), puis valide la mise à jour du stock. Seules les pertes
+   réelles vont au registre. Le calcul des écarts de période ne change pas :
+   il ne lit pas ces lignes (litresJetes les met à 0).
    Sec : rien n'y trace la consommation (cornets, gobelets), la différence
    avec le comptage précédent est donc de la consommation, pas une perte.
    Un seul inventaire en attente par partie : un nouveau comptage remplace
@@ -774,7 +778,7 @@ async function verifierInventaire(partie) {
           '<div class="stack">' + justes.map(rang).join('') + '</div></details>'
         : '') +
       '<div class="actions"><button class="btn clair" data-fermer>Laisser en attente</button>' +
-      '<button class="btn menthe" id="ci-ok">Reprendre sur le stock réel</button></div>' +
+      '<button class="btn menthe" id="ci-ok">Valider l’inventaire</button></div>' +
       '<button type="button" class="btn fantome bloc sm" id="ci-ecarter" style="margin-top:8px">Écarter ce comptage</button>');
 
     if (enCours && justes.some(x => x.c === enCours)) {
@@ -838,17 +842,43 @@ async function verifierInventaire(partie) {
       /* Livraison confirmée ailleurs pendant que l'écran était ouvert. */
       if (!sec && th.livraisons.length) { invaliderStock(); th = await theoriqueAuComptage(a, (await stockReel()).articles || {}); }
       if (th.livraisons.length) return toast('Confirmez d’abord la livraison en attente : une quantité corrigée fausserait les écarts', 'erreur');
-      confirmer('Reprendre cet inventaire sur le stock réel ?',
-      'Le stock prend les quantités comptées le ' + fmtD(a.jour) + '.' +
-      (manq ? ' ' + manq + ' ' + accord(manq, 'bac manquant part', 'bacs manquants partent') +
-              ' au registre des pertes.' : ''),
-      'Reprendre', () => confirmerInventaire(a, partie), () => dessinerV(), 'Retour');
+      const lieu = sec ? 'du sec' : 'de la chambre froide';
+      /* Bacs manquants, recalculés sur l'attendu à jour. */
+      const manquants = sec ? [] : lignesAttente(Object.assign({}, a, { avant: th.theo }), partie)
+        .filter(x => x.d < 0 && bacs(x));
+      const nbManq = manquants.reduce((s, x) => s - x.d, 0);
+      const majStock = motif => confirmer('Mettre à jour le stock ' + lieu + ' ?',
+        'Le stock prend les quantités comptées le ' + fmtD(a.jour) + '.' +
+        (motif === 'pertes' ? ' ' + nbManq + ' ' + accord(nbManq, 'bac va', 'bacs vont') + ' au registre des pertes.'
+         : motif === 'non_scanne' ? ' ' + nbManq + ' ' + accord(nbManq, 'bac est noté', 'bacs sont notés') +
+           ' consommés sans scan, hors pertes.' : '') +
+        ' Le calcul des écarts ne change pas.',
+        'Mettre à jour le stock', () => confirmerInventaire(a, partie, motif), () => dessinerV(), 'Retour');
+      if (!nbManq) return majStock('');
+      /* Des bacs manquent : le manager dit ce qu'ils sont devenus. */
+      showSheet(
+        '<h2 id="sheet-titre">' + nbManq + ' ' + accord(nbManq, 'bac manquant', 'bacs manquants') + '</h2>' +
+        '<p class="sub">Par rapport au stock attendu le ' + esc(fmtD(a.jour)) + '. Que sont-ils devenus ?</p>' +
+        '<div class="stack" style="margin-top:12px">' + manquants.map(x =>
+          '<div class="invl"><span class="invn">' + esc(lib(x.c)) + '</span><span class="invc">' + nb(-x.d) + '</span></div>'
+        ).join('') + '</div>' +
+        '<div class="stack" style="margin-top:16px">' +
+        '<button type="button" class="btn menthe bloc" id="ce-scan">Consommés, sortie non scannée</button>' +
+        '<button type="button" class="btn clair bloc" id="ce-pertes">Pertes réelles (cassés, jetés, disparus)</button>' +
+        '<button type="button" class="btn clair bloc" id="ce-recompter">Mal compté : recompter</button>' +
+        '</div>' +
+        '<button type="button" class="btn fantome bloc sm" data-fermer style="margin-top:8px">Retour</button>');
+      $('#ce-scan').onclick = () => majStock('non_scanne');
+      $('#ce-pertes').onclick = () => majStock('pertes');
+      $('#ce-recompter').onclick = () => { toast('Touchez « Recompter » sur la ligne à revoir'); dessinerV(); };
+      const ret = $('#sheet-corps [data-fermer]');
+      if (ret) ret.onclick = () => dessinerV();
     };
   };
   dessinerV();
 }
 
-async function confirmerInventaire(a, partie) {
+async function confirmerInventaire(a, partie, motif) {
   partie = partie === 'sec' ? 'sec' : 'froid';
   const CLE = INV_ATTENTE[partie].cle;
   const cur = await inventaireEnAttente(partie);
@@ -887,7 +917,7 @@ async function confirmerInventaire(a, partie) {
     await DB.set('stock:secs', hist.slice(-36));
     await DB.del(CLE);
     await feed('ok', STATE.user.prenom + ' a confirmé l’inventaire du sec du ' + fmtD(cur.jour) + ' (' + (cur.par || '—') + ')');
-    toast('Inventaire du sec repris sur le stock');
+    toast('Inventaire du sec validé, stock à jour');
     return rendre(STATE.view);
   }
 
@@ -899,12 +929,17 @@ async function confirmerInventaire(a, partie) {
     toast('Confirmez d’abord la livraison en attente', 'erreur');
     return rendre(STATE.view);
   }
-  const inv = await enregistrerInventaire(lignesAReprendre(cur, 'froid', theo), cur.note, theo, meta);
+  /* « pertes » : les bacs manquants vont au registre. « non_scanne » :
+     consommés sans scan, notés sur l'inventaire seulement. */
+  motif = motif === 'pertes' ? 'pertes' : 'non_scanne';
+  const inv = await enregistrerInventaire(lignesAReprendre(cur, 'froid', theo), cur.note, theo,
+    Object.assign(meta, { motifEcart: motif }));
 
-  /* Chaque bac manquant devient une perte du jour du comptage. L'id dérive
-     du comptage : confirmer deux fois n'en ajoute pas de seconde. */
+  /* En pertes réelles, chaque bac manquant devient une perte du jour du
+     comptage. L'id dérive du comptage : confirmer deux fois n'en ajoute pas
+     de seconde. */
   const manquants = Object.keys(inv.ecarts).filter(c => inv.ecarts[c] < 0 && litArticle(c).taille);
-  if (manquants.length) {
+  if (manquants.length && motif === 'pertes') {
     const cle = 'pertes:' + cur.jour;
     const liste = await DB.get(cle, []);
     manquants.forEach(c => {
@@ -921,9 +956,10 @@ async function confirmerInventaire(a, partie) {
   await DB.del(CLE);
   const bacsPerdus = manquants.reduce((s, c) => s - inv.ecarts[c], 0);
   await feed(bacsPerdus ? 'warn' : 'ok',
-    STATE.user.prenom + ' a confirmé l’inventaire du ' + fmtD(cur.jour) + ' (' + (cur.par || '—') + ')' +
-    (bacsPerdus ? ' · ' + bacsPerdus + ' ' + accord(bacsPerdus, 'bac', 'bacs') + ' en perte' : ''));
-  toast('Inventaire repris sur le stock');
+    STATE.user.prenom + ' a validé l’inventaire du ' + fmtD(cur.jour) + ' (' + (cur.par || '—') + ')' +
+    (bacsPerdus ? ' · ' + bacsPerdus + ' ' + accord(bacsPerdus, 'bac', 'bacs') +
+      (motif === 'pertes' ? ' en perte' : ' consommés sans scan') : ''));
+  toast('Inventaire validé, stock de la chambre froide à jour');
   rendre(STATE.view);
 }
 
