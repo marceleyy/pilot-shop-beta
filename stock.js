@@ -2294,11 +2294,10 @@ V.inventaire = async function () {
   /* Recherche dans le sec : nom du catalogue, déclinaison, nom de
      l'étiquette ou code Amorino (« wafer », « nocciolata », « CIALDI »). */
   let recherche = '';
-  let minuterieRech = null;
   const nrmR = x => String(x || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
   const texteRech = c => {
     const f = (typeof INFO_PRODUITS !== 'undefined' && INFO_PRODUITS[c]) || {};
-    return nrmR([f.etiquette, f.code, typeof contenuSec === 'function' ? contenuSec(c) : ''].join(' '));
+    return nrmR([f.etiquette, f.code].join(' '));
   };
   /* La note survit au redessin : ouvrir une famille redessine l'écran. */
   let note = '';
@@ -2334,11 +2333,11 @@ V.inventaire = async function () {
       ? SEC_SECTIONS.map(s => typeof s === 'string' ? { id:s } : s)
       : [...new Set(catalogue.map(r => r.sec || 'Autres'))].map(s => ({ id:s }));
 
+    const mots = nrmR(recherche).split(/\s+/).filter(Boolean);
     return sections.map(section => {
       /* Déclinaisons qui répondent à la recherche : chaque mot tapé doit se
          trouver dans le nom, la déclinaison, l'étiquette ou le
          code (« pot grand », « nocciolata 5 kg »). */
-      const mots = nrmR(recherche).split(/\s+/).filter(Boolean);
       const varsVues = r => {
         const vs = r.variantes && r.variantes.length ? r.variantes : [''];
         if (!mots.length) return vs;
@@ -2368,6 +2367,7 @@ V.inventaire = async function () {
           }
 
           const ouvert = deplies[r.id] || mots.length > 0;
+          const vues = varsVues(r);
           const saisis = r.variantes.filter(v => saisieSec[cleSec(r, v)] !== undefined).length;
           const total  = r.variantes.reduce((s, v) => s + num(saisieSec[cleSec(r, v)] || 0), 0);
 
@@ -2376,10 +2376,11 @@ V.inventaire = async function () {
             '<b>' + esc(r.nom) + '</b>' +
             '<span class="invc">' + (saisis
               ? n1(total) + ' ' + esc(r.unite) + (total > 1 ? 's' : '') + ' · ' + saisis + '/' + r.variantes.length
-              : r.variantes.length + ' déclinaisons · en ' + esc(r.unite)) + '</span>' +
+              : (vues.length < r.variantes.length ? vues.length + ' sur ' : '') +
+                r.variantes.length + ' déclinaisons · en ' + esc(r.unite)) + '</span>' +
             '<span class="chev">' + (ouvert ? '−' : '+') + '</span></button>' +
             (ouvert
-              ? '<div class="stack" style="margin-top:8px">' + varsVues(r).map(v => {
+              ? '<div class="stack" style="margin-top:8px">' + vues.map(v => {
                   const c = cleSec(r, v);
                   return '<div class="invl">' +
                     '<span class="invn">' + esc(v) + contenuLigne(c) + '</span>' + infoSec(c, r.nom + ', ' + v) +
@@ -2391,6 +2392,9 @@ V.inventaire = async function () {
         }).join('') + '</div></div>';
     }).join('');
   };
+
+  const listeSec = () => blocSec() ||
+    '<p class="mini" style="margin-top:12px">Aucun produit ne correspond à « ' + esc(recherche) + ' ».</p>';
 
   /* Valeur totale du stock (manager) : dernier inventaire confirmé de la
      chambre froide + dernier du sec, chacun à ses prix du jour. */
@@ -2407,6 +2411,28 @@ V.inventaire = async function () {
       (sp ? ' · ' + sp + ' ' + accord(sp, 'produit compté', 'produits comptés') + ' sans prix' : '') +
       '</div>', 'solide');
   })();
+
+  /* Liaisons des lignes (repli, fiche « ? », saisie du sec), dans tout l'écran
+     ou seulement dans la liste du sec refaite par la recherche. */
+  const lierLignes = racine => {
+    const ouvert = partie === 'froid' ? ouvertFroid : ouvertSec;
+    racine.querySelectorAll('[data-deplier]').forEach(b => b.onclick = () => {
+      /* Pendant une recherche tout est ouvert : rien à replier. */
+      if (partie === 'sec' && recherche.trim()) return;
+      deplies[b.dataset.deplier] = !deplies[b.dataset.deplier];
+      dessiner();
+    });
+    racine.querySelectorAll('[data-info]').forEach(b => b.onclick = () => ficheProduit(b.dataset.info));
+    racine.querySelectorAll('[data-sec]').forEach(i => {
+      i.disabled = !ouvert;
+      i.oninput = () => {
+        if (i.value === '') delete saisieSec[i.dataset.sec];
+        else saisieSec[i.dataset.sec] = i.value;
+        garderBrouillon();
+        majTotaux();
+      };
+    });
+  };
 
   const dessiner = () => {
     $('#vue-actions').innerHTML = '';
@@ -2466,7 +2492,7 @@ V.inventaire = async function () {
         : '<div class="champ" style="margin-top:14px"><label class="f" for="sec-cherche">Chercher un produit</label>' +
           '<input type="search" id="sec-cherche" autocomplete="off" placeholder="Nom, étiquette ou code : wafer, nocciolata, CIALDI…" value="' +
           esc(recherche) + '"></div>' +
-          (blocSec() || '<p class="mini" style="margin-top:12px">Aucun produit ne correspond à « ' + esc(recherche) + ' ».</p>')) +
+          '<div id="sec-liste">' + listeSec() + '</div>') +
 
       '<div class="champ" style="margin-top:18px"><label class="f">Note</label>' +
       '<textarea id="inv-note" placeholder="Ce qui explique un écart, un bac abîmé, un doute.">' +
@@ -2517,12 +2543,6 @@ V.inventaire = async function () {
             }).join('') + '</div>'
           : ''));
 
-    $$('[data-deplier]').forEach(b => b.onclick = () => {
-      /* Pendant une recherche tout est ouvert : rien à replier. */
-      if (partie === 'sec' && recherche.trim() && !b.dataset.deplier.startsWith('f:')) return;
-      deplies[b.dataset.deplier] = !deplies[b.dataset.deplier];
-      dessiner();
-    });
     $$('[data-hist]').forEach(b => b.onclick = () => {
       const [p, i] = b.dataset.hist.split('|');
       const liste = (p === 'froid' ? historique : historiqueSec).slice().reverse();
@@ -2630,32 +2650,20 @@ V.inventaire = async function () {
         majTotaux();
       };
     });
-    $$('[data-info]').forEach(b => b.onclick = () => ficheProduit(b.dataset.info));
+    lierLignes(document);
+    /* Recherche : seule la liste est refaite, le champ reste en place (le
+       clavier du téléphone ne se ferme pas). Pendant une composition (accent,
+       prédiction), on attend qu'elle se termine. */
     const zc = $('#sec-cherche');
-    if (zc) zc.oninput = e => {
-      recherche = zc.value;
-      /* Clavier mobile en cours de saisie (accents, prédiction) : on attend la
-         fin du mot. Sinon un court délai, pour ne pas tout redessiner à chaque
-         lettre. */
-      if (e && e.isComposing) return;
-      clearTimeout(minuterieRech);
-      minuterieRech = setTimeout(() => {
-        const pos = zc.selectionStart;
-        dessiner();
-        const z = $('#sec-cherche');
-        if (z) { z.focus(); try { z.setSelectionRange(pos, pos); } catch (er) {} }
-      }, 250);
-    };
-    if (zc) zc.addEventListener('compositionend', () => zc.oninput());
-    $$('[data-sec]').forEach(i => {
-      i.disabled = !ouvert;
-      i.oninput = () => {
-        if (i.value === '') delete saisieSec[i.dataset.sec];
-        else saisieSec[i.dataset.sec] = i.value;
-        garderBrouillon();
-        majTotaux();
+    if (zc) {
+      zc.oninput = e => {
+        recherche = zc.value;
+        if (e && e.isComposing) return;
+        const l = $('#sec-liste');
+        if (l) { l.innerHTML = listeSec(); lierLignes(l); }
       };
-    });
+      zc.addEventListener('compositionend', () => zc.oninput());
+    }
     const zn = $('#inv-note');
     if (zn) { zn.disabled = !ouvert; zn.oninput = () => { note = zn.value; }; }
     majTotaux();
@@ -2717,7 +2725,7 @@ V.inventaire = async function () {
       (douteux.length
         ? '<div class="alerte warn" style="margin-top:12px"><div style="flex:1;min-width:0"><b>Quantités à vérifier</b>' +
           douteux.map(x => '<p>' + esc(libelleInv(p, x.c)) + ' : ' + esc(x.t) + '.</p>').join('') +
-          '<p class="mini">Vérifiez l’unité : un carton entier = 1, la moitié = 0,5.</p></div></div>'
+          '<p class="mini">Vérifiez l’unité affichée (carton, ramette, pack…) : une unité entière = 1, la moitié = 0,5.</p></div></div>'
         : '') +
       (pasComptes.length
         ? '<div class="alerte" style="margin-top:12px"><div style="flex:1;min-width:0"><b>Pas comptés cette fois (' + pasComptes.length + ')</b>' +
