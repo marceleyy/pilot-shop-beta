@@ -734,6 +734,7 @@ async function verifierInventaire(partie) {
         '<small>compté ' + nb(x.compte) + (sec ? ' · précédent ' : ' · attendu ') + nb(x.attendu) +
         (r && r.unite ? ' ' + esc(accord(x.attendu, r.unite)) : '') +
         (k ? ' · recompté ' + nb(num(k.q)) + ' le ' + esc(fmtD(String(k.at).slice(0, 10))) + ' par ' + esc(k.par || '—') : '') +
+        (sec && secDouteux(x.c, x.compte, x.attendu || undefined) ? '<br><b>À vérifier : ' + esc(secDouteux(x.c, x.compte, x.attendu || undefined)) + '</b>' : '') +
         '</small></span>' +
         '<span class="invc">' + (x.d ? (sec ? '' : 'écart ') + (x.d > 0 ? '+' : '') + nb(x.d) : (sec ? 'inchangé' : 'juste')) + '<br>' +
         '<button type="button" class="btn clair sm" data-recompter="' + esc(x.c) + '">Recompter</button></span></div>' +
@@ -1879,6 +1880,24 @@ V.catalogue = async function () {
   $('#ct-prix-froid').onclick = () => editerPrix('Prix chambre froide', froidPrix(), () => rendre('catalogue'));
 };
 
+/* Quantité du sec à revoir avant de valider : l'unité est souvent un carton
+   (« Wafer al Gianduja : 4 » = 48 boîtes). Signalée quand elle fait plus du
+   double du comptage précédent (et au moins 2 de plus), ou, sans comptage
+   précédent, quand elle vaut 100 € HT ou plus. Renvoie le texte, ou ''. */
+function secDouteux(c, q, prec) {
+  q = num(q);
+  if (!(q > 0)) return '';
+  const n = v => Number.isInteger(num(v)) ? String(num(v)) : n1(v);
+  const r = catalogueSec().filter(x => typeof x === 'object' && x.id === String(c).split('|')[1])[0];
+  const u = r && r.unite ? ' ' + accord(q, r.unite) : '';
+  const p = prixLigne(c, null);
+  const val = p !== null ? ' (' + eur(q * p) + ' HT)' : '';
+  if (prec !== undefined && num(prec) > 0) {
+    return q >= 2 * num(prec) + 2 ? n(q) + u + val + ', contre ' + n(prec) + ' la dernière fois' : '';
+  }
+  return p !== null && q * p >= 100 ? n(q) + u + val + ', jamais compté avant' : '';
+}
+
 /* Fiche d'un produit du sec : ce qu'on voit sur l'étagère. */
 function ficheProduit(c) {
   const f = (typeof INFO_PRODUITS !== 'undefined') && INFO_PRODUITS[c];
@@ -2606,6 +2625,17 @@ V.inventaire = async function () {
     const vides = Object.keys(avant || {})
       .filter(c => lignes[c] === undefined && num(avant[c]) > 0 && parGroupe[groupeInv(p, c)])
       .sort((x, y) => libelleInv(p, x).localeCompare(libelleInv(p, y)));
+    /* Sec : une référence pas comptée du tout garde son ancien stock. On les
+       nomme (celles qui ont une fiche « ? » d'abord : elles sont en réserve),
+       et on montre les quantités qui ressemblent à une erreur d'unité. */
+    const douteux = p === 'sec' ? Object.keys(lignes)
+      .map(c => ({ c: c, t: secDouteux(c, lignes[c], (avant || {})[c]) })).filter(x => x.t) : [];
+    const pasComptes = p === 'sec' ? catalogueSec()
+      .filter(r => typeof r === 'object' && !r.masque && !parGroupe[r.id])
+      .sort((x, y) => (+!!INFO_PRODUITS['sec|' + y.id + '|' + ((y.variantes || [])[0] || '')] -
+                       +!!INFO_PRODUITS['sec|' + x.id + '|' + ((x.variantes || [])[0] || '')]) ||
+                      x.nom.localeCompare(y.nom))
+      .map(r => r.nom) : [];
     showSheet(
       '<h2 id="sheet-titre">' + esc(titre) + '</h2>' +
       '<p class="sub">' + esc(texte) + '</p>' +
@@ -2619,6 +2649,16 @@ V.inventaire = async function () {
       (vides.length
         ? '<div class="alerte warn" style="margin-top:12px"><div style="flex:1;min-width:0"><b>Laissés vides, comptés 0</b>' +
           '<p>' + esc(vides.map(libelleInv.bind(null, p)).join(', ')) + '. Corrigez si c’est un oubli.</p></div></div>'
+        : '') +
+      (douteux.length
+        ? '<div class="alerte warn" style="margin-top:12px"><div style="flex:1;min-width:0"><b>Quantités à vérifier</b>' +
+          douteux.map(x => '<p>' + esc(libelleInv(p, x.c)) + ' : ' + esc(x.t) + '.</p>').join('') +
+          '<p class="mini">Vérifiez l’unité : un carton entier = 1, la moitié = 0,5.</p></div></div>'
+        : '') +
+      (pasComptes.length
+        ? '<div class="alerte" style="margin-top:12px"><div style="flex:1;min-width:0"><b>Pas comptés cette fois (' + pasComptes.length + ')</b>' +
+          '<p>' + esc(pasComptes.join(', ')) + '. Leur stock reste celui du dernier inventaire. ' +
+          'Comptez-les s’ils sont en réserve.</p></div></div>'
         : '') +
       '<div class="actions"><button class="btn clair" data-fermer>Corriger</button>' +
       '<button class="btn menthe" id="rv-oui">' + esc(libelle) + '</button></div>'
