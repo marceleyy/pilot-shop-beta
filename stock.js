@@ -1914,6 +1914,7 @@ function ficheProduit(c) {
     (f.etiquette ? '<p><b>Sur l’étiquette :</b> ' + esc(f.etiquette) + '</p>' : '') +
     (f.code ? '<p><b>Code Amorino :</b> ' + esc(f.code) + '</p>' : '') +
     (f.compter ? '<p><b>Comment compter :</b> ' + esc(f.compter) + '</p>' : '') +
+    (typeof contenuSec === 'function' && contenuSec(c) ? '<p><b>Contenu :</b> ' + esc(contenuSec(c)) + '</p>' : '') +
     '</div><div class="actions"><button class="btn clair" data-fermer>Fermer</button></div>');
 }
 
@@ -1958,6 +1959,7 @@ function voirInventaire(h, partie) {
     /* Les autres familles comptées en chambre froide (macarons, gaufres…),
        saveur par saveur, comptées ou non. */
     FAMILLES_PRODUIT.filter(f => f.id !== 'glace' && f.lieu !== 'sec' && f.stock !== 'sec')
+      .sort((x, y) => (y.id === 'cremini') - (x.id === 'cremini'))   // Cremini avec les glaces
       .forEach(f => groupes.push({ titre: f.libelle, lignes: (f.saveurs && f.saveurs.length ? f.saveurs : [''])
         .map(sv => ligne(cleArticle(f.id, sv, ''), sv || f.libelle, f.unite)) }));
     const autres = {};
@@ -2211,6 +2213,38 @@ V.inventaire = async function () {
   };
 
   /* --- Chambre froide : une ligne par parfum, tailles côte à côte --------- */
+  const rendFamille = f => {
+    /* Les familles à saveurs se comptent saveur par saveur : un coulis
+       pistache et un coulis caramel ne se remplacent pas l'un l'autre,
+       et « Coulis : 4 » ne disait pas lequel manquait. */
+    if (f.saveurs) {
+    const fid = 'f:' + f.id;
+    return '<div class="invp">' +
+      enteteFamille(fid, f.libelle, f.saveurs.map(sv => cleArticle(f.id, sv, '')),
+        f.saveurs.length, f.unites) +
+      (!deplies[fid] ? '' :
+      '<div class="stack" style="margin-top:8px">' + f.saveurs.map(sv => {
+              const c = cleArticle(f.id, sv, '');
+              const q = num(articles[c]);
+              return '<div class="invl">' +
+                '<span class="invn">' + esc(sv) + '</span>' +
+                (q ? '<span class="invc">' + q + '</span>' : '') +
+                '<input type="number" inputmode="numeric" min="0" step="1" data-inv="' + esc(c) + '" ' +
+                'aria-label="' + esc(f.libelle + ', ' + sv) + '" ' +
+                'value="' + (saisie[c] !== undefined ? esc(saisie[c]) : '') + '" placeholder="0"></div>';
+            }).join('') + '</div>') + '</div>';
+        }
+        const c = cleArticle(f.id, '', '');
+        const q = num(articles[c]);
+        return '<div class="invl">' +
+          '<span class="invn">' + esc(f.libelle) +
+          '<small>en ' + esc(f.unites) + '</small></span>' +
+          (q ? '<span class="invc">' + q + ' en stock</span>' : '') +
+          '<input type="number" inputmode="numeric" min="0" step="1" data-inv="' + esc(c) + '" ' +
+          'aria-label="' + esc(f.libelle + ' (en ' + f.unites + ')') + '" ' +
+          'value="' + (saisie[c] !== undefined ? esc(saisie[c]) : '') + '" placeholder="0"></div>';
+  };
+
   const blocFroid = () =>
     '<div class="invp" style="margin-top:14px">' +
     enteteFamille('f:glace', 'Glaces',
@@ -2245,39 +2279,11 @@ V.inventaire = async function () {
         }).join('') + '</div></div>';
     }).join('') + '</div>') + '</div>' +
 
+    /* Cremini : bacs de glace de 2,15 L, comptés avec les glaces. */
+    autres.filter(f => f.id === 'cremini').map(f => '<div class="stack" style="margin-top:8px">' + rendFamille(f) + '</div>').join('') +
     '<div class="entete"><h3>Autres familles</h3>' +
     '<span class="pousse mini">comptées à l’unité</span></div>' +
-    '<div class="stack">' + autres.map(f => {
-    /* Les familles à saveurs se comptent saveur par saveur : un coulis
-       pistache et un coulis caramel ne se remplacent pas l'un l'autre,
-       et « Coulis : 4 » ne disait pas lequel manquait. */
-    if (f.saveurs) {
-    const fid = 'f:' + f.id;
-    return '<div class="invp">' +
-      enteteFamille(fid, f.libelle, f.saveurs.map(sv => cleArticle(f.id, sv, '')),
-        f.saveurs.length, f.unites) +
-      (!deplies[fid] ? '' :
-      '<div class="stack" style="margin-top:8px">' + f.saveurs.map(sv => {
-              const c = cleArticle(f.id, sv, '');
-              const q = num(articles[c]);
-              return '<div class="invl">' +
-                '<span class="invn">' + esc(sv) + '</span>' +
-                (q ? '<span class="invc">' + q + '</span>' : '') +
-                '<input type="number" inputmode="numeric" min="0" step="1" data-inv="' + esc(c) + '" ' +
-                'aria-label="' + esc(f.libelle + ', ' + sv) + '" ' +
-                'value="' + (saisie[c] !== undefined ? esc(saisie[c]) : '') + '" placeholder="0"></div>';
-            }).join('') + '</div>') + '</div>';
-        }
-        const c = cleArticle(f.id, '', '');
-        const q = num(articles[c]);
-        return '<div class="invl">' +
-          '<span class="invn">' + esc(f.libelle) +
-          '<small>en ' + esc(f.unites) + '</small></span>' +
-          (q ? '<span class="invc">' + q + ' en stock</span>' : '') +
-          '<input type="number" inputmode="numeric" min="0" step="1" data-inv="' + esc(c) + '" ' +
-          'aria-label="' + esc(f.libelle + ' (en ' + f.unites + ')') + '" ' +
-          'value="' + (saisie[c] !== undefined ? esc(saisie[c]) : '') + '" placeholder="0"></div>';
-    }).join('') + '</div>';
+    '<div class="stack">' + autres.filter(f => f.id !== 'cremini').map(rendFamille).join('') + '</div>';
 
   /* --- Sec : par section, unité visible, décimales où ça a du sens ---------
      Le manager l'a dit : « comme ça, les personnes voient avant de taper ».
@@ -2285,9 +2291,21 @@ V.inventaire = async function () {
      l'autorise : deux cartons pleins et un à moitié, ça se tape 2,5. Zéro
      veut dire « à commander », 0,5 veut dire « je réfléchis ». */
   let deplies = {};
+  /* Recherche dans le sec : nom du catalogue, déclinaison, nom de
+     l'étiquette ou code Amorino (« wafer », « nocciolata », « CIALDI »). */
+  let recherche = '';
+  const nrmR = x => String(x || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  const texteRech = c => {
+    const f = (typeof INFO_PRODUITS !== 'undefined' && INFO_PRODUITS[c]) || {};
+    return nrmR([f.etiquette, f.code, typeof contenuSec === 'function' ? contenuSec(c) : ''].join(' '));
+  };
   /* La note survit au redessin : ouvrir une famille redessine l'écran. */
   let note = '';
   const cleSec = (r, v) => 'sec|' + r.id + '|' + (v || '');
+  const contenuLigne = c => {
+    const t = typeof contenuSec === 'function' ? contenuSec(c) : '';
+    return t ? '<small>' + esc(t) + '</small>' : '';
+  };
   /* « ? » : fiche produit (photo, nom de l'étiquette, code, comment compter). */
   const infoSec = (c, nom) => (typeof INFO_PRODUITS !== 'undefined' && INFO_PRODUITS[c])
     ? '<button type="button" class="info-p" data-info="' + esc(c) + '" aria-label="' +
@@ -2316,8 +2334,15 @@ V.inventaire = async function () {
       : [...new Set(catalogue.map(r => r.sec || 'Autres'))].map(s => ({ id:s }));
 
     return sections.map(section => {
+      const q = nrmR(recherche).trim();
+      /* Déclinaisons qui répondent à la recherche (toutes si le nom répond). */
+      const varsVues = r => {
+        const vs = r.variantes && r.variantes.length ? r.variantes : [''];
+        if (!q || nrmR(r.nom + ' ' + section.id).includes(q)) return vs;
+        return vs.filter(v => nrmR(v).includes(q) || texteRech(cleSec(r, v)).includes(q));
+      };
       const refs = catalogue.filter(r =>
-        typeof r === 'object' && (r.sec || 'Autres') === section.id && !r.masque);
+        typeof r === 'object' && (r.sec || 'Autres') === section.id && !r.masque && varsVues(r).length);
       if (!refs.length) return '';
       const nb = refs.reduce((n, r) => n + (r.variantes ? r.variantes.length : 1), 0);
       const teinte = section.teinte ? ' style="--sec-teinte:' + section.teinte + '"' : '';
@@ -2331,12 +2356,12 @@ V.inventaire = async function () {
           if (!r.variantes || !r.variantes.length) {
             const c = cleSec(r, '');
             return '<div class="invl">' +
-              '<span class="invn">' + esc(r.nom) + '</span>' + infoSec(c, r.nom) +
+              '<span class="invn">' + esc(r.nom) + contenuLigne(c) + '</span>' + infoSec(c, r.nom) +
               (anc[c] !== undefined ? '<span class="invc faible">préc. ' + n1(anc[c]) + '</span>' : '') +
               champSec(r, c, r.nom) + '</div>';
           }
 
-          const ouvert = deplies[r.id];
+          const ouvert = deplies[r.id] || !!q;
           const saisis = r.variantes.filter(v => saisieSec[cleSec(r, v)] !== undefined).length;
           const total  = r.variantes.reduce((s, v) => s + num(saisieSec[cleSec(r, v)] || 0), 0);
 
@@ -2348,10 +2373,10 @@ V.inventaire = async function () {
               : r.variantes.length + ' déclinaisons · en ' + esc(r.unite)) + '</span>' +
             '<span class="chev">' + (ouvert ? '−' : '+') + '</span></button>' +
             (ouvert
-              ? '<div class="stack" style="margin-top:8px">' + r.variantes.map(v => {
+              ? '<div class="stack" style="margin-top:8px">' + varsVues(r).map(v => {
                   const c = cleSec(r, v);
                   return '<div class="invl">' +
-                    '<span class="invn">' + esc(v) + '</span>' + infoSec(c, r.nom + ', ' + v) +
+                    '<span class="invn">' + esc(v) + contenuLigne(c) + '</span>' + infoSec(c, r.nom + ', ' + v) +
                     (anc[c] !== undefined ? '<span class="invc faible">préc. ' + n1(anc[c]) + '</span>' : '') +
                     champSec(r, c, r.nom + ', ' + v) + '</div>';
                 }).join('') + '</div>'
@@ -2431,7 +2456,11 @@ V.inventaire = async function () {
         ? '<div class="rappel" style="margin-top:12px"><b>Comptez aussi l’armoire −13</b> : ' +
           nbArmoire + ' ' + accord(nbArmoire, 'bac y est noté et fait', 'bacs y sont notés et font') + ' toujours partie du stock.</div>'
         : '') +
-      (partie === 'froid' ? blocFroid() : blocSec()) +
+      (partie === 'froid' ? blocFroid()
+        : '<div class="champ" style="margin-top:14px"><label class="f" for="sec-cherche">Chercher un produit</label>' +
+          '<input type="search" id="sec-cherche" autocomplete="off" placeholder="Nom, étiquette ou code : wafer, nocciolata, CIALDI…" value="' +
+          esc(recherche) + '"></div>' +
+          (blocSec() || '<p class="mini" style="margin-top:12px">Aucun produit ne correspond à « ' + esc(recherche) + ' ».</p>')) +
 
       '<div class="champ" style="margin-top:18px"><label class="f">Note</label>' +
       '<textarea id="inv-note" placeholder="Ce qui explique un écart, un bac abîmé, un doute.">' +
@@ -2593,6 +2622,13 @@ V.inventaire = async function () {
       };
     });
     $$('[data-info]').forEach(b => b.onclick = () => ficheProduit(b.dataset.info));
+    const zc = $('#sec-cherche');
+    if (zc) zc.oninput = () => {
+      recherche = zc.value;
+      dessiner();
+      const z = $('#sec-cherche');
+      if (z) { z.focus(); z.setSelectionRange(z.value.length, z.value.length); }
+    };
     $$('[data-sec]').forEach(i => {
       i.disabled = !ouvert;
       i.oninput = () => {
