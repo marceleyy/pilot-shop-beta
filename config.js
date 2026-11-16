@@ -595,7 +595,7 @@ const INVENTAIRE_SEC = [
   { id:'conepapier',sec:'Cornets et pots', nom:'Cônes papier',       unite:'carton', decimal:true,
     variantes:['Petit','Grand'] },
   { id:'pot',       sec:'Cornets et pots', nom:'Pots',               unite:'ramette', decimal:false,
-    variantes:['Petit','Classique','Grand','Géant','À partager'] },
+    variantes:['Petit','Classique','Grand','Géant','À partager','Waffle stick'] },
   { id:'couvercle', sec:'Cornets et pots', nom:'Couvercles gobelet', unite:'carton', decimal:true,
     variantes:['Petit','Grand'] },
 
@@ -752,9 +752,45 @@ const PRIX_ACHAT = {
     'sec|decor|Chocolat en poudre 1 kg': 6.8,
     'sec|filmiso|1100 ml': 3, 'sec|filmiso|550 ml': 2, 'sec|bagueiso|': 14, 'sec|bouteille|': 4.85,
     'sec|biscuit|Baci di Dama': 3.9, 'sec|biscuit|Brutti e buoni': 3.8,
+    /* Pots : prix d'une RAMETTE, l'unité comptée. Petit et Classique :
+       carton de 8 ramettes de 250 (98,96 € et 103,35 €). Grand : carton de
+       1 400 = 7 ramettes de 200 (85,02 €). Géant (Grandissimo) : ramette de
+       160 à 15,02 €. Waffle stick : 150 coupes à 17,26 €. */
+    'sec|pot|Petit': 12.37, 'sec|pot|Classique': 12.92, 'sec|pot|Grand': 12.15,
+    'sec|pot|Géant': 15.02, 'sec|pot|Waffle stick': 17.26,
     'sec|gaufrier|Pierre abrasive crêpière': 22.6, 'sec|gaufrier|Brosse gaufrier': 15
   }
 };
+
+/* Ce que contient une unité comptée, lu sur les factures Amorino 2026 et
+   en réserve. Affiché sous le nom pendant l'inventaire : « 1 carton =
+   432 cornets ». Clé « sec|id|déclinaison », ou « sec|id| » pour toutes les
+   déclinaisons. */
+const CONTENU_SEC = {
+  'sec|cornet|Petit': '1 carton = 432 cornets', 'sec|cornet|Classique': '1 carton = 275 cornets',
+  'sec|cornet|Grand': '1 carton = 256 cornets',
+  'sec|chococone|Petit': '1 carton = 225', 'sec|chococone|Classique': '1 carton = 175', 'sec|chococone|Grand': '1 carton = 128',
+  'sec|cornetsg|': '1 carton = 25 cornets',
+  'sec|conepapier|Petit': '1 carton = 3 000 cônes', 'sec|conepapier|Grand': '1 carton = 2 800 cônes',
+  'sec|pot|Petit': '1 ramette = 250 pots · carton de 8 ramettes', 'sec|pot|Classique': '1 ramette = 250 pots · carton de 8 ramettes',
+  'sec|pot|Grand': '1 ramette = 200 pots · carton de 7 ramettes', 'sec|pot|Géant': '1 ramette = 160 pots (Grandissimo)',
+  'sec|pot|Waffle stick': '1 ramette = 150 coupes Waffle stick (le « waffle carré »)',
+  'sec|cuillere|': '1 carton = 3 600 cuillères',
+  'sec|serviette|': '24×24 : 6 000 · 25×25 : 3 600 · 30×30 : 3 200 par carton',
+  'sec|barquette|': '1 carton = 330 barquettes (210 en kraft)',
+  'sec|gobelet|': '1 pack = 50 gobelets', 'sec|bague|': '1 pack = 100 bagues',
+  'sec|paille|': '1 carton = 250 pailles', 'sec|spatule|': '1 carton = 1 000 spatules',
+  'sec|isobac|': '1 carton = 100 bacs', 'sec|filmiso|': '1 pack = 100 films', 'sec|bagueiso|': '1 pack = 100 bagues',
+  'sec|macaroncarton|Petit 2p': '1 carton = 200 boîtes', 'sec|macaroncarton|Moyen 4p': '1 carton = 100 boîtes',
+  'sec|sackraft|Grand': '1 carton = 200 sacs',
+  'sec|lavette|': '1 pack = 25 lavettes',
+  'sec|chocochaud|': '1 boîte = 15 sachets', 'sec|tablette|': '1 carton = 25 sachets de 220 g',
+  'sec|cialdi|': '1 carton = 400 mini wafers', 'sec|gaufrette|': '1 carton = 12 boîtes de 50',
+  'sec|biscuit|Baci di Dama': 'carton de 20 sachets de 120 g', 'sec|biscuit|Brutti e buoni': 'carton de 8 sachets de 120 g',
+  'sec|topping|Noisette': 'carton de 20 sachets de 150 g', 'sec|decor|Amarena 3 kg': 'carton de 6 boîtes de 3 kg',
+  'sec|sucrecristal|': '1 pack = 1 000 bûchettes de 4 g'
+};
+const contenuSec = c => CONTENU_SEC[c] || CONTENU_SEC[String(c).split('|').slice(0, 2).join('|') + '|'] || '';
 
 /* Fiches produit du sec : le « ? » à côté d'une ligne de l'inventaire.
    Le nom du catalogue n'est pas celui de l'étiquette (« Crème gianduja 5 kg »
