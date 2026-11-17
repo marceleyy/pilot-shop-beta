@@ -190,7 +190,21 @@ function secDepuisCode(ref) {
   if (!c) return null;
   const connues = clesSecConnues();
   const cle = (c.cles || []).filter(k => connues.has(k))[0];
-  return cle ? { cle: cle, par: num(c.par) > 0 ? num(c.par) : 1 } : null;
+  return cle ? { cle: cle, par: num(c.par) > 0 ? num(c.par) : 1, vivante: cleVivanteSecSeule(cle) } : null;
+}
+
+/* Clé de famille d'une ligne du sec suivie à l'ouverture (chantilly, coulis,
+   toppings), ou null. Ces lignes reçoivent leurs livraisons dans le journal
+   des mouvements de la famille, comme avant : le stock vivant les lit là. */
+function cleVivanteSecSeule(cle) {
+  const o = {}; o[cle] = 1;
+  return typeof cleVivanteSec === 'function' ? cleVivanteSec(cle, o) : null;
+}
+
+/* Identifiant d'une référence ajoutée au catalogue du sec. */
+function idCatalogueSec(nom) {
+  return 'm_' + String(nom || 'article').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]+/g, '').slice(0, 20) + '_' + Date.now().toString(36).slice(-4) + Math.random().toString(36).slice(2, 4);
 }
 
 /* lignes : [{ cle, q }] déjà converties en unités comptées. L'id dérive de la
@@ -200,7 +214,7 @@ async function ajouterReceptionSec(lignes, meta) {
   const vus = new Set(l.map(m => m && m.id));
   let n = 0;
   (lignes || []).forEach((x, i) => {
-    const id = meta.id + '|' + i;
+    const id = meta.id + '|' + (x.i !== undefined ? x.i : i);
     if (!x.cle || !(num(x.q) > 0) || vus.has(id)) return;
     l.push({ id: id, at: meta.at, cle: x.cle, q: num(x.q), bl: meta.bl || '', par: meta.par || '' });
     n++;
@@ -215,8 +229,7 @@ async function ajouterReceptionSec(lignes, meta) {
 async function ajouterArticleSecRecu(nom, section) {
   const m = (await DB.get('catalogue:sec', null)) || {};
   m.masques = m.masques || []; m.modifs = m.modifs || {}; m.ajouts = m.ajouts || [];
-  const id = 'm_' + String(nom || 'article').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
-    .replace(/[^a-z0-9]+/g, '').slice(0, 20) + '_' + Math.random().toString(36).slice(2, 6);
+  const id = idCatalogueSec(nom);
   m.ajouts.push({ id: id, sec: section, nom: String(nom || '').trim() || 'Article reçu', unite: 'unité', decimal: true, variantes: [] });
   await enregistrerCatalogueSec(m);
   return 'sec|' + id + '|';
@@ -1336,7 +1349,7 @@ V.stock = async function () {
   if (typeof chargerCatalogueSec === 'function') await chargerCatalogueSec();
   const sec = await DB.get('stock:sec', null);
   /* Livraisons du sec confirmées depuis le dernier comptage. */
-  const recusSec = sec ? await recusSecDepuis(sec.at).catch(() => ({})) : {};
+  const secAttendu = sec ? await stockSecAttendu(sec).catch(() => null) : null;
   const attente = await inventaireEnAttente('froid');
   const attenteSec = await inventaireEnAttente('sec');
   /* Réceptions pas encore confirmées : leurs bacs ne sont pas dans ces chiffres. */
@@ -1438,9 +1451,8 @@ V.stock = async function () {
     const sections = (typeof SEC_SECTIONS !== 'undefined')
       ? SEC_SECTIONS.map(s => typeof s === 'string' ? { id:s } : s) : [];
     /* Comptage + réceptions confirmées depuis (voir stockSecAttendu). */
-    const l = Object.assign({}, sec.lignes);
-    Object.keys(recusSec).forEach(c => { l[c] = Math.round((num(l[c]) + recusSec[c]) * 1000) / 1000; });
-    const nbRecus = Object.keys(recusSec).length;
+    const l = secAttendu ? secAttendu.lignes : Object.assign({}, sec.lignes);
+    const nbRecus = secAttendu ? Object.keys(secAttendu.recus).length : 0;
     const parRef = {};
     Object.keys(l).forEach(k => { const p = k.split('|'); if (p[0] !== 'sec') return;
       (parRef[p[1]] = parRef[p[1]] || []).push({ v: p[2] || '', q: num(l[k]) }); });
@@ -1472,8 +1484,8 @@ V.stock = async function () {
     };
 
     return carte('<div class="grid g2">' +
-      kpi('Références', totalLignes, '', 'comptées') +
-      kpi('Unités', n1(totalUnites), '', 'au dernier comptage') + '</div>' +
+      kpi('Références', totalLignes, '', nbRecus ? 'comptées ou reçues' : 'comptées') +
+      kpi('Unités', n1(totalUnites), '', nbRecus ? 'comptage + livraisons' : 'au dernier comptage') + '</div>' +
       '<p class="rappel" style="margin-top:14px">Compté le ' + fmtD(sec.jour) +
       (sec.par ? ' par ' + esc(sec.par) : '') + '. Chantilly, coulis et toppings ' +
       'baissent à chaque ouverture tracée ; le reste suit le comptage' +
@@ -1965,8 +1977,7 @@ V.catalogue = async function () {
       enCours = true; $('#ct-ok').disabled = true;
       const variantes = $('#ct-var').value.split('\n').map(s => s.trim()).filter(Boolean);
       if (neuf) {
-        const id = 'm_' + nom.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
-          .replace(/[^a-z0-9]+/g, '').slice(0, 20) + '_' + Date.now().toString(36).slice(-4);
+        const id = idCatalogueSec(nom);
         m.ajouts.push({ id, sec:section, nom, unite, decimal, variantes });
       } else {
         m.modifs[r.id] = { nom, unite, decimal, variantes };

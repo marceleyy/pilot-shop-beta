@@ -271,7 +271,7 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
          return '<option value="neuf|' + esc(id) + '">Nouveau · ' + esc(id) + '</option>'; }).join('') + '</optgroup>' +
        '<optgroup label="Article existant">' + (typeof catalogueSec === 'function' ? catalogueSec() : [])
          .filter(x => x && typeof x === 'object' && !x.masque)
-         .map(x => (x.variantes && x.variantes.length ? x.variantes : ['']).map(v =>
+         .map(x => (x.variantes && x.variantes.length ? x.variantes : ['']).filter(v => !cleVivanteSecSeule('sec|' + x.id + '|' + v)).map(v =>
            '<option value="' + esc('sec|' + x.id + '|' + v) + '">' + esc(x.nom + (v ? ' · ' + v : '')) + '</option>').join('')).join('') +
        '</optgroup>';
      const lieuLigne = (l, i) => l.famille === 'sec'
@@ -316,28 +316,32 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
            const l = r.lignes[i];
            if (l.famille !== 'sec' || l.cle || !(num(qtes[i]) > 0)) continue;
            if (/^neuf\|/.test(rappro[i])) {
-             try { cles[i] = await ajouterArticleSecRecu(l.produit, rappro[i].slice(5)); }
+             /* Retenue dans rappro : un nouvel essai ne la recrée pas. */
+             try { cles[i] = rappro[i] = await ajouterArticleSecRecu(l.produit, rappro[i].slice(5)); }
              catch (e) { return toast('Ajout au catalogue impossible, réessayez', 'erreur'); }
            } else cles[i] = rappro[i];
          }
+         /* Sec écrit avant de marquer : un échec laisse la réception en
+            attente. Id par ligne du bon : un second iPad n'ajoute rien. */
+         const secRecus = [];
+         r.lignes.forEach((l, i) => { if (l.famille === 'sec' && cles[i] && num(qtes[i]) > 0) secRecus.push({ cle:cles[i], q:num(qtes[i]), i:i }); });
+         if (secRecus.length) await ajouterReceptionSec(secRecus, { id:r.id, at:r.at, bl:r.numero, par:STATE.user.prenom });
          /* Marquée d'abord : un second iPad qui confirme ensuite la trouve
             traitée et n'ajoute pas les bacs une seconde fois. */
          if (!(await marquerReceptionTraitee(r.id, 'confirmee'))) return;
          let n = 0;
-         const secRecus = [];
          for (let i = 0; i < r.lignes.length; i++) {
            const l = r.lignes[i], q = num(qtes[i]);
            if (!(q > 0)) continue;
            /* Sec : journal du sec (stock attendu = comptage + réceptions). */
            if (l.famille === 'sec') {
-             if (cles[i]) { secRecus.push({ cle:cles[i], q:q }); n += q; }
+             if (cles[i]) n += q;
              continue;
            }
            /* Daté de la livraison, pas de la confirmation (voir ajouterMouvement). */
            await ajouterMouvement('reception', l.cle, q, { lot:l.lot, bl:r.numero, dlc:l.dlc, famille:l.famille, at:r.at });
            n += q;
          }
-         if (secRecus.length) await ajouterReceptionSec(secRecus, { id:r.id, at:r.at, bl:r.numero, par:STATE.user.prenom });
          const corrige = r.lignes.some((l, i) => num(qtes[i]) !== num(l.qte));
          /* Le manager a validé chaque ligne gardée : l'appli retient l'article
             de chaque référence pour les prochains bons. */
@@ -546,8 +550,13 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
          if (!l.ref || typeof secDepuisCode !== 'function') return;
          const sd = secDepuisCode(l.ref);
          const a = memo && typeof cleMemoRef === 'function' ? memo[cleMemoRef(l.ref)] : null;
-         if (sd) { l.codeSec = true; choixSec(l, sd.cle, sd.par); }
-         else if (a && /^sec\|/.test(a.cle || '') && clesSecConnues().has(a.cle)) { l.codeSec = true; choixSec(l, a.cle, 1); }
+         if (sd && sd.vivante) {
+           /* Coulis, toppings… : entrée de la famille, comme un choix au catalogue. */
+           const f = litArticle(sd.vivante);
+           const c = catalogue.filter(x => x.fam === f.famille && x.parfum === f.parfum)[0];
+           if (c) { l.codeSec = 'code'; l.lieu = c.lieu; l.choix = c; l.produit = l.lu = c.nom; l.unite = c.unite; l.facteur = sd.par; }
+         } else if (sd) { l.codeSec = 'code'; choixSec(l, sd.cle, sd.par); }
+         else if (a && /^sec\|/.test(a.cle || '') && clesSecConnues().has(a.cle) && !cleVivanteSecSeule(a.cle)) { l.codeSec = 'memo'; choixSec(l, a.cle, 1); }
        });
        lignes.forEach(l => {
          if (l.codeSec) return;
@@ -578,8 +587,9 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
              '<input type="search" data-r="' + i + '.produit" value="' + esc(l.produit) + '" placeholder="Chercher dans le catalogue ou écrire le nom" autocomplete="off">' +
              '<div class="chips" data-sugg="' + i + '" style="margin-top:6px">' + (l.choix && l.produit === l.choix.nom ? '' : puces(l, i, l.produit)) + '</div>' +
              (l.appris && l.produit === l.lu ? '<p class="mini" style="margin-top:4px">Reconnu grâce aux livraisons précédentes (' + esc(l.ref) + ')</p>' : '') +
-             (l.choix && l.choix.cle && l.produit === l.choix.nom ? '<p class="mini" style="margin-top:4px">Entrera au stock du sec' +
-               (l.codeSec ? ' (référence ' + esc(l.ref) + ')' : '') +
+             (l.codeSec && l.choix && l.produit === l.choix.nom ? '<p class="mini" style="margin-top:4px">' +
+               (l.codeSec === 'memo' ? 'Reconnu grâce aux livraisons précédentes (' + esc(l.ref) + '), à vérifier'
+                 : 'Référence Amorino ' + esc(l.ref)) +
                (num(l.facteur) > 1 ? ' · 1 sur le bon = ' + num(l.facteur) + ' comptés à l’inventaire' : '') + '</p>' : '') + '</div>' +
              '<div class="grid g3" style="margin-top:10px">' +
              '<div class="champ"><label class="f">Quantité' + (l.qteDouteuse ? ' <b style="color:var(--corail-d)">à vérifier</b>' : '') + '</label><input type="number" min="1" data-r="' + i + '.qte" value="' + l.qte + '"></div>' +
@@ -623,8 +633,8 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
              const c = catalogue.filter(x => x.lieu === (l.lieu || 'froid') && x.nom === b.dataset.nom)[0];
              if (!c) return;
              l.choix = c; l.produit = c.nom; l.unite = c.unite;
-             const sd = c.cle && l.ref && typeof secDepuisCode === 'function' ? secDepuisCode(l.ref) : null;
-             l.facteur = sd && sd.cle === c.cle ? sd.par : 1;
+             const sd = l.ref && typeof secDepuisCode === 'function' ? secDepuisCode(l.ref) : null;
+             l.facteur = sd && (sd.cle === c.cle || (sd.vivante && c.fam && cleArticle(c.fam, c.parfum, '') === sd.vivante)) ? sd.par : 1;
              /* Le nom choisi ne porte pas de taille : sans taille saisie, le
                 bac par défaut est signalé à vérifier. */
              if (c.fam === 'glace' && !num(l.taille)) l.tailleDeduite = true;
@@ -726,7 +736,7 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
             }
             const cleC = cleArticle(c.fam, c.parfum, c.fam === 'glace' ? (num(l.taille) || FOURNISSEUR.tailleParDefaut) : '');
             auStock++;
-            aStocker.push({ cle:cleC, produit:l.produit.trim(), qte:num(l.qte), ref:l.ref || '',
+            aStocker.push({ cle:cleC, produit:l.produit.trim(), qte:num(l.qte) * (num(l.facteur) || 1), ref:l.ref || '',
                             lot:l.lot || '', dlc:l.dlc || '', famille:c.fam });
             continue;
           }
