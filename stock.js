@@ -1763,9 +1763,14 @@ V.controle = async function () {
       bvs.id = 'valeur-stock';
       bvs.style.marginTop = '14px';
       bvs.innerHTML = html;
-      /* Sous les réceptions à confirmer, qui restent l'alerte du haut. */
-      const ref = apresReceptions && apresReceptions.parentNode === page ? apresReceptions.nextSibling : page.firstChild.nextSibling;
-      page.insertBefore(bvs, ref);
+      /* Dans la grille de la météo et de « Personne en service » : une
+         colonne de large, pas toute la page. */
+      const grille = $('#ctl-meteo');
+      if (grille) { bvs.style.marginTop = ''; grille.appendChild(bvs); }
+      else {
+        const ref = apresReceptions && apresReceptions.parentNode === page ? apresReceptions.nextSibling : page.firstChild.nextSibling;
+        page.insertBefore(bvs, ref);
+      }
       const go = bvs.querySelector('[data-valstock]');
       /* L'onglet qui porte la valeur : le sec s'il en a, sinon la chambre froide. */
       const secVal = ps ? valeurStock(ps.lignes, ps.prix).total : 0;
@@ -1795,7 +1800,7 @@ V.controle = async function () {
             sous.length + ' ' + accord(sous.length, 'article sous le stock minimum', 'articles sous le stock minimum') + '</b>' +
             '<p>' + liste + '</p></div><button class="btn menthe sm" data-voirseuil>Voir</button></div>';
           /* Sous la valeur du stock, sinon sous les réceptions à confirmer. */
-          const apres = $('#valeur-stock');
+          const apres = $('#valeur-stock') && $('#valeur-stock').parentNode === page ? $('#valeur-stock') : $('#ctl-meteo');
           const ancre = apres && apres.parentNode === page ? apres
             : apresReceptions && apresReceptions.parentNode === page ? apresReceptions : page.firstChild;
           page.insertBefore(bm, ancre ? ancre.nextSibling : null);
@@ -2397,13 +2402,13 @@ function carteValeurStock(precedent, secPrec, bouton) {
   const vs = secPrec ? valeurStock(secPrec.lignes, secPrec.prix) : { total: 0, sansPrix: 0 };
   if (!(vf.total + vs.total > 0)) return '';
   const sp = vf.sansPrix + vs.sansPrix;
-  return carte('<div class="cs">Valeur totale du stock</div>' +
-    '<h2 style="margin-top:2px">' + eur(vf.total + vs.total) + ' HT</h2>' +
-    '<div class="mini">Chambre froide ' + eur(vf.total) + (precedent ? ' (' + esc(fmtD(precedent.jour)) + ')' : '') +
-    ' · Sec ' + eur(vs.total) + (secPrec ? ' (' + esc(fmtD(secPrec.jour)) + ')' : '') +
+  return carte('<div class="ch"><h2>Valeur du stock actuel</h2></div>' +
+    '<div class="kpi" style="margin-top:6px"><div class="v">' + eur(vf.total + vs.total) + ' HT</div></div>' +
+    '<div class="mini">Chambre froide ' + eur(vf.total) + (precedent ? ' (' + esc(fmtDC(precedent.jour)) + ')' : '') +
+    ' · Sec ' + eur(vs.total) + (secPrec ? ' (' + esc(fmtDC(secPrec.jour)) + ')' : '') +
     (sp ? ' · ' + sp + ' ' + accord(sp, 'produit compté', 'produits comptés') + ' sans prix' : '') +
     '</div>' +
-    (bouton ? '<button class="btn clair sm" style="margin-top:10px" data-valstock>Ouvrir l’inventaire (export dans l’historique)</button>' : ''),
+    (bouton ? '<button class="btn clair sm" style="margin-top:10px" data-valstock>Détail et export</button>' : ''),
     'solide');
 }
 
