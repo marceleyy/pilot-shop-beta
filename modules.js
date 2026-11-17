@@ -296,6 +296,7 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
        'Rien n’entrera au stock pour ce bon. La réception reste tracée au registre.', 'Écarter',
        async () => {
          if (!(await marquerReceptionTraitee(r.id, 'ecartee'))) return;
+         if (typeof retirerReceptionSec === 'function') { try { await retirerReceptionSec(r.id); } catch (e) {} }
          await feed('warn', STATE.user.prenom + ' a écarté l’entrée en stock du bon ' + (r.numero || 'sans n°') + ' (' + (r.par || '—') + ')');
          toast('Réception écartée du stock');
          if ((await receptionsEnAttente()).length) return verifierReceptions();
@@ -326,7 +327,13 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
          if (secRecus.length) await ajouterReceptionSec(secRecus, { id:r.id, at:r.at, bl:r.numero, par:STATE.user.prenom });
          /* Marquée d'abord : un second iPad qui confirme ensuite la trouve
             traitée et n'ajoute pas les bacs une seconde fois. */
-         if (!(await marquerReceptionTraitee(r.id, 'confirmee'))) return;
+         if (!(await marquerReceptionTraitee(r.id, 'confirmee'))) {
+           /* Écartée entre-temps sur un autre appareil : le sec écrit à
+              l'instant ne doit pas rester au stock. */
+           const deja = (await DB.get(CLE_RECEPTION_ATTENTE, [])).filter(x => x && x.id === r.id)[0];
+           if (secRecus.length && (!deja || deja.traite !== 'confirmee')) { try { await retirerReceptionSec(r.id); } catch (e) {} }
+           return;
+         }
          let n = 0;
          for (let i = 0; i < r.lignes.length; i++) {
            const l = r.lignes[i], q = num(qtes[i]);
@@ -351,7 +358,8 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
          closeSheet();
          /* Livraison antérieure au dernier inventaire : il l'a déjà comptée,
             le journal écarte le mouvement. */
-         const inv = await DB.get('stock:inventaire', null);
+         const toutSec = r.lignes.every((l, i) => !(num(qtes[i]) > 0) || l.famille === 'sec');
+         const inv = await DB.get(toutSec ? 'stock:sec' : 'stock:inventaire', null);
          toast(inv && inv.at && inv.at >= r.at
            ? 'Confirmée. L’inventaire du ' + fmtD(inv.jour) + ' comptait déjà cette livraison : stock inchangé'
            : n + ' ' + accord(n, 'unité ajoutée', 'unités ajoutées') + ' au stock');
@@ -2247,7 +2255,7 @@ V.parametres = async function () {
          'Supprimer', async () => {
            ENCEINTES.splice(+b.dataset.supp, 1);
            await DB.set('enceintes', ENCEINTES);
-           toast('Unité supprimée'); rendre(STATE.view === 'reglages' ? 'reglages' : 'parametres');
+           toast('Unité supprimée'); rendre(STATE.view);
          });
      });
      $('#ea').onclick = async () => {
@@ -2259,7 +2267,7 @@ V.parametres = async function () {
        ENCEINTES.push({ id:'u' + uid().slice(0, 4), nom:'Nouvelle unité', cible:'—',
                         lo:-24, hi:8, pas:1, vert:[-20, -17], crit:-15, zone:'boutique' });
        await DB.set('enceintes', ENCEINTES);
-       await rendre(STATE.view === 'reglages' ? 'reglages' : 'parametres');
+       await rendre(STATE.view);
        $$('[data-e]').forEach(i => { if (enCours[i.dataset.e] !== undefined) i.value = enCours[i.dataset.e]; });
      };
      $('#ev').onclick = async () => {
@@ -2364,7 +2372,7 @@ async function organiserSemaine() {
       await feed('ok', STATE.user.prenom + ' a réorganisé les tâches de la semaine');
       closeSheet();
       toast('Semaine enregistrée');
-      rendre(STATE.view === 'reglages' ? 'reglages' : 'parametres');
+      rendre(STATE.view);
     };
 
     $('#os-raz').onclick = () => confirmer('Rétablir le tableau d’origine ?',
@@ -2373,7 +2381,7 @@ async function organiserSemaine() {
       'Rétablir', async () => {
         await DB.del('hebdo:plan');
         TACHES_HEBDO = TACHES_HEBDO_DEF.map(t => Object.assign({}, t, { jours:(t.jours || []).slice() }));
-        closeSheet(); toast('Tableau rétabli'); rendre(STATE.view === 'reglages' ? 'reglages' : 'parametres');
+        closeSheet(); toast('Tableau rétabli'); rendre(STATE.view);
       },
       /* La confirmation occupe la même feuille : « Annuler » fermait tout et
          perdait l'organisation en cours. On y revient, bascules comprises. */
@@ -2485,7 +2493,7 @@ function modifierAsynchrone(id) {
       await feed('ok', STATE.user.prenom + (nouvelle ? ' a ajouté' : ' a modifié') + ' la tâche « ' + nom + ' »');
       closeSheet();
       toast(nouvelle ? 'Tâche ajoutée' : 'Tâche modifiée');
-      rendre(STATE.view === 'reglages' ? 'reglages' : 'parametres');
+      rendre(STATE.view);
     };
 
     if ($('#as-supp')) $('#as-supp').onclick = () => {
@@ -2499,7 +2507,7 @@ function modifierAsynchrone(id) {
           await DB.set('asynchrones', sc);
           appliquerAsynchrones(sc);
           await feed('ok', STATE.user.prenom + ' a supprimé la tâche « ' + a.nom + ' »');
-          closeSheet(); toast('Tâche supprimée'); rendre(STATE.view === 'reglages' ? 'reglages' : 'parametres');
+          closeSheet(); toast('Tâche supprimée'); rendre(STATE.view);
         },
         /* « Annuler » revient à la feuille, saisie en cours comprise. */
         () => { dessiner(); _feuilleModifiee = true; });
@@ -2589,7 +2597,7 @@ async function attribuerResponsables() {
       await feed('ok', STATE.user.prenom + ' a mis à jour les responsables de la semaine');
       closeSheet();
       toast('Responsables enregistrés');
-      rendre(STATE.view === 'reglages' ? 'reglages' : 'parametres');
+      rendre(STATE.view);
     };
   };
   dessiner();
