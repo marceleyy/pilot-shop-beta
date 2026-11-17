@@ -738,11 +738,29 @@ async function theoriqueAuComptage(a, maintenant) {
 
 /* Ce que l'inventaire confirmé doit porter : le compté, plus, pour ce qui
    n'a pas été compté du tout, la valeur attendue (le stock ne bouge pas). */
+/* Déclinaisons retirées de la fiche : on ne peut plus les compter, leur
+   stock est reporté tel quel même si le reste de la référence a été compté. */
+function clesRetireesSec(partie) {
+  const out = new Set();
+  if (partie === 'sec') catalogueSec().forEach(r => (r.variantesRetirees || []).forEach(v => out.add('sec|' + r.id + '|' + v)));
+  return out;
+}
+/* Même règle pour la chambre froide (parfum ou saveur retiré). */
+function estRetireeInv(partie, c, retireesSec, retiresAuComptage) {
+  if (partie === 'sec') return retireesSec.has(c);
+  const a = litArticle(c);
+  /* Retiré maintenant OU au moment du comptage : un parfum réactivé entre
+     les deux n'a pas été proposé à l'équipe, son stock reste. */
+  const k = a.famille + '|' + a.parfum;
+  return !froidActif(a.famille, a.parfum) || (retiresAuComptage || []).indexOf(k) >= 0;
+}
+
 function lignesAReprendre(a, partie, attendu) {
   const comptes = groupesComptes(a, partie);
+  const retirees = clesRetireesSec(partie);
   const out = {};
   Object.keys(attendu || {}).forEach(c => {
-    if (!comptes.has(groupeInv(partie, c)) && num(attendu[c])) out[c] = num(attendu[c]);
+    if ((estRetireeInv(partie, c, retirees, a.retires) || !comptes.has(groupeInv(partie, c))) && num(attendu[c])) out[c] = num(attendu[c]);
   });
   return Object.assign(out, a.lignes || {});
 }
@@ -750,8 +768,9 @@ function lignesAReprendre(a, partie, attendu) {
 function lignesAttente(a, partie) {
   const l = a.lignes || {}, av = a.avant || {};
   const comptes = groupesComptes(a, partie);
+  const retirees = clesRetireesSec(partie);
   return [...new Set(Object.keys(av).concat(Object.keys(l)))]
-    .filter(c => comptes.has(groupeInv(partie, c)))
+    .filter(c => comptes.has(groupeInv(partie, c)) && !(estRetireeInv(partie, c, retirees, a.retires) && !(c in l)))
     .map(c => ({ c: c, compte: num(l[c] || 0), attendu: num(av[c] || 0) }))
     .filter(x => x.compte || x.attendu)
     .map(x => Object.assign(x, { d: x.compte - x.attendu }))
@@ -784,6 +803,11 @@ async function verifierInventaire(partie) {
     return toast('Seul un manager peut confirmer un inventaire', 'erreur');
   }
   if (sec) await chargerCatalogueSec();
+  /* Sans la liste des retirés, leur stock serait effacé : pas de confirmation. */
+  else {
+    try { await chargerCatalogueFroid(); }
+    catch (e) { return toast('Catalogue de la chambre froide illisible, réessayez', 'erreur'); }
+  }
   let a = await inventaireEnAttente(partie);
   if (!a) { toast('Aucun inventaire à confirmer'); return rendre(STATE.view); }
   /* Stock du moment, sur l'ancien inventaire : l'inventaire en attente n'y
@@ -1379,21 +1403,44 @@ function qteSec(cle, articles, secLignes) {
   return num((secLignes || {})[cle]);
 }
 
-/* [{ cle, nom, q, min, unite, partie }] des articles sous leur minimum. */
+/* Produits de la chambre froide autres que la glace (macarons, gaufres,
+   crêpes, coffrets…) : [{ k: clé d'article, nom, grp, u }]. */
+function articlesFroidSeuils() {
+  const out = [];
+  FAMILLES_PRODUIT.filter(f => f.id !== 'glace' && f.lieu !== 'sec' && f.stock !== 'sec').forEach(f => {
+    if (f.parfums && f.saveurs && f.saveurs.length) {
+      saveursActives(f).forEach(sv => out.push({ k: cleArticle(f.id, sv, ''), nom: f.libelle + ' · ' + sv, grp: f.libelle, u: f.unites || f.unite || 'unités' }));
+    } else if (froidActif(f.id, '')) {
+      out.push({ k: cleArticle(f.id, '', ''), nom: f.libelle, grp: f.libelle, u: f.unites || f.unite || 'unités' });
+    }
+  });
+  return out;
+}
+
+/* [{ cle, nom, q, min, unite, partie }] des articles au minimum ou en
+   dessous : à commander. */
 function articlesSousSeuil(seuils, articles, secLignes) {
   const out = [];
   const connues = typeof clesSecConnues === 'function' ? clesSecConnues() : new Set();
+  const froid = new Map(articlesFroidSeuils().map(x => [x.k, x]));
   Object.keys(seuils || {}).forEach(k => {
     const min = num(seuils[k]);
     if (!(min > 0)) return;
     const p = k.split('|');
     if (p[0] === 'glace') {
+      if (!froidActif('glace', p[1])) return;
       const q = bacsParfum(articles, p[1]);
-      if (q < min) out.push({ cle: k, nom: p[1], q: q, min: min, unite: 'bac', partie: 'froid' });
-    } else if (p[0] === 'sec' && connues.has(k)) {
+      if (q <= min) out.push({ cle: k, nom: p[1], q: q, min: min, unite: 'bac', partie: 'froid' });
+    } else if (p[0] === 'sec') {
+      if (!connues.has(k)) return;
       const q = qteSec(k, articles, secLignes);
       const r = catalogueSec().filter(x => typeof x === 'object' && x.id === p[1])[0];
-      if (q < min) out.push({ cle: k, nom: libelleSec(k), q: q, min: min, unite: (r && r.unite) || 'unité', partie: 'sec' });
+      if (q <= min) out.push({ cle: k, nom: libelleSec(k), q: q, min: min, unite: (r && r.unite) || 'unité', partie: 'sec' });
+    } else {
+      const it = froid.get(k);
+      if (!it) return;
+      const q = num((articles || {})[k]);
+      if (q <= min) out.push({ cle: k, nom: it.nom, q: q, min: min, unite: it.u, partie: 'froid' });
     }
   });
   return out.sort((a, b) => (a.q / a.min) - (b.q / b.min));
@@ -1406,8 +1453,9 @@ async function editerSeuils(partie, apres) {
   const seuils = await chargerSeuils();
   const items = [];
   if (partie === 'froid') {
-    PARFUMS.slice().sort((a, b) => a.localeCompare(b)).forEach(p =>
+    parfumsActifs().sort((a, b) => a.localeCompare(b)).forEach(p =>
       items.push({ k: 'glace|' + p, nom: p, grp: 'Bacs de glace, toutes tailles', u: 'bacs' }));
+    articlesFroidSeuils().forEach(x => items.push(x));
   } else {
     catalogueSec().filter(r => r && typeof r === 'object' && !r.masque).forEach(r =>
       (r.variantes && r.variantes.length ? r.variantes : ['']).forEach(v =>
@@ -1421,8 +1469,8 @@ async function editerSeuils(partie, apres) {
   const nrm = x => String(x || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
   let grp = null;
   showSheet(
-    '<h2 id="sheet-titre">Stock minimum · ' + (partie === 'froid' ? 'glaces' : 'sec') + '</h2>' +
-    '<p class="sub">Sous ce nombre, l’article est signalé sur Stock et sur la tour de contrôle. Vide : pas de minimum.</p>' +
+    '<h2 id="sheet-titre">Stock minimum · ' + (partie === 'froid' ? 'chambre froide' : 'sec') + '</h2>' +
+    '<p class="sub">Arrivé à ce nombre ou en dessous, l’article est signalé sur Stock et sur la tour de contrôle (à commander). Vide : pas de minimum.</p>' +
     '<input type="search" id="sl-rech" placeholder="Chercher un article" autocomplete="off">' +
     '<div id="sl-liste" style="margin-top:10px">' + items.map((it, i) => {
       const titre = it.grp !== grp ? '<div class="entete" data-slg="' + esc(it.grp) + '" style="margin-top:12px"><h3>' + esc(it.grp) + '</h3></div>' : '';
@@ -1494,10 +1542,10 @@ V.stock = async function () {
   const seuils = await chargerSeuils().catch(() => ({}));
   const manager = !!(STATE.user && STATE.user.role === 'manager');
   const boutonSeuils = p => manager
-    ? '<button class="btn clair bloc" data-seuils="' + p + '" style="margin-top:10px">Stock minimum ' + (p === 'froid' ? 'des glaces' : 'du sec') + '</button>' : '';
-  /* « Sous le minimum : 3 sur 4 » ou « Minimum 4 ». */
+    ? '<button class="btn clair bloc" data-seuils="' + p + '" style="margin-top:10px">Stock minimum ' + (p === 'froid' ? 'de la chambre froide' : 'du sec') + '</button>' : '';
+  /* « À commander : 3 pour un minimum de 4 » (au minimum ou en dessous) ou « Minimum 4 ». */
   const ligneMin = (q, min, u) => !(min > 0) ? ''
-    : q < min ? '<div class="mini" style="color:var(--corail-d)"><b>Sous le minimum : ' + nSeuil(q) + ' sur ' + nSeuil(min) + (u ? ' ' + esc(u) : '') + '</b></div>'
+    : q <= min ? '<div class="mini" style="color:var(--corail-d)"><b>À commander : ' + nSeuil(q) + ' pour un minimum de ' + nSeuil(min) + (u ? ' ' + esc(u) : '') + '</b></div>'
     : '<div class="mini">Minimum ' + nSeuil(min) + (u ? ' ' + esc(u) : '') + '</div>';
   const minGlace = Object.keys(seuils).filter(k => k.indexOf('glace|') === 0 && num(seuils[k]) > 0).map(k => k.slice(6));
   const attente = await inventaireEnAttente('froid');
@@ -1539,6 +1587,13 @@ V.stock = async function () {
     });
     /* Un parfum à minimum reste affiché à zéro bac : c'est là qu'il manque. */
     if (minGlace.length && !parFamille.glace) parFamille.glace = [];
+    articlesFroidSeuils().forEach(x => {
+      if (!(num(seuils[x.k]) > 0) || clesFroid.indexOf(x.k) >= 0) return;
+      const f = litArticle(x.k).famille;
+      (parFamille[f] = parFamille[f] || []).push(x.k);
+    });
+    /* Un produit à minimum sans stock reste à sa place alphabétique. */
+    Object.keys(parFamille).forEach(f => parFamille[f].sort((a, b) => libelleArticle(a).localeCompare(libelleArticle(b))));
     return carte('<div class="grid g3">' +
       kpi('Bacs de glace', t.bacs, '', n1(t.litres) + ' L') +
       kpi('Autres produits', t.unites, '', 'comptés à l’unité') +
@@ -1560,7 +1615,7 @@ V.stock = async function () {
     '<button class="btn menthe bloc xl" id="st-inv" style="margin-top:16px">Faire l’inventaire</button>' +
     boutonSeuils('froid') +
 
-    (clesFroid.length || minGlace.length
+    (clesFroid.length || Object.keys(parFamille).length
       ? Object.keys(parFamille).map(fid => {
           const fam = FAMILLES_PRODUIT.filter(x => x.id === fid)[0];
           const sous = parFamille[fid].reduce((s, c) => s + num(articles[c]), 0);
@@ -1580,14 +1635,14 @@ V.stock = async function () {
                     '<div class="mini tailles">' + (tailles.length ? tailles.map(c => { const q = num(articles[c]);
                       return '<span class="tq' + (q < 0 ? ' neg' : '') + '"><b>' + q + '</b>×' + esc(litArticle(c).taille) + ' L</span>';
                     }).join('') : 'aucun bac') + '</div>' + ligneMin(n, min, accord(min, 'bac')) + '</div>' +
-                    '<b class="num" style="font-size:20px">' + n + '</b></div>', negatif ? 'corail' : min > 0 && n < min ? 'ambre' : '');
+                    '<b class="num" style="font-size:20px">' + n + '</b></div>', negatif ? 'corail' : min > 0 && n <= min ? 'ambre' : '');
                 }).join('');
               })()
-            : parFamille[fid].map(c => { const a = litArticle(c), q = num(articles[c]);
+            : parFamille[fid].map(c => { const a = litArticle(c), q = num(articles[c]), min = num(seuils[c]);
                 return carte('<div class="rang"><div style="flex:1;min-width:0"><b>' +
                   esc(a.parfum || (fam ? fam.libelle : fid)) + '</b>' +
-                  (fam ? '<div class="mini">En ' + esc(fam.unites) + '</div>' : '') + '</div>' +
-                  '<b class="num" style="font-size:20px">' + q + '</b></div>', q < 0 ? 'corail' : '');
+                  (fam ? '<div class="mini">En ' + esc(fam.unites) + '</div>' : '') + ligneMin(q, min, fam ? (min > 1 ? fam.unites : fam.unite) : '') + '</div>' +
+                  '<b class="num" style="font-size:20px">' + q + '</b></div>', q < 0 ? 'corail' : min > 0 && q <= min ? 'ambre' : '');
               }).join('');
           return '<div class="entete"><h3>' + esc(fam ? fam.libelle : fid) + '</h3>' +
             '<span class="pousse mini num">' + sous + ' ' + u + '</span></div>' +
@@ -1676,14 +1731,14 @@ V.stock = async function () {
             const minDe = v => num(seuils['sec|' + r.id + '|' + (v || '')]);
             /* Sans déclinaison : le total (vivant si suivi) fait foi, comme le texte. */
             const sous = r.variantes && r.variantes.length
-              ? lignes.filter(x => minDe(x.v) > 0 && x.q < minDe(x.v))
-              : (minDe('') > 0 && total < minDe('') ? [{ v: '', q: total }] : []);
+              ? lignes.filter(x => minDe(x.v) > 0 && x.q <= minDe(x.v))
+              : (minDe('') > 0 && total <= minDe('') ? [{ v: '', q: total }] : []);
             const aMin = minDe('') > 0 || lignes.some(x => minDe(x.v) > 0);
             return carte('<div class="rang"><div style="flex:1;min-width:0"><b>' + esc(r.nom) + '</b>' +
               (suivi ? '<div class="mini">Suivi en direct : comptage moins ouvertures</div>' : '') +
               (r.variantes && r.variantes.length
-                ? (sous.length ? '<div class="mini" style="color:var(--corail-d)"><b>Sous le minimum : ' +
-                    sous.map(x => esc(x.v || '—') + ' ' + nSeuil(x.q) + ' sur ' + nSeuil(minDe(x.v))).join(', ') + '</b></div>' : '')
+                ? (sous.length ? '<div class="mini" style="color:var(--corail-d)"><b>À commander : ' +
+                    sous.map(x => esc(x.v || '—') + ' ' + nSeuil(x.q) + ' (minimum ' + nSeuil(minDe(x.v)) + ')').join(', ') + '</b></div>' : '')
                 : (aMin ? ligneMin(total, minDe(''), '') : '')) +
               (r.variantes && r.variantes.length
                 ? '<div class="mini tailles">' + lignes
@@ -1763,9 +1818,14 @@ V.controle = async function () {
       bvs.id = 'valeur-stock';
       bvs.style.marginTop = '14px';
       bvs.innerHTML = html;
-      /* Sous les réceptions à confirmer, qui restent l'alerte du haut. */
-      const ref = apresReceptions && apresReceptions.parentNode === page ? apresReceptions.nextSibling : page.firstChild.nextSibling;
-      page.insertBefore(bvs, ref);
+      /* Dans la grille de la météo et de « Personne en service » : une
+         colonne de large, pas toute la page. */
+      const grille = $('#ctl-meteo');
+      if (grille) { bvs.style.marginTop = ''; grille.appendChild(bvs); }
+      else {
+        const ref = apresReceptions && apresReceptions.parentNode === page ? apresReceptions.nextSibling : page.firstChild.nextSibling;
+        page.insertBefore(bvs, ref);
+      }
       const go = bvs.querySelector('[data-valstock]');
       /* L'onglet qui porte la valeur : le sec s'il en a, sinon la chambre froide. */
       const secVal = ps ? valeurStock(ps.lignes, ps.prix).total : 0;
@@ -1792,10 +1852,10 @@ V.controle = async function () {
           const liste = sous.slice(0, 8).map(x => esc(x.nom) + ' ' + nSeuil(x.q) + '/' + nSeuil(x.min)).join(', ') +
             (sous.length > 8 ? ' et ' + (sous.length - 8) + ' autre' + (sous.length > 9 ? 's' : '') : '');
           bm.innerHTML = '<div class="alerte warn"><span class="ai">•</span><div style="flex:1;min-width:0"><b>' +
-            sous.length + ' ' + accord(sous.length, 'article sous le stock minimum', 'articles sous le stock minimum') + '</b>' +
+            sous.length + ' ' + accord(sous.length, 'article à commander', 'articles à commander') + ' (au minimum ou en dessous)</b>' +
             '<p>' + liste + '</p></div><button class="btn menthe sm" data-voirseuil>Voir</button></div>';
           /* Sous la valeur du stock, sinon sous les réceptions à confirmer. */
-          const apres = $('#valeur-stock');
+          const apres = $('#valeur-stock') && $('#valeur-stock').parentNode === page ? $('#valeur-stock') : $('#ctl-meteo');
           const ancre = apres && apres.parentNode === page ? apres
             : apresReceptions && apresReceptions.parentNode === page ? apresReceptions : page.firstChild;
           page.insertBefore(bm, ancre ? ancre.nextSibling : null);
@@ -1900,13 +1960,42 @@ V.controle = async function () {
    Forme des modifications, sous la clé « catalogue:sec » :
      { masques: ['id1','id2'],            références retirées de l'affichage
        modifs:  { id: { unite, decimal, variantes, nom } },
-       ajouts:  [ { id, sec, nom, unite, decimal, variantes } ] }
+       ajouts:  [ { id, sec, nom, unite, decimal, variantes } ],
+       retirees: ['sec|id|déclinaison'] }  déclinaisons retirées une à une
+   Une déclinaison retirée disparaît de « variantes » (inventaire, réception,
+   réassort, minimums) mais reste dans « variantesRetirees » pour la fiche.
+   Son stock n'est jamais effacé : il reste au dernier comptage.
    -------------------------------------------------------------------------- */
 let _catalogueSec = null;
 
 function catalogueSecBrut() {
   return INVENTAIRE_SEC.map(r => typeof r === 'string'
     ? { id:r, nom:r, unite:'unité', decimal:false } : Object.assign({}, r));
+}
+
+/* Chambre froide : parfums de glace et saveurs retirés par le manager.
+   catalogue:froid = { retires: ['glace|Amarena', 'mac_classico|Mangue', 'gaufre|'] }
+   Retiré = absent de l'inventaire, de la réception et des minimums. Le stock
+   déjà compté n'est jamais effacé : il est reporté à chaque inventaire. */
+let _froidRetires = new Set();
+function froidActif(famille, saveur) {
+  return !_froidRetires.has((famille || '') + '|' + (saveur || ''));
+}
+function parfumsActifs() {
+  return PARFUMS.filter(p => froidActif('glace', p));
+}
+function saveursActives(f) {
+  return (f.saveurs || []).filter(sv => froidActif(f.id, sv));
+}
+/* Famille visible à l'inventaire : au moins une saveur active, ou, sans
+   saveur, la famille elle-même active. */
+function familleFroidActive(f) {
+  return f.saveurs && f.saveurs.length ? saveursActives(f).length > 0 : froidActif(f.id, '');
+}
+async function chargerCatalogueFroid() {
+  const m = await DB.get('catalogue:froid', null);   // une erreur garde l'ancienne liste
+  _froidRetires = new Set(m && Array.isArray(m.retires) ? m.retires : []);
+  return _froidRetires;
 }
 
 /* Synchrone, à partir du dernier chargement. */
@@ -1916,7 +2005,8 @@ function catalogueSec() {
 
 /* À appeler avant de dessiner un écran qui s'en sert. */
 async function chargerCatalogueSec() {
-  const [m] = await Promise.all([DB.get('catalogue:sec', null), chargerPrixAchat().catch(() => {})]);
+  const [m] = await Promise.all([DB.get('catalogue:sec', null), chargerPrixAchat().catch(() => {}),
+    chargerCatalogueFroid().catch(() => {})]);
   const base = catalogueSecBrut();
   if (!m) { _catalogueSec = base; return base; }
   const out = base.map(r => {
@@ -1934,6 +2024,20 @@ async function chargerCatalogueSec() {
     const x = Object.assign({}, a, mod || {});
     if ((m.masques || []).indexOf(a.id) >= 0) x.masque = true;
     out.push(x);
+  });
+  /* Déclinaisons retirées une à une (fiche article). Une référence dont
+     toutes les déclinaisons sont retirées est retirée elle-même. */
+  const ret = new Set(Array.isArray(m.retirees) ? m.retirees : []);
+  if (ret.size) out.forEach(x => {
+    const vs = x.variantes || [];
+    if (!vs.length) return;
+    const retirees = vs.filter(v => ret.has('sec|' + x.id + '|' + v));
+    if (!retirees.length) return;
+    x.variantesRetirees = retirees;
+    x.variantesToutes = vs.slice();
+    x.variantes = vs.filter(v => retirees.indexOf(v) < 0);
+    /* Garde-fou (la fiche l'empêche) : tout retiré = référence retirée. */
+    if (!x.variantes.length) { x.variantes = vs; x.masque = true; }
   });
   _catalogueSec = out;
   return out;
@@ -2072,6 +2176,276 @@ function editerPrix(titre, lignes, apres) {
   };
 }
 
+/* Fiche d'une référence du sec : pour chaque déclinaison, active ou
+   retirée, prix d'achat et stock minimum. Un seul endroit pour ce que
+   l'inventaire, la réception, les minimums et la valeur lisent. Retirer ne
+   touche pas au stock déjà compté. */
+/* Renommer une déclinaison du sec partout où sa clé « sec|id|nom » sert :
+   dernier inventaire, inventaire en attente, réceptions depuis, prix,
+   minimums, déclinaisons retirées, mémoire des bons de livraison, puis le
+   catalogue. Son stock, son prix et son minimum la suivent.
+   ren = { ancien: nouveau }. */
+async function renommerDeclinaisonsSec(r, ren) {
+  const anciens = Object.keys(ren || {}).filter(a => ren[a] && ren[a] !== a);
+  if (!anciens.length) return {};
+  const k = v => 'sec|' + r.id + '|' + v;
+  const map = {};
+  anciens.forEach(a => { map[k(a)] = k(ren[a]); });
+  const deplacer = o => {
+    if (!o || typeof o !== 'object') return false;
+    let n = 0;
+    Object.keys(map).forEach(a => {
+      if (o[a] === undefined) return;
+      o[map[a]] = o[a]; delete o[a]; n++;
+    });
+    return n > 0;
+  };
+  /* Prix effectif (corrigé ou d'usine) recopié sous le nouveau nom. Rien
+     à recopier (nouvel essai après un échec) : le prix déjà déplacé reste. */
+  const prix = {};
+  Object.keys(map).forEach(a => {
+    const pa = prixArticle(a);
+    if (pa !== null && !corrige(map[a])) prix[map[a]] = pa;
+    if (corrige(a)) prix[a] = null;
+  });
+  if (Object.keys(prix).length) await enregistrerPrixAchat(prix);
+  const seuils = await chargerSeuils();
+  if (deplacer(seuils)) await DB.set(CLE_SEUILS, seuils);
+  const sp = await DB.get('stock:sec', null);
+  if (sp && (deplacer(sp.lignes) | deplacer(sp.prix))) await DB.set('stock:sec', sp);
+  const at = await DB.get(INV_ATTENTE.sec.cle, null);
+  if (at && (deplacer(at.lignes) | deplacer(at.avant))) await DB.set(INV_ATTENTE.sec.cle, at);
+  const mv = await DB.get(CLE_SEC_MV, []);
+  if (Array.isArray(mv) && mv.some(x => x && map[x.cle])) {
+    await DB.set(CLE_SEC_MV, mv.map(x => x && map[x.cle] ? Object.assign({}, x, { cle: map[x.cle] }) : x));
+  }
+  const memo = await memoBL();
+  let nMemo = 0;
+  Object.keys(memo).forEach(c => { if (memo[c] && map[memo[c].cle]) { memo[c].cle = map[memo[c].cle]; nMemo++; } });
+  if (nMemo) await DB.set(CLE_MEMO_BL, memo);
+  /* Catalogue en dernier, relu juste avant. */
+  const m = (await DB.get('catalogue:sec', null)) || {};
+  m.masques = m.masques || []; m.modifs = m.modifs || {}; m.ajouts = m.ajouts || [];
+  const toutes = (r.variantesToutes || r.variantes || []).map(v => ren[v] || v);
+  m.modifs[r.id] = Object.assign({ nom: r.nom, unite: r.unite, decimal: r.decimal !== false },
+    m.modifs[r.id] || {}, { variantes: toutes });
+  if (Array.isArray(m.retirees)) m.retirees = m.retirees.map(x => map[x] || x);
+  await enregistrerCatalogueSec(m);
+  return map;
+}
+
+/* Renommage permis ? Pas vers le nom d'une autre déclinaison existante
+   (échange ou chaîne : les données se mélangeraient), et pas pour les
+   coulis, toppings et crèmes : leur stock vivant suit le nom de la saveur. */
+function erreurRenommage(r, ren) {
+  const anciens = Object.keys(ren || {}).filter(a => ren[a] && ren[a] !== a);
+  if (!anciens.length) return '';
+  if (FAMILLES_PRODUIT.some(f => (f.lieu === 'sec' || f.stock === 'sec') && (f.refSec || f.id) === r.id && f.saveurs && f.saveurs.length)) {
+    return 'Les saveurs de ' + r.nom + ' ne se renomment pas ici (suivies à l’ouverture)';
+  }
+  const toutes = r.variantesToutes || r.variantes || [];
+  /* La déclinaison elle-même ne compte pas : « chocolat » → « Chocolat ». */
+  const a = anciens.filter(x => toutes.some(v => v !== x && v.toLowerCase() === ren[x].toLowerCase()))[0];
+  return a ? '« ' + ren[a] + ' » existe déjà : renommez en deux fois, par un nom provisoire' : '';
+}
+
+/* Contrôle des nouveaux noms : non vides, sans « | », sans doublon. */
+function erreurNomsDeclinaisons(noms) {
+  if (noms.some(n => !n)) return 'Une déclinaison n’a pas de nom';
+  if (noms.some(n => n.indexOf('|') >= 0)) return 'Le caractère « | » n’est pas permis';
+  const vus = new Set();
+  for (const n of noms) { const c = n.toLowerCase(); if (vus.has(c)) return 'Deux déclinaisons portent le nom « ' + n + ' »'; vus.add(c); }
+  return '';
+}
+
+async function ficheArticle(r, apres) {
+  let seuils;
+  try { seuils = await chargerSeuils(); } catch (e) { return toast('Minimums illisibles, réessayez', 'erreur'); }
+  const toutes = r.variantesToutes || (r.variantes || []).concat(r.variantesRetirees || []);
+  const lignes = (toutes.length ? toutes : ['']).map(v => ({
+    v: v, cp: 'sec|' + r.id + '|' + v,
+    actif: toutes.length ? (r.variantesRetirees || []).indexOf(v) < 0 : !r.masque
+  }));
+  /* Point décimal partout (2.5) : l'export et les calculs le lisent tel quel. */
+  const val = cp => { const p = corrige(cp) ? num(_prixAchat[cp]) : prixAchatDefaut(cp); return p > 0 ? String(p) : ''; };
+  showSheet(
+    '<h2 id="sheet-titre">' + esc(r.nom) + '</h2>' +
+    '<p class="mini">Code : ' + esc(r.id) + (r.sec ? ' · ' + esc(r.sec) : '') + '</p>' +
+    '<p class="cs">Compté en ' + esc(r.unite) + '. Prix d’achat HT par ' + esc(r.unite) +
+    ' ; minimum : arrivé à ce nombre, l’article est « à commander ». Retirer une déclinaison la cache ' +
+    'de l’inventaire, de la réception et du réassort, sans effacer son stock.</p>' +
+    (r.masque && toutes.length ? '<div class="alerte warn" style="margin-top:10px"><span class="ai">•</span><div><b>Référence retirée</b><p>Réaffichez-la avec ↺ dans le catalogue.</p></div></div>' : '') +
+    lignes.map((x, i) =>
+      '<div class="card plat" style="margin-top:10px"><div class="rang">' +
+      (x.v ? '<input type="text" id="fn-' + i + '" value="' + esc(x.v) + '" aria-label="Nom de la déclinaison" style="flex:1;min-width:0;font-weight:600">'
+           : '<b style="flex:1;min-width:0">' + esc(r.nom) + '</b>') +
+      '<label class="mini" style="display:flex;align-items:center;gap:6px"><input type="checkbox" data-fa="' + i + '"' + (x.actif ? ' checked' : '') + '> Active</label></div>' +
+      '<div class="grid g2" style="margin-top:8px">' +
+      '<div class="champ"><label class="f" for="fp-' + i + '">Prix (€)</label><input type="text" inputmode="decimal" id="fp-' + i + '" value="' + esc(val(x.cp)) + '" placeholder="—"></div>' +
+      '<div class="champ"><label class="f" for="fm-' + i + '">Minimum</label><input type="text" inputmode="decimal" id="fm-' + i + '" value="' + (num(seuils[x.cp]) > 0 ? esc(String(seuils[x.cp])) : '') + '" placeholder="—"></div>' +
+      '</div></div>').join('') +
+    '<div class="actions"><button class="btn clair" data-fermer>Annuler</button>' +
+    '<button class="btn menthe" id="fa-ok">Enregistrer</button></div>');
+  let enCours = false;
+  $('#fa-ok').onclick = async () => {
+    if (enCours) return;
+    const prix = {}, mins = {}, actifs = {};
+    for (let i = 0; i < lignes.length; i++) {
+      const x = lignes[i];
+      const v = lirePrix($('#fp-' + i).value);
+      if (isNaN(v)) return toast('Prix illisible : ' + (x.v || r.nom), 'erreur');
+      const d = prixAchatDefaut(x.cp);
+      const avantPrix = corrige(x.cp) ? num(_prixAchat[x.cp]) : (d || 0);
+      if (v !== avantPrix) prix[x.cp] = (d !== null && v === d) || (d === null && v === 0) ? null : v;
+      const fm = $('#fm-' + i);
+      const mt = fm.value.trim().replace(',', '.');
+      const mv = mt === '' ? 0 : Number(mt);
+      if (!(mv >= 0)) return toast('Minimum invalide : ' + (x.v || r.nom), 'erreur');
+      if (mv !== (num(seuils[x.cp]) > 0 ? num(seuils[x.cp]) : 0)) mins[x.cp] = mv;
+      const a = !!$('[data-fa="' + i + '"]').checked;
+      if (a !== x.actif) actifs[x.cp] = a;
+    }
+    if (toutes.length && !$$('[data-fa]').some(c => c.checked)) {
+      return toast('Gardez au moins une déclinaison active, ou retirez la référence avec ✕', 'erreur');
+    }
+    const ren = {};
+    if (toutes.length) {
+      const noms = lignes.map((x, i) => $('#fn-' + i).value.trim());
+      const err = erreurNomsDeclinaisons(noms);
+      if (err) return toast(err, 'erreur');
+      lignes.forEach((x, i) => { if (noms[i] !== x.v) ren[x.v] = noms[i]; });
+      const errR = erreurRenommage(r, ren);
+      if (errR) return toast(errR, 'erreur');
+    }
+    enCours = true; $('#fa-ok').disabled = true;
+    try {
+      /* Renommage d'abord : la suite s'écrit sous les nouveaux noms. */
+      const map = await renommerDeclinaisonsSec(r, ren);
+      const suit = o => Object.keys(o).reduce((acc, c) => { acc[map[c] || c] = o[c]; return acc; }, {});
+      const p2 = suit(prix), m2 = suit(mins), a2 = suit(actifs);
+      Object.keys(prix).forEach(c => delete prix[c]); Object.assign(prix, p2);
+      Object.keys(mins).forEach(c => delete mins[c]); Object.assign(mins, m2);
+      Object.keys(actifs).forEach(c => delete actifs[c]); Object.assign(actifs, a2);
+      if (Object.keys(prix).length) await enregistrerPrixAchat(prix);
+      if (Object.keys(mins).length) {
+        /* Relu juste avant : un autre manager garde ses minimums. */
+        const frais = await chargerSeuils();
+        Object.keys(mins).forEach(k => { if (mins[k] > 0) frais[k] = mins[k]; else delete frais[k]; });
+        await DB.set(CLE_SEUILS, frais);
+      }
+      if (Object.keys(actifs).length) {
+        const m = (await DB.get('catalogue:sec', null)) || {};
+        m.masques = m.masques || []; m.modifs = m.modifs || {}; m.ajouts = m.ajouts || [];
+        m.retirees = Array.isArray(m.retirees) ? m.retirees : [];
+        Object.keys(actifs).forEach(k => {
+          if (!toutes.length) {
+            const i = m.masques.indexOf(r.id);
+            if (actifs[k] && i >= 0) m.masques.splice(i, 1);
+            if (!actifs[k] && i < 0) m.masques.push(r.id);
+            return;
+          }
+          const j = m.retirees.indexOf(k);
+          if (actifs[k] && j >= 0) m.retirees.splice(j, 1);
+          if (!actifs[k] && j < 0) m.retirees.push(k);
+        });
+        await enregistrerCatalogueSec(m);
+      }
+    } catch (e) { enCours = false; $('#fa-ok').disabled = false; return toast('Enregistrement impossible, réessayez', 'erreur'); }
+    const n = Object.keys(prix).length + Object.keys(mins).length + Object.keys(actifs).length + Object.keys(ren).length;
+    if (Object.keys(ren).length) await feed('ok', STATE.user.prenom + ' a renommé ' +
+      Object.keys(ren).map(a => a + ' en ' + ren[a]).join(', ') + ' (' + r.nom + ')');
+    if (n) await feed('ok', STATE.user.prenom + ' a mis à jour la fiche ' + r.nom);
+    closeSheet();
+    toast(n ? 'Fiche enregistrée' : 'Rien n’a changé');
+    if (apres) apres();
+  };
+}
+
+/* Fiche de la chambre froide : chaque parfum de glace et chaque saveur des
+   autres familles, actif ou retiré, et son stock minimum. Retirer cache de
+   l'inventaire, de la réception et des minimums sans effacer le stock. */
+async function ficheFroid(apres) {
+  let seuils;
+  try { seuils = await chargerSeuils(); await chargerCatalogueFroid(); }
+  catch (e) { return toast('Catalogue illisible, réessayez', 'erreur'); }
+  const lignes = PARFUMS.slice().sort((a, b) => a.localeCompare(b)).map(p =>
+    ({ grp: 'Glaces (bacs, toutes tailles)', nom: p, cr: 'glace|' + p, cs: 'glace|' + p }));
+  FAMILLES_PRODUIT.filter(f => f.id !== 'glace' && f.lieu !== 'sec' && f.stock !== 'sec').forEach(f => {
+    if (f.saveurs && f.saveurs.length) f.saveurs.forEach(sv =>
+      lignes.push({ grp: f.libelle + ' (en ' + (f.unites || 'unités') + ')', nom: sv, cr: f.id + '|' + sv, cs: cleArticle(f.id, sv, '') }));
+    else lignes.push({ grp: 'Autres (à l’unité)', nom: f.libelle + ' (en ' + (f.unites || 'unités') + ')', cr: f.id + '|', cs: cleArticle(f.id, '', '') });
+  });
+  lignes.forEach(x => { x.actif = !_froidRetires.has(x.cr); x.min = num(seuils[x.cs]) > 0 ? num(seuils[x.cs]) : 0; });
+  let grp = null;
+  showSheet(
+    '<h2 id="sheet-titre">Catalogue · chambre froide</h2>' +
+    '<p class="cs">Décochez un parfum ou une saveur que la boutique ne prend plus : il disparaît de ' +
+    'l’inventaire, de la réception et des minimums. Le stock déjà compté reste. Minimum : arrivé à ce nombre, ' +
+    'l’article est « à commander ».</p>' +
+    '<input type="search" id="ff-rech" placeholder="Chercher" autocomplete="off" style="margin-top:10px">' +
+    '<div id="ff-liste" style="margin-top:6px">' + lignes.map((x, i) => {
+      const t = x.grp !== grp ? '<div class="entete" data-ffg="' + esc(x.grp) + '" style="margin-top:12px"><h3>' + esc(x.grp) + '</h3></div>' : '';
+      grp = x.grp;
+      return t + '<div class="rang" data-ffr="' + i + '" data-ffgr="' + esc(x.grp) + '" style="padding:6px 0">' +
+        '<label style="flex:1;min-width:0;display:flex;align-items:center;gap:8px"><input type="checkbox" data-ffa="' + i + '"' + (x.actif ? ' checked' : '') + '> ' + esc(x.nom) + '</label>' +
+        '<input type="number" min="0" step="any" inputmode="decimal" data-ffm="' + i + '" aria-label="Minimum ' + esc(x.nom) + '" placeholder="min" value="' + (x.min ? esc(String(x.min)) : '') + '" style="width:76px;text-align:center"></div>';
+    }).join('') + '</div>' +
+    '<div class="actions"><button class="btn clair" data-fermer>Annuler</button>' +
+    '<button class="btn menthe" id="ff-ok">Enregistrer</button></div>');
+  const nrm = x => String(x || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  $('#ff-rech').oninput = e => {
+    const q = nrm(e.target.value.trim());
+    const vus = new Set();
+    $$('[data-ffr]').forEach(r => {
+      const x = lignes[+r.dataset.ffr];
+      const ok = !q || nrm(x.nom).indexOf(q) >= 0 || nrm(x.grp).indexOf(q) >= 0;
+      r.style.display = ok ? '' : 'none';
+      if (ok) vus.add(x.grp);
+    });
+    $$('[data-ffg]').forEach(h => { h.style.display = vus.has(h.dataset.ffg) ? '' : 'none'; });
+  };
+  let enCours = false;
+  $('#ff-ok').onclick = async () => {
+    if (enCours) return;
+    const actifs = {}, mins = {};
+    for (let i = 0; i < lignes.length; i++) {
+      const x = lignes[i];
+      const a = !!$('[data-ffa="' + i + '"]').checked;
+      if (a !== x.actif) actifs[x.cr] = a;
+      const fm = $('[data-ffm="' + i + '"]');
+      if (fm.validity && fm.validity.badInput) return toast('Minimum illisible : ' + x.nom, 'erreur');
+      const mv = fm.value.trim() === '' ? 0 : Number(fm.value);
+      if (!(mv >= 0)) return toast('Minimum invalide : ' + x.nom, 'erreur');
+      if (mv !== x.min) mins[x.cs] = mv;
+    }
+    if (!lignes.some((x, i) => x.cr.indexOf('glace|') === 0 && $('[data-ffa="' + i + '"]').checked)) {
+      return toast('Gardez au moins un parfum de glace actif', 'erreur');
+    }
+    enCours = true; $('#ff-ok').disabled = true;
+    try {
+      if (Object.keys(actifs).length) {
+        /* Relu juste avant : un autre manager garde ses réglages. */
+        const m = (await DB.get('catalogue:froid', null)) || {};
+        const ret = new Set(Array.isArray(m.retires) ? m.retires : []);
+        Object.keys(actifs).forEach(k => { if (actifs[k]) ret.delete(k); else ret.add(k); });
+        m.retires = [...ret];
+        await DB.set('catalogue:froid', m);
+        _froidRetires = ret;
+      }
+      if (Object.keys(mins).length) {
+        const frais = await chargerSeuils();
+        Object.keys(mins).forEach(k => { if (mins[k] > 0) frais[k] = mins[k]; else delete frais[k]; });
+        await DB.set(CLE_SEUILS, frais);
+      }
+    } catch (e) { enCours = false; $('#ff-ok').disabled = false; return toast('Enregistrement impossible, réessayez', 'erreur'); }
+    const n = Object.keys(actifs).length + Object.keys(mins).length;
+    if (n) await feed('ok', STATE.user.prenom + ' a mis à jour le catalogue de la chambre froide');
+    closeSheet();
+    toast(n ? 'Catalogue enregistré' : 'Rien n’a changé');
+    if (apres) apres();
+  };
+}
+
 /* -----------------------------------------------------------------------------
    VUE — CATALOGUE (manager)
    -------------------------------------------------------------------------- */
@@ -2102,7 +2476,13 @@ V.catalogue = async function () {
       .map(f => ({ cp: cleArticle(f.id, '', ''), nom: f.libelle, unite: f.unite })));
 
   $('#vue-actions').innerHTML = '';
+  const nbRetFroid = _froidRetires.size;
   $('#page').innerHTML =
+    carte('<div class="rang"><div style="flex:1;min-width:0"><b>Catalogue chambre froide</b>' +
+      '<div class="mini">' + parfumsActifs().length + ' parfums de glace actifs' +
+      (nbRetFroid ? ' · ' + nbRetFroid + ' ' + accord(nbRetFroid, 'article retiré', 'articles retirés') : '') +
+      ' · actif et stock minimum</div></div>' +
+      '<button class="btn clair sm" id="ct-froid">Gérer</button></div>') +
     carte('<div class="rang"><div style="flex:1;min-width:0"><b>Prix chambre froide</b>' +
       '<div class="mini">' + froidPrix().map(x => { const p = prixArticle(x.cp);
         return esc(x.nom) + ' ' + (p !== null ? eur(p) : '—'); }).join(' · ') + '</div></div>' +
@@ -2110,7 +2490,9 @@ V.catalogue = async function () {
     carte('<h2>Catalogue du sec</h2>' +
       '<div class="cs">Ce que l’inventaire et le réassort proposent. Retirez ce que ' +
       'vous ne comptez plus, ajoutez ce qui manque, changez une unité ou une ' +
-      'déclinaison. Vos réglages survivent aux mises à jour.</div>', 'solide') +
+      'déclinaison. € ouvre la fiche : code, nom des déclinaisons, actives ou non, prix et stock minimum. ' +
+      '✕ retire la référence (↺ la réaffiche). ' +
+      'Vos réglages survivent aux mises à jour.</div>', 'solide') +
 
     sections.map(s => {
       const refs = cat.filter(r => (r.sec || 'Autres') === s.id);
@@ -2125,13 +2507,14 @@ V.catalogue = async function () {
             esc(r.nom) + '</b>' +
             '<div class="mini">' + esc(r.unite) + (r.decimal === false ? ' · entiers' : ' · demi possible') +
             (r.variantes && r.variantes.length ? ' · ' + r.variantes.length + ' déclinaisons' : '') +
+            (r.variantesRetirees && r.variantesRetirees.length ? ' · ' + r.variantesRetirees.length + ' retirée' + (r.variantesRetirees.length > 1 ? 's' : '') : '') +
             ' · ' + prixResume(r) +
             '</div></div>' +
             '<div class="duo compact">' +
-            '<button class="btn clair" data-prix="' + esc(r.id) + '" aria-label="Prix d’achat">€</button>' +
+            '<button class="btn clair" data-prix="' + esc(r.id) + '" aria-label="Fiche : actif, prix, minimum">€</button>' +
             '<button class="btn clair" data-edit="' + esc(r.id) + '" aria-label="Modifier">✎</button>' +
             '<button class="btn ' + (r.masque ? 'menthe' : 'clair') + '" data-masque="' + esc(r.id) + '" ' +
-            'aria-label="' + (r.masque ? 'Réafficher' : 'Retirer') + '">' + (r.masque ? '↺' : '−') + '</button>' +
+            'aria-label="' + (r.masque ? 'Réafficher' : 'Retirer du catalogue') + '" title="' + (r.masque ? 'Réafficher' : 'Retirer du catalogue') + '">' + (r.masque ? '↺' : '✕') + '</button>' +
             '</div></div>', r.masque ? 'plat' : '')
         ).join('') + '</div></div>';
     }).join('');
@@ -2139,9 +2522,29 @@ V.catalogue = async function () {
   $$('[data-masque]').forEach(b => b.onclick = async () => {
     const id = b.dataset.masque;
     const i = m.masques.indexOf(id);
-    if (i >= 0) m.masques.splice(i, 1); else m.masques.push(id);
+    const r = cat.filter(x => x.id === id)[0];
+    /* Retirer demande confirmation : le bouton est petit et sans texte. */
+    if (r && !r.masque) {
+      const ok = await new Promise(res => {
+        showSheet('<h2 id="sheet-titre">Retirer ' + esc(r.nom) + ' ?</h2>' +
+          '<p class="cs">La référence disparaît de l’inventaire, de la réception et du réassort. ' +
+          'Son stock et ses prix sont gardés. Vous pourrez la réafficher avec ↺.</p>' +
+          '<div class="actions"><button class="btn clair" id="rt-non">Annuler</button>' +
+          '<button class="btn corail" id="rt-oui">Retirer</button></div>');
+        $('#rt-non').onclick = () => { closeSheet(); res(false); };
+        $('#rt-oui').onclick = () => { closeSheet(); res(true); };
+      });
+      if (!ok) return;
+    }
+    /* Toutes ses déclinaisons retirées (✎ ou deux fiches en même temps) :
+       ↺ les réactive, sinon la référence resterait cachée. */
+    const toutRetire = r && r.masque && r.variantesToutes && r.variantesRetirees &&
+      r.variantesRetirees.length >= r.variantesToutes.length;
+    if (toutRetire && Array.isArray(m.retirees)) m.retirees = m.retirees.filter(k => k.split('|')[1] !== id);
+    if (i >= 0) m.masques.splice(i, 1); else if (!toutRetire) m.masques.push(id);
+    const reaffiche = i >= 0 || toutRetire;
     await enregistrerCatalogueSec(m);
-    await feed('ok', STATE.user.prenom + (i >= 0 ? ' a réaffiché ' : ' a retiré ') + id + ' du catalogue');
+    await feed('ok', STATE.user.prenom + (reaffiche ? ' a réaffiché ' : ' a retiré ') + id + ' du catalogue');
     rendre('catalogue');
   });
 
@@ -2163,7 +2566,9 @@ V.catalogue = async function () {
       '</div></div>' +
       '<div class="champ" style="margin-top:12px"><label class="f">Déclinaisons, une par ligne</label>' +
       '<textarea id="ct-var" rows="4" placeholder="Petit\nClassique\nGrand">' +
-      esc((r.variantes || []).join('\n')) + '</textarea></div>' +
+      /* Toutes les déclinaisons, retirées comprises : sinon les enregistrer ici
+         effaçait celles que la fiche avait seulement retirées. */
+      esc((r.variantesToutes || r.variantes || []).join('\n')) + '</textarea></div>' +
       '<div class="actions"><button class="btn clair" data-fermer>Annuler</button>' +
       '<button class="btn menthe" id="ct-ok">Enregistrer</button></div>');
 
@@ -2181,11 +2586,48 @@ V.catalogue = async function () {
       if (!nom) return toast('Le nom est obligatoire', 'erreur');
       enCours = true; $('#ct-ok').disabled = true;
       const variantes = $('#ct-var').value.split('\n').map(s => s.trim()).filter(Boolean);
+      const errN = variantes.length ? erreurNomsDeclinaisons(variantes) : '';
+      if (errN) { enCours = false; $('#ct-ok').disabled = false; return toast(errN, 'erreur'); }
+      if (!neuf) {
+        const avant = r.variantesToutes || r.variantes || [];
+        /* Même nombre de lignes : une ligne changée est un renommage, son
+           stock, son prix et son minimum la suivent. */
+        /* Mêmes noms dans un autre ordre : simple réordonnancement. */
+        const memes = avant.slice().sort().join('\n') === variantes.slice().sort().join('\n');
+        if (avant.length && avant.length === variantes.length && !memes) {
+          const ren = {};
+          avant.forEach((v, i) => { if (variantes[i] !== v) ren[v] = variantes[i]; });
+          const errR = erreurRenommage(r, ren);
+          if (errR) { enCours = false; $('#ct-ok').disabled = false; return toast(errR, 'erreur'); }
+          if (Object.keys(ren).length) {
+            try {
+              await renommerDeclinaisonsSec(r, ren);
+              const m2 = (await DB.get('catalogue:sec', null)) || {};
+              Object.assign(m, m2);
+              m.masques = m.masques || []; m.modifs = m.modifs || {}; m.ajouts = m.ajouts || [];
+            } catch (e) { enCours = false; $('#ct-ok').disabled = false; return toast('Renommage impossible, réessayez', 'erreur'); }
+          }
+        } else {
+          /* Une déclinaison effacée qui a encore du stock le perdrait. */
+          const enStock = (await stockSecAttendu(await DB.get('stock:sec', null))).lignes;
+          const perdues = avant.filter(v => variantes.indexOf(v) < 0 && num(enStock['sec|' + r.id + '|' + v]) > 0);
+          if (perdues.length) {
+            enCours = false; $('#ct-ok').disabled = false;
+            return toast(perdues.join(', ') + ' a encore du stock : retirez-la dans la fiche € (décocher) ou renommez-la', 'erreur');
+          }
+        }
+      }
       if (neuf) {
         const id = idCatalogueSec(nom);
         m.ajouts.push({ id, sec:section, nom, unite, decimal, variantes });
       } else {
         m.modifs[r.id] = { nom, unite, decimal, variantes };
+        /* Une déclinaison effacée ou renommée ne reste pas « retirée » :
+           une future déclinaison du même nom serait cachée sans raison. */
+        if (Array.isArray(m.retirees)) m.retirees = m.retirees.filter(k => {
+          const p = k.split('|');
+          return p[1] !== r.id || variantes.indexOf(p[2]) >= 0;
+        });
       }
       try { await enregistrerCatalogueSec(m); }
       catch (e) { enCours = false; $('#ct-ok').disabled = false; return toast('Enregistrement impossible, réessayez', 'erreur'); }
@@ -2201,9 +2643,9 @@ V.catalogue = async function () {
   $$('[data-ajout]').forEach(b => b.onclick = () => editer(null, b.dataset.ajout));
   $$('[data-prix]').forEach(b => b.onclick = () => {
     const r = cat.filter(x => x.id === b.dataset.prix)[0];
-    if (r) editerPrix(r.nom, declis(r).map(v =>
-      ({ cp: 'sec|' + r.id + '|' + v, nom: v || r.nom, unite: r.unite })), () => rendre('catalogue'));
+    if (r) ficheArticle(r, () => rendre('catalogue'));
   });
+  $('#ct-froid').onclick = () => ficheFroid(() => rendre('catalogue'));
   $('#ct-prix-froid').onclick = () => editerPrix('Prix chambre froide', froidPrix(), () => rendre('catalogue'));
 };
 
@@ -2397,13 +2839,13 @@ function carteValeurStock(precedent, secPrec, bouton) {
   const vs = secPrec ? valeurStock(secPrec.lignes, secPrec.prix) : { total: 0, sansPrix: 0 };
   if (!(vf.total + vs.total > 0)) return '';
   const sp = vf.sansPrix + vs.sansPrix;
-  return carte('<div class="cs">Valeur totale du stock</div>' +
-    '<h2 style="margin-top:2px">' + eur(vf.total + vs.total) + ' HT</h2>' +
-    '<div class="mini">Chambre froide ' + eur(vf.total) + (precedent ? ' (' + esc(fmtD(precedent.jour)) + ')' : '') +
-    ' · Sec ' + eur(vs.total) + (secPrec ? ' (' + esc(fmtD(secPrec.jour)) + ')' : '') +
+  return carte('<div class="ch"><h2>Valeur du stock actuel</h2></div>' +
+    '<div class="kpi" style="margin-top:6px"><div class="v">' + eur(vf.total + vs.total) + ' HT</div></div>' +
+    '<div class="mini">Chambre froide ' + eur(vf.total) + (precedent ? ' (' + esc(fmtDC(precedent.jour)) + ')' : '') +
+    ' · Sec ' + eur(vs.total) + (secPrec ? ' (' + esc(fmtDC(secPrec.jour)) + ')' : '') +
     (sp ? ' · ' + sp + ' ' + accord(sp, 'produit compté', 'produits comptés') + ' sans prix' : '') +
     '</div>' +
-    (bouton ? '<button class="btn clair sm" style="margin-top:10px" data-valstock>Ouvrir l’inventaire (export dans l’historique)</button>' : ''),
+    (bouton ? '<button class="btn clair sm" style="margin-top:10px" data-valstock>Détail et export</button>' : ''),
     'solide');
 }
 
@@ -2460,7 +2902,11 @@ V.inventaire = async function () {
      c'est lui qu'on relit et qu'on corrige. */
   const attenteDuJour = !!(attente && attente.jour === today());
   const dejaFaitAujourdhui = attenteDuJour || !!(precedent && precedent.jour === today());
-  if (dejaFaitAujourdhui) Object.assign(saisie, (attenteDuJour ? attente : precedent).lignes || {});
+  if (dejaFaitAujourdhui) {
+    const lj = (attenteDuJour ? attente : precedent).lignes || {};
+    /* Une ligne retirée (reportée, sans champ à l'écran) gonflerait les totaux. */
+    Object.keys(lj).forEach(c => { const x = litArticle(c); if (froidActif(x.famille, x.parfum)) saisie[c] = lj[c]; });
+  }
   const attenteSecDuJour = !!(attenteSec && attenteSec.jour === today());
   const secDejaFait = attenteSecDuJour || !!(secPrec && secPrec.jour === today());
   if (secDejaFait) Object.assign(saisieSec, (attenteSecDuJour ? attenteSec : secPrec).lignes || {});
@@ -2512,14 +2958,15 @@ V.inventaire = async function () {
     .filter(c => num(articles[c]) !== 0 && litArticle(c).famille === 'glace')
     .map(c => num(litArticle(c).taille))
     .filter(t => t && COURANTES.indexOf(t) < 0 && RARES.indexOf(t) < 0))].sort();
+  const PARFUMS_INV = parfumsActifs();
   let montrerRares = RARES.some(t =>
-    PARFUMS.some(p => num(articles[cleArticle('glace', p, t)]) !== 0 ||
+    PARFUMS_INV.some(p => num(articles[cleArticle('glace', p, t)]) !== 0 ||
                       saisie[cleArticle('glace', p, t)] !== undefined));
 
   /* Les familles comptées en chambre froide : tout sauf les glaces (qui ont
      leur bloc) et ce qui vit au sec — coulis, toppings, chantilly. Ceux-là
      apparaissaient ici en double, avec l'inventaire du sec. */
-  const autres = FAMILLES_PRODUIT.filter(f => f.id !== 'glace' && f.lieu !== 'sec');
+  const autres = FAMILLES_PRODUIT.filter(f => f.id !== 'glace' && f.lieu !== 'sec' && familleFroidActive(f));
 
   const totalBacs   = () => Object.keys(saisie).reduce((s, c) => s + num(saisie[c]), 0);
   const totalLitres = () => Object.keys(saisie).reduce((s, c) => {
@@ -2572,11 +3019,12 @@ V.inventaire = async function () {
        et « Coulis : 4 » ne disait pas lequel manquait. */
     if (f.saveurs) {
     const fid = 'f:' + f.id;
+    const svs = saveursActives(f);
     return '<div class="invp">' +
-      enteteFamille(fid, f.libelle, f.saveurs.map(sv => cleArticle(f.id, sv, '')),
-        f.saveurs.length, f.unites) +
+      enteteFamille(fid, f.libelle, svs.map(sv => cleArticle(f.id, sv, '')),
+        svs.length, f.unites) +
       (!deplies[fid] ? '' :
-      '<div class="stack" style="margin-top:8px">' + f.saveurs.map(sv => {
+      '<div class="stack" style="margin-top:8px">' + svs.map(sv => {
               const c = cleArticle(f.id, sv, '');
               const q = num(articles[c]);
               return '<div class="invl">' +
@@ -2601,11 +3049,11 @@ V.inventaire = async function () {
   const blocFroid = () =>
     '<div class="invp" style="margin-top:14px">' +
     enteteFamille('f:glace', 'Glaces',
-      Object.keys(saisie).filter(c => litArticle(c).famille === 'glace'), PARFUMS.length, 'bacs', 'parfums') +
+      Object.keys(saisie).filter(c => litArticle(c).famille === 'glace'), PARFUMS_INV.length, 'bacs', 'parfums') +
     (!deplies['f:glace'] ? '' :
     '<div class="entete" style="margin-top:8px"><button class="btn clair sm pousse" id="inv-rares">' +
     (montrerRares ? 'Masquer le 7 L' : '+ 7 L') + '</button></div>' +
-    '<div class="stack">' + PARFUMS.map(p => {
+    '<div class="stack">' + PARFUMS_INV.map(p => {
       const base = montrerRares ? COURANTES.concat(RARES) : COURANTES;
       const sup = ORPHELINES.filter(t => num(articles[cleArticle('glace', p, t)]) !== 0 ||
                                          saisie[cleArticle('glace', p, t)] !== undefined);
@@ -2820,7 +3268,7 @@ V.inventaire = async function () {
           : ''), 'solide') +
 
       '<div class="tseg">' +
-      [['froid', 'Chambre froide', PARFUMS.length + ' parfums'],
+      [['froid', 'Chambre froide', parfumsActifs().length + ' parfums'],
        ['sec',   'Sec',            (n => n + ' ' + accord(n, 'référence'))(catalogueSec().filter(r => typeof r !== 'object' || !r.masque).length)]].map(x =>
         '<button class="' + (x[0] === partie ? 'on' : '') + '" data-partie="' + x[0] + '">' +
         '<span class="tsl">' + x[1] + '</span><small>' + x[2] + '</small></button>').join('') +
@@ -3107,6 +3555,9 @@ V.inventaire = async function () {
        sont dans la chambre froide, l'équipier les a comptés. */
     const tout = (await stockReel()).articles;
     const avant = (await theoriqueAuComptage({ at: nowISO() }, tout)).theo;
+    /* Un parfum retiré n'est pas proposé au comptage : son stock est reporté
+       à la confirmation, il ne compte ni dans les manquants ni dans « avant ». */
+    Object.keys(avant).forEach(c => { const x = litArticle(c); if (!froidActif(x.famille, x.parfum)) delete avant[c]; });
     /* Manquants et surplus sont comptés séparément, sur l'union des articles
        attendus et saisis, comme enregistrerInventaire : une somme d'écarts
        signés laissait 2 bacs manquants et 2 en trop s'annuler en
@@ -3145,7 +3596,9 @@ V.inventaire = async function () {
           par: STATE.user ? STATE.user.prenom : null,
           employe: STATE.user ? STATE.user.id : null,
           note: $('#inv-note') ? $('#inv-note').value : '',
-          lignes: lignes, avant: avant
+          lignes: lignes, avant: avant,
+          /* Ce qui était retiré pendant le comptage : relu à la confirmation. */
+          retires: [..._froidRetires]
         };
         await DB.set(CLE_INV_ATTENTE, a);
         /* Le brouillon de la chambre froide est effacé — il n'a plus lieu
