@@ -1368,7 +1368,13 @@ function bacsParfum(articles, parfum) {
 /* Quantité d'une ligne du sec : stock vivant pour coulis et toppings suivis
    à l'ouverture, sinon comptage + livraisons. */
 function qteSec(cle, articles, secLignes) {
-  const cleV = typeof cleVivanteSec === 'function' ? cleVivanteSec(cle, secLignes || {}) : null;
+  /* Même lecture que l'écran Stock : une famille sans saveur suit son total,
+     même si sa ligne n'a jamais été comptée. */
+  const p = String(cle).split('|');
+  const f = FAMILLES_PRODUIT.filter(x => (x.lieu === 'sec' || x.stock === 'sec') && (x.refSec || x.id) === p[1])[0];
+  const cleV = f && !(f.saveurs && f.saveurs.length)
+    ? (p[2] ? null : cleArticle(f.id, '', ''))
+    : (typeof cleVivanteSec === 'function' ? cleVivanteSec(cle, secLignes || {}) : null);
   if (cleV && articles && articles[cleV] !== undefined) return num(articles[cleV]);
   return num((secLignes || {})[cle]);
 }
@@ -1406,6 +1412,11 @@ async function editerSeuils(partie, apres) {
     catalogueSec().filter(r => r && typeof r === 'object' && !r.masque).forEach(r =>
       (r.variantes && r.variantes.length ? r.variantes : ['']).forEach(v =>
         items.push({ k: 'sec|' + r.id + '|' + v, nom: r.nom + (v ? ' · ' + v : ''), grp: r.sec || 'Autres', u: r.unite || 'unité' })));
+    /* Une référence ajoutée tombe en fin de catalogue : regroupée sous sa
+       section, dans l'ordre des sections (tri stable). */
+    const ordre = (typeof SEC_SECTIONS !== 'undefined' ? SEC_SECTIONS : []).map(x => typeof x === 'string' ? x : x.id);
+    const rang = g => { const i = ordre.indexOf(g); return i < 0 ? 999 : i; };
+    items.sort((a, b) => rang(a.grp) - rang(b.grp));
   }
   const nrm = x => String(x || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
   let grp = null;
@@ -1423,8 +1434,13 @@ async function editerSeuils(partie, apres) {
     }).join('') + '</div>' +
     '<div class="actions"><button class="btn clair" data-fermer>Annuler</button>' +
     '<button class="btn menthe" id="sl-ok">Enregistrer</button></div>');
-  const touches = {};
-  $$('[data-sl]').forEach(inp => inp.oninput = () => { touches[+inp.dataset.sl] = inp.value.trim(); });
+  const touches = {}, illisibles = {};
+  $$('[data-sl]').forEach(inp => inp.oninput = () => {
+    const i = +inp.dataset.sl;
+    /* « 4,5, » : le navigateur rend '' ; sans ce test, le minimum était effacé. */
+    illisibles[i] = !!(inp.validity && inp.validity.badInput);
+    touches[i] = inp.value.trim();
+  });
   $('#sl-rech').oninput = () => {
     const mots = nrm($('#sl-rech').value).split(/\s+/).filter(Boolean);
     const visibles = new Set();
@@ -1439,8 +1455,13 @@ async function editerSeuils(partie, apres) {
   let enCours = false;
   $('#sl-ok').onclick = async () => {
     if (enCours) return;
-    const idx = Object.keys(touches);
-    if (idx.some(i => touches[i] !== '' && !(num(touches[i]) >= 0))) return toast('Minimum invalide : un nombre positif', 'erreur');
+    if (Object.keys(illisibles).some(i => illisibles[i]) ||
+        Object.keys(touches).some(i => touches[i] !== '' && !(Number(touches[i].replace(',', '.')) >= 0))) {
+      return toast('Minimum invalide : un nombre positif', 'erreur');
+    }
+    /* Seules les valeurs réellement changées comptent. */
+    const avant = i => num(seuils[items[+i].k]) > 0 ? num(seuils[items[+i].k]) : 0;
+    const idx = Object.keys(touches).filter(i => (touches[i] === '' ? 0 : num(touches[i])) !== avant(i));
     if (!idx.length) { closeSheet(); return; }
     enCours = true;
     try {
@@ -1579,7 +1600,7 @@ V.stock = async function () {
   const blocSec = () => {
     if (!sec || !sec.lignes || !Object.keys(sec.lignes).length) {
       return carte('<p class="cs">Le sec n’a jamais été compté.</p>' + bandeauAttente(attenteSec, 'sec') +
-        '<button class="btn menthe bloc xl" id="st-inv-sec" style="margin-top:12px">Compter le sec</button>', 'solide');
+        '<button class="btn menthe bloc xl" id="st-inv-sec" style="margin-top:12px">Compter le sec</button>' + boutonSeuils('sec'), 'solide');
     }
     const cat = (typeof catalogueSec === 'function') ? catalogueSec() : INVENTAIRE_SEC;
     const sections = (typeof SEC_SECTIONS !== 'undefined')
@@ -1653,7 +1674,10 @@ V.stock = async function () {
             const suivi = enBloc !== null || lignes.some(x => x.vif);
             const connues = new Set(r.variantes || []);
             const minDe = v => num(seuils['sec|' + r.id + '|' + (v || '')]);
-            const sous = lignes.filter(x => minDe(x.v) > 0 && x.q < minDe(x.v));
+            /* Sans déclinaison : le total (vivant si suivi) fait foi, comme le texte. */
+            const sous = r.variantes && r.variantes.length
+              ? lignes.filter(x => minDe(x.v) > 0 && x.q < minDe(x.v))
+              : (minDe('') > 0 && total < minDe('') ? [{ v: '', q: total }] : []);
             const aMin = lignes.some(x => minDe(x.v) > 0);
             return carte('<div class="rang"><div style="flex:1;min-width:0"><b>' + esc(r.nom) + '</b>' +
               (suivi ? '<div class="mini">Suivi en direct : comptage moins ouvertures</div>' : '') +
@@ -1752,7 +1776,11 @@ V.controle = async function () {
     try {
       const seuils = await chargerSeuils();
       if (Object.keys(seuils).length) {
-        const [{ articles }, sec] = await Promise.all([stockReel(), Promise.resolve(ps)]);
+        /* Catalogue de la boutique : sans lui, les références ajoutées et les
+           déclinaisons renommées étaient ignorées à l'ouverture de l'appli. */
+        if (typeof chargerCatalogueSec === 'function') { try { await chargerCatalogueSec(); } catch (e) {} }
+        const { articles } = await stockReel();
+        const sec = ps;
         const att = sec ? await stockSecAttendu(sec).catch(() => null) : null;
         const sous = articlesSousSeuil(seuils, articles, att ? att.lignes : (sec && sec.lignes) || {});
         if (STATE.view !== 'controle' || page !== $('#page')) return;
@@ -1766,8 +1794,11 @@ V.controle = async function () {
           bm.innerHTML = '<div class="alerte warn"><span class="ai">•</span><div style="flex:1;min-width:0"><b>' +
             sous.length + ' ' + accord(sous.length, 'article sous le stock minimum', 'articles sous le stock minimum') + '</b>' +
             '<p>' + liste + '</p></div><button class="btn menthe sm" data-voirseuil>Voir</button></div>';
+          /* Sous la valeur du stock, sinon sous les réceptions à confirmer. */
           const apres = $('#valeur-stock');
-          page.insertBefore(bm, apres && apres.parentNode === page ? apres.nextSibling : page.firstChild.nextSibling);
+          const ancre = apres && apres.parentNode === page ? apres
+            : apresReceptions && apresReceptions.parentNode === page ? apresReceptions : page.firstChild;
+          page.insertBefore(bm, ancre ? ancre.nextSibling : null);
           bm.querySelector('[data-voirseuil]').onclick = () => {
             STATE.stockPartie = sous.some(x => x.partie === 'froid') ? 'froid' : 'sec'; rendre('stock'); };
         }
