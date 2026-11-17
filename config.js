@@ -332,11 +332,12 @@ const REASSORT = [
   { id: 'r15', ref:'gobeleteau',  cat: 'Sec', nom: 'Gobelets à eau',         unite: 'pack' },
   { id: 'r16', ref:'paille',      cat: 'Sec', nom: 'Pailles',                unite: 'carton' },
   { id: 'r17', ref:'creaspearl',  cat: 'Sec', nom: 'Creaspearls',            unite: 'pack' },
-  { id: 'r18', ref:'wafer',       cat: 'Sec', nom: 'Wafers 5p 30 g',         unite: 'pack' },
-  { id: 'r19', ref:'sucrecristal',cat: 'Sec', nom: 'Sucre cristal individuel', unite: 'pack' },
+  /* « Wafers 5p 30 g » fusionné avec les mini wafers La Cialdina (CIALDI). */
+  { id: 'r18', ref:'cialdi',      cat: 'Sec', nom: 'Mini wafers emballés (La Cialdina)', unite: 'carton' },
+  { id: 'r19', ref:'sucrecristal',cat: 'Sec', nom: 'Sucre blond en bûchettes 4 g', unite: 'pack' },
   { id: 'r20', ref:'capsule',     cat: 'Sec', nom: 'Capsules à café',        unite: 'boîte' },
   { id: 'r21', ref:'chocochaud',  cat: 'Sec', nom: 'Chocolat chaud',         unite: 'boîte' },
-  { id: 'r22', ref:'tablette',    cat: 'Sec', nom: 'Chocolat 220 g',         unite: 'carton' },
+  { id: 'r22', ref:'tablette',    cat: 'Sec', nom: 'Chocolat en poudre boisson 220 g', unite: 'carton' },
   { id: 'r23', ref:'the',         cat: 'Sec', nom: 'Thés',                   unite: 'boîte' },
   { id: 'r24', ref:'boisson',     cat: 'Sec', nom: 'Boissons',               unite: 'pack' },
   { id: 'r25', ref:'lait',        cat: 'Sec', nom: 'Lait',                   unite: 'brique' },
@@ -594,7 +595,7 @@ const INVENTAIRE_SEC = [
   { id:'conepapier',sec:'Cornets et pots', nom:'Cônes papier',       unite:'carton', decimal:true,
     variantes:['Petit','Grand'] },
   { id:'pot',       sec:'Cornets et pots', nom:'Pots',               unite:'ramette', decimal:false,
-    variantes:['Petit','Classique','Grand','Géant','À partager'] },
+    variantes:['Petit','Classique','Grand','Géant','À partager','Waffle stick'] },
   { id:'couvercle', sec:'Cornets et pots', nom:'Couvercles gobelet', unite:'carton', decimal:true,
     variantes:['Petit','Grand'] },
 
@@ -612,8 +613,8 @@ const INVENTAIRE_SEC = [
   { id:'gobeleteau',sec:'Service', nom:'Gobelets à eau',             unite:'pack', decimal:true },
   { id:'paille',    sec:'Service', nom:'Pailles',                    unite:'carton', decimal:true },
   { id:'creaspearl',sec:'Service', nom:'Creaspearls',                unite:'pack', decimal:true },
-  { id:'wafer',     sec:'Service', nom:'Wafers 5p 30 g',             unite:'pack', decimal:true },
-  { id:'sucrecristal',sec:'Service', nom:'Sucre cristal individuel', unite:'pack', decimal:true },
+  /* « Wafers 5p 30 g » retiré : doublon des mini wafers La Cialdina (cialdi). */
+  { id:'sucrecristal',sec:'Service', nom:'Sucre blond en bûchettes 4 g', unite:'pack', decimal:true },
 
   /* ==================== CAFÉ, CHOCOLAT, THÉ ==================== */
   { id:'capsule',   sec:'Café, chocolat, thé', nom:'Capsules à café', unite:'boîte', decimal:true,
@@ -621,7 +622,7 @@ const INVENTAIRE_SEC = [
   { id:'chocochaud',sec:'Café, chocolat, thé', nom:'Chocolat chaud',  unite:'boîte', decimal:true,
     variantes:['Noir','Lait','Noisette','Amande','Blanc','Caramel',
                'Aztèque','Orange cannelle','Gianduja','Coco','Panettone'] },
-  { id:'tablette',  sec:'Café, chocolat, thé', nom:'Chocolat 220 g',  unite:'carton', decimal:true,
+  { id:'tablette',  sec:'Café, chocolat, thé', nom:'Chocolat en poudre boisson 220 g', unite:'carton', decimal:true,
     variantes:['Noir','Lait','Noisette'] },
   { id:'the',       sec:'Café, chocolat, thé', nom:'Thés',            unite:'boîte', decimal:true,
     variantes:['Breakfast','Earl grey','Vert','Vert Yuanne','Rooibos',
@@ -662,10 +663,11 @@ const INVENTAIRE_SEC = [
      stock zéro, au conditionnement facturé. Un manager retire d'un « − » ce
      qu'il ne veut pas compter. */
   { id:'spatule',   sec:'Service', nom:'Spatules en bois 11 cm',     unite:'carton', decimal:true },
-  { id:'cialdi',    sec:'Service', nom:'Mini wafers emballés',       unite:'carton', decimal:true },
-  { id:'gaufrette', sec:'Service', nom:'Mini gaufrettes choco-noisette', unite:'carton', decimal:true },
+  { id:'cialdi',    sec:'Service', nom:'Mini wafers emballés (La Cialdina)', unite:'carton', decimal:true },
+  { id:'gaufrette', sec:'Service', nom:'Wafer al Gianduja (carton 12 boîtes)', unite:'carton', decimal:true },
   { id:'garniture', sec:'Coulis et toppings', nom:'Garnitures gaufres et crêpes', unite:'pot', decimal:true,
-    variantes:['Sauce caramel 2 L','Sauce caramel 700 g','Chocolat de couverture 5 kg','Crème gianduja 5 kg',
+    /* « Sauce caramel 700 g » = le flacon « Coulis · Caramel » : comptée là. */
+    variantes:['Sauce caramel 2 L','Chocolat de couverture 5 kg','Crème gianduja 5 kg',
                'Crème pistache 3 kg','Noisettes caramélisées 1 kg','Dulce de leche 1,2 kg'] },
   { id:'decor',     sec:'Coulis et toppings', nom:'Décors et crèmes glace', unite:'pot', decimal:true,
     variantes:['Cremino pistache 5,5 kg','Cremino noisette 5,5 kg','Amarena 3 kg',
@@ -741,7 +743,7 @@ const PRIX_ACHAT = {
     'sec|lavette|Rose': 7.05, 'sec|lavette|Jaune': 7.05, 'sec|lavette|Bleue': 7.05, 'sec|lavette|Verte': 8.65,
     'sec|topping|Noisette': 1.15,   // sachet de 150 g (carton 20 × 150 g à 23 €)
     'sec|spatule|': 3.89, 'sec|cialdi|': 14.5, 'sec|gaufrette|': 32,
-    'sec|garniture|Sauce caramel 2 L': 17, 'sec|garniture|Sauce caramel 700 g': 4.96,
+    'sec|garniture|Sauce caramel 2 L': 17, 'sec|coulis|Caramel': 4.96,   // flacon 700 g (TOPCARAMS, 6 × 700 g à 29,75 €)
     'sec|garniture|Chocolat de couverture 5 kg': 38.75, 'sec|garniture|Crème gianduja 5 kg': 32,
     'sec|garniture|Crème pistache 3 kg': 38.1, 'sec|garniture|Noisettes caramélisées 1 kg': 13.15,
     'sec|garniture|Dulce de leche 1,2 kg': 8.9,
@@ -750,8 +752,82 @@ const PRIX_ACHAT = {
     'sec|decor|Chocolat en poudre 1 kg': 6.8,
     'sec|filmiso|1100 ml': 3, 'sec|filmiso|550 ml': 2, 'sec|bagueiso|': 14, 'sec|bouteille|': 4.85,
     'sec|biscuit|Baci di Dama': 3.9, 'sec|biscuit|Brutti e buoni': 3.8,
+    /* Pots : prix d'une RAMETTE, l'unité comptée. Petit et Classique :
+       carton de 8 ramettes de 250 (98,96 € et 103,35 €). Grand : carton de
+       1 400 = 7 ramettes de 200 (85,02 €). Géant (Grandissimo) : ramette de
+       160 à 15,02 €. Waffle stick : 150 coupes à 17,26 €. */
+    'sec|pot|Petit': 12.37, 'sec|pot|Classique': 12.92, 'sec|pot|Grand': 12.15,
+    'sec|pot|Géant': 15.02, 'sec|pot|Waffle stick': 17.26,
     'sec|gaufrier|Pierre abrasive crêpière': 22.6, 'sec|gaufrier|Brosse gaufrier': 15
   }
+};
+
+/* Ce que contient une unité comptée, lu sur les factures Amorino 2026 et
+   en réserve. Affiché sous le nom pendant l'inventaire : « 1 carton =
+   432 cornets ». Clé « sec|id|déclinaison », ou « sec|id| » pour toutes les
+   déclinaisons. */
+const CONTENU_SEC = {
+  'sec|cornet|Petit': '1 carton = 432 cornets', 'sec|cornet|Classique': '1 carton = 275 cornets',
+  'sec|cornet|Grand': '1 carton = 256 cornets',
+  'sec|chococone|Petit': '1 carton = 225', 'sec|chococone|Classique': '1 carton = 175', 'sec|chococone|Grand': '1 carton = 128',
+  'sec|cornetsg|': '1 carton = 25 cornets',
+  'sec|conepapier|Petit': '1 carton = 3 000 cônes', 'sec|conepapier|Grand': '1 carton = 2 800 cônes',
+  'sec|pot|Petit': '1 ramette = 250 pots · carton de 8 ramettes', 'sec|pot|Classique': '1 ramette = 250 pots · carton de 8 ramettes',
+  'sec|pot|Grand': '1 ramette = 200 pots · carton de 7 ramettes', 'sec|pot|Géant': '1 ramette = 160 pots (Grandissimo)',
+  'sec|pot|Waffle stick': '1 ramette = 150 coupes Waffle stick (le « waffle carré »)',
+  'sec|cuillere|': '1 carton = 3 600 cuillères',
+  'sec|serviette|': '24×24 : 6 000 · 25×25 : 3 600 · 30×30 : 3 200 par carton',
+  'sec|barquette|': '1 carton = 330 barquettes (210 en kraft)',
+  'sec|gobelet|': '1 pack = 50 gobelets', 'sec|bague|': '1 pack = 100 bagues',
+  'sec|paille|': '1 carton = 250 pailles', 'sec|spatule|': '1 carton = 1 000 spatules',
+  'sec|isobac|': '1 carton = 100 bacs', 'sec|filmiso|': '1 pack = 100 films', 'sec|bagueiso|': '1 pack = 100 bagues',
+  'sec|macaroncarton|Petit 2p': '1 carton = 200 boîtes', 'sec|macaroncarton|Moyen 4p': '1 carton = 100 boîtes',
+  'sec|sackraft|Grand': '1 carton = 200 sacs',
+  'sec|lavette|': '1 pack = 25 lavettes',
+  'sec|chocochaud|': '1 boîte = 15 sachets', 'sec|tablette|': '1 carton = 25 sachets de 220 g',
+  'sec|cialdi|': '1 carton = 400 mini wafers', 'sec|gaufrette|': '1 carton = 12 boîtes de 50',
+  'sec|biscuit|Baci di Dama': 'carton de 20 sachets de 120 g', 'sec|biscuit|Brutti e buoni': 'carton de 8 sachets de 120 g',
+  'sec|topping|Noisette': 'carton de 20 sachets de 150 g', 'sec|decor|Amarena 3 kg': 'carton de 6 boîtes de 3 kg',
+  'sec|sucrecristal|': '1 pack = 1 000 bûchettes de 4 g'
+};
+const contenuSec = c => CONTENU_SEC[c] || CONTENU_SEC[String(c).split('|').slice(0, 2).join('|') + '|'] || '';
+
+/* Fiches produit du sec : le « ? » à côté d'une ligne de l'inventaire.
+   Le nom du catalogue n'est pas celui de l'étiquette (« Crème gianduja 5 kg »
+   est un seau marqué « Pasta Nocciolata ») : l'équipe ne trouvait pas la
+   ligne. Photo prise en réserve, nom lu sur l'étiquette, code Amorino des
+   factures, et comment compter. Clé = celle de l'inventaire. */
+const INFO_PRODUITS = {
+  'sec|sucrecristal|': { photo: 'produits/sucre-buchettes.jpg', etiquette: 'Sucre blond bio en bûchettes, 1000 × 4 g', code: 'SUCREBR',
+    compter: 'Un carton entier = 1 pack. Un carton entamé à moitié = 0,5.' },
+  'sec|topping|Caramel': { photo: 'produits/eclats-caramel.jpg', etiquette: 'Éclats de caramel (Caramel flakes), pot de 500 g', code: 'CARAMP',
+    compter: 'Un pot = 1.' },
+  'sec|topping|Pistache': { photo: 'produits/pistaches-500g.jpg', etiquette: 'Pistaches concassées (Chopped pistachio kernels), sachet de 500 g', code: 'TOPPISTA500',
+    compter: 'Un sachet = 1.' },
+  'sec|topping|Noisette': { photo: 'produits/noisettes-150g.jpg', etiquette: 'Noisettes torréfiées (Roasted hazelnuts), sachet de 150 g, carton de 20', code: 'TOPNOIS150',
+    compter: 'Un sachet = 1. Un carton plein = 20.' },
+  'sec|cialdi|': { photo: 'produits/cialdina.jpg', etiquette: 'La Cialdina, mini wafers emballés un par un, carton de 2 kg (400 pièces)', code: 'CIALDI',
+    compter: 'Un carton = 1. Un sac à moitié plein = 0,5.' },
+  'sec|gaufrette|': { photo: 'produits/wafer-gianduja.jpg', etiquette: 'Wafer al Gianduja, boîte de 400 g, carton de 12 boîtes', code: 'WAFERN',
+    compter: 'Un carton de 12 boîtes = 1. Six boîtes seules = 0,5.' },
+  'sec|garniture|Crème pistache 3 kg': { photo: 'produits/chococream-pistache.jpg', etiquette: 'Chococream Pistacchio 15 %, seau de 3 kg', code: 'TOPPISTAC',
+    compter: 'Un seau = 1.' },
+  'sec|coulis|Caramel': { etiquette: 'Sauce caramel beurre salé, flacon de 700 g (carton de 6)', code: 'TOPCARAMS (FTP074)',
+    compter: 'Un flacon = 1. Ce n’est pas le bidon de 2,4 kg, compté dans Garnitures.' },
+  'sec|garniture|Sauce caramel 2 L': { photo: 'produits/caramel-guerande.jpg', etiquette: 'Caramel au beurre salé de Guérande, bidon de 2,4 kg', code: 'TOPCARAM (CB76S)',
+    compter: 'Un bidon = 1.' },
+  'sec|garniture|Chocolat de couverture 5 kg': { photo: 'produits/crema-fondente.jpg', etiquette: 'Crema Fondente 18 (Irca), seau de 5 kg', code: 'TOPCHOCG2',
+    compter: 'Un seau = 1.' },
+  'sec|garniture|Crème gianduja 5 kg': { photo: 'produits/pasta-nocciolata.jpg', etiquette: 'Pasta Nocciolata (Irca), seau de 5 kg', code: 'TOPNOCCIO',
+    compter: 'Un seau = 1.' },
+  'sec|decor|Cremino pistache 5,5 kg': { photo: 'produits/cremino-pistache.jpg', etiquette: 'Cremino Pistachio « TOPCREMINOLP », seau de 5,5 kg', code: 'TOPCREMINOLP',
+    compter: 'Un seau = 1.' },
+  'sec|decor|Amarena 3 kg': { photo: 'produits/amarena.jpg', etiquette: 'Variegato Amarena « Amorino », boîte de 3 kg', code: 'TOPAMARENA',
+    compter: 'Une boîte = 1.' },
+  'sec|biscuit|Baci di Dama': { photo: 'produits/baci-di-dama.jpg', etiquette: 'Biscuits sablés fourrés chocolat et noisette (Baci di Dama)', code: 'BACI',
+    compter: 'Une boîte ou un sachet = 1.' },
+  'sec|biscuit|Brutti e buoni': { photo: 'produits/brutti-e-buoni.jpg', etiquette: 'Brutti e Buoni, sachet de 120 g', code: 'B_BRUTTI',
+    compter: 'Un sachet = 1.' }
 };
 
 const MOTIFS_PERTE = [

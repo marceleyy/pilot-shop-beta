@@ -12,6 +12,7 @@ env.js
 7?.png
 !am.png
 !icons/*
+!produits/*.jpg
 photos/
 *.m4a
 Pilot-Shop*.pdf

@@ -525,8 +525,12 @@ async function enregistrerInventaire(lignes, note, avant, meta) {
    Avant de confirmer, le manager voit l'écart article par article et peut
    recompter (le lendemain s'il le veut). À la confirmation, le stock prend
    les quantités comptées.
-   Chambre froide : chaque bac manquant part au registre des pertes, où les
-   écarts s'additionnent au fil des inventaires.
+   Chambre froide : les bacs manquants ne partent plus d'office en pertes. Le
+   manager valide l'inventaire, voit la liste des bacs manquants, dit ce
+   qu'ils sont devenus (consommés sans scan, pertes réelles, ou mal compté :
+   il recompte), puis valide la mise à jour du stock. Seules les pertes
+   réelles vont au registre. Le calcul des écarts de période ne change pas :
+   il ne lit pas ces lignes (litresJetes les met à 0).
    Sec : rien n'y trace la consommation (cornets, gobelets), la différence
    avec le comptage précédent est donc de la consommation, pas une perte.
    Un seul inventaire en attente par partie : un nouveau comptage remplace
@@ -725,11 +729,14 @@ async function verifierInventaire(partie) {
     const rang = x => {
       const k = corr[x.c];
       const r = sec ? refSec(x.c) : null;
+      /* Jamais compté avant : pas de chiffre précédent dans « avant ». */
+      const dt = sec ? secDouteux(x.c, x.compte, (a.avant || {})[x.c], true) : '';
       return '<div class="invl">' +
         '<span class="invn">' + esc(lib(x.c)) +
         '<small>compté ' + nb(x.compte) + (sec ? ' · précédent ' : ' · attendu ') + nb(x.attendu) +
         (r && r.unite ? ' ' + esc(accord(x.attendu, r.unite)) : '') +
         (k ? ' · recompté ' + nb(num(k.q)) + ' le ' + esc(fmtD(String(k.at).slice(0, 10))) + ' par ' + esc(k.par || '—') : '') +
+        (dt ? '<br><b>À vérifier : ' + esc(dt) + '</b>' : '') +
         '</small></span>' +
         '<span class="invc">' + (x.d ? (sec ? '' : 'écart ') + (x.d > 0 ? '+' : '') + nb(x.d) : (sec ? 'inchangé' : 'juste')) + '<br>' +
         '<button type="button" class="btn clair sm" data-recompter="' + esc(x.c) + '">Recompter</button></span></div>' +
@@ -774,7 +781,7 @@ async function verifierInventaire(partie) {
           '<div class="stack">' + justes.map(rang).join('') + '</div></details>'
         : '') +
       '<div class="actions"><button class="btn clair" data-fermer>Laisser en attente</button>' +
-      '<button class="btn menthe" id="ci-ok">Reprendre sur le stock réel</button></div>' +
+      '<button class="btn menthe" id="ci-ok">Valider l’inventaire</button></div>' +
       '<button type="button" class="btn fantome bloc sm" id="ci-ecarter" style="margin-top:8px">Écarter ce comptage</button>');
 
     if (enCours && justes.some(x => x.c === enCours)) {
@@ -838,17 +845,46 @@ async function verifierInventaire(partie) {
       /* Livraison confirmée ailleurs pendant que l'écran était ouvert. */
       if (!sec && th.livraisons.length) { invaliderStock(); th = await theoriqueAuComptage(a, (await stockReel()).articles || {}); }
       if (th.livraisons.length) return toast('Confirmez d’abord la livraison en attente : une quantité corrigée fausserait les écarts', 'erreur');
-      confirmer('Reprendre cet inventaire sur le stock réel ?',
-      'Le stock prend les quantités comptées le ' + fmtD(a.jour) + '.' +
-      (manq ? ' ' + manq + ' ' + accord(manq, 'bac manquant part', 'bacs manquants partent') +
-              ' au registre des pertes.' : ''),
-      'Reprendre', () => confirmerInventaire(a, partie), () => dessinerV(), 'Retour');
+      const lieu = sec ? 'du sec' : 'de la chambre froide';
+      /* Bacs manquants, recalculés sur l'attendu à jour. */
+      const manquants = sec ? [] : lignesAttente(Object.assign({}, a, { avant: th.theo }), partie)
+        .filter(x => x.d < 0 && bacs(x));
+      const nbManq = manquants.reduce((s, x) => s - x.d, 0);
+      const majStock = motif => confirmer('Mettre à jour le stock ' + lieu + ' ?',
+        'Le stock prend les quantités comptées le ' + fmtD(a.jour) + '.' +
+        (motif === 'pertes' ? ' ' + nbManq + ' ' + accord(nbManq, 'bac va', 'bacs vont') + ' au registre des pertes.'
+         : motif === 'non_scanne' ? ' ' + nbManq + ' ' + accord(nbManq, 'bac est noté', 'bacs sont notés') +
+           ' consommés sans scan, hors pertes.' : '') +
+        ' Le calcul des écarts ne change pas.',
+        'Mettre à jour le stock', () => confirmerInventaire(a, partie, motif, nbManq),
+        () => (nbManq ? choix() : dessinerV()), 'Retour');
+      if (!nbManq) return majStock('');
+      /* Des bacs manquent : le manager dit ce qu'ils sont devenus. */
+      const choix = () => { showSheet(
+        '<h2 id="sheet-titre">' + nbManq + ' ' + accord(nbManq, 'bac manquant', 'bacs manquants') + '</h2>' +
+        '<p class="sub">Par rapport au stock attendu le ' + esc(fmtD(a.jour)) + '. Que sont-ils devenus ?</p>' +
+        '<div class="stack" style="margin-top:12px">' + manquants.map(x =>
+          '<div class="invl"><span class="invn">' + esc(lib(x.c)) + '</span><span class="invc">' + nb(-x.d) + '</span></div>'
+        ).join('') + '</div>' +
+        '<div class="stack" style="margin-top:16px">' +
+        '<button type="button" class="btn menthe bloc" id="ce-scan">Consommés, sortie non scannée</button>' +
+        '<button type="button" class="btn clair bloc" id="ce-pertes">Pertes réelles (cassés, jetés, disparus)</button>' +
+        '<button type="button" class="btn clair bloc" id="ce-recompter">Mal compté : recompter</button>' +
+        '</div>' +
+        '<button type="button" class="btn fantome bloc sm" data-fermer style="margin-top:8px">Retour</button>');
+      $('#ce-scan').onclick = () => majStock('non_scanne');
+      $('#ce-pertes').onclick = () => majStock('pertes');
+      $('#ce-recompter').onclick = () => { toast('Touchez « Recompter » sur la ligne à revoir'); dessinerV(); };
+      const ret = $('#sheet-corps [data-fermer]');
+      if (ret) ret.onclick = () => dessinerV();
+      };
+      choix();
     };
   };
   dessinerV();
 }
 
-async function confirmerInventaire(a, partie) {
+async function confirmerInventaire(a, partie, motif, nbVu) {
   partie = partie === 'sec' ? 'sec' : 'froid';
   const CLE = INV_ATTENTE[partie].cle;
   const cur = await inventaireEnAttente(partie);
@@ -887,7 +923,7 @@ async function confirmerInventaire(a, partie) {
     await DB.set('stock:secs', hist.slice(-36));
     await DB.del(CLE);
     await feed('ok', STATE.user.prenom + ' a confirmé l’inventaire du sec du ' + fmtD(cur.jour) + ' (' + (cur.par || '—') + ')');
-    toast('Inventaire du sec repris sur le stock');
+    toast('Inventaire du sec validé, stock à jour');
     return rendre(STATE.view);
   }
 
@@ -899,12 +935,37 @@ async function confirmerInventaire(a, partie) {
     toast('Confirmez d’abord la livraison en attente', 'erreur');
     return rendre(STATE.view);
   }
-  const inv = await enregistrerInventaire(lignesAReprendre(cur, 'froid', theo), cur.note, theo, meta);
+  /* « pertes » : les bacs manquants vont au registre. « non_scanne » :
+     consommés sans scan, notés sur l'inventaire seulement. */
+  const aReprendre = lignesAReprendre(cur, 'froid', theo);
+  /* Le manager a choisi pour un nombre de bacs manquants : si un mouvement
+     synchronisé entre-temps le change, il revoit l'écran avant d'enregistrer. */
+  const nbMaintenant = Object.keys(theo).concat(Object.keys(aReprendre))
+    .filter((c, i, t) => t.indexOf(c) === i && litArticle(c).taille)
+    .reduce((s, c) => s + Math.max(0, num(theo[c] || 0) - num(aReprendre[c] || 0)), 0);
+  if (nbVu !== undefined && nbMaintenant !== nbVu) {
+    toast('Le stock a bougé depuis la vérification : revoyez les bacs manquants', 'erreur');
+    return verifierInventaire('froid');
+  }
+  motif = nbMaintenant ? (motif === 'pertes' ? 'pertes' : 'non_scanne') : '';
+  const inv = await enregistrerInventaire(aReprendre, cur.note, theo,
+    motif ? Object.assign(meta, { motifEcart: motif }) : meta);
 
-  /* Chaque bac manquant devient une perte du jour du comptage. L'id dérive
-     du comptage : confirmer deux fois n'en ajoute pas de seconde. */
+  /* En pertes réelles, chaque bac manquant devient une perte du jour du
+     comptage. L'id dérive du comptage : confirmer deux fois n'en ajoute pas
+     de seconde. */
   const manquants = Object.keys(inv.ecarts).filter(c => inv.ecarts[c] < 0 && litArticle(c).taille);
-  if (manquants.length) {
+  if (manquants.length && motif === 'non_scanne') {
+    /* Revalidé autrement après un premier choix « pertes » : on retire ses lignes. */
+    const cle = 'pertes:' + cur.jour;
+    const liste = await DB.get(cle, []);
+    const reste = liste.filter(w => !(w && String(w.id || '').indexOf('inv|' + cur.at + '|') === 0));
+    if (reste.length !== liste.length) {
+      await DB.set(cle, reste);
+      if (typeof cumulerPertesMois === 'function') await cumulerPertesMois(cur.jour);
+    }
+  }
+  if (manquants.length && motif === 'pertes') {
     const cle = 'pertes:' + cur.jour;
     const liste = await DB.get(cle, []);
     manquants.forEach(c => {
@@ -920,10 +981,11 @@ async function confirmerInventaire(a, partie) {
   }
   await DB.del(CLE);
   const bacsPerdus = manquants.reduce((s, c) => s - inv.ecarts[c], 0);
-  await feed(bacsPerdus ? 'warn' : 'ok',
-    STATE.user.prenom + ' a confirmé l’inventaire du ' + fmtD(cur.jour) + ' (' + (cur.par || '—') + ')' +
-    (bacsPerdus ? ' · ' + bacsPerdus + ' ' + accord(bacsPerdus, 'bac', 'bacs') + ' en perte' : ''));
-  toast('Inventaire repris sur le stock');
+  await feed(bacsPerdus && motif === 'pertes' ? 'warn' : 'ok',
+    STATE.user.prenom + ' a validé l’inventaire du ' + fmtD(cur.jour) + ' (' + (cur.par || '—') + ')' +
+    (bacsPerdus ? ' · ' + bacsPerdus + ' ' + accord(bacsPerdus, 'bac', 'bacs') +
+      (motif === 'pertes' ? ' en perte' : ' consommés sans scan') : ''));
+  toast('Inventaire validé, stock de la chambre froide à jour');
   rendre(STATE.view);
 }
 
@@ -1834,6 +1896,42 @@ V.catalogue = async function () {
   $('#ct-prix-froid').onclick = () => editerPrix('Prix chambre froide', froidPrix(), () => rendre('catalogue'));
 };
 
+/* Quantité du sec à revoir avant de valider : l'unité est souvent un carton
+   (« Wafer al Gianduja : 4 » = 48 boîtes). Signalée quand elle fait plus du
+   double du dernier comptage et au moins 2 de plus, ou, sans comptage
+   précédent, quand elle vaut 100 € HT ou plus. Renvoie le texte, ou ''.
+   Le comptage de l'équipier reste à l'aveugle : ni le chiffre précédent ni
+   le prix ne lui sont montrés (manager = false). */
+function secDouteux(c, q, prec, manager) {
+  q = num(q);
+  if (!(q > 0)) return '';
+  const n = v => Number.isInteger(num(v)) ? String(num(v)) : n1(v);
+  const r = catalogueSec().filter(x => typeof x === 'object' && x.id === String(c).split('|')[1])[0];
+  const u = r && r.unite ? ' ' + accord(q, r.unite) : '';
+  const p = prixLigne(c, null);
+  const connu = prec !== undefined && prec !== null && prec !== '';
+  const douteux = connu ? (q > 2 * num(prec) && q >= num(prec) + 2) : (p !== null && q * p >= 100);
+  if (!douteux) return '';
+  if (!manager) return n(q) + u + ', vérifiez l’unité';
+  return n(q) + u + (p !== null ? ' (' + eur(q * p) + ' HT)' : '') +
+    (connu ? ', contre ' + n(prec) + ' la dernière fois' : ', jamais compté avant');
+}
+
+/* Fiche d'un produit du sec : ce qu'on voit sur l'étagère. */
+function ficheProduit(c) {
+  const f = (typeof INFO_PRODUITS !== 'undefined') && INFO_PRODUITS[c];
+  if (!f) return;
+  showSheet('<h2 id="sheet-titre">' + esc(libelleSec(c)) + '</h2>' +
+    (f.photo ? '<img src="' + esc(f.photo) + '" alt="' + esc(f.etiquette || '') + '" loading="lazy" ' +
+      'style="display:block;width:100%;max-height:52vh;object-fit:contain;border-radius:12px;margin-top:10px;background:#eee">' : '') +
+    '<div class="stack" style="margin-top:12px">' +
+    (f.etiquette ? '<p><b>Sur l’étiquette :</b> ' + esc(f.etiquette) + '</p>' : '') +
+    (f.code ? '<p><b>Code Amorino :</b> ' + esc(f.code) + '</p>' : '') +
+    (f.compter ? '<p><b>Comment compter :</b> ' + esc(f.compter) + '</p>' : '') +
+    (typeof contenuSec === 'function' && contenuSec(c) ? '<p><b>Contenu :</b> ' + esc(contenuSec(c)) + '</p>' : '') +
+    '</div><div class="actions"><button class="btn clair" data-fermer>Fermer</button></div>');
+}
+
 /* Un inventaire passé, en entier : TOUS les produits du catalogue, comptés
    ou non. Un produit absent de la saisie s'affiche à 0, en grisé — l'écran
    ne montrait que les totaux, impossible de retrouver ce qui avait été
@@ -1849,7 +1947,7 @@ function voirInventaire(h, partie) {
     vus.add(cle);
     const q = num(l[cle] || 0), p = prixLigne(cle, h.prix);
     return { nom: nom, q: q, saisi: l[cle] !== undefined,
-             ecart: ecarts[cle] || 0, unite: unite || '',
+             ecart: ecarts[cle] || 0, unite: unite || '', prix: p,
              val: (p !== null && q > 0) ? q * p : 0 };
   };
 
@@ -1866,7 +1964,8 @@ function voirInventaire(h, partie) {
     /* Une ligne par parfum, tailles côte à côte, comme à la saisie. */
     groupes.push({ titre: 'Glaces', lignes: PARFUMS.map(p => {
       const parT = tailles.map(t => ligne(cleArticle('glace', p, t), '', ''));
-      return { nom: p, saisi: parT.some(x => x.saisi),
+      parT.forEach((x, k) => { x.nom = p + ' ' + tailles[k] + ' L'; x.unite = 'bac'; });
+      return { nom: p, saisi: parT.some(x => x.saisi), det: parT,
                ecart: parT.reduce((s2, x) => s2 + num(x.ecart), 0),
                val: parT.reduce((s2, x) => s2 + x.val, 0),
                texte: tailles.map((t, k) => t + ' L : ' + nb(parT[k].q)).join(' · ') };
@@ -1874,6 +1973,7 @@ function voirInventaire(h, partie) {
     /* Les autres familles comptées en chambre froide (macarons, gaufres…),
        saveur par saveur, comptées ou non. */
     FAMILLES_PRODUIT.filter(f => f.id !== 'glace' && f.lieu !== 'sec' && f.stock !== 'sec')
+      .sort((x, y) => (y.id === 'cremini') - (x.id === 'cremini'))   // Cremini avec les glaces
       .forEach(f => groupes.push({ titre: f.libelle, lignes: (f.saveurs && f.saveurs.length ? f.saveurs : [''])
         .map(sv => ligne(cleArticle(f.id, sv, ''), sv || f.libelle, f.unite)) }));
     const autres = {};
@@ -1932,7 +2032,45 @@ function voirInventaire(h, partie) {
           : nb(x.q) + (x.unite ? ' ' + esc(accord(x.q, x.unite)) : '')) +
         (estManager && x.val > 0 ? '<br>' + eur(x.val) : '') + '</span></div>').join('') +
       '</div>').join('') +
-    '<div class="actions"><button class="btn clair" data-fermer>Fermer</button></div>');
+    '<div class="actions">' +
+    (estManager ? '<button class="btn clair" id="inv-csv">Exporter pour le comptable</button>' : '') +
+    '<button class="btn clair" data-fermer>Fermer</button></div>');
+
+  /* Le comptable veut le détail par parfum et les totaux : un fichier
+     tableur, une ligne par produit compté, prix et valeur HT figés au
+     comptage, puis le total de chaque groupe et le total général. */
+  const bCsv = $('#inv-csv');
+  if (bCsv) bCsv.onclick = () => {
+    const q = x => { x = String(x == null ? '' : x);
+                     if (/^[=+\-@\t\r]/.test(x)) x = "'" + x;
+                     return '"' + x.replace(/"/g, '""') + '"'; };
+    const dec = v => (Math.round(num(v) * 100) / 100).toFixed(2).replace('.', ',');
+    const rows = [['Groupe', 'Produit', 'Quantité', 'Unité', 'Prix HT', 'Valeur HT']];
+    let total = 0;
+    groupes.filter(g => g.lignes.length).forEach(g => {
+      let tg = 0;
+      g.lignes.forEach(x => (x.det || [x]).forEach(y => {
+        if (!(num(y.q) > 0)) return;
+        rows.push([g.titre, y.nom, String(y.q).replace('.', ','), y.unite ? accord(y.q, y.unite) : '',
+                   y.prix !== null && y.prix !== undefined ? dec(y.prix) : 'sans prix', dec(y.val)]);
+        tg += num(y.val);
+      }));
+      if (tg > 0) rows.push([g.titre, 'Total ' + g.titre, '', '', '', dec(tg)]);
+      total += tg;
+    });
+    /* Même total que « Valeur du stock » à l'écran : un produit d'un ancien
+       catalogue, compté mais absent des groupes, va sur une ligne à part. */
+    const vt = valeurStock(l, h.prix).total;
+    if (Math.abs(vt - total) >= 0.005) rows.push(['Autres', 'Produits hors catalogue', '', '', '', dec(vt - total)]);
+    rows.push(['', 'TOTAL ' + (partie === 'froid' ? 'CHAMBRE FROIDE' : 'SEC'), '', '', '', dec(vt)]);
+    const csv = rows.map(r => r.map(q).join(';')).join('\n');
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8' }));
+    a.download = 'inventaire-' + (partie === 'froid' ? 'chambre-froide' : 'sec') + '-' + h.jour + '.csv';
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+    toast('Fichier téléchargé');
+  };
 }
 
 V.inventaire = async function () {
@@ -2089,6 +2227,38 @@ V.inventaire = async function () {
   };
 
   /* --- Chambre froide : une ligne par parfum, tailles côte à côte --------- */
+  const rendFamille = f => {
+    /* Les familles à saveurs se comptent saveur par saveur : un coulis
+       pistache et un coulis caramel ne se remplacent pas l'un l'autre,
+       et « Coulis : 4 » ne disait pas lequel manquait. */
+    if (f.saveurs) {
+    const fid = 'f:' + f.id;
+    return '<div class="invp">' +
+      enteteFamille(fid, f.libelle, f.saveurs.map(sv => cleArticle(f.id, sv, '')),
+        f.saveurs.length, f.unites) +
+      (!deplies[fid] ? '' :
+      '<div class="stack" style="margin-top:8px">' + f.saveurs.map(sv => {
+              const c = cleArticle(f.id, sv, '');
+              const q = num(articles[c]);
+              return '<div class="invl">' +
+                '<span class="invn">' + esc(sv) + '</span>' +
+                (q ? '<span class="invc">' + q + '</span>' : '') +
+                '<input type="number" inputmode="numeric" min="0" step="1" data-inv="' + esc(c) + '" ' +
+                'aria-label="' + esc(f.libelle + ', ' + sv) + '" ' +
+                'value="' + (saisie[c] !== undefined ? esc(saisie[c]) : '') + '" placeholder="0"></div>';
+            }).join('') + '</div>') + '</div>';
+        }
+        const c = cleArticle(f.id, '', '');
+        const q = num(articles[c]);
+        return '<div class="invl">' +
+          '<span class="invn">' + esc(f.libelle) +
+          '<small>en ' + esc(f.unites) + '</small></span>' +
+          (q ? '<span class="invc">' + q + ' en stock</span>' : '') +
+          '<input type="number" inputmode="numeric" min="0" step="1" data-inv="' + esc(c) + '" ' +
+          'aria-label="' + esc(f.libelle + ' (en ' + f.unites + ')') + '" ' +
+          'value="' + (saisie[c] !== undefined ? esc(saisie[c]) : '') + '" placeholder="0"></div>';
+  };
+
   const blocFroid = () =>
     '<div class="invp" style="margin-top:14px">' +
     enteteFamille('f:glace', 'Glaces',
@@ -2123,39 +2293,11 @@ V.inventaire = async function () {
         }).join('') + '</div></div>';
     }).join('') + '</div>') + '</div>' +
 
+    /* Cremini : bacs de glace de 2,15 L, comptés avec les glaces. */
+    autres.filter(f => f.id === 'cremini').map(f => '<div class="stack" style="margin-top:8px">' + rendFamille(f) + '</div>').join('') +
     '<div class="entete"><h3>Autres familles</h3>' +
     '<span class="pousse mini">comptées à l’unité</span></div>' +
-    '<div class="stack">' + autres.map(f => {
-    /* Les familles à saveurs se comptent saveur par saveur : un coulis
-       pistache et un coulis caramel ne se remplacent pas l'un l'autre,
-       et « Coulis : 4 » ne disait pas lequel manquait. */
-    if (f.saveurs) {
-    const fid = 'f:' + f.id;
-    return '<div class="invp">' +
-      enteteFamille(fid, f.libelle, f.saveurs.map(sv => cleArticle(f.id, sv, '')),
-        f.saveurs.length, f.unites) +
-      (!deplies[fid] ? '' :
-      '<div class="stack" style="margin-top:8px">' + f.saveurs.map(sv => {
-              const c = cleArticle(f.id, sv, '');
-              const q = num(articles[c]);
-              return '<div class="invl">' +
-                '<span class="invn">' + esc(sv) + '</span>' +
-                (q ? '<span class="invc">' + q + '</span>' : '') +
-                '<input type="number" inputmode="numeric" min="0" step="1" data-inv="' + esc(c) + '" ' +
-                'aria-label="' + esc(f.libelle + ', ' + sv) + '" ' +
-                'value="' + (saisie[c] !== undefined ? esc(saisie[c]) : '') + '" placeholder="0"></div>';
-            }).join('') + '</div>') + '</div>';
-        }
-        const c = cleArticle(f.id, '', '');
-        const q = num(articles[c]);
-        return '<div class="invl">' +
-          '<span class="invn">' + esc(f.libelle) +
-          '<small>en ' + esc(f.unites) + '</small></span>' +
-          (q ? '<span class="invc">' + q + ' en stock</span>' : '') +
-          '<input type="number" inputmode="numeric" min="0" step="1" data-inv="' + esc(c) + '" ' +
-          'aria-label="' + esc(f.libelle + ' (en ' + f.unites + ')') + '" ' +
-          'value="' + (saisie[c] !== undefined ? esc(saisie[c]) : '') + '" placeholder="0"></div>';
-    }).join('') + '</div>';
+    '<div class="stack">' + autres.filter(f => f.id !== 'cremini').map(rendFamille).join('') + '</div>';
 
   /* --- Sec : par section, unité visible, décimales où ça a du sens ---------
      Le manager l'a dit : « comme ça, les personnes voient avant de taper ».
@@ -2163,9 +2305,26 @@ V.inventaire = async function () {
      l'autorise : deux cartons pleins et un à moitié, ça se tape 2,5. Zéro
      veut dire « à commander », 0,5 veut dire « je réfléchis ». */
   let deplies = {};
+  /* Recherche dans le sec : nom du catalogue, déclinaison, nom de
+     l'étiquette ou code Amorino (« wafer », « nocciolata », « CIALDI »). */
+  let recherche = '';
+  let minuterieRech = null;
+  const nrmR = x => String(x || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  const texteRech = c => {
+    const f = (typeof INFO_PRODUITS !== 'undefined' && INFO_PRODUITS[c]) || {};
+    return nrmR([f.etiquette, f.code].join(' '));
+  };
   /* La note survit au redessin : ouvrir une famille redessine l'écran. */
   let note = '';
   const cleSec = (r, v) => 'sec|' + r.id + '|' + (v || '');
+  const contenuLigne = c => {
+    const t = typeof contenuSec === 'function' ? contenuSec(c) : '';
+    return t ? '<small>' + esc(t) + '</small>' : '';
+  };
+  /* « ? » : fiche produit (photo, nom de l'étiquette, code, comment compter). */
+  const infoSec = (c, nom) => (typeof INFO_PRODUITS !== 'undefined' && INFO_PRODUITS[c])
+    ? '<button type="button" class="info-p" data-info="' + esc(c) + '" aria-label="' +
+      esc('Comment reconnaître ' + nom) + '">?</button>' : '';
 
   /* nom : ce qu'un lecteur d'écran annonce, la ligne n'ayant pas d'étiquette. */
   const champSec = (r, c, nom) => {
@@ -2189,11 +2348,28 @@ V.inventaire = async function () {
       ? SEC_SECTIONS.map(s => typeof s === 'string' ? { id:s } : s)
       : [...new Set(catalogue.map(r => r.sec || 'Autres'))].map(s => ({ id:s }));
 
+    const mots = nrmR(recherche).split(/\s+/).filter(Boolean);
     return sections.map(section => {
-      const refs = catalogue.filter(r =>
-        typeof r === 'object' && (r.sec || 'Autres') === section.id && !r.masque);
+      /* Déclinaisons qui répondent à la recherche : chaque mot tapé doit se
+         trouver dans le nom, la déclinaison, l'étiquette ou le
+         code (« pot grand », « nocciolata 5 kg »). */
+      const varsVues = r => {
+        const vs = r.variantes && r.variantes.length ? r.variantes : [''];
+        if (!mots.length) return vs;
+        return vs.filter(v => {
+          const t = nrmR(r.nom + ' ' + v) + ' ' + texteRech(cleSec(r, v));
+          return mots.every(m => t.includes(m));
+        });
+      };
+      const vuesDe = new Map();
+      const refs = catalogue.filter(r => {
+        if (typeof r !== 'object' || (r.sec || 'Autres') !== section.id || r.masque) return false;
+        const vs = varsVues(r);
+        vuesDe.set(r, vs);
+        return vs.length > 0;
+      });
       if (!refs.length) return '';
-      const nb = refs.reduce((n, r) => n + (r.variantes ? r.variantes.length : 1), 0);
+      const nb = refs.reduce((n, r) => n + vuesDe.get(r).length, 0);
       const teinte = section.teinte ? ' style="--sec-teinte:' + section.teinte + '"' : '';
 
       return '<div class="sec-bloc"' + teinte + '>' +
@@ -2205,12 +2381,13 @@ V.inventaire = async function () {
           if (!r.variantes || !r.variantes.length) {
             const c = cleSec(r, '');
             return '<div class="invl">' +
-              '<span class="invn">' + esc(r.nom) + '</span>' +
+              '<span class="invn">' + esc(r.nom) + contenuLigne(c) + '</span>' + infoSec(c, r.nom) +
               (anc[c] !== undefined ? '<span class="invc faible">préc. ' + n1(anc[c]) + '</span>' : '') +
               champSec(r, c, r.nom) + '</div>';
           }
 
-          const ouvert = deplies[r.id];
+          const ouvert = deplies[r.id] || mots.length > 0;
+          const vues = vuesDe.get(r);
           const saisis = r.variantes.filter(v => saisieSec[cleSec(r, v)] !== undefined).length;
           const total  = r.variantes.reduce((s, v) => s + num(saisieSec[cleSec(r, v)] || 0), 0);
 
@@ -2218,14 +2395,16 @@ V.inventaire = async function () {
             '<button type="button" class="invp-h depliable" data-deplier="' + esc(r.id) + '">' +
             '<b>' + esc(r.nom) + '</b>' +
             '<span class="invc">' + (saisis
-              ? n1(total) + ' ' + esc(r.unite) + (total > 1 ? 's' : '') + ' · ' + saisis + '/' + r.variantes.length
-              : r.variantes.length + ' déclinaisons · en ' + esc(r.unite)) + '</span>' +
+              ? n1(total) + ' ' + esc(r.unite) + (total > 1 ? 's' : '') + ' · ' + saisis + '/' + r.variantes.length +
+                (vues.length < r.variantes.length ? ' · ' + vues.length + ' affichée' + (vues.length > 1 ? 's' : '') : '')
+              : (vues.length < r.variantes.length ? vues.length + ' sur ' : '') +
+                r.variantes.length + ' déclinaisons · en ' + esc(r.unite)) + '</span>' +
             '<span class="chev">' + (ouvert ? '−' : '+') + '</span></button>' +
             (ouvert
-              ? '<div class="stack" style="margin-top:8px">' + r.variantes.map(v => {
+              ? '<div class="stack" style="margin-top:8px">' + vues.map(v => {
                   const c = cleSec(r, v);
                   return '<div class="invl">' +
-                    '<span class="invn">' + esc(v) + '</span>' +
+                    '<span class="invn">' + esc(v) + contenuLigne(c) + '</span>' + infoSec(c, r.nom + ', ' + v) +
                     (anc[c] !== undefined ? '<span class="invc faible">préc. ' + n1(anc[c]) + '</span>' : '') +
                     champSec(r, c, r.nom + ', ' + v) + '</div>';
                 }).join('') + '</div>'
@@ -2234,6 +2413,9 @@ V.inventaire = async function () {
         }).join('') + '</div></div>';
     }).join('');
   };
+
+  const listeSec = () => blocSec() ||
+    '<p class="mini" style="margin-top:12px">Aucun produit ne correspond à « ' + esc(recherche) + ' ».</p>';
 
   /* Valeur totale du stock (manager) : dernier inventaire confirmé de la
      chambre froide + dernier du sec, chacun à ses prix du jour. */
@@ -2250,6 +2432,28 @@ V.inventaire = async function () {
       (sp ? ' · ' + sp + ' ' + accord(sp, 'produit compté', 'produits comptés') + ' sans prix' : '') +
       '</div>', 'solide');
   })();
+
+  /* Liaisons des lignes (repli, fiche « ? », saisie du sec), dans tout l'écran
+     ou seulement dans la liste du sec refaite par la recherche. */
+  const lierLignes = racine => {
+    const ouvert = partie === 'froid' ? ouvertFroid : ouvertSec;
+    racine.querySelectorAll('[data-deplier]').forEach(b => b.onclick = () => {
+      /* Pendant une recherche tout est ouvert : rien à replier. */
+      if (partie === 'sec' && recherche.trim()) return;
+      deplies[b.dataset.deplier] = !deplies[b.dataset.deplier];
+      dessiner();
+    });
+    racine.querySelectorAll('[data-info]').forEach(b => b.onclick = () => ficheProduit(b.dataset.info));
+    racine.querySelectorAll('[data-sec]').forEach(i => {
+      i.disabled = !ouvert;
+      i.oninput = () => {
+        if (i.value === '') delete saisieSec[i.dataset.sec];
+        else saisieSec[i.dataset.sec] = i.value;
+        garderBrouillon();
+        majTotaux();
+      };
+    });
+  };
 
   const dessiner = () => {
     $('#vue-actions').innerHTML = '';
@@ -2305,7 +2509,11 @@ V.inventaire = async function () {
         ? '<div class="rappel" style="margin-top:12px"><b>Comptez aussi l’armoire −13</b> : ' +
           nbArmoire + ' ' + accord(nbArmoire, 'bac y est noté et fait', 'bacs y sont notés et font') + ' toujours partie du stock.</div>'
         : '') +
-      (partie === 'froid' ? blocFroid() : blocSec()) +
+      (partie === 'froid' ? blocFroid()
+        : '<div class="champ" style="margin-top:14px"><label class="f" for="sec-cherche">Chercher un produit</label>' +
+          '<input type="search" id="sec-cherche" autocomplete="off" placeholder="Nom, étiquette ou code : wafer, nocciolata, CIALDI…" value="' +
+          esc(recherche) + '"></div>' +
+          '<div id="sec-liste">' + listeSec() + '</div>') +
 
       '<div class="champ" style="margin-top:18px"><label class="f">Note</label>' +
       '<textarea id="inv-note" placeholder="Ce qui explique un écart, un bac abîmé, un doute.">' +
@@ -2356,10 +2564,6 @@ V.inventaire = async function () {
             }).join('') + '</div>'
           : ''));
 
-    $$('[data-deplier]').forEach(b => b.onclick = () => {
-      deplies[b.dataset.deplier] = !deplies[b.dataset.deplier];
-      dessiner();
-    });
     $$('[data-hist]').forEach(b => b.onclick = () => {
       const [p, i] = b.dataset.hist.split('|');
       const liste = (p === 'froid' ? historique : historiqueSec).slice().reverse();
@@ -2454,6 +2658,7 @@ V.inventaire = async function () {
       if (b.dataset.partie === partie) return;
       partie = b.dataset.partie;
       note = '';
+      recherche = '';
       dessiner();
     });
 
@@ -2466,15 +2671,23 @@ V.inventaire = async function () {
         majTotaux();
       };
     });
-    $$('[data-sec]').forEach(i => {
-      i.disabled = !ouvert;
-      i.oninput = () => {
-        if (i.value === '') delete saisieSec[i.dataset.sec];
-        else saisieSec[i.dataset.sec] = i.value;
-        garderBrouillon();
-        majTotaux();
+    lierLignes(document);
+    /* Recherche : seule la liste est refaite, le champ reste en place (le
+       clavier du téléphone ne se ferme pas). Pendant une composition (accent,
+       prédiction), on attend qu'elle se termine. */
+    const zc = $('#sec-cherche');
+    if (zc) {
+      zc.oninput = e => {
+        recherche = zc.value;
+        if (e && e.isComposing) return;
+        clearTimeout(minuterieRech);
+        minuterieRech = setTimeout(() => {
+          const l = $('#sec-liste');
+          if (l && l.isConnected) { l.innerHTML = listeSec(); lierLignes(l); }
+        }, 120);
       };
-    });
+      zc.addEventListener('compositionend', () => zc.oninput());
+    }
     const zn = $('#inv-note');
     if (zn) { zn.disabled = !ouvert; zn.oninput = () => { note = zn.value; }; }
     majTotaux();
@@ -2503,6 +2716,22 @@ V.inventaire = async function () {
     const vides = Object.keys(avant || {})
       .filter(c => lignes[c] === undefined && num(avant[c]) > 0 && parGroupe[groupeInv(p, c)])
       .sort((x, y) => libelleInv(p, x).localeCompare(libelleInv(p, y)));
+    /* Sec : une référence pas comptée du tout garde son ancien stock. On les
+       nomme (celles qui ont une fiche « ? » d'abord : elles sont en réserve),
+       et on montre les quantités qui ressemblent à une erreur d'unité. */
+    const mgr = !!(STATE.user && STATE.user.role === 'manager');
+    const douteux = p === 'sec' ? Object.keys(lignes)
+      .map(c => ({ c: c, t: secDouteux(c, lignes[c], (avant || {})[c], mgr) })).filter(x => x.t) : [];
+    /* Pas comptées : celles qui avaient du stock, et celles qui ont une fiche
+       « ? » (vues en réserve). Les autres, vides depuis toujours, noieraient
+       la liste. */
+    const cles = r => (r.variantes && r.variantes.length ? r.variantes : ['']).map(v => 'sec|' + r.id + '|' + v);
+    const aFiche = r => typeof INFO_PRODUITS !== 'undefined' && cles(r).some(k => INFO_PRODUITS[k]);
+    const aStock = r => cles(r).some(k => num((avant || {})[k]) > 0);
+    const pasComptes = p === 'sec' ? catalogueSec()
+      .filter(r => typeof r === 'object' && !r.masque && !parGroupe[r.id] && (aStock(r) || aFiche(r)))
+      .sort((x, y) => (+aFiche(y) - +aFiche(x)) || x.nom.localeCompare(y.nom))
+      .map(r => r.nom) : [];
     showSheet(
       '<h2 id="sheet-titre">' + esc(titre) + '</h2>' +
       '<p class="sub">' + esc(texte) + '</p>' +
@@ -2516,6 +2745,16 @@ V.inventaire = async function () {
       (vides.length
         ? '<div class="alerte warn" style="margin-top:12px"><div style="flex:1;min-width:0"><b>Laissés vides, comptés 0</b>' +
           '<p>' + esc(vides.map(libelleInv.bind(null, p)).join(', ')) + '. Corrigez si c’est un oubli.</p></div></div>'
+        : '') +
+      (douteux.length
+        ? '<div class="alerte warn" style="margin-top:12px"><div style="flex:1;min-width:0"><b>Quantités à vérifier</b>' +
+          douteux.map(x => '<p>' + esc(libelleInv(p, x.c)) + ' : ' + esc(x.t) + '.</p>').join('') +
+          '<p class="mini">Vérifiez l’unité affichée (carton, ramette, pack…) : une unité entière = 1, la moitié = 0,5.</p></div></div>'
+        : '') +
+      (pasComptes.length
+        ? '<div class="alerte" style="margin-top:12px"><div style="flex:1;min-width:0"><b>Pas comptés cette fois (' + pasComptes.length + ')</b>' +
+          '<p>' + esc(pasComptes.join(', ')) + '. Leur stock reste celui du dernier inventaire. ' +
+          'Comptez-les s’ils sont en réserve.</p></div></div>'
         : '') +
       '<div class="actions"><button class="btn clair" data-fermer>Corriger</button>' +
       '<button class="btn menthe" id="rv-oui">' + esc(libelle) + '</button></div>'
