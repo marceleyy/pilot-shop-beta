@@ -1678,7 +1678,7 @@ V.stock = async function () {
             const sous = r.variantes && r.variantes.length
               ? lignes.filter(x => minDe(x.v) > 0 && x.q < minDe(x.v))
               : (minDe('') > 0 && total < minDe('') ? [{ v: '', q: total }] : []);
-            const aMin = lignes.some(x => minDe(x.v) > 0);
+            const aMin = minDe('') > 0 || lignes.some(x => minDe(x.v) > 0);
             return carte('<div class="rang"><div style="flex:1;min-width:0"><b>' + esc(r.nom) + '</b>' +
               (suivi ? '<div class="mini">Suivi en direct : comptage moins ouvertures</div>' : '') +
               (r.variantes && r.variantes.length
