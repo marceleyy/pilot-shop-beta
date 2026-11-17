@@ -665,7 +665,7 @@ const INVENTAIRE_SEC = [
   { id:'spatule',   sec:'Service', nom:'Spatules en bois 11 cm',     unite:'carton', decimal:true },
   { id:'cialdi',    sec:'Service', nom:'Mini wafers emballés (La Cialdina)', unite:'carton', decimal:true },
   /* Comptée à la boîte depuis le 17/11 (carton de 12 à 32 € : 2,67 € la boîte). */
-  { id:'gaufrette', sec:'Service', nom:'Wafer al Gianduja (carton 12 boîtes)', unite:'boîte', decimal:true },
+  { id:'gaufrette', sec:'Service', nom:'Wafer al Gianduja (boîte de 50)', unite:'boîte', decimal:true },
   { id:'garniture', sec:'Coulis et toppings', nom:'Garnitures gaufres et crêpes', unite:'pot', decimal:true,
     /* « Sauce caramel 700 g » = le flacon « Coulis · Caramel » : comptée là. */
     variantes:['Sauce caramel 2 L','Chocolat de couverture 5 kg','Crème gianduja 5 kg',
@@ -810,7 +810,7 @@ const INFO_PRODUITS = {
     compter: 'Un sachet = 1. Un carton plein = 20.' },
   'sec|cialdi|': { photo: 'produits/cialdina.jpg', etiquette: 'La Cialdina, mini wafers emballés un par un, carton de 2 kg (400 pièces)', code: 'CIALDI',
     compter: 'Un carton = 1. Un sac à moitié plein = 0,5.' },
-  'sec|gaufrette|': { photo: 'produits/wafer-gianduja.jpg', etiquette: 'Wafer al Gianduja, boîte de 400 g, carton de 12 boîtes', code: 'WAFERN',
+  'sec|gaufrette|': { photo: 'produits/wafer-gianduja.jpg', etiquette: 'Wafer al Gianduja, boîte de 50 mini gaufrettes, carton de 12 boîtes', code: 'WAFERN',
     compter: 'À la boîte depuis le 17/11 : une boîte = 1, un carton fermé = 12.' },
   'sec|garniture|Crème pistache 3 kg': { photo: 'produits/chococream-pistache.jpg', etiquette: 'Chococream Pistacchio 15 %, seau de 3 kg', code: 'TOPPISTAC',
     compter: 'Un seau = 1.' },

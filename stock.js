@@ -2053,21 +2053,21 @@ function voirInventaire(h, partie) {
      comptage, puis le total de chaque groupe et le total général. */
   const bCsv = $('#inv-csv');
   if (bCsv) bCsv.onclick = () => {
-    /* Nombres : point décimal et sans guillemets, pour que le tableur les lise
-       comme des nombres (somme, multiplication) sans remplacer les virgules. */
-    const Nb = function (v) { this.v = v; };
-    const q = x => { if (x instanceof Nb) return x.v;
+    /* Nombres : point décimal et sans guillemets, comme demandé par la
+       boutique (son tableur les lit ainsi comme des nombres). Un tableur
+       réglé en français attendrait une virgule. */
+    const q = x => { if (typeof x === 'number') return isFinite(x) ? String(x) : '';
                      x = String(x == null ? '' : x);
                      if (/^[=+\-@\t\r]/.test(x)) x = "'" + x;
                      return '"' + x.replace(/"/g, '""') + '"'; };
-    const dec = v => new Nb((Math.round(num(v) * 100) / 100).toFixed(2));
+    const dec = v => Math.round(num(v) * 100) / 100;
     const rows = [['Groupe', 'Produit', 'Quantité', 'Unité', 'Prix HT', 'Valeur HT']];
     let total = 0;
     groupes.filter(g => g.lignes.length).forEach(g => {
       let tg = 0;
       g.lignes.forEach(x => (x.det || [x]).forEach(y => {
         if (!(num(y.q) > 0)) return;
-        rows.push([g.titre, y.nom, new Nb(String(num(y.q))), y.unite ? accord(y.q, y.unite) : '',
+        rows.push([g.titre, y.nom, Math.round(num(y.q) * 1000) / 1000, y.unite ? accord(y.q, y.unite) : '',
                    y.prix !== null && y.prix !== undefined ? dec(y.prix) : 'sans prix', dec(y.val)]);
         tg += num(y.val);
       }));
