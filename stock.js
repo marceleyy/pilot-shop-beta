@@ -1398,11 +1398,12 @@ function articlesFroidSeuils() {
 function articlesSousSeuil(seuils, articles, secLignes) {
   const out = [];
   const connues = typeof clesSecConnues === 'function' ? clesSecConnues() : new Set();
+  const froid = new Map(articlesFroidSeuils().map(x => [x.k, x]));
   Object.keys(seuils || {}).forEach(k => {
     const min = num(seuils[k]);
     if (!(min > 0)) return;
     const p = k.split('|');
-    if (p[0] === 'glace' && p.length === 2) {
+    if (p[0] === 'glace') {
       const q = bacsParfum(articles, p[1]);
       if (q <= min) out.push({ cle: k, nom: p[1], q: q, min: min, unite: 'bac', partie: 'froid' });
     } else if (p[0] === 'sec') {
@@ -1411,7 +1412,7 @@ function articlesSousSeuil(seuils, articles, secLignes) {
       const r = catalogueSec().filter(x => typeof x === 'object' && x.id === p[1])[0];
       if (q <= min) out.push({ cle: k, nom: libelleSec(k), q: q, min: min, unite: (r && r.unite) || 'unité', partie: 'sec' });
     } else {
-      const it = articlesFroidSeuils().filter(x => x.k === k)[0];
+      const it = froid.get(k);
       if (!it) return;
       const q = num((articles || {})[k]);
       if (q <= min) out.push({ cle: k, nom: it.nom, q: q, min: min, unite: it.u, partie: 'froid' });
@@ -1517,7 +1518,7 @@ V.stock = async function () {
   const manager = !!(STATE.user && STATE.user.role === 'manager');
   const boutonSeuils = p => manager
     ? '<button class="btn clair bloc" data-seuils="' + p + '" style="margin-top:10px">Stock minimum ' + (p === 'froid' ? 'de la chambre froide' : 'du sec') + '</button>' : '';
-  /* « Sous le minimum : 3 sur 4 » ou « Minimum 4 ». */
+  /* « À commander : 3 pour un minimum de 4 » (au minimum ou en dessous) ou « Minimum 4 ». */
   const ligneMin = (q, min, u) => !(min > 0) ? ''
     : q <= min ? '<div class="mini" style="color:var(--corail-d)"><b>À commander : ' + nSeuil(q) + ' pour un minimum de ' + nSeuil(min) + (u ? ' ' + esc(u) : '') + '</b></div>'
     : '<div class="mini">Minimum ' + nSeuil(min) + (u ? ' ' + esc(u) : '') + '</div>';
@@ -1566,6 +1567,8 @@ V.stock = async function () {
       const f = litArticle(x.k).famille;
       (parFamille[f] = parFamille[f] || []).push(x.k);
     });
+    /* Un produit à minimum sans stock reste à sa place alphabétique. */
+    Object.keys(parFamille).forEach(f => parFamille[f].sort((a, b) => libelleArticle(a).localeCompare(libelleArticle(b))));
     return carte('<div class="grid g3">' +
       kpi('Bacs de glace', t.bacs, '', n1(t.litres) + ' L') +
       kpi('Autres produits', t.unites, '', 'comptés à l’unité') +
@@ -1613,7 +1616,7 @@ V.stock = async function () {
             : parFamille[fid].map(c => { const a = litArticle(c), q = num(articles[c]), min = num(seuils[c]);
                 return carte('<div class="rang"><div style="flex:1;min-width:0"><b>' +
                   esc(a.parfum || (fam ? fam.libelle : fid)) + '</b>' +
-                  (fam ? '<div class="mini">En ' + esc(fam.unites) + '</div>' : '') + ligneMin(q, min, fam ? fam.unites : '') + '</div>' +
+                  (fam ? '<div class="mini">En ' + esc(fam.unites) + '</div>' : '') + ligneMin(q, min, fam ? (min > 1 ? fam.unites : fam.unite) : '') + '</div>' +
                   '<b class="num" style="font-size:20px">' + q + '</b></div>', q < 0 ? 'corail' : min > 0 && q <= min ? 'ambre' : '');
               }).join('');
           return '<div class="entete"><h3>' + esc(fam ? fam.libelle : fid) + '</h3>' +
