@@ -1342,6 +1342,126 @@ async function tacheRecomptage() {
 }
 
 /* -----------------------------------------------------------------------------
+   STOCK MINIMUM (manager)
+   « catalogue:seuils » : { « glace|<parfum> »: bacs, toutes tailles confondues ;
+   « sec|<réf>|<déclinaison> »: unités comptées }. Un article sous son minimum
+   (strictement) est signalé sur Stock et sur la tour de contrôle. Absent ou 0 :
+   pas de minimum.
+   -------------------------------------------------------------------------- */
+const CLE_SEUILS = 'catalogue:seuils';
+/* Quantité sans décimale inutile : « 2 », « 2,5 ». */
+const nSeuil = v => (Number(v) || 0).toLocaleString('fr-FR', { maximumFractionDigits: 2 });
+
+async function chargerSeuils() {
+  const m = await DB.get(CLE_SEUILS, null);
+  return (m && typeof m === 'object' && !Array.isArray(m)) ? m : {};
+}
+
+/* Bacs d'un parfum, toutes tailles. */
+function bacsParfum(articles, parfum) {
+  return Object.keys(articles || {}).reduce((t, c) => {
+    const a = litArticle(c);
+    return a.famille === 'glace' && a.parfum === parfum ? t + num(articles[c]) : t;
+  }, 0);
+}
+
+/* Quantité d'une ligne du sec : stock vivant pour coulis et toppings suivis
+   à l'ouverture, sinon comptage + livraisons. */
+function qteSec(cle, articles, secLignes) {
+  const cleV = typeof cleVivanteSec === 'function' ? cleVivanteSec(cle, secLignes || {}) : null;
+  if (cleV && articles && articles[cleV] !== undefined) return num(articles[cleV]);
+  return num((secLignes || {})[cle]);
+}
+
+/* [{ cle, nom, q, min, unite, partie }] des articles sous leur minimum. */
+function articlesSousSeuil(seuils, articles, secLignes) {
+  const out = [];
+  const connues = typeof clesSecConnues === 'function' ? clesSecConnues() : new Set();
+  Object.keys(seuils || {}).forEach(k => {
+    const min = num(seuils[k]);
+    if (!(min > 0)) return;
+    const p = k.split('|');
+    if (p[0] === 'glace') {
+      const q = bacsParfum(articles, p[1]);
+      if (q < min) out.push({ cle: k, nom: p[1], q: q, min: min, unite: 'bac', partie: 'froid' });
+    } else if (p[0] === 'sec' && connues.has(k)) {
+      const q = qteSec(k, articles, secLignes);
+      const r = catalogueSec().filter(x => typeof x === 'object' && x.id === p[1])[0];
+      if (q < min) out.push({ cle: k, nom: libelleSec(k), q: q, min: min, unite: (r && r.unite) || 'unité', partie: 'sec' });
+    }
+  });
+  return out.sort((a, b) => (a.q / a.min) - (b.q / b.min));
+}
+
+/* Feuille de saisie des minimums d'une partie (« froid » : glaces, « sec »). */
+async function editerSeuils(partie, apres) {
+  if (!(STATE.user && STATE.user.role === 'manager')) return toast('Réservé au manager', 'erreur');
+  if (typeof chargerCatalogueSec === 'function') { try { await chargerCatalogueSec(); } catch (e) {} }
+  const seuils = await chargerSeuils();
+  const items = [];
+  if (partie === 'froid') {
+    PARFUMS.slice().sort((a, b) => a.localeCompare(b)).forEach(p =>
+      items.push({ k: 'glace|' + p, nom: p, grp: 'Bacs de glace, toutes tailles', u: 'bacs' }));
+  } else {
+    catalogueSec().filter(r => r && typeof r === 'object' && !r.masque).forEach(r =>
+      (r.variantes && r.variantes.length ? r.variantes : ['']).forEach(v =>
+        items.push({ k: 'sec|' + r.id + '|' + v, nom: r.nom + (v ? ' · ' + v : ''), grp: r.sec || 'Autres', u: r.unite || 'unité' })));
+  }
+  const nrm = x => String(x || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  let grp = null;
+  showSheet(
+    '<h2 id="sheet-titre">Stock minimum · ' + (partie === 'froid' ? 'glaces' : 'sec') + '</h2>' +
+    '<p class="sub">Sous ce nombre, l’article est signalé sur Stock et sur la tour de contrôle. Vide : pas de minimum.</p>' +
+    '<input type="search" id="sl-rech" placeholder="Chercher un article" autocomplete="off">' +
+    '<div id="sl-liste" style="margin-top:10px">' + items.map((it, i) => {
+      const titre = it.grp !== grp ? '<div class="entete" data-slg="' + esc(it.grp) + '" style="margin-top:12px"><h3>' + esc(it.grp) + '</h3></div>' : '';
+      grp = it.grp;
+      const v = seuils[it.k];
+      return titre + '<div class="rang" data-slr="' + i + '" data-slgr="' + esc(it.grp) + '" style="padding:6px 0">' +
+        '<div style="flex:1;min-width:0">' + esc(it.nom) + '<div class="mini">en ' + esc(it.u) + '</div></div>' +
+        '<input type="number" min="0" step="any" inputmode="decimal" data-sl="' + i + '" value="' + (num(v) > 0 ? esc(String(v)) : '') + '" style="width:76px;text-align:center"></div>';
+    }).join('') + '</div>' +
+    '<div class="actions"><button class="btn clair" data-fermer>Annuler</button>' +
+    '<button class="btn menthe" id="sl-ok">Enregistrer</button></div>');
+  const touches = {};
+  $$('[data-sl]').forEach(inp => inp.oninput = () => { touches[+inp.dataset.sl] = inp.value.trim(); });
+  $('#sl-rech').oninput = () => {
+    const mots = nrm($('#sl-rech').value).split(/\s+/).filter(Boolean);
+    const visibles = new Set();
+    $$('[data-slr]').forEach(el => {
+      const it = items[+el.dataset.slr];
+      const ok = mots.every(m => nrm(it.nom).indexOf(m) >= 0);
+      el.style.display = ok ? '' : 'none';
+      if (ok) visibles.add(it.grp);
+    });
+    $$('[data-slg]').forEach(el => { el.style.display = visibles.has(el.dataset.slg) ? '' : 'none'; });
+  };
+  let enCours = false;
+  $('#sl-ok').onclick = async () => {
+    if (enCours) return;
+    const idx = Object.keys(touches);
+    if (idx.some(i => touches[i] !== '' && !(num(touches[i]) >= 0))) return toast('Minimum invalide : un nombre positif', 'erreur');
+    if (!idx.length) { closeSheet(); return; }
+    enCours = true;
+    try {
+      /* Relu juste avant : seules les lignes touchées changent, un autre
+         manager qui saisit en même temps garde les siennes. */
+      const frais = await chargerSeuils();
+      idx.forEach(i => {
+        const k = items[+i].k, v = touches[i];
+        if (v === '' || !(num(v) > 0)) delete frais[k]; else frais[k] = num(v);
+      });
+      await DB.set(CLE_SEUILS, frais);
+      await feed('ok', STATE.user.prenom + ' a réglé le stock minimum de ' + idx.length + ' ' + accord(idx.length, 'article'));
+      closeSheet();
+      toast('Stock minimum enregistré');
+      if (apres) apres();
+    } catch (e) { toast('Enregistrement impossible, réessayez', 'erreur'); }
+    finally { enCours = false; }
+  };
+}
+
+/* -----------------------------------------------------------------------------
    VUE — STOCK RÉEL
    -------------------------------------------------------------------------- */
 V.stock = async function () {
@@ -1350,6 +1470,15 @@ V.stock = async function () {
   const sec = await DB.get('stock:sec', null);
   /* Livraisons du sec confirmées depuis le dernier comptage. */
   const secAttendu = sec ? await stockSecAttendu(sec).catch(() => null) : null;
+  const seuils = await chargerSeuils().catch(() => ({}));
+  const manager = !!(STATE.user && STATE.user.role === 'manager');
+  const boutonSeuils = p => manager
+    ? '<button class="btn clair bloc" data-seuils="' + p + '" style="margin-top:10px">Stock minimum ' + (p === 'froid' ? 'des glaces' : 'du sec') + '</button>' : '';
+  /* « Sous le minimum : 3 sur 4 » ou « Minimum 4 ». */
+  const ligneMin = (q, min, u) => !(min > 0) ? ''
+    : q < min ? '<div class="mini" style="color:var(--corail-d)"><b>Sous le minimum : ' + nSeuil(q) + ' sur ' + nSeuil(min) + (u ? ' ' + esc(u) : '') + '</b></div>'
+    : '<div class="mini">Minimum ' + nSeuil(min) + (u ? ' ' + esc(u) : '') + '</div>';
+  const minGlace = Object.keys(seuils).filter(k => k.indexOf('glace|') === 0 && num(seuils[k]) > 0).map(k => k.slice(6));
   const attente = await inventaireEnAttente('froid');
   const attenteSec = await inventaireEnAttente('sec');
   /* Réceptions pas encore confirmées : leurs bacs ne sont pas dans ces chiffres. */
@@ -1387,6 +1516,8 @@ V.stock = async function () {
       const f = litArticle(c).famille;
       (parFamille[f] = parFamille[f] || []).push(c);
     });
+    /* Un parfum à minimum reste affiché à zéro bac : c'est là qu'il manque. */
+    if (minGlace.length && !parFamille.glace) parFamille.glace = [];
     return carte('<div class="grid g3">' +
       kpi('Bacs de glace', t.bacs, '', n1(t.litres) + ' L') +
       kpi('Autres produits', t.unites, '', 'comptés à l’unité') +
@@ -1406,8 +1537,9 @@ V.stock = async function () {
       : '') +
 
     '<button class="btn menthe bloc xl" id="st-inv" style="margin-top:16px">Faire l’inventaire</button>' +
+    boutonSeuils('froid') +
 
-    (clesFroid.length
+    (clesFroid.length || minGlace.length
       ? Object.keys(parFamille).map(fid => {
           const fam = FAMILLES_PRODUIT.filter(x => x.id === fid)[0];
           const sous = parFamille[fid].reduce((s, c) => s + num(articles[c]), 0);
@@ -1417,15 +1549,17 @@ V.stock = async function () {
                 const parParfum = {};
                 parFamille[fid].forEach(c => { const a = litArticle(c);
                   (parParfum[a.parfum] = parParfum[a.parfum] || []).push(c); });
+                minGlace.forEach(p => { if (!parParfum[p]) parParfum[p] = []; });
                 return Object.keys(parParfum).sort((x, y) => x.localeCompare(y)).map(p => {
                   const tailles = parParfum[p].sort((x, y) => num(litArticle(x).taille) - num(litArticle(y).taille));
                   const n = tailles.reduce((s, c) => s + num(articles[c]), 0);
                   const negatif = tailles.some(c => num(articles[c]) < 0);
+                  const min = num(seuils['glace|' + p]);
                   return carte('<div class="rang"><div style="flex:1;min-width:0"><b>' + esc(p) + '</b>' +
-                    '<div class="mini tailles">' + tailles.map(c => { const q = num(articles[c]);
+                    '<div class="mini tailles">' + (tailles.length ? tailles.map(c => { const q = num(articles[c]);
                       return '<span class="tq' + (q < 0 ? ' neg' : '') + '"><b>' + q + '</b>×' + esc(litArticle(c).taille) + ' L</span>';
-                    }).join('') + '</div></div>' +
-                    '<b class="num" style="font-size:20px">' + n + '</b></div>', negatif ? 'corail' : '');
+                    }).join('') : 'aucun bac') + '</div>' + ligneMin(n, min, accord(min, 'bac')) + '</div>' +
+                    '<b class="num" style="font-size:20px">' + n + '</b></div>', negatif ? 'corail' : min > 0 && n < min ? 'ambre' : '');
                 }).join('');
               })()
             : parFamille[fid].map(c => { const a = litArticle(c), q = num(articles[c]);
@@ -1458,6 +1592,11 @@ V.stock = async function () {
       (parRef[p[1]] = parRef[p[1]] || []).push({ v: p[2] || '', q: num(l[k]) }); });
     const totalLignes = Object.keys(l).length;
     const totalUnites = Object.keys(l).reduce((s, k) => s + num(l[k]), 0);
+    /* Ligne à minimum jamais comptée : affichée à zéro. */
+    const connuesSec = clesSecConnues();
+    Object.keys(seuils).forEach(k => { const p = k.split('|');
+      if (p[0] !== 'sec' || !(num(seuils[k]) > 0) || !connuesSec.has(k) || l[k] !== undefined) return;
+      (parRef[p[1]] = parRef[p[1]] || []).push({ v: p[2] || '', q: 0 }); });
 
     /* Stock vivant du sec. Les familles tracées à l'ouverture (chantilly,
        coulis, toppings) ont un compte qui bouge entre deux comptages :
@@ -1492,6 +1631,7 @@ V.stock = async function () {
       (nbRecus ? ', plus les livraisons confirmées depuis (' + nbRecus + ' ' + accord(nbRecus, 'référence reçue', 'références reçues') + ')' : '') +
       '.</p>' + bandeauAttente(attenteSec, 'sec'), 'solide') +
       '<button class="btn menthe bloc xl" id="st-inv-sec" style="margin-top:16px">Recompter le sec</button>' +
+      boutonSeuils('sec') +
 
       sections.map(s => {
         const refs = cat.filter(r => (r.sec || 'Autres') === s.id && !r.masque && parRef[r.id]);
@@ -1512,8 +1652,15 @@ V.stock = async function () {
             const total = enBloc !== null ? enBloc : lignes.reduce((a, x) => a + x.q, 0);
             const suivi = enBloc !== null || lignes.some(x => x.vif);
             const connues = new Set(r.variantes || []);
+            const minDe = v => num(seuils['sec|' + r.id + '|' + (v || '')]);
+            const sous = lignes.filter(x => minDe(x.v) > 0 && x.q < minDe(x.v));
+            const aMin = lignes.some(x => minDe(x.v) > 0);
             return carte('<div class="rang"><div style="flex:1;min-width:0"><b>' + esc(r.nom) + '</b>' +
               (suivi ? '<div class="mini">Suivi en direct : comptage moins ouvertures</div>' : '') +
+              (r.variantes && r.variantes.length
+                ? (sous.length ? '<div class="mini" style="color:var(--corail-d)"><b>Sous le minimum : ' +
+                    sous.map(x => esc(x.v || '—') + ' ' + nSeuil(x.q) + ' sur ' + nSeuil(minDe(x.v))).join(', ') + '</b></div>' : '')
+                : (aMin ? ligneMin(total, minDe(''), '') : '')) +
               (r.variantes && r.variantes.length
                 ? '<div class="mini tailles">' + lignes
                     .sort((a, b) => (r.variantes.indexOf(a.v) + 99) - (r.variantes.indexOf(b.v) + 99))
@@ -1522,7 +1669,7 @@ V.stock = async function () {
                 : '') + '</div>' +
               '<b class="num" style="font-size:20px">' + n1(total) + '</b>' +
               '<span class="mini" style="margin-left:6px">' + esc(r.unite) + (total > 1 ? 's' : '') + '</span></div>',
-              total < 0 ? 'corail' : '');
+              total < 0 ? 'corail' : (sous.length ? 'ambre' : ''));
           }).join('') + '</div></div>';
       }).join('');
   };
@@ -1547,6 +1694,7 @@ V.stock = async function () {
     if (rv && typeof verifierReceptions === 'function') rv.onclick = verifierReceptions;
     const bs = $('#st-inv-sec');
     if (bs) bs.onclick = () => { STATE.inventairePartie = 'sec'; rendre('inventaire'); };
+    $$('[data-seuils]').forEach(b => b.onclick = () => editerSeuils(b.dataset.seuils, () => rendre('stock')));
   };
   dessiner();
 };
@@ -1599,6 +1747,32 @@ V.controle = async function () {
       const secVal = ps ? valeurStock(ps.lignes, ps.prix).total : 0;
       if (go) go.onclick = () => { STATE.inventairePartie = secVal > 0 ? 'sec' : 'froid'; rendre('inventaire'); };
     }
+
+    /* Articles sous leur stock minimum : à commander. */
+    try {
+      const seuils = await chargerSeuils();
+      if (Object.keys(seuils).length) {
+        const [{ articles }, sec] = await Promise.all([stockReel(), Promise.resolve(ps)]);
+        const att = sec ? await stockSecAttendu(sec).catch(() => null) : null;
+        const sous = articlesSousSeuil(seuils, articles, att ? att.lignes : (sec && sec.lignes) || {});
+        if (STATE.view !== 'controle' || page !== $('#page')) return;
+        const vieille = $('#sous-seuil'); if (vieille) vieille.remove();
+        if (sous.length) {
+          const bm = document.createElement('div');
+          bm.id = 'sous-seuil';
+          bm.style.marginTop = '14px';
+          const liste = sous.slice(0, 8).map(x => esc(x.nom) + ' ' + nSeuil(x.q) + '/' + nSeuil(x.min)).join(', ') +
+            (sous.length > 8 ? ' et ' + (sous.length - 8) + ' autre' + (sous.length > 9 ? 's' : '') : '');
+          bm.innerHTML = '<div class="alerte warn"><span class="ai">•</span><div style="flex:1;min-width:0"><b>' +
+            sous.length + ' ' + accord(sous.length, 'article sous le stock minimum', 'articles sous le stock minimum') + '</b>' +
+            '<p>' + liste + '</p></div><button class="btn menthe sm" data-voirseuil>Voir</button></div>';
+          const apres = $('#valeur-stock');
+          page.insertBefore(bm, apres && apres.parentNode === page ? apres.nextSibling : page.firstChild.nextSibling);
+          bm.querySelector('[data-voirseuil]').onclick = () => {
+            STATE.stockPartie = sous.some(x => x.partie === 'froid') ? 'froid' : 'sec'; rendre('stock'); };
+        }
+      }
+    } catch (e) {}
   }
 
   /* -----------------------------------------------------------------------------
