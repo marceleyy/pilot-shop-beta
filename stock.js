@@ -738,11 +738,20 @@ async function theoriqueAuComptage(a, maintenant) {
 
 /* Ce que l'inventaire confirmé doit porter : le compté, plus, pour ce qui
    n'a pas été compté du tout, la valeur attendue (le stock ne bouge pas). */
+/* Déclinaisons retirées de la fiche : on ne peut plus les compter, leur
+   stock est reporté tel quel même si le reste de la référence a été compté. */
+function clesRetireesSec(partie) {
+  const out = new Set();
+  if (partie === 'sec') catalogueSec().forEach(r => (r.variantesRetirees || []).forEach(v => out.add('sec|' + r.id + '|' + v)));
+  return out;
+}
+
 function lignesAReprendre(a, partie, attendu) {
   const comptes = groupesComptes(a, partie);
+  const retirees = clesRetireesSec(partie);
   const out = {};
   Object.keys(attendu || {}).forEach(c => {
-    if (!comptes.has(groupeInv(partie, c)) && num(attendu[c])) out[c] = num(attendu[c]);
+    if ((retirees.has(c) || !comptes.has(groupeInv(partie, c))) && num(attendu[c])) out[c] = num(attendu[c]);
   });
   return Object.assign(out, a.lignes || {});
 }
@@ -750,8 +759,9 @@ function lignesAReprendre(a, partie, attendu) {
 function lignesAttente(a, partie) {
   const l = a.lignes || {}, av = a.avant || {};
   const comptes = groupesComptes(a, partie);
+  const retirees = clesRetireesSec(partie);
   return [...new Set(Object.keys(av).concat(Object.keys(l)))]
-    .filter(c => comptes.has(groupeInv(partie, c)))
+    .filter(c => comptes.has(groupeInv(partie, c)) && !(retirees.has(c) && !(c in l)))
     .map(c => ({ c: c, compte: num(l[c] || 0), attendu: num(av[c] || 0) }))
     .filter(x => x.compte || x.attendu)
     .map(x => Object.assign(x, { d: x.compte - x.attendu }))
@@ -1983,8 +1993,10 @@ async function chargerCatalogueSec() {
     const retirees = vs.filter(v => ret.has('sec|' + x.id + '|' + v));
     if (!retirees.length) return;
     x.variantesRetirees = retirees;
+    x.variantesToutes = vs.slice();
     x.variantes = vs.filter(v => retirees.indexOf(v) < 0);
-    if (!x.variantes.length) { x.variantes = vs; x.variantesRetirees = []; x.masque = true; }
+    /* Garde-fou (la fiche l'empêche) : tout retiré = référence retirée. */
+    if (!x.variantes.length) { x.variantes = vs; x.masque = true; }
   });
   _catalogueSec = out;
   return out;
@@ -2128,8 +2140,9 @@ function editerPrix(titre, lignes, apres) {
    l'inventaire, la réception, les minimums et la valeur lisent. Retirer ne
    touche pas au stock déjà compté. */
 async function ficheArticle(r, apres) {
-  const seuils = await chargerSeuils().catch(() => ({}));
-  const toutes = (r.variantes || []).concat(r.variantesRetirees || []);
+  let seuils;
+  try { seuils = await chargerSeuils(); } catch (e) { return toast('Minimums illisibles, réessayez', 'erreur'); }
+  const toutes = r.variantesToutes || (r.variantes || []).concat(r.variantesRetirees || []);
   const lignes = (toutes.length ? toutes : ['']).map(v => ({
     v: v, cp: 'sec|' + r.id + '|' + v,
     actif: toutes.length ? (r.variantesRetirees || []).indexOf(v) < 0 : !r.masque
@@ -2140,6 +2153,7 @@ async function ficheArticle(r, apres) {
     '<p class="cs">Compté en ' + esc(r.unite) + '. Prix d’achat HT par ' + esc(r.unite) +
     ' ; minimum : arrivé à ce nombre, l’article est « à commander ». Retirer une déclinaison la cache ' +
     'de l’inventaire, de la réception et du réassort, sans effacer son stock.</p>' +
+    (r.masque && toutes.length ? '<div class="alerte warn" style="margin-top:10px"><span class="ai">•</span><div><b>Référence retirée</b><p>Réaffichez-la avec ↺ dans le catalogue.</p></div></div>' : '') +
     lignes.map((x, i) =>
       '<div class="card plat" style="margin-top:10px"><div class="rang">' +
       '<b style="flex:1;min-width:0">' + esc(x.v || r.nom) + '</b>' +
@@ -2168,6 +2182,9 @@ async function ficheArticle(r, apres) {
       if (mv !== (num(seuils[x.cp]) > 0 ? num(seuils[x.cp]) : 0)) mins[x.cp] = mv;
       const a = !!$('[data-fa="' + i + '"]').checked;
       if (a !== x.actif) actifs[x.cp] = a;
+    }
+    if (toutes.length && !$$('[data-fa]').some(c => c.checked)) {
+      return toast('Gardez au moins une déclinaison active, ou retirez la référence avec −', 'erreur');
     }
     enCours = true; $('#fa-ok').disabled = true;
     try {
@@ -2273,9 +2290,16 @@ V.catalogue = async function () {
   $$('[data-masque]').forEach(b => b.onclick = async () => {
     const id = b.dataset.masque;
     const i = m.masques.indexOf(id);
-    if (i >= 0) m.masques.splice(i, 1); else m.masques.push(id);
+    const r = cat.filter(x => x.id === id)[0];
+    /* Toutes ses déclinaisons retirées (✎ ou deux fiches en même temps) :
+       ↺ les réactive, sinon la référence resterait cachée. */
+    const toutRetire = r && r.masque && r.variantesToutes && r.variantesRetirees &&
+      r.variantesRetirees.length >= r.variantesToutes.length;
+    if (toutRetire && Array.isArray(m.retirees)) m.retirees = m.retirees.filter(k => k.split('|')[1] !== id);
+    if (i >= 0) m.masques.splice(i, 1); else if (!toutRetire) m.masques.push(id);
+    const reaffiche = i >= 0 || toutRetire;
     await enregistrerCatalogueSec(m);
-    await feed('ok', STATE.user.prenom + (i >= 0 ? ' a réaffiché ' : ' a retiré ') + id + ' du catalogue');
+    await feed('ok', STATE.user.prenom + (reaffiche ? ' a réaffiché ' : ' a retiré ') + id + ' du catalogue');
     rendre('catalogue');
   });
 
@@ -2299,7 +2323,7 @@ V.catalogue = async function () {
       '<textarea id="ct-var" rows="4" placeholder="Petit\nClassique\nGrand">' +
       /* Toutes les déclinaisons, retirées comprises : sinon les enregistrer ici
          effaçait celles que la fiche avait seulement retirées. */
-      esc((r.variantes || []).concat(r.variantesRetirees || []).join('\n')) + '</textarea></div>' +
+      esc((r.variantesToutes || r.variantes || []).join('\n')) + '</textarea></div>' +
       '<div class="actions"><button class="btn clair" data-fermer>Annuler</button>' +
       '<button class="btn menthe" id="ct-ok">Enregistrer</button></div>');
 
@@ -2322,6 +2346,12 @@ V.catalogue = async function () {
         m.ajouts.push({ id, sec:section, nom, unite, decimal, variantes });
       } else {
         m.modifs[r.id] = { nom, unite, decimal, variantes };
+        /* Une déclinaison effacée ou renommée ne reste pas « retirée » :
+           une future déclinaison du même nom serait cachée sans raison. */
+        if (Array.isArray(m.retirees)) m.retirees = m.retirees.filter(k => {
+          const p = k.split('|');
+          return p[1] !== r.id || variantes.indexOf(p[2]) >= 0;
+        });
       }
       try { await enregistrerCatalogueSec(m); }
       catch (e) { enCours = false; $('#ct-ok').disabled = false; return toast('Enregistrement impossible, réessayez', 'erreur'); }
