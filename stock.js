@@ -236,10 +236,33 @@ async function ajouterArticleSecRecu(nom, section) {
 }
 
 /* Quantités reçues depuis un instant (le dernier comptage du sec). */
+/* Réception écartée : ses lignes du journal du sec sont marquées
+   « supprime » (et non effacées : la fusion avec la base les ferait
+   revenir), et ne comptent plus. */
+async function retirerReceptionSec(id) {
+  const l = await DB.get(CLE_SEC_MV, []);
+  let n = 0;
+  l.forEach(m => { if (m && !m.supprime && String(m.id).indexOf(id + '|') === 0) { m.supprime = nowISO(); n++; } });
+  if (n) await DB.set(CLE_SEC_MV, l);
+  return n;
+}
+
+/* Réceptions du sec livrées entre deux instants (debut exclu, fin incluse). */
+async function recusSecEntre(debut, fin) {
+  const out = {};
+  (await DB.get(CLE_SEC_MV, [])).forEach(m => {
+    if (!m || !m.cle || m.supprime) return;
+    if (debut && String(m.at) <= String(debut)) return;
+    if (fin && String(m.at) > String(fin)) return;
+    out[m.cle] = Math.round((num(out[m.cle]) + num(m.q)) * 1000) / 1000;
+  });
+  return out;
+}
+
 async function recusSecDepuis(at) {
   const out = {};
   (await DB.get(CLE_SEC_MV, [])).forEach(m => {
-    if (!m || !m.cle || (at && String(m.at) <= String(at))) return;
+    if (!m || !m.cle || m.supprime || (at && String(m.at) <= String(at))) return;
     out[m.cle] = Math.round((num(out[m.cle]) + num(m.q)) * 1000) / 1000;
   });
   return out;
@@ -1014,7 +1037,18 @@ async function confirmerInventaire(a, partie, motif, nbVu) {
   if (partie === 'sec') {
     /* Même enregistrement que l'ancienne validation directe du sec, à
        l'heure du comptage. */
-    const lignes = lignesAReprendre(cur, 'sec', cur.avant);
+    /* Attendu recalculé maintenant : une livraison d'avant le comptage,
+       confirmée après, n'était pas dans cur.avant et serait perdue. */
+    const precSec = await DB.get('stock:sec', null);
+    let attenduSec = cur.avant;
+    /* Comptage rejoué plus ancien que le dernier confirmé : l'attendu du
+       moment du comptage (cur.avant) reste le bon. */
+    if (precSec && precSec.lignes && String(precSec.at || '') < String(cur.at || '')) {
+      attenduSec = Object.assign({}, precSec.lignes);
+      const rec = await recusSecEntre(precSec.at, cur.at);
+      Object.keys(rec).forEach(c => { attenduSec[c] = Math.round((num(attenduSec[c]) + rec[c]) * 1000) / 1000; });
+    }
+    const lignes = lignesAReprendre(cur, 'sec', attenduSec);
     /* Référence tracée (chantilly, coulis, toppings) non comptée : on reprend
        son stock vivant à l'heure du comptage, pas le chiffre du comptage
        précédent, sinon ses ouvertures depuis seraient effacées. */
@@ -1026,7 +1060,9 @@ async function confirmerInventaire(a, partie, motif, nbVu) {
       if (cleV && vivant[cleV] !== undefined) lignes[c] = Math.max(0, num(vivant[cleV]) - await mouvementsDepuis(cleV, cur.at));
     }
     await chargerPrixAchat().catch(() => {});
-    const inv = Object.assign({}, meta, { note: cur.note || '', lignes: lignes, prix: prixDuComptage(lignes) });
+    const inv = Object.assign({}, meta, { note: cur.note || '', lignes: lignes, prix: prixDuComptage(lignes),
+      /* Ce qui a vraiment été compté : un recomptage du jour ne recharge que ça. */
+      comptees: Object.keys(cur.lignes || {}) });
     await DB.set('stock:sec', inv);
     invaliderStock();
     /* Historique du sec : une correction du même jour remplace son entrée. */
@@ -1547,7 +1583,8 @@ V.stock = async function () {
   const ligneMin = (q, min, u) => !(min > 0) ? ''
     : q <= min ? '<div class="mini" style="color:var(--corail-d)"><b>À commander : ' + nSeuil(q) + ' pour un minimum de ' + nSeuil(min) + (u ? ' ' + esc(u) : '') + '</b></div>'
     : '<div class="mini">Minimum ' + nSeuil(min) + (u ? ' ' + esc(u) : '') + '</div>';
-  const minGlace = Object.keys(seuils).filter(k => k.indexOf('glace|') === 0 && num(seuils[k]) > 0).map(k => k.slice(6));
+  const minGlace = Object.keys(seuils).filter(k => k.indexOf('glace|') === 0 && num(seuils[k]) > 0).map(k => k.slice(6))
+    .filter(p => froidActif('glace', p));
   const attente = await inventaireEnAttente('froid');
   const attenteSec = await inventaireEnAttente('sec');
   /* Réceptions pas encore confirmées : leurs bacs ne sont pas dans ces chiffres. */
@@ -2212,12 +2249,18 @@ async function renommerDeclinaisonsSec(r, ren) {
   const seuils = await chargerSeuils();
   if (deplacer(seuils)) await DB.set(CLE_SEUILS, seuils);
   const sp = await DB.get('stock:sec', null);
+  if (sp && Array.isArray(sp.comptees)) sp.comptees = sp.comptees.map(c => map[c] || c);
   if (sp && (deplacer(sp.lignes) | deplacer(sp.prix))) await DB.set('stock:sec', sp);
   const at = await DB.get(INV_ATTENTE.sec.cle, null);
   if (at && (deplacer(at.lignes) | deplacer(at.avant))) await DB.set(INV_ATTENTE.sec.cle, at);
   const mv = await DB.get(CLE_SEC_MV, []);
   if (Array.isArray(mv) && mv.some(x => x && map[x.cle])) {
     await DB.set(CLE_SEC_MV, mv.map(x => x && map[x.cle] ? Object.assign({}, x, { cle: map[x.cle] }) : x));
+  }
+  const ra = await DB.get('reception:attente', []);
+  if (Array.isArray(ra) && ra.some(x => x && !x.traite && (x.lignes || []).some(l => l && map[l.cle]))) {
+    ra.forEach(x => { if (x && !x.traite) (x.lignes || []).forEach(l => { if (l && map[l.cle]) l.cle = map[l.cle]; }); });
+    await DB.set('reception:attente', ra);
   }
   const memo = await memoBL();
   let nMemo = 0;
@@ -2909,7 +2952,18 @@ V.inventaire = async function () {
   }
   const attenteSecDuJour = !!(attenteSec && attenteSec.jour === today());
   const secDejaFait = attenteSecDuJour || !!(secPrec && secPrec.jour === today());
-  if (secDejaFait) Object.assign(saisieSec, (attenteSecDuJour ? attenteSec : secPrec).lignes || {});
+  if (secDejaFait) {
+    const src = attenteSecDuJour ? attenteSec : secPrec;
+    const ls0 = src.lignes || {};
+    /* Inventaire confirmé : ses lignes comprennent aussi ce qui a été reporté
+       sans être compté. Seules les lignes comptées reviennent à l'écran. */
+    const ls = {};
+    Object.keys(ls0).forEach(c => { if (!Array.isArray(src.comptees) || src.comptees.indexOf(c) >= 0) ls[c] = ls0[c]; });
+    /* Déclinaison retirée ou référence masquée : reportée à la confirmation,
+       pas recopiée comme « comptée » (elle écraserait ses réceptions). */
+    const proposees = clesSecConnues();
+    Object.keys(ls).forEach(c => { if (proposees.has(c)) saisieSec[c] = ls[c]; });
+  }
 
   /* Verrouillé tant que la personne n'a pas demandé à rouvrir. */
   let ouvertFroid = !dejaFaitAujourdhui;

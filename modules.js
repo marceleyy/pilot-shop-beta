@@ -12,8 +12,11 @@
    PAGES.reception  = { titre:'Réception',   sous:'Livraison, DLC et stock fermé' };
 PAGES.stock      = { titre:'Stock réel', sous:'Ce qui reste en chambre froide' };
 PAGES.inventaire = { titre:'Faire l’inventaire', sous:'Compter ce qui est physiquement là' };
-PAGES.catalogue  = { titre:'Catalogue du sec', sous:'Ce que l’inventaire propose' };
-PAGES.parametres = { titre:'Back-office', sous:'Tâches, horaires et unités froides' };
+PAGES.catalogue  = { titre:'Catalogues', sous:'Sec et chambre froide' };
+PAGES.parametres = { titre:'Réglages', sous:'Tâches, horaires, unités froides et catalogues' };
+/* Un seul endroit pour paramétrer : Réglages réunit l'ancien Back-office
+   (tâches, horaires, unités froides) et les deux catalogues. */
+PAGES.reglages.sous = 'Tâches, horaires, unités froides et catalogues';
 PAGES.hebdo      = { titre:'Tâches du jour', sous:'Plan hebdomadaire de la boutique' };
 PAGES.lots.titre = 'Traçabilité';
 PAGES.lots.sous  = 'Ouverture de tout nouveau produit';
@@ -32,13 +35,8 @@ if (MENU_PLUS.manager.indexOf('reception') < 0) MENU_PLUS.manager.splice(2, 0, '
    son menu. Les signalements de l'équipe étaient donc enregistrés sans que
    personne ne puisse les consulter ni les marquer traités. */
 if (MENU_PLUS.manager.indexOf('anomalie') < 0) MENU_PLUS.manager.unshift('anomalie');
-/* Le catalogue du sec est modifiable par le manager depuis l'application :
-   retirer une référence, en ajouter, changer une unité. Sans passer par le code. */
-if (MENU_PLUS.manager.indexOf('catalogue') < 0) {
-  const i = MENU_PLUS.manager.indexOf('inventaire');
-  MENU_PLUS.manager.splice(i >= 0 ? i + 1 : MENU_PLUS.manager.length, 0, 'catalogue');
-}
-if (MENU_PLUS.manager.indexOf('parametres') < 0) MENU_PLUS.manager.push('parametres');
+/* Catalogues et Back-office ne sont plus des entrées du menu : on les
+   ouvre depuis Réglages (réservés au manager, voir vueAutorisee). */
 /* Les tâches hebdomadaires méritent leur onglet : c'est le tableau que l'équipe
    consultait au mur, consulté plusieurs fois par jour. */
 if (MENU_PLUS.equipe.indexOf('hebdo') < 0)  MENU_PLUS.equipe.unshift('hebdo');
@@ -298,6 +296,7 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
        'Rien n’entrera au stock pour ce bon. La réception reste tracée au registre.', 'Écarter',
        async () => {
          if (!(await marquerReceptionTraitee(r.id, 'ecartee'))) return;
+         if (typeof retirerReceptionSec === 'function') { try { await retirerReceptionSec(r.id); } catch (e) {} }
          await feed('warn', STATE.user.prenom + ' a écarté l’entrée en stock du bon ' + (r.numero || 'sans n°') + ' (' + (r.par || '—') + ')');
          toast('Réception écartée du stock');
          if ((await receptionsEnAttente()).length) return verifierReceptions();
@@ -328,7 +327,13 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
          if (secRecus.length) await ajouterReceptionSec(secRecus, { id:r.id, at:r.at, bl:r.numero, par:STATE.user.prenom });
          /* Marquée d'abord : un second iPad qui confirme ensuite la trouve
             traitée et n'ajoute pas les bacs une seconde fois. */
-         if (!(await marquerReceptionTraitee(r.id, 'confirmee'))) return;
+         if (!(await marquerReceptionTraitee(r.id, 'confirmee'))) {
+           /* Écartée entre-temps sur un autre appareil : le sec écrit à
+              l'instant ne doit pas rester au stock. */
+           const deja = (await DB.get(CLE_RECEPTION_ATTENTE, [])).filter(x => x && x.id === r.id)[0];
+           if (secRecus.length && (!deja || deja.traite !== 'confirmee')) { try { await retirerReceptionSec(r.id); } catch (e) {} }
+           return;
+         }
          let n = 0;
          for (let i = 0; i < r.lignes.length; i++) {
            const l = r.lignes[i], q = num(qtes[i]);
@@ -353,7 +358,8 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
          closeSheet();
          /* Livraison antérieure au dernier inventaire : il l'a déjà comptée,
             le journal écarte le mouvement. */
-         const inv = await DB.get('stock:inventaire', null);
+         const toutSec = r.lignes.every((l, i) => !(num(qtes[i]) > 0) || l.famille === 'sec');
+         const inv = await DB.get(toutSec ? 'stock:sec' : 'stock:inventaire', null);
          toast(inv && inv.at && inv.at >= r.at
            ? 'Confirmée. L’inventaire du ' + fmtD(inv.jour) + ' comptait déjà cette livraison : stock inchangé'
            : n + ' ' + accord(n, 'unité ajoutée', 'unités ajoutées') + ' au stock');
@@ -1071,7 +1077,7 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
          : '<div class="alerte ok"><div style="flex:1"><b>Tout est à jour</b>' +
            '<p>Aucun relevé ni contrôle en retard.</p></div></div>') +
    
-       (msgs.length ? '<div class="entete"><h3>Carnet de relève</h3>' +
+       (msgs.length ? '<div class="entete"><h3>Messagerie</h3>' +
          '<button class="btn fantome sm pousse" data-go="releve">Tout voir</button></div>' +
          '<div class="stack">' + msgs.map(m => carte('<div class="rang">' +
            '<div style="flex:1"><b>' + esc(m.texte) + '</b><div class="mini">' + esc(m.par) + ' · ' +
@@ -2249,7 +2255,7 @@ V.parametres = async function () {
          'Supprimer', async () => {
            ENCEINTES.splice(+b.dataset.supp, 1);
            await DB.set('enceintes', ENCEINTES);
-           toast('Unité supprimée'); rendre('parametres');
+           toast('Unité supprimée'); rendre(STATE.view);
          });
      });
      $('#ea').onclick = async () => {
@@ -2261,7 +2267,7 @@ V.parametres = async function () {
        ENCEINTES.push({ id:'u' + uid().slice(0, 4), nom:'Nouvelle unité', cible:'—',
                         lo:-24, hi:8, pas:1, vert:[-20, -17], crit:-15, zone:'boutique' });
        await DB.set('enceintes', ENCEINTES);
-       await rendre('parametres');
+       await rendre(STATE.view);
        $$('[data-e]').forEach(i => { if (enCours[i.dataset.e] !== undefined) i.value = enCours[i.dataset.e]; });
      };
      $('#ev').onclick = async () => {
@@ -2366,7 +2372,7 @@ async function organiserSemaine() {
       await feed('ok', STATE.user.prenom + ' a réorganisé les tâches de la semaine');
       closeSheet();
       toast('Semaine enregistrée');
-      rendre('parametres');
+      rendre(STATE.view);
     };
 
     $('#os-raz').onclick = () => confirmer('Rétablir le tableau d’origine ?',
@@ -2375,7 +2381,7 @@ async function organiserSemaine() {
       'Rétablir', async () => {
         await DB.del('hebdo:plan');
         TACHES_HEBDO = TACHES_HEBDO_DEF.map(t => Object.assign({}, t, { jours:(t.jours || []).slice() }));
-        closeSheet(); toast('Tableau rétabli'); rendre('parametres');
+        closeSheet(); toast('Tableau rétabli'); rendre(STATE.view);
       },
       /* La confirmation occupe la même feuille : « Annuler » fermait tout et
          perdait l'organisation en cours. On y revient, bascules comprises. */
@@ -2487,7 +2493,7 @@ function modifierAsynchrone(id) {
       await feed('ok', STATE.user.prenom + (nouvelle ? ' a ajouté' : ' a modifié') + ' la tâche « ' + nom + ' »');
       closeSheet();
       toast(nouvelle ? 'Tâche ajoutée' : 'Tâche modifiée');
-      rendre('parametres');
+      rendre(STATE.view);
     };
 
     if ($('#as-supp')) $('#as-supp').onclick = () => {
@@ -2501,7 +2507,7 @@ function modifierAsynchrone(id) {
           await DB.set('asynchrones', sc);
           appliquerAsynchrones(sc);
           await feed('ok', STATE.user.prenom + ' a supprimé la tâche « ' + a.nom + ' »');
-          closeSheet(); toast('Tâche supprimée'); rendre('parametres');
+          closeSheet(); toast('Tâche supprimée'); rendre(STATE.view);
         },
         /* « Annuler » revient à la feuille, saisie en cours comprise. */
         () => { dessiner(); _feuilleModifiee = true; });
@@ -2591,7 +2597,7 @@ async function attribuerResponsables() {
       await feed('ok', STATE.user.prenom + ' a mis à jour les responsables de la semaine');
       closeSheet();
       toast('Responsables enregistrés');
-      rendre('parametres');
+      rendre(STATE.view);
     };
   };
   dessiner();
@@ -3094,18 +3100,26 @@ function formulaireAnomalie() {
        await V_reglages_origine.call(this);
      } else {
        $('#vue-actions').innerHTML = '';
-       $('#page').innerHTML =
-         carte('<h2>Réglages</h2><div class="cs">Paramètres de la boutique ' +
-           esc(APP.site) + ' · version ' + esc(APP.version) + '.</div>' +
-           '<button class="btn clair bloc" data-go="parametres" style="margin-top:14px">' +
-           'Back-office : tâches, horaires et unités froides</button>' +
-           '<button class="btn clair bloc" data-go="equipe" style="margin-top:8px">Équipe</button>',
-           'solide');
+       /* Réglages = un seul endroit : les catalogues en tête, puis les
+          tâches, horaires et unités froides (ancien Back-office). */
+       await V.parametres();
+       const p0 = $('#page');
+       if (p0) p0.insertAdjacentHTML('afterbegin',
+         carte('<div class="rang"><div style="flex:1;min-width:0"><b>Catalogues</b>' +
+           '<div class="mini">Sec et chambre froide : produits utilisés ou non, prix, stock minimum. ' +
+           'L’inventaire, la réception, la valeur du stock et les écarts les lisent.</div></div>' +
+           '<button class="btn clair sm" data-go="catalogue">Ouvrir</button></div>', 'solide'));
        $$('#page [data-go]').forEach(b => b.onclick = () => rendre(b.dataset.go));
      }
      const page = $('#page');
      if (!page) return;
-   
+
+     /* Diagnostic technique replié : utile au dépannage seulement. */
+     const ouvrirDiag = document.createElement('div');
+     ouvrirDiag.innerHTML = '<p class="mini" style="text-align:center;margin-top:18px">' +
+       esc(APP.site) + ' · version ' + esc(APP.version) + ' · ' +
+       '<button type="button" class="lien" id="dg-ouvrir" style="background:none;border:0;padding:0;color:inherit;text-decoration:underline;cursor:pointer;font:inherit">diagnostic technique</button></p>';
+     page.appendChild(ouvrirDiag.firstChild);
      const bloc = document.createElement('div');
      bloc.innerHTML = carte(entete('🩺', 'Diagnostic de la base',
        'Pour vérifier que cet appareil communique bien avec la base. Utile surtout quand quelque chose ne s’enregistre pas.') +
@@ -3141,7 +3155,11 @@ function formulaireAnomalie() {
          : '<p class="mini" style="margin-top:14px">Mode local : aucune base configurée, rien à tester.</p>') +
        '<div id="dg-res" style="margin-top:12px"></div>' +
        '<button class="btn fantome bloc" id="dg-purge" style="margin-top:8px">Vider la file d’attente</button>', 'plat');
-     page.appendChild(bloc.firstChild);
+     const diag = bloc.firstChild;
+     /* Reste ouvert d'un rafraîchissement à l'autre (test, file vidée). */
+     diag.hidden = !V.reglages._diag;
+     page.appendChild(diag);
+     $('#dg-ouvrir').onclick = () => { diag.hidden = !diag.hidden; V.reglages._diag = !diag.hidden; };
    
      /* Le test écrit puis efface une ligne dans des tables du registre : on le
         dit avant de le faire, au lieu de le découvrir après. */

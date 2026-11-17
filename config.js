@@ -1182,7 +1182,7 @@ const PAGES = {
   inv:      { titre: 'Inventaires',       sous: 'Glace et sec' },
   caisse:   { titre: 'Caisse',            sous: 'Fonds, recettes et écarts' },
   fiches:   { titre: 'Bibliothèque',      sous: 'Protocoles et fiches techniques' },
-  releve:   { titre: 'Carnet de relève',  sous: 'Messages entre les services' },
+  releve:   { titre: 'Messagerie',        sous: 'Messages entre les services' },
   ecarts:   { titre: 'Écarts glace',      sous: 'Rendement de la période' },
   frigo:    { titre: 'Produits ouverts',  sous: 'Du plus urgent au moins urgent' },
   periodes: { titre: 'Périodes',          sous: 'Clôture et fenêtre de calcul' },

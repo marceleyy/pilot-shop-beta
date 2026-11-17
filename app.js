@@ -1672,12 +1672,7 @@ function renderNav() {
        '<span class="mi-s">' + esc(PAGES[id].sous) + '</span></span>' +
        '<span class="mi-fl">›</span>' +
        '</button>').join('') +
-       /* Le retour bêta vit ici et non plus en bouton flottant : posé sur
-          le contenu, il couvrait « HS » et « + » des frigos sur téléphone. */
-       (APP.beta ? '<button type="button" class="menu-item" id="mp-retour">' +
-         '<span class="mi-tx"><span class="mi-t">Signaler un souci</span>' +
-         '<span class="mi-s">Un bug, un chiffre faux, une idée : c’est transmis à ' + esc(destinataireSouci()) + '</span></span>' +
-         '<span class="mi-fl">›</span></button>' : '') +
+       /* « Signaler un souci » retiré du menu : Anomalie, en haut, fait la même chose. */
        /* Une personne qui travaille dans deux boutiques (guide.js). */
        (typeof changerDeBoutique === 'function' && STATE.user.role === 'manager' ? '<button type="button" class="menu-item" id="mp-boutique">' +
          '<span class="mi-tx"><span class="mi-t">Changer de boutique</span>' +
@@ -3033,6 +3028,8 @@ function vueAccueil() {
 function vueAutorisee(id) {
   const role = STATE.user && STATE.user.role;
   if (!role || role === 'manager') return true;
+  /* Ouverts depuis Réglages, hors menu : réservés au manager. */
+  if (['parametres', 'catalogue'].indexOf(id) >= 0) return false;
   const de = r => (TABS[r] || []).map(t => t.id).concat(MENU_PLUS[r] || []);
   return de('manager').indexOf(id) < 0 || de(role).indexOf(id) >= 0;
 }
