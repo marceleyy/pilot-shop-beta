@@ -165,6 +165,95 @@ async function apprendreBL(lignes) {
 }
 
 /* -----------------------------------------------------------------------------
+   RÉCEPTIONS DU SEC
+   Le sec n'a pas de mouvement à la vente : son stock est celui du dernier
+   inventaire. Une livraison confirmée par un manager s'y ajoute jusqu'au
+   comptage suivant : stock attendu = dernier comptage + réceptions depuis.
+   Journal à part (« stock:sec-mv »), une ligne par article reçu ; les prix
+   ne sont jamais touchés ici.
+   -------------------------------------------------------------------------- */
+const CLE_SEC_MV = 'stock:sec-mv';
+
+/* Clés du sec qui existent dans le catalogue de la boutique. */
+function clesSecConnues() {
+  const s = new Set();
+  (typeof catalogueSec === 'function' ? catalogueSec() : []).forEach(r => {
+    if (!r || typeof r !== 'object' || r.masque) return;
+    (r.variantes && r.variantes.length ? r.variantes : ['']).forEach(v => s.add('sec|' + r.id + '|' + v));
+  });
+  return s;
+}
+
+/* Ligne du sec pour une référence Amorino : { cle, par } ou null. */
+function secDepuisCode(ref) {
+  const c = typeof codeAmorino === 'function' ? codeAmorino(ref) : null;
+  if (!c) return null;
+  const connues = clesSecConnues();
+  const cle = (c.cles || []).filter(k => connues.has(k))[0];
+  return cle ? { cle: cle, par: num(c.par) > 0 ? num(c.par) : 1, vivante: cleVivanteSecSeule(cle) } : null;
+}
+
+/* Clé de famille d'une ligne du sec suivie à l'ouverture (chantilly, coulis,
+   toppings), ou null. Ces lignes reçoivent leurs livraisons dans le journal
+   des mouvements de la famille, comme avant : le stock vivant les lit là. */
+function cleVivanteSecSeule(cle) {
+  const o = {}; o[cle] = 1;
+  return typeof cleVivanteSec === 'function' ? cleVivanteSec(cle, o) : null;
+}
+
+/* Identifiant d'une référence ajoutée au catalogue du sec. */
+function idCatalogueSec(nom) {
+  return 'm_' + String(nom || 'article').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]+/g, '').slice(0, 20) + '_' + Date.now().toString(36).slice(-4) + Math.random().toString(36).slice(2, 4);
+}
+
+/* lignes : [{ cle, q }] déjà converties en unités comptées. L'id dérive de la
+   réception : confirmer deux fois n'ajoute rien. */
+async function ajouterReceptionSec(lignes, meta) {
+  const l = await DB.get(CLE_SEC_MV, []);
+  const vus = new Set(l.map(m => m && m.id));
+  let n = 0;
+  (lignes || []).forEach((x, i) => {
+    const id = meta.id + '|' + (x.i !== undefined ? x.i : i);
+    if (!x.cle || !(num(x.q) > 0) || vus.has(id)) return;
+    l.push({ id: id, at: meta.at, cle: x.cle, q: num(x.q), bl: meta.bl || '', par: meta.par || '' });
+    n++;
+  });
+  if (n) await DB.set(CLE_SEC_MV, l.slice(-2000));
+  return n;
+}
+
+/* Article reçu inconnu du catalogue, déclaré nouveau par le manager à la
+   confirmation : ajouté comme depuis le catalogue (sans prix, à l'unité).
+   Relu juste avant : une page catalogue ouverte ailleurs n'est pas écrasée. */
+async function ajouterArticleSecRecu(nom, section) {
+  const m = (await DB.get('catalogue:sec', null)) || {};
+  m.masques = m.masques || []; m.modifs = m.modifs || {}; m.ajouts = m.ajouts || [];
+  const id = idCatalogueSec(nom);
+  m.ajouts.push({ id: id, sec: section, nom: String(nom || '').trim() || 'Article reçu', unite: 'unité', decimal: true, variantes: [] });
+  await enregistrerCatalogueSec(m);
+  return 'sec|' + id + '|';
+}
+
+/* Quantités reçues depuis un instant (le dernier comptage du sec). */
+async function recusSecDepuis(at) {
+  const out = {};
+  (await DB.get(CLE_SEC_MV, [])).forEach(m => {
+    if (!m || !m.cle || (at && String(m.at) <= String(at))) return;
+    out[m.cle] = Math.round((num(out[m.cle]) + num(m.q)) * 1000) / 1000;
+  });
+  return out;
+}
+
+/* Stock attendu du sec : dernier comptage + réceptions depuis. */
+async function stockSecAttendu(secPrec) {
+  const base = Object.assign({}, (secPrec && secPrec.lignes) || {});
+  const recus = await recusSecDepuis(secPrec && secPrec.at);
+  Object.keys(recus).forEach(c => { base[c] = Math.round((num(base[c]) + recus[c]) * 1000) / 1000; });
+  return { lignes: base, recus: recus };
+}
+
+/* -----------------------------------------------------------------------------
    ÉCRITURE DES MOUVEMENTS
    Journal en ajout seul : on n'efface jamais une ligne, on en ajoute une qui
    corrige. C'est ce qui permet de reconstituer l'historique lors d'un contrôle.
@@ -1253,12 +1342,164 @@ async function tacheRecomptage() {
 }
 
 /* -----------------------------------------------------------------------------
+   STOCK MINIMUM (manager)
+   « catalogue:seuils » : { « glace|<parfum> »: bacs, toutes tailles confondues ;
+   « sec|<réf>|<déclinaison> »: unités comptées }. Un article sous son minimum
+   (strictement) est signalé sur Stock et sur la tour de contrôle. Absent ou 0 :
+   pas de minimum.
+   -------------------------------------------------------------------------- */
+const CLE_SEUILS = 'catalogue:seuils';
+/* Quantité sans décimale inutile : « 2 », « 2,5 ». */
+const nSeuil = v => (Number(v) || 0).toLocaleString('fr-FR', { maximumFractionDigits: 2 });
+
+async function chargerSeuils() {
+  const m = await DB.get(CLE_SEUILS, null);
+  return (m && typeof m === 'object' && !Array.isArray(m)) ? m : {};
+}
+
+/* Bacs d'un parfum, toutes tailles. */
+function bacsParfum(articles, parfum) {
+  return Object.keys(articles || {}).reduce((t, c) => {
+    const a = litArticle(c);
+    return a.famille === 'glace' && a.parfum === parfum ? t + num(articles[c]) : t;
+  }, 0);
+}
+
+/* Quantité d'une ligne du sec : stock vivant pour coulis et toppings suivis
+   à l'ouverture, sinon comptage + livraisons. */
+function qteSec(cle, articles, secLignes) {
+  /* Même lecture que l'écran Stock : une famille sans saveur suit son total,
+     même si sa ligne n'a jamais été comptée. */
+  const p = String(cle).split('|');
+  const f = FAMILLES_PRODUIT.filter(x => (x.lieu === 'sec' || x.stock === 'sec') && (x.refSec || x.id) === p[1])[0];
+  const cleV = f && !(f.saveurs && f.saveurs.length)
+    ? (p[2] ? null : cleArticle(f.id, '', ''))
+    : (typeof cleVivanteSec === 'function' ? cleVivanteSec(cle, secLignes || {}) : null);
+  if (cleV && articles && articles[cleV] !== undefined) return num(articles[cleV]);
+  return num((secLignes || {})[cle]);
+}
+
+/* [{ cle, nom, q, min, unite, partie }] des articles sous leur minimum. */
+function articlesSousSeuil(seuils, articles, secLignes) {
+  const out = [];
+  const connues = typeof clesSecConnues === 'function' ? clesSecConnues() : new Set();
+  Object.keys(seuils || {}).forEach(k => {
+    const min = num(seuils[k]);
+    if (!(min > 0)) return;
+    const p = k.split('|');
+    if (p[0] === 'glace') {
+      const q = bacsParfum(articles, p[1]);
+      if (q < min) out.push({ cle: k, nom: p[1], q: q, min: min, unite: 'bac', partie: 'froid' });
+    } else if (p[0] === 'sec' && connues.has(k)) {
+      const q = qteSec(k, articles, secLignes);
+      const r = catalogueSec().filter(x => typeof x === 'object' && x.id === p[1])[0];
+      if (q < min) out.push({ cle: k, nom: libelleSec(k), q: q, min: min, unite: (r && r.unite) || 'unité', partie: 'sec' });
+    }
+  });
+  return out.sort((a, b) => (a.q / a.min) - (b.q / b.min));
+}
+
+/* Feuille de saisie des minimums d'une partie (« froid » : glaces, « sec »). */
+async function editerSeuils(partie, apres) {
+  if (!(STATE.user && STATE.user.role === 'manager')) return toast('Réservé au manager', 'erreur');
+  if (typeof chargerCatalogueSec === 'function') { try { await chargerCatalogueSec(); } catch (e) {} }
+  const seuils = await chargerSeuils();
+  const items = [];
+  if (partie === 'froid') {
+    PARFUMS.slice().sort((a, b) => a.localeCompare(b)).forEach(p =>
+      items.push({ k: 'glace|' + p, nom: p, grp: 'Bacs de glace, toutes tailles', u: 'bacs' }));
+  } else {
+    catalogueSec().filter(r => r && typeof r === 'object' && !r.masque).forEach(r =>
+      (r.variantes && r.variantes.length ? r.variantes : ['']).forEach(v =>
+        items.push({ k: 'sec|' + r.id + '|' + v, nom: r.nom + (v ? ' · ' + v : ''), grp: r.sec || 'Autres', u: r.unite || 'unité' })));
+    /* Une référence ajoutée tombe en fin de catalogue : regroupée sous sa
+       section, dans l'ordre des sections (tri stable). */
+    const ordre = (typeof SEC_SECTIONS !== 'undefined' ? SEC_SECTIONS : []).map(x => typeof x === 'string' ? x : x.id);
+    const rang = g => { const i = ordre.indexOf(g); return i < 0 ? 999 : i; };
+    items.sort((a, b) => rang(a.grp) - rang(b.grp));
+  }
+  const nrm = x => String(x || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  let grp = null;
+  showSheet(
+    '<h2 id="sheet-titre">Stock minimum · ' + (partie === 'froid' ? 'glaces' : 'sec') + '</h2>' +
+    '<p class="sub">Sous ce nombre, l’article est signalé sur Stock et sur la tour de contrôle. Vide : pas de minimum.</p>' +
+    '<input type="search" id="sl-rech" placeholder="Chercher un article" autocomplete="off">' +
+    '<div id="sl-liste" style="margin-top:10px">' + items.map((it, i) => {
+      const titre = it.grp !== grp ? '<div class="entete" data-slg="' + esc(it.grp) + '" style="margin-top:12px"><h3>' + esc(it.grp) + '</h3></div>' : '';
+      grp = it.grp;
+      const v = seuils[it.k];
+      return titre + '<div class="rang" data-slr="' + i + '" data-slgr="' + esc(it.grp) + '" style="padding:6px 0">' +
+        '<div style="flex:1;min-width:0">' + esc(it.nom) + '<div class="mini">en ' + esc(it.u) + '</div></div>' +
+        '<input type="number" min="0" step="any" inputmode="decimal" data-sl="' + i + '" value="' + (num(v) > 0 ? esc(String(v)) : '') + '" style="width:76px;text-align:center"></div>';
+    }).join('') + '</div>' +
+    '<div class="actions"><button class="btn clair" data-fermer>Annuler</button>' +
+    '<button class="btn menthe" id="sl-ok">Enregistrer</button></div>');
+  const touches = {}, illisibles = {};
+  $$('[data-sl]').forEach(inp => inp.oninput = () => {
+    const i = +inp.dataset.sl;
+    /* « 4,5, » : le navigateur rend '' ; sans ce test, le minimum était effacé. */
+    illisibles[i] = !!(inp.validity && inp.validity.badInput);
+    touches[i] = inp.value.trim();
+  });
+  $('#sl-rech').oninput = () => {
+    const mots = nrm($('#sl-rech').value).split(/\s+/).filter(Boolean);
+    const visibles = new Set();
+    $$('[data-slr]').forEach(el => {
+      const it = items[+el.dataset.slr];
+      const ok = mots.every(m => nrm(it.nom).indexOf(m) >= 0);
+      el.style.display = ok ? '' : 'none';
+      if (ok) visibles.add(it.grp);
+    });
+    $$('[data-slg]').forEach(el => { el.style.display = visibles.has(el.dataset.slg) ? '' : 'none'; });
+  };
+  let enCours = false;
+  $('#sl-ok').onclick = async () => {
+    if (enCours) return;
+    if (Object.keys(illisibles).some(i => illisibles[i]) ||
+        Object.keys(touches).some(i => touches[i] !== '' && !(Number(touches[i].replace(',', '.')) >= 0))) {
+      return toast('Minimum invalide : un nombre positif', 'erreur');
+    }
+    /* Seules les valeurs réellement changées comptent. */
+    const avant = i => num(seuils[items[+i].k]) > 0 ? num(seuils[items[+i].k]) : 0;
+    const idx = Object.keys(touches).filter(i => (touches[i] === '' ? 0 : num(touches[i])) !== avant(i));
+    if (!idx.length) { closeSheet(); return; }
+    enCours = true;
+    try {
+      /* Relu juste avant : seules les lignes touchées changent, un autre
+         manager qui saisit en même temps garde les siennes. */
+      const frais = await chargerSeuils();
+      idx.forEach(i => {
+        const k = items[+i].k, v = touches[i];
+        if (v === '' || !(num(v) > 0)) delete frais[k]; else frais[k] = num(v);
+      });
+      await DB.set(CLE_SEUILS, frais);
+      await feed('ok', STATE.user.prenom + ' a réglé le stock minimum de ' + idx.length + ' ' + accord(idx.length, 'article'));
+      closeSheet();
+      toast('Stock minimum enregistré');
+      if (apres) apres();
+    } catch (e) { toast('Enregistrement impossible, réessayez', 'erreur'); }
+    finally { enCours = false; }
+  };
+}
+
+/* -----------------------------------------------------------------------------
    VUE — STOCK RÉEL
    -------------------------------------------------------------------------- */
 V.stock = async function () {
   const { articles, inventaire } = await stockReel();
   if (typeof chargerCatalogueSec === 'function') await chargerCatalogueSec();
   const sec = await DB.get('stock:sec', null);
+  /* Livraisons du sec confirmées depuis le dernier comptage. */
+  const secAttendu = sec ? await stockSecAttendu(sec).catch(() => null) : null;
+  const seuils = await chargerSeuils().catch(() => ({}));
+  const manager = !!(STATE.user && STATE.user.role === 'manager');
+  const boutonSeuils = p => manager
+    ? '<button class="btn clair bloc" data-seuils="' + p + '" style="margin-top:10px">Stock minimum ' + (p === 'froid' ? 'des glaces' : 'du sec') + '</button>' : '';
+  /* « Sous le minimum : 3 sur 4 » ou « Minimum 4 ». */
+  const ligneMin = (q, min, u) => !(min > 0) ? ''
+    : q < min ? '<div class="mini" style="color:var(--corail-d)"><b>Sous le minimum : ' + nSeuil(q) + ' sur ' + nSeuil(min) + (u ? ' ' + esc(u) : '') + '</b></div>'
+    : '<div class="mini">Minimum ' + nSeuil(min) + (u ? ' ' + esc(u) : '') + '</div>';
+  const minGlace = Object.keys(seuils).filter(k => k.indexOf('glace|') === 0 && num(seuils[k]) > 0).map(k => k.slice(6));
   const attente = await inventaireEnAttente('froid');
   const attenteSec = await inventaireEnAttente('sec');
   /* Réceptions pas encore confirmées : leurs bacs ne sont pas dans ces chiffres. */
@@ -1296,6 +1537,8 @@ V.stock = async function () {
       const f = litArticle(c).famille;
       (parFamille[f] = parFamille[f] || []).push(c);
     });
+    /* Un parfum à minimum reste affiché à zéro bac : c'est là qu'il manque. */
+    if (minGlace.length && !parFamille.glace) parFamille.glace = [];
     return carte('<div class="grid g3">' +
       kpi('Bacs de glace', t.bacs, '', n1(t.litres) + ' L') +
       kpi('Autres produits', t.unites, '', 'comptés à l’unité') +
@@ -1315,8 +1558,9 @@ V.stock = async function () {
       : '') +
 
     '<button class="btn menthe bloc xl" id="st-inv" style="margin-top:16px">Faire l’inventaire</button>' +
+    boutonSeuils('froid') +
 
-    (clesFroid.length
+    (clesFroid.length || minGlace.length
       ? Object.keys(parFamille).map(fid => {
           const fam = FAMILLES_PRODUIT.filter(x => x.id === fid)[0];
           const sous = parFamille[fid].reduce((s, c) => s + num(articles[c]), 0);
@@ -1326,15 +1570,17 @@ V.stock = async function () {
                 const parParfum = {};
                 parFamille[fid].forEach(c => { const a = litArticle(c);
                   (parParfum[a.parfum] = parParfum[a.parfum] || []).push(c); });
+                minGlace.forEach(p => { if (!parParfum[p]) parParfum[p] = []; });
                 return Object.keys(parParfum).sort((x, y) => x.localeCompare(y)).map(p => {
                   const tailles = parParfum[p].sort((x, y) => num(litArticle(x).taille) - num(litArticle(y).taille));
                   const n = tailles.reduce((s, c) => s + num(articles[c]), 0);
                   const negatif = tailles.some(c => num(articles[c]) < 0);
+                  const min = num(seuils['glace|' + p]);
                   return carte('<div class="rang"><div style="flex:1;min-width:0"><b>' + esc(p) + '</b>' +
-                    '<div class="mini tailles">' + tailles.map(c => { const q = num(articles[c]);
+                    '<div class="mini tailles">' + (tailles.length ? tailles.map(c => { const q = num(articles[c]);
                       return '<span class="tq' + (q < 0 ? ' neg' : '') + '"><b>' + q + '</b>×' + esc(litArticle(c).taille) + ' L</span>';
-                    }).join('') + '</div></div>' +
-                    '<b class="num" style="font-size:20px">' + n + '</b></div>', negatif ? 'corail' : '');
+                    }).join('') : 'aucun bac') + '</div>' + ligneMin(n, min, accord(min, 'bac')) + '</div>' +
+                    '<b class="num" style="font-size:20px">' + n + '</b></div>', negatif ? 'corail' : min > 0 && n < min ? 'ambre' : '');
                 }).join('');
               })()
             : parFamille[fid].map(c => { const a = litArticle(c), q = num(articles[c]);
@@ -1354,17 +1600,24 @@ V.stock = async function () {
   const blocSec = () => {
     if (!sec || !sec.lignes || !Object.keys(sec.lignes).length) {
       return carte('<p class="cs">Le sec n’a jamais été compté.</p>' + bandeauAttente(attenteSec, 'sec') +
-        '<button class="btn menthe bloc xl" id="st-inv-sec" style="margin-top:12px">Compter le sec</button>', 'solide');
+        '<button class="btn menthe bloc xl" id="st-inv-sec" style="margin-top:12px">Compter le sec</button>' + boutonSeuils('sec'), 'solide');
     }
     const cat = (typeof catalogueSec === 'function') ? catalogueSec() : INVENTAIRE_SEC;
     const sections = (typeof SEC_SECTIONS !== 'undefined')
       ? SEC_SECTIONS.map(s => typeof s === 'string' ? { id:s } : s) : [];
-    const l = sec.lignes;
+    /* Comptage + réceptions confirmées depuis (voir stockSecAttendu). */
+    const l = secAttendu ? secAttendu.lignes : Object.assign({}, sec.lignes);
+    const nbRecus = secAttendu ? Object.keys(secAttendu.recus).length : 0;
     const parRef = {};
     Object.keys(l).forEach(k => { const p = k.split('|'); if (p[0] !== 'sec') return;
       (parRef[p[1]] = parRef[p[1]] || []).push({ v: p[2] || '', q: num(l[k]) }); });
     const totalLignes = Object.keys(l).length;
     const totalUnites = Object.keys(l).reduce((s, k) => s + num(l[k]), 0);
+    /* Ligne à minimum jamais comptée : affichée à zéro. */
+    const connuesSec = clesSecConnues();
+    Object.keys(seuils).forEach(k => { const p = k.split('|');
+      if (p[0] !== 'sec' || !(num(seuils[k]) > 0) || !connuesSec.has(k) || l[k] !== undefined) return;
+      (parRef[p[1]] = parRef[p[1]] || []).push({ v: p[2] || '', q: 0 }); });
 
     /* Stock vivant du sec. Les familles tracées à l'ouverture (chantilly,
        coulis, toppings) ont un compte qui bouge entre deux comptages :
@@ -1391,12 +1644,15 @@ V.stock = async function () {
     };
 
     return carte('<div class="grid g2">' +
-      kpi('Références', totalLignes, '', 'comptées') +
-      kpi('Unités', n1(totalUnites), '', 'au dernier comptage') + '</div>' +
+      kpi('Références', totalLignes, '', nbRecus ? 'comptées ou reçues' : 'comptées') +
+      kpi('Unités', n1(totalUnites), '', nbRecus ? 'comptage + livraisons' : 'au dernier comptage') + '</div>' +
       '<p class="rappel" style="margin-top:14px">Compté le ' + fmtD(sec.jour) +
       (sec.par ? ' par ' + esc(sec.par) : '') + '. Chantilly, coulis et toppings ' +
-      'baissent à chaque ouverture tracée ; le reste suit le comptage.</p>' + bandeauAttente(attenteSec, 'sec'), 'solide') +
+      'baissent à chaque ouverture tracée ; le reste suit le comptage' +
+      (nbRecus ? ', plus les livraisons confirmées depuis (' + nbRecus + ' ' + accord(nbRecus, 'référence reçue', 'références reçues') + ')' : '') +
+      '.</p>' + bandeauAttente(attenteSec, 'sec'), 'solide') +
       '<button class="btn menthe bloc xl" id="st-inv-sec" style="margin-top:16px">Recompter le sec</button>' +
+      boutonSeuils('sec') +
 
       sections.map(s => {
         const refs = cat.filter(r => (r.sec || 'Autres') === s.id && !r.masque && parRef[r.id]);
@@ -1417,8 +1673,18 @@ V.stock = async function () {
             const total = enBloc !== null ? enBloc : lignes.reduce((a, x) => a + x.q, 0);
             const suivi = enBloc !== null || lignes.some(x => x.vif);
             const connues = new Set(r.variantes || []);
+            const minDe = v => num(seuils['sec|' + r.id + '|' + (v || '')]);
+            /* Sans déclinaison : le total (vivant si suivi) fait foi, comme le texte. */
+            const sous = r.variantes && r.variantes.length
+              ? lignes.filter(x => minDe(x.v) > 0 && x.q < minDe(x.v))
+              : (minDe('') > 0 && total < minDe('') ? [{ v: '', q: total }] : []);
+            const aMin = minDe('') > 0 || lignes.some(x => minDe(x.v) > 0);
             return carte('<div class="rang"><div style="flex:1;min-width:0"><b>' + esc(r.nom) + '</b>' +
               (suivi ? '<div class="mini">Suivi en direct : comptage moins ouvertures</div>' : '') +
+              (r.variantes && r.variantes.length
+                ? (sous.length ? '<div class="mini" style="color:var(--corail-d)"><b>Sous le minimum : ' +
+                    sous.map(x => esc(x.v || '—') + ' ' + nSeuil(x.q) + ' sur ' + nSeuil(minDe(x.v))).join(', ') + '</b></div>' : '')
+                : (aMin ? ligneMin(total, minDe(''), '') : '')) +
               (r.variantes && r.variantes.length
                 ? '<div class="mini tailles">' + lignes
                     .sort((a, b) => (r.variantes.indexOf(a.v) + 99) - (r.variantes.indexOf(b.v) + 99))
@@ -1427,7 +1693,7 @@ V.stock = async function () {
                 : '') + '</div>' +
               '<b class="num" style="font-size:20px">' + n1(total) + '</b>' +
               '<span class="mini" style="margin-left:6px">' + esc(r.unite) + (total > 1 ? 's' : '') + '</span></div>',
-              total < 0 ? 'corail' : '');
+              total < 0 ? 'corail' : (sous.length ? 'ambre' : ''));
           }).join('') + '</div></div>';
       }).join('');
   };
@@ -1452,6 +1718,7 @@ V.stock = async function () {
     if (rv && typeof verifierReceptions === 'function') rv.onclick = verifierReceptions;
     const bs = $('#st-inv-sec');
     if (bs) bs.onclick = () => { STATE.inventairePartie = 'sec'; rendre('inventaire'); };
+    $$('[data-seuils]').forEach(b => b.onclick = () => editerSeuils(b.dataset.seuils, () => rendre('stock')));
   };
   dessiner();
 };
@@ -1472,12 +1739,71 @@ V.controle = async function () {
      scanné par l'équipe attendait sans que personne ne le voie. */
   const recAttente = typeof receptionsEnAttente === 'function' ? await receptionsEnAttente() : [];
   if (STATE.view !== 'controle' || page !== $('#page')) return;
+  let apresReceptions = null;
   if (recAttente.length && typeof bandeauReceptions === 'function' && page.firstChild) {
     const br = document.createElement('div');
+    apresReceptions = br;
     br.style.marginTop = '14px';
     br.innerHTML = bandeauReceptions(recAttente);
     page.insertBefore(br, page.firstChild.nextSibling);
     const bv = br.querySelector('#rc-verif'); if (bv) bv.onclick = verifierReceptions;
+  }
+
+  /* Valeur du stock, sans passer par Inventaire : derniers comptages validés
+     (chambre froide et sec), à leurs prix du jour. */
+  if (STATE.user && STATE.user.role === 'manager') {
+    const [, pf, ps] = await Promise.all([chargerPrixAchat().catch(() => {}),
+      DB.get('stock:inventaire', null), DB.get('stock:sec', null)]);
+    if (STATE.view !== 'controle' || page !== $('#page')) return;
+    /* Deux dessins rapprochés (« Traité », retour d'un écran) : une seule carte. */
+    const ancienne = $('#valeur-stock'); if (ancienne) ancienne.remove();
+    const html = carteValeurStock(pf, ps, true);
+    if (html && page.firstChild) {
+      const bvs = document.createElement('div');
+      bvs.id = 'valeur-stock';
+      bvs.style.marginTop = '14px';
+      bvs.innerHTML = html;
+      /* Sous les réceptions à confirmer, qui restent l'alerte du haut. */
+      const ref = apresReceptions && apresReceptions.parentNode === page ? apresReceptions.nextSibling : page.firstChild.nextSibling;
+      page.insertBefore(bvs, ref);
+      const go = bvs.querySelector('[data-valstock]');
+      /* L'onglet qui porte la valeur : le sec s'il en a, sinon la chambre froide. */
+      const secVal = ps ? valeurStock(ps.lignes, ps.prix).total : 0;
+      if (go) go.onclick = () => { STATE.inventairePartie = secVal > 0 ? 'sec' : 'froid'; rendre('inventaire'); };
+    }
+
+    /* Articles sous leur stock minimum : à commander. */
+    try {
+      const seuils = await chargerSeuils();
+      if (Object.keys(seuils).length) {
+        /* Catalogue de la boutique : sans lui, les références ajoutées et les
+           déclinaisons renommées étaient ignorées à l'ouverture de l'appli. */
+        if (typeof chargerCatalogueSec === 'function') { try { await chargerCatalogueSec(); } catch (e) {} }
+        const { articles } = await stockReel();
+        const sec = ps;
+        const att = sec ? await stockSecAttendu(sec).catch(() => null) : null;
+        const sous = articlesSousSeuil(seuils, articles, att ? att.lignes : (sec && sec.lignes) || {});
+        if (STATE.view !== 'controle' || page !== $('#page')) return;
+        const vieille = $('#sous-seuil'); if (vieille) vieille.remove();
+        if (sous.length) {
+          const bm = document.createElement('div');
+          bm.id = 'sous-seuil';
+          bm.style.marginTop = '14px';
+          const liste = sous.slice(0, 8).map(x => esc(x.nom) + ' ' + nSeuil(x.q) + '/' + nSeuil(x.min)).join(', ') +
+            (sous.length > 8 ? ' et ' + (sous.length - 8) + ' autre' + (sous.length > 9 ? 's' : '') : '');
+          bm.innerHTML = '<div class="alerte warn"><span class="ai">•</span><div style="flex:1;min-width:0"><b>' +
+            sous.length + ' ' + accord(sous.length, 'article sous le stock minimum', 'articles sous le stock minimum') + '</b>' +
+            '<p>' + liste + '</p></div><button class="btn menthe sm" data-voirseuil>Voir</button></div>';
+          /* Sous la valeur du stock, sinon sous les réceptions à confirmer. */
+          const apres = $('#valeur-stock');
+          const ancre = apres && apres.parentNode === page ? apres
+            : apresReceptions && apresReceptions.parentNode === page ? apresReceptions : page.firstChild;
+          page.insertBefore(bm, ancre ? ancre.nextSibling : null);
+          bm.querySelector('[data-voirseuil]').onclick = () => {
+            STATE.stockPartie = sous.some(x => x.partie === 'froid') ? 'froid' : 'sec'; rendre('stock'); };
+        }
+      }
+    } catch (e) {}
   }
 
   /* -----------------------------------------------------------------------------
@@ -1856,8 +2182,7 @@ V.catalogue = async function () {
       enCours = true; $('#ct-ok').disabled = true;
       const variantes = $('#ct-var').value.split('\n').map(s => s.trim()).filter(Boolean);
       if (neuf) {
-        const id = 'm_' + nom.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
-          .replace(/[^a-z0-9]+/g, '').slice(0, 20) + '_' + Date.now().toString(36).slice(-4);
+        const id = idCatalogueSec(nom);
         m.ajouts.push({ id, sec:section, nom, unite, decimal, variantes });
       } else {
         m.modifs[r.id] = { nom, unite, decimal, variantes };
@@ -2027,17 +2352,21 @@ function voirInventaire(h, partie) {
      comptage, puis le total de chaque groupe et le total général. */
   const bCsv = $('#inv-csv');
   if (bCsv) bCsv.onclick = () => {
-    const q = x => { x = String(x == null ? '' : x);
+    /* Nombres : point décimal et sans guillemets, comme demandé par la
+       boutique (son tableur les lit ainsi comme des nombres). Un tableur
+       réglé en français attendrait une virgule. */
+    const q = x => { if (typeof x === 'number') return isFinite(x) ? String(x) : '';
+                     x = String(x == null ? '' : x);
                      if (/^[=+\-@\t\r]/.test(x)) x = "'" + x;
                      return '"' + x.replace(/"/g, '""') + '"'; };
-    const dec = v => (Math.round(num(v) * 100) / 100).toFixed(2).replace('.', ',');
+    const dec = v => Math.round(num(v) * 100) / 100;
     const rows = [['Groupe', 'Produit', 'Quantité', 'Unité', 'Prix HT', 'Valeur HT']];
     let total = 0;
     groupes.filter(g => g.lignes.length).forEach(g => {
       let tg = 0;
       g.lignes.forEach(x => (x.det || [x]).forEach(y => {
         if (!(num(y.q) > 0)) return;
-        rows.push([g.titre, y.nom, String(y.q).replace('.', ','), y.unite ? accord(y.q, y.unite) : '',
+        rows.push([g.titre, y.nom, Math.round(num(y.q) * 1000) / 1000, y.unite ? accord(y.q, y.unite) : '',
                    y.prix !== null && y.prix !== undefined ? dec(y.prix) : 'sans prix', dec(y.val)]);
         tg += num(y.val);
       }));
@@ -2059,11 +2388,35 @@ function voirInventaire(h, partie) {
   };
 }
 
+/* Valeur totale du stock (manager) : dernier inventaire confirmé de la
+   chambre froide + dernier du sec, chacun à ses prix du jour. Montrée sur
+   l'écran Inventaire et sur la tour de contrôle (sans aller la générer).
+   « bouton » ajoute un lien vers l'inventaire et son export. '' sans valeur. */
+function carteValeurStock(precedent, secPrec, bouton) {
+  const vf = precedent ? valeurStock(precedent.lignes, precedent.prix) : { total: 0, sansPrix: 0 };
+  const vs = secPrec ? valeurStock(secPrec.lignes, secPrec.prix) : { total: 0, sansPrix: 0 };
+  if (!(vf.total + vs.total > 0)) return '';
+  const sp = vf.sansPrix + vs.sansPrix;
+  return carte('<div class="cs">Valeur totale du stock</div>' +
+    '<h2 style="margin-top:2px">' + eur(vf.total + vs.total) + ' HT</h2>' +
+    '<div class="mini">Chambre froide ' + eur(vf.total) + (precedent ? ' (' + esc(fmtD(precedent.jour)) + ')' : '') +
+    ' · Sec ' + eur(vs.total) + (secPrec ? ' (' + esc(fmtD(secPrec.jour)) + ')' : '') +
+    (sp ? ' · ' + sp + ' ' + accord(sp, 'produit compté', 'produits comptés') + ' sans prix' : '') +
+    '</div>' +
+    (bouton ? '<button class="btn clair sm" style="margin-top:10px" data-valstock>Ouvrir l’inventaire (export dans l’historique)</button>' : ''),
+    'solide');
+}
+
 V.inventaire = async function () {
   await chargerCatalogueSec();
   const { articles } = await stockReel();
   const precedent = await DB.get('stock:inventaire', null);
   const secPrec   = await DB.get('stock:sec', null);
+  /* Attendu du sec : dernier comptage + livraisons confirmées depuis. Sert à
+     repérer une quantité douteuse et à garder le stock d'une référence non
+     recomptée (réceptions comprises). */
+  const secAttendu = (await stockSecAttendu(secPrec).catch(() => null)) ||
+    { lignes: Object.assign({}, (secPrec && secPrec.lignes) || {}), recus: {} };
   const historique = await DB.get('stock:inventaires', []);
   /* L'historique du sec, séparé : les deux comptages ne se font pas le même
      jour ni par la même personne, et on doit pouvoir voir l'un sans l'autre. */
@@ -2403,21 +2756,7 @@ V.inventaire = async function () {
   const listeSec = () => blocSec() ||
     '<p class="mini" style="margin-top:12px">Aucun produit ne correspond à « ' + esc(recherche) + ' ».</p>';
 
-  /* Valeur totale du stock (manager) : dernier inventaire confirmé de la
-     chambre froide + dernier du sec, chacun à ses prix du jour. */
-  const valeurTotale = (() => {
-    if (!estManager) return '';
-    const vf = precedent ? valeurStock(precedent.lignes, precedent.prix) : { total: 0, sansPrix: 0 };
-    const vs = secPrec ? valeurStock(secPrec.lignes, secPrec.prix) : { total: 0, sansPrix: 0 };
-    if (!(vf.total + vs.total > 0)) return '';
-    const sp = vf.sansPrix + vs.sansPrix;
-    return carte('<div class="cs">Valeur totale du stock</div>' +
-      '<h2 style="margin-top:2px">' + eur(vf.total + vs.total) + ' HT</h2>' +
-      '<div class="mini">Chambre froide ' + eur(vf.total) + (precedent ? ' (' + esc(fmtD(precedent.jour)) + ')' : '') +
-      ' · Sec ' + eur(vs.total) + (secPrec ? ' (' + esc(fmtD(secPrec.jour)) + ')' : '') +
-      (sp ? ' · ' + sp + ' ' + accord(sp, 'produit compté', 'produits comptés') + ' sans prix' : '') +
-      '</div>', 'solide');
-  })();
+  const valeurTotale = estManager ? carteValeurStock(precedent, secPrec) : '';
 
   /* Liaisons des lignes (repli, fiche « ? », saisie du sec), dans tout l'écran
      ou seulement dans la liste du sec refaite par la recherche. */
@@ -2841,7 +3180,7 @@ V.inventaire = async function () {
     const lignes = {};
     cptes.forEach(k => { lignes[k] = num(saisieSec[k]); });
 
-    resumeAvantValider('sec', lignes, (secPrec && secPrec.lignes) || {}, 'Valider le sec ?',
+    resumeAvantValider('sec', lignes, secAttendu.lignes, 'Valider le sec ?',
       cptes.length + ' ' + accord(cptes.length, 'référence comptée', 'références comptées') + '. ' +
       'L’inventaire est enregistré, à confirmer par un manager : le stock ne change pas avant.' +
       (attenteSec && !attenteSecDuJour ? ' Il remplace celui du ' + fmtD(attenteSec.jour) + ', encore à confirmer.' : ''),
@@ -2855,7 +3194,7 @@ V.inventaire = async function () {
           employe: STATE.user ? STATE.user.id : null,
           note: $('#inv-note') ? $('#inv-note').value : '',
           lignes: lignes,
-          avant: Object.assign({}, (secPrec && secPrec.lignes) || {})
+          avant: Object.assign({}, secAttendu.lignes)
         };
         await DB.set(INV_ATTENTE.sec.cle, a);
         oublierBrouillon('sec');

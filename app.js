@@ -168,7 +168,7 @@
       iPad disparaissaient (vérifié : ventes et imports effacés). */
    const FUSIONNER = ['checklist:', 'hebdo:', 'temp:', 'caisse:', 'reassort:',
                       'preuves:', 'ruptures', 'releve', 'lots:', 'clean:',
-                      'anomalies', 'reception:', 'stock:mv:', 'stock:m13:', 'pointage:', 'ecart:',
+                      'anomalies', 'reception:', 'stock:mv:', 'stock:sec-mv', 'stock:m13:', 'pointage:', 'ecart:',
                       /* Deux iPads qui ajoutent une ligne au même moment : sans fusion,
                          la seconde écriture effaçait la ligne de l'autre. */
                       'feed:', 'pertes:',
@@ -192,7 +192,7 @@
    /* « stock:m13: » : entrées et sorties de l'armoire −13, en ajout seul. Deux
       iPads qui y posent chacun un bac ne doivent pas s'effacer. */
    /* « pertes: » : une perte retirée est marquée « supprime », comme une preuve. */
-   const UNIR = ['ruptures', 'releve', 'anomalies', 'reception:', 'stock:mv:', 'stock:m13:', 'pointage:', 'preuves:',
+   const UNIR = ['ruptures', 'releve', 'anomalies', 'reception:', 'stock:mv:', 'stock:sec-mv', 'stock:m13:', 'pointage:', 'preuves:',
                  'feed:', 'pertes:'];
    const ts = x => (x && (x.a || x.at)) || '';
    /* « k » : identifiant de ligne du journal, dont « id » est celui de la personne. */
