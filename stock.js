@@ -2307,10 +2307,8 @@ async function ficheArticle(r, apres) {
       const d = prixAchatDefaut(x.cp);
       const avantPrix = corrige(x.cp) ? num(_prixAchat[x.cp]) : (d || 0);
       if (v !== avantPrix) prix[x.cp] = (d !== null && v === d) || (d === null && v === 0) ? null : v;
-      const fm = $('#fm-' + i);
-      const mt = fm.value.trim().replace(',', '.');
-      const mv = mt === '' ? 0 : Number(mt);
-      if (!(mv >= 0)) return toast('Minimum invalide : ' + (x.v || r.nom), 'erreur');
+      const mv = lireMinimum($('#fm-' + i).value);
+      if (isNaN(mv)) return toast('Minimum invalide : ' + (x.v || r.nom), 'erreur');
       if (mv !== (num(seuils[x.cp]) > 0 ? num(seuils[x.cp]) : 0)) mins[x.cp] = mv;
       const a = !!$('[data-fa="' + i + '"]').checked;
       if (a !== x.actif) actifs[x.cp] = a;
@@ -2369,6 +2367,13 @@ async function ficheArticle(r, apres) {
     toast(n ? 'Fiche enregistrée' : 'Rien n’a changé');
     if (apres) apres();
   };
+}
+
+/* Minimum saisi : « 2 », « 2.5 » ou « 2,5 » ; vide = 0 ; sinon NaN. */
+function lireMinimum(txt) {
+  const t = String(txt || '').trim().replace(',', '.');
+  if (!t) return 0;
+  return /^\d+(\.\d+)?$/.test(t) ? Number(t) : NaN;
 }
 
 /* Articles de la chambre froide, dans l'ordre du catalogue : parfums de
@@ -2446,10 +2451,13 @@ async function ficheFroidArticle(x, apres) {
       const avant = corrige(cp) ? num(_prixAchat[cp]) : (d || 0);
       if (v !== avant) prix[cp] = (d !== null && v === d) || (d === null && v === 0) ? null : v;
     }
-    const mt = $('#ffa-min').value.trim().replace(',', '.');
-    const mv = mt === '' ? 0 : Number(mt);
-    if (!(mv >= 0)) return toast('Minimum invalide', 'erreur');
+    const mv = lireMinimum($('#ffa-min').value);
+    if (isNaN(mv)) return toast('Minimum invalide', 'erreur');
     const a = !!$('#ffa-actif').checked;
+    /* Dernier parfum actif : refusé avant d'écrire quoi que ce soit. */
+    if (!a && actif && x.cr.indexOf('glace|') === 0 && !PARFUMS.some(p => p !== x.nom && !_froidRetires.has('glace|' + p))) {
+      return toast('Gardez au moins un parfum de glace actif', 'erreur');
+    }
     enCours = true; $('#ffa-ok').disabled = true;
     try {
       if (a !== actif && !(await basculerFroid(x.cr, a))) { enCours = false; $('#ffa-ok').disabled = false; return; }
@@ -2462,6 +2470,9 @@ async function ficheFroidArticle(x, apres) {
       }
     } catch (e) { enCours = false; $('#ffa-ok').disabled = false; return toast('Enregistrement impossible, réessayez', 'erreur'); }
     const n = Object.keys(prix).length + (mv !== min ? 1 : 0) + (a !== actif ? 1 : 0);
+    /* Le prix est commun : le journal le dit, pas seulement l'article ouvert. */
+    if (Object.keys(prix).length && x.commun) await feed('ok', STATE.user.prenom + ' a modifié le prix ' +
+      x.prix.map(p => 'par ' + p.nom).join(', ') + ' (commun à ' + x.commun + (x.grp !== 'Glaces' ? ' de ' + x.grp : '') + ')');
     if (n) await feed('ok', STATE.user.prenom + ' a mis à jour la fiche ' + x.nom + ' (chambre froide)');
     closeSheet();
     toast(n ? 'Fiche enregistrée' : 'Rien n’a changé');
@@ -2493,12 +2504,8 @@ V.catalogue = async function () {
     return (lo === hi ? eur(lo) : eur(lo) + ' à ' + eur(hi)) + '/' + esc(r.unite) +
       (ps.length < declis(r).length ? ' (incomplet)' : '');
   };
-  /* Onglet demandé depuis Réglages, sinon le dernier ouvert. */
-  if (STATE.cataloguePartie === 'froid' || STATE.cataloguePartie === 'sec') {
-    V.catalogue._partie = STATE.cataloguePartie;
-    STATE.cataloguePartie = null;
-  }
-  const partie = V.catalogue._partie === 'sec' ? 'sec' : 'froid';
+  /* Onglet choisi dans Réglages ou en haut de l'écran ; gardé au retour. */
+  let partie = STATE.cataloguePartie === 'sec' ? 'sec' : 'froid';
   let seuils = {};
   try { seuils = await chargerSeuils(); } catch (e) {}
   const froid = articlesFroid();
@@ -2514,7 +2521,7 @@ V.catalogue = async function () {
   froid.forEach(x => { if (grpsFroid.indexOf(x.grp) < 0) grpsFroid.push(x.grp); });
 
   $('#vue-actions').innerHTML = '';
-  const onglets = '<div class="tseg">' +
+  const onglets = () => '<div class="tseg">' +
     [['froid', 'Chambre froide', parfumsActifs().length + ' parfums'],
      ['sec', 'Sec', (n => n + ' ' + accord(n, 'référence'))(cat.filter(r => !r.masque).length)]].map(x =>
       '<button class="' + (x[0] === partie ? 'on' : '') + '" data-partie="' + x[0] + '">' +
@@ -2542,9 +2549,7 @@ V.catalogue = async function () {
           '</div></div>', off ? 'plat' : '');
       }).join('') + '</div></div>').join('');
 
-  if (partie === 'froid') {
-    $('#page').innerHTML = onglets + corpsFroid();
-  } else $('#page').innerHTML = onglets +
+  const corpsSec = () =>
     carte('<h2>Catalogue du sec</h2>' +
       '<div class="cs">Ce que l’inventaire et le réassort proposent. Retirez ce que ' +
       'vous ne comptez plus, ajoutez ce qui manque, changez une unité ou une ' +
@@ -2577,6 +2582,12 @@ V.catalogue = async function () {
         ).join('') + '</div></div>';
     }).join('');
 
+  /* Changer d'onglet redessine sans relire la base. */
+  function dessiner() {
+    $('#page').innerHTML = onglets() + (partie === 'froid' ? corpsFroid() : corpsSec());
+    lier();
+  }
+  const lier = () => {
   $$('[data-masque]').forEach(b => b.onclick = async () => {
     const id = b.dataset.masque;
     const i = m.masques.indexOf(id);
@@ -2705,8 +2716,9 @@ V.catalogue = async function () {
   });
   $$('[data-partie]').forEach(b => b.onclick = () => {
     if (b.dataset.partie === partie) return;
-    V.catalogue._partie = b.dataset.partie;
-    rendre('catalogue');
+    STATE.cataloguePartie = partie = b.dataset.partie;
+    dessiner();
+    window.scrollTo(0, 0);
   });
   $$('[data-fprix]').forEach(b => b.onclick = () => {
     const x = froid[+b.dataset.fprix];
@@ -2733,6 +2745,8 @@ V.catalogue = async function () {
     await feed('ok', STATE.user.prenom + (off ? ' a réaffiché ' : ' a retiré ') + x.nom + ' (chambre froide)');
     rendre('catalogue');
   });
+  };
+  dessiner();
 };
 
 /* Quantité du sec à revoir avant de valider : l'unité est souvent un carton
