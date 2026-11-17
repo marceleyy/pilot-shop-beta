@@ -1935,7 +1935,11 @@ V.controle = async function () {
    Forme des modifications, sous la clé « catalogue:sec » :
      { masques: ['id1','id2'],            références retirées de l'affichage
        modifs:  { id: { unite, decimal, variantes, nom } },
-       ajouts:  [ { id, sec, nom, unite, decimal, variantes } ] }
+       ajouts:  [ { id, sec, nom, unite, decimal, variantes } ],
+       retirees: ['sec|id|déclinaison'] }  déclinaisons retirées une à une
+   Une déclinaison retirée disparaît de « variantes » (inventaire, réception,
+   réassort, minimums) mais reste dans « variantesRetirees » pour la fiche.
+   Son stock n'est jamais effacé : il reste au dernier comptage.
    -------------------------------------------------------------------------- */
 let _catalogueSec = null;
 
@@ -1969,6 +1973,18 @@ async function chargerCatalogueSec() {
     const x = Object.assign({}, a, mod || {});
     if ((m.masques || []).indexOf(a.id) >= 0) x.masque = true;
     out.push(x);
+  });
+  /* Déclinaisons retirées une à une (fiche article). Une référence dont
+     toutes les déclinaisons sont retirées est retirée elle-même. */
+  const ret = new Set(Array.isArray(m.retirees) ? m.retirees : []);
+  if (ret.size) out.forEach(x => {
+    const vs = x.variantes || [];
+    if (!vs.length) return;
+    const retirees = vs.filter(v => ret.has('sec|' + x.id + '|' + v));
+    if (!retirees.length) return;
+    x.variantesRetirees = retirees;
+    x.variantes = vs.filter(v => retirees.indexOf(v) < 0);
+    if (!x.variantes.length) { x.variantes = vs; x.variantesRetirees = []; x.masque = true; }
   });
   _catalogueSec = out;
   return out;
@@ -2107,6 +2123,87 @@ function editerPrix(titre, lignes, apres) {
   };
 }
 
+/* Fiche d'une référence du sec : pour chaque déclinaison, active ou
+   retirée, prix d'achat et stock minimum. Un seul endroit pour ce que
+   l'inventaire, la réception, les minimums et la valeur lisent. Retirer ne
+   touche pas au stock déjà compté. */
+async function ficheArticle(r, apres) {
+  const seuils = await chargerSeuils().catch(() => ({}));
+  const toutes = (r.variantes || []).concat(r.variantesRetirees || []);
+  const lignes = (toutes.length ? toutes : ['']).map(v => ({
+    v: v, cp: 'sec|' + r.id + '|' + v,
+    actif: toutes.length ? (r.variantesRetirees || []).indexOf(v) < 0 : !r.masque
+  }));
+  const val = cp => { const p = corrige(cp) ? num(_prixAchat[cp]) : prixAchatDefaut(cp); return p > 0 ? String(p).replace('.', ',') : ''; };
+  showSheet(
+    '<h2 id="sheet-titre">' + esc(r.nom) + '</h2>' +
+    '<p class="cs">Compté en ' + esc(r.unite) + '. Prix d’achat HT par ' + esc(r.unite) +
+    ' ; minimum : arrivé à ce nombre, l’article est « à commander ». Retirer une déclinaison la cache ' +
+    'de l’inventaire, de la réception et du réassort, sans effacer son stock.</p>' +
+    lignes.map((x, i) =>
+      '<div class="card plat" style="margin-top:10px"><div class="rang">' +
+      '<b style="flex:1;min-width:0">' + esc(x.v || r.nom) + '</b>' +
+      '<label class="mini" style="display:flex;align-items:center;gap:6px"><input type="checkbox" data-fa="' + i + '"' + (x.actif ? ' checked' : '') + '> Active</label></div>' +
+      '<div class="grid g2" style="margin-top:8px">' +
+      '<div class="champ"><label class="f" for="fp-' + i + '">Prix (€)</label><input type="text" inputmode="decimal" id="fp-' + i + '" value="' + esc(val(x.cp)) + '" placeholder="—"></div>' +
+      '<div class="champ"><label class="f" for="fm-' + i + '">Minimum</label><input type="number" min="0" step="any" inputmode="decimal" id="fm-' + i + '" value="' + (num(seuils[x.cp]) > 0 ? esc(String(seuils[x.cp])) : '') + '" placeholder="—"></div>' +
+      '</div></div>').join('') +
+    '<div class="actions"><button class="btn clair" data-fermer>Annuler</button>' +
+    '<button class="btn menthe" id="fa-ok">Enregistrer</button></div>');
+  let enCours = false;
+  $('#fa-ok').onclick = async () => {
+    if (enCours) return;
+    const prix = {}, mins = {}, actifs = {};
+    for (let i = 0; i < lignes.length; i++) {
+      const x = lignes[i];
+      const v = lirePrix($('#fp-' + i).value);
+      if (isNaN(v)) return toast('Prix illisible : ' + (x.v || r.nom), 'erreur');
+      const d = prixAchatDefaut(x.cp);
+      const avantPrix = corrige(x.cp) ? num(_prixAchat[x.cp]) : (d || 0);
+      if (v !== avantPrix) prix[x.cp] = (d !== null && v === d) || (d === null && v === 0) ? null : v;
+      const fm = $('#fm-' + i);
+      if (fm.validity && fm.validity.badInput) return toast('Minimum illisible : ' + (x.v || r.nom), 'erreur');
+      const mv = fm.value.trim() === '' ? 0 : Number(fm.value);
+      if (!(mv >= 0)) return toast('Minimum invalide : ' + (x.v || r.nom), 'erreur');
+      if (mv !== (num(seuils[x.cp]) > 0 ? num(seuils[x.cp]) : 0)) mins[x.cp] = mv;
+      const a = !!$('[data-fa="' + i + '"]').checked;
+      if (a !== x.actif) actifs[x.cp] = a;
+    }
+    enCours = true; $('#fa-ok').disabled = true;
+    try {
+      if (Object.keys(prix).length) await enregistrerPrixAchat(prix);
+      if (Object.keys(mins).length) {
+        /* Relu juste avant : un autre manager garde ses minimums. */
+        const frais = await chargerSeuils();
+        Object.keys(mins).forEach(k => { if (mins[k] > 0) frais[k] = mins[k]; else delete frais[k]; });
+        await DB.set(CLE_SEUILS, frais);
+      }
+      if (Object.keys(actifs).length) {
+        const m = (await DB.get('catalogue:sec', null)) || {};
+        m.masques = m.masques || []; m.modifs = m.modifs || {}; m.ajouts = m.ajouts || [];
+        m.retirees = Array.isArray(m.retirees) ? m.retirees : [];
+        Object.keys(actifs).forEach(k => {
+          if (!toutes.length) {
+            const i = m.masques.indexOf(r.id);
+            if (actifs[k] && i >= 0) m.masques.splice(i, 1);
+            if (!actifs[k] && i < 0) m.masques.push(r.id);
+            return;
+          }
+          const j = m.retirees.indexOf(k);
+          if (actifs[k] && j >= 0) m.retirees.splice(j, 1);
+          if (!actifs[k] && j < 0) m.retirees.push(k);
+        });
+        await enregistrerCatalogueSec(m);
+      }
+    } catch (e) { enCours = false; $('#fa-ok').disabled = false; return toast('Enregistrement impossible, réessayez', 'erreur'); }
+    const n = Object.keys(prix).length + Object.keys(mins).length + Object.keys(actifs).length;
+    if (n) await feed('ok', STATE.user.prenom + ' a mis à jour la fiche ' + r.nom);
+    closeSheet();
+    toast(n ? 'Fiche enregistrée' : 'Rien n’a changé');
+    if (apres) apres();
+  };
+}
+
 /* -----------------------------------------------------------------------------
    VUE — CATALOGUE (manager)
    -------------------------------------------------------------------------- */
@@ -2145,7 +2242,8 @@ V.catalogue = async function () {
     carte('<h2>Catalogue du sec</h2>' +
       '<div class="cs">Ce que l’inventaire et le réassort proposent. Retirez ce que ' +
       'vous ne comptez plus, ajoutez ce qui manque, changez une unité ou une ' +
-      'déclinaison. Vos réglages survivent aux mises à jour.</div>', 'solide') +
+      'déclinaison. € ouvre la fiche : déclinaisons actives, prix et stock minimum. ' +
+      'Vos réglages survivent aux mises à jour.</div>', 'solide') +
 
     sections.map(s => {
       const refs = cat.filter(r => (r.sec || 'Autres') === s.id);
@@ -2160,10 +2258,11 @@ V.catalogue = async function () {
             esc(r.nom) + '</b>' +
             '<div class="mini">' + esc(r.unite) + (r.decimal === false ? ' · entiers' : ' · demi possible') +
             (r.variantes && r.variantes.length ? ' · ' + r.variantes.length + ' déclinaisons' : '') +
+            (r.variantesRetirees && r.variantesRetirees.length ? ' · ' + r.variantesRetirees.length + ' retirée' + (r.variantesRetirees.length > 1 ? 's' : '') : '') +
             ' · ' + prixResume(r) +
             '</div></div>' +
             '<div class="duo compact">' +
-            '<button class="btn clair" data-prix="' + esc(r.id) + '" aria-label="Prix d’achat">€</button>' +
+            '<button class="btn clair" data-prix="' + esc(r.id) + '" aria-label="Fiche : actif, prix, minimum">€</button>' +
             '<button class="btn clair" data-edit="' + esc(r.id) + '" aria-label="Modifier">✎</button>' +
             '<button class="btn ' + (r.masque ? 'menthe' : 'clair') + '" data-masque="' + esc(r.id) + '" ' +
             'aria-label="' + (r.masque ? 'Réafficher' : 'Retirer') + '">' + (r.masque ? '↺' : '−') + '</button>' +
@@ -2198,7 +2297,9 @@ V.catalogue = async function () {
       '</div></div>' +
       '<div class="champ" style="margin-top:12px"><label class="f">Déclinaisons, une par ligne</label>' +
       '<textarea id="ct-var" rows="4" placeholder="Petit\nClassique\nGrand">' +
-      esc((r.variantes || []).join('\n')) + '</textarea></div>' +
+      /* Toutes les déclinaisons, retirées comprises : sinon les enregistrer ici
+         effaçait celles que la fiche avait seulement retirées. */
+      esc((r.variantes || []).concat(r.variantesRetirees || []).join('\n')) + '</textarea></div>' +
       '<div class="actions"><button class="btn clair" data-fermer>Annuler</button>' +
       '<button class="btn menthe" id="ct-ok">Enregistrer</button></div>');
 
@@ -2236,8 +2337,7 @@ V.catalogue = async function () {
   $$('[data-ajout]').forEach(b => b.onclick = () => editer(null, b.dataset.ajout));
   $$('[data-prix]').forEach(b => b.onclick = () => {
     const r = cat.filter(x => x.id === b.dataset.prix)[0];
-    if (r) editerPrix(r.nom, declis(r).map(v =>
-      ({ cp: 'sec|' + r.id + '|' + v, nom: v || r.nom, unite: r.unite })), () => rendre('catalogue'));
+    if (r) ficheArticle(r, () => rendre('catalogue'));
   });
   $('#ct-prix-froid').onclick = () => editerPrix('Prix chambre froide', froidPrix(), () => rendre('catalogue'));
 };
