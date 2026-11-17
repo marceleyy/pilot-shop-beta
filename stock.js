@@ -165,6 +165,82 @@ async function apprendreBL(lignes) {
 }
 
 /* -----------------------------------------------------------------------------
+   RÉCEPTIONS DU SEC
+   Le sec n'a pas de mouvement à la vente : son stock est celui du dernier
+   inventaire. Une livraison confirmée par un manager s'y ajoute jusqu'au
+   comptage suivant : stock attendu = dernier comptage + réceptions depuis.
+   Journal à part (« stock:sec-mv »), une ligne par article reçu ; les prix
+   ne sont jamais touchés ici.
+   -------------------------------------------------------------------------- */
+const CLE_SEC_MV = 'stock:sec-mv';
+
+/* Clés du sec qui existent dans le catalogue de la boutique. */
+function clesSecConnues() {
+  const s = new Set();
+  (typeof catalogueSec === 'function' ? catalogueSec() : []).forEach(r => {
+    if (!r || typeof r !== 'object' || r.masque) return;
+    (r.variantes && r.variantes.length ? r.variantes : ['']).forEach(v => s.add('sec|' + r.id + '|' + v));
+  });
+  return s;
+}
+
+/* Ligne du sec pour une référence Amorino : { cle, par } ou null. */
+function secDepuisCode(ref) {
+  const c = typeof codeAmorino === 'function' ? codeAmorino(ref) : null;
+  if (!c) return null;
+  const connues = clesSecConnues();
+  const cle = (c.cles || []).filter(k => connues.has(k))[0];
+  return cle ? { cle: cle, par: num(c.par) > 0 ? num(c.par) : 1 } : null;
+}
+
+/* lignes : [{ cle, q }] déjà converties en unités comptées. L'id dérive de la
+   réception : confirmer deux fois n'ajoute rien. */
+async function ajouterReceptionSec(lignes, meta) {
+  const l = await DB.get(CLE_SEC_MV, []);
+  const vus = new Set(l.map(m => m && m.id));
+  let n = 0;
+  (lignes || []).forEach((x, i) => {
+    const id = meta.id + '|' + i;
+    if (!x.cle || !(num(x.q) > 0) || vus.has(id)) return;
+    l.push({ id: id, at: meta.at, cle: x.cle, q: num(x.q), bl: meta.bl || '', par: meta.par || '' });
+    n++;
+  });
+  if (n) await DB.set(CLE_SEC_MV, l.slice(-2000));
+  return n;
+}
+
+/* Article reçu inconnu du catalogue, déclaré nouveau par le manager à la
+   confirmation : ajouté comme depuis le catalogue (sans prix, à l'unité).
+   Relu juste avant : une page catalogue ouverte ailleurs n'est pas écrasée. */
+async function ajouterArticleSecRecu(nom, section) {
+  const m = (await DB.get('catalogue:sec', null)) || {};
+  m.masques = m.masques || []; m.modifs = m.modifs || {}; m.ajouts = m.ajouts || [];
+  const id = 'm_' + String(nom || 'article').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]+/g, '').slice(0, 20) + '_' + Math.random().toString(36).slice(2, 6);
+  m.ajouts.push({ id: id, sec: section, nom: String(nom || '').trim() || 'Article reçu', unite: 'unité', decimal: true, variantes: [] });
+  await enregistrerCatalogueSec(m);
+  return 'sec|' + id + '|';
+}
+
+/* Quantités reçues depuis un instant (le dernier comptage du sec). */
+async function recusSecDepuis(at) {
+  const out = {};
+  (await DB.get(CLE_SEC_MV, [])).forEach(m => {
+    if (!m || !m.cle || (at && String(m.at) <= String(at))) return;
+    out[m.cle] = Math.round((num(out[m.cle]) + num(m.q)) * 1000) / 1000;
+  });
+  return out;
+}
+
+/* Stock attendu du sec : dernier comptage + réceptions depuis. */
+async function stockSecAttendu(secPrec) {
+  const base = Object.assign({}, (secPrec && secPrec.lignes) || {});
+  const recus = await recusSecDepuis(secPrec && secPrec.at);
+  Object.keys(recus).forEach(c => { base[c] = Math.round((num(base[c]) + recus[c]) * 1000) / 1000; });
+  return { lignes: base, recus: recus };
+}
+
+/* -----------------------------------------------------------------------------
    ÉCRITURE DES MOUVEMENTS
    Journal en ajout seul : on n'efface jamais une ligne, on en ajoute une qui
    corrige. C'est ce qui permet de reconstituer l'historique lors d'un contrôle.
@@ -1259,6 +1335,8 @@ V.stock = async function () {
   const { articles, inventaire } = await stockReel();
   if (typeof chargerCatalogueSec === 'function') await chargerCatalogueSec();
   const sec = await DB.get('stock:sec', null);
+  /* Livraisons du sec confirmées depuis le dernier comptage. */
+  const recusSec = sec ? await recusSecDepuis(sec.at).catch(() => ({})) : {};
   const attente = await inventaireEnAttente('froid');
   const attenteSec = await inventaireEnAttente('sec');
   /* Réceptions pas encore confirmées : leurs bacs ne sont pas dans ces chiffres. */
@@ -1359,7 +1437,10 @@ V.stock = async function () {
     const cat = (typeof catalogueSec === 'function') ? catalogueSec() : INVENTAIRE_SEC;
     const sections = (typeof SEC_SECTIONS !== 'undefined')
       ? SEC_SECTIONS.map(s => typeof s === 'string' ? { id:s } : s) : [];
-    const l = sec.lignes;
+    /* Comptage + réceptions confirmées depuis (voir stockSecAttendu). */
+    const l = Object.assign({}, sec.lignes);
+    Object.keys(recusSec).forEach(c => { l[c] = Math.round((num(l[c]) + recusSec[c]) * 1000) / 1000; });
+    const nbRecus = Object.keys(recusSec).length;
     const parRef = {};
     Object.keys(l).forEach(k => { const p = k.split('|'); if (p[0] !== 'sec') return;
       (parRef[p[1]] = parRef[p[1]] || []).push({ v: p[2] || '', q: num(l[k]) }); });
@@ -1395,7 +1476,9 @@ V.stock = async function () {
       kpi('Unités', n1(totalUnites), '', 'au dernier comptage') + '</div>' +
       '<p class="rappel" style="margin-top:14px">Compté le ' + fmtD(sec.jour) +
       (sec.par ? ' par ' + esc(sec.par) : '') + '. Chantilly, coulis et toppings ' +
-      'baissent à chaque ouverture tracée ; le reste suit le comptage.</p>' + bandeauAttente(attenteSec, 'sec'), 'solide') +
+      'baissent à chaque ouverture tracée ; le reste suit le comptage' +
+      (nbRecus ? ', plus les livraisons confirmées depuis (' + nbRecus + ' ' + accord(nbRecus, 'référence reçue', 'références reçues') + ')' : '') +
+      '.</p>' + bandeauAttente(attenteSec, 'sec'), 'solide') +
       '<button class="btn menthe bloc xl" id="st-inv-sec" style="margin-top:16px">Recompter le sec</button>' +
 
       sections.map(s => {
@@ -2113,6 +2196,11 @@ V.inventaire = async function () {
   const { articles } = await stockReel();
   const precedent = await DB.get('stock:inventaire', null);
   const secPrec   = await DB.get('stock:sec', null);
+  /* Attendu du sec : dernier comptage + livraisons confirmées depuis. Sert à
+     repérer une quantité douteuse et à garder le stock d'une référence non
+     recomptée (réceptions comprises). */
+  const secAttendu = (await stockSecAttendu(secPrec).catch(() => null)) ||
+    { lignes: Object.assign({}, (secPrec && secPrec.lignes) || {}), recus: {} };
   const historique = await DB.get('stock:inventaires', []);
   /* L'historique du sec, séparé : les deux comptages ne se font pas le même
      jour ni par la même personne, et on doit pouvoir voir l'un sans l'autre. */
@@ -2876,7 +2964,7 @@ V.inventaire = async function () {
     const lignes = {};
     cptes.forEach(k => { lignes[k] = num(saisieSec[k]); });
 
-    resumeAvantValider('sec', lignes, (secPrec && secPrec.lignes) || {}, 'Valider le sec ?',
+    resumeAvantValider('sec', lignes, secAttendu.lignes, 'Valider le sec ?',
       cptes.length + ' ' + accord(cptes.length, 'référence comptée', 'références comptées') + '. ' +
       'L’inventaire est enregistré, à confirmer par un manager : le stock ne change pas avant.' +
       (attenteSec && !attenteSecDuJour ? ' Il remplace celui du ' + fmtD(attenteSec.jour) + ', encore à confirmer.' : ''),
@@ -2890,7 +2978,7 @@ V.inventaire = async function () {
           employe: STATE.user ? STATE.user.id : null,
           note: $('#inv-note') ? $('#inv-note').value : '',
           lignes: lignes,
-          avant: Object.assign({}, (secPrec && secPrec.lignes) || {})
+          avant: Object.assign({}, secAttendu.lignes)
         };
         await DB.set(INV_ATTENTE.sec.cle, a);
         oublierBrouillon('sec');

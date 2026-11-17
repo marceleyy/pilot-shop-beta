@@ -794,6 +794,86 @@ const CONTENU_SEC = {
 };
 const contenuSec = c => CONTENU_SEC[c] || CONTENU_SEC[String(c).split('|').slice(0, 2).join('|') + '|'] || '';
 
+/* Références Amorino des bons de livraison → ligne du sec. Sert à la
+   réception : une ligne « COP16BN 1 » entre directement au stock du sec,
+   sans rien deviner. « cles » : la première qui existe dans le catalogue de
+   la boutique (un manager a pu renommer une déclinaison). « par » : combien
+   d'unités comptées fait une unité du bon (COP16BN = carton de 8 ramettes).
+   Tarif « Articles publiés avec prix standard », novembre 2026. Une
+   référence absente d'ici est demandée au manager à la confirmation, puis
+   retenue pour les bons suivants. Les prix ne sont jamais touchés. */
+const CODES_AMORINO = {
+  CORNP: { cles:['sec|cornet|Petit'] }, CORNM1: { cles:['sec|cornet|Classique'] }, CORNG: { cles:['sec|cornet|Grand'] },
+  CORNPCHOC: { cles:['sec|chococone|Petit'] }, CORNMCHOC: { cles:['sec|chococone|Classique'] }, CORNGCHOC: { cles:['sec|chococone|Grand'] },
+  CORNMSG: { cles:['sec|cornetsg|'] }, CONE35: { cles:['sec|conepapier|Petit'] }, CONE44: { cles:['sec|conepapier|Grand'] },
+  COP16BN: { cles:['sec|pot|Petit'], par:8 }, COP10MGN: { cles:['sec|pot|Grand'], par:7 },
+  COPM2NB: { cles:['sec|pot|Géant'] }, COPM4NB: { cles:['sec|pot|Waffle stick'] },
+  COUVP: { cles:['sec|m_couverclecoupe_a17|Petit'] }, COUVM: { cles:['sec|m_couverclecoupe_a17|Classique'] },
+  COUVG: { cles:['sec|m_couverclecoupe_a17|Grand'] }, COUVGT: { cles:['sec|m_couverclecoupe_a17|Géant'] },
+  COUVM4: { cles:['sec|m_couverclecoupe_a17|Waffle stick'] }, COUVASS_GAU: { cles:['sec|m_couvercleassiet_a17|'] },
+  COUVC8OZV2: { cles:['sec|m_couverclesgobelet_3afy|Petit', 'sec|couvercle|Petit'] },
+  'COUVC12/16OZV2': { cles:['sec|m_couverclesgobelet_3afy|Grand', 'sec|couvercle|Grand'] },
+  COUVDOME90: { cles:['sec|m_couverclesgobelet_3afy|Dôme Ø 90 mm'] },
+  KNIFE_BB: { cles:['sec|couvert|Couteau'] }, FORK_BB: { cles:['sec|couvert|Fourchette'] },
+  CUILLEREGO_BB: { cles:['sec|couvert|Cuillère'] }, CUILLEREP_BOIS3: { cles:['sec|m_cuillereboisemb_a17|'] },
+  SPOONI: { cles:['sec|cuillere|'] }, SERV24: { cles:['sec|serviette|'] }, ASSGAU: { cles:['sec|barquette|'] },
+  GOBSP4: { cles:['sec|gobelet|Expresso'] }, GOBSP8: { cles:['sec|gobelet|Petit'] },
+  GOBSP12: { cles:['sec|gobelet|Moyen'] }, GOBSP15: { cles:['sec|gobelet|Grand'] },
+  BGOBBP: { cles:['sec|bague|Petit'] }, BGOBBG: { cles:['sec|bague|Grand'] },
+  PAILLE: { cles:['sec|paille|'] }, PAILLE_E: { cles:['sec|m_pailleemballee_a17|'] },
+  PORTE2GOB: { cles:['sec|m_porte2gobelets_a17|'] }, SPATB11: { cles:['sec|spatule|'] },
+  SUCREBR: { cles:['sec|sucrecristal|'] }, SUCREB: { cles:['sec|m_sucreblanc_a17|'] }, SUGARG: { cles:['sec|m_sucreglace_a17|'] },
+  CIALDI: { cles:['sec|cialdi|'] }, WAFERN: { cles:['sec|gaufrette|'], par:12 },
+  CHOCOLATTE: { cles:['sec|tablette|Lait'] }, CHOCOLATF: { cles:['sec|tablette|Noir'] },
+  CHOCFOND: { cles:['sec|chocochaud|Noir'] }, CHOCMILK: { cles:['sec|chocochaud|Lait'] },
+  CHOCNOCC: { cles:['sec|chocochaud|Noisette'] }, CHOCMAND: { cles:['sec|chocochaud|Amande'] },
+  CHOCBIANCA: { cles:['sec|chocochaud|Blanc'] }, CHOCCARAM: { cles:['sec|chocochaud|Caramel'] },
+  CHOCXOCOATL: { cles:['sec|chocochaud|Aztèque'] }, CHOCARANC: { cles:['sec|chocochaud|Orange cannelle'] },
+  CHOCGIAND: { cles:['sec|chocochaud|Gianduja'] }, CHOCCOCCO: { cles:['sec|chocochaud|Coco'] },
+  CHOCPANET: { cles:['sec|chocochaud|Panettone'] },
+  TEABREAKB50N: { cles:['sec|the|Breakfast'] }, TEAEARLB50N: { cles:['sec|the|Earl grey'] },
+  TEAROOIBOSB50N: { cles:['sec|the|Rooibos'] }, TEAINFUB50N: { cles:['sec|the|Infusion pomme orange'] },
+  TEAYUNB50N: { cles:['sec|the|Vert Yuanne'] }, THEMATCHAP3: { cles:['sec|m_matcha_a17|'] },
+  TOPCARAM: { cles:['sec|coulis|Sauce caramel', 'sec|garniture|Sauce caramel 2 L'] },
+  TOPCHOCG2: { cles:['sec|coulis|Chocolat de couverture', 'sec|garniture|Chocolat de couverture 5 kg'] },
+  TOPNOCCIO: { cles:['sec|coulis|Crème gianduja', 'sec|garniture|Crème gianduja 5 kg'] },
+  TOPPISTAC: { cles:['sec|coulis|Crème pistache', 'sec|garniture|Crème pistache 3 kg'] },
+  TOPNOISC: { cles:['sec|coulis|Noisettes caramélisées', 'sec|garniture|Noisettes caramélisées 1 kg'] },
+  TOPDULCE: { cles:['sec|coulis|Dulce de leche', 'sec|garniture|Dulce de leche 1,2 kg'] },
+  TOPPISTA500: { cles:['sec|topping|Pistache'] }, CARAMP: { cles:['sec|topping|Caramel'] },
+  TOPCAFE3: { cles:['sec|topping|Café'] },
+  TOPCREMINOLP: { cles:['sec|decor|Cremino pistache 5,5 kg'] }, TOPCREMINOLV: { cles:['sec|decor|Cremino noisette 5,5 kg'] },
+  TOPAMARENA: { cles:['sec|decor|Amarena 3 kg'], par:6 }, TOPCRUNCH: { cles:['sec|decor|Céréales chocolat 800 g'], par:4 },
+  TOPTIRA: { cles:['sec|decor|Chocolat en poudre 1 kg'] },
+  'BAG1-2': { cles:['sec|sackraft|Petit'] }, 'BAG2-2': { cles:['sec|sackraft|Grand'] },
+  'BAGTA1-3': { cles:['sec|m_sacslivraison_a17|Petit'] }, 'BAGTA2-3': { cles:['sec|m_sacslivraison_a17|Grand'] },
+  SACISO1: { cles:['sec|m_sacsisothermes_a17|Petit'] }, SACISO2: { cles:['sec|m_sacsisothermes_a17|Grand'] },
+  ADHSAC_VL: { cles:['sec|m_adhesifsac_a17|'] }, GMACISO1: { cles:['sec|m_gaineisomac_a17|'] },
+  SEPGIAND: { cles:['sec|m_separateurgian_a17|'] }, GLACIERE_AMO: { cles:['sec|m_glaciere_a17|'] },
+  MACBOX2N: { cles:['sec|macaroncarton|Petit 2p'] }, MAC_ISO1: { cles:['sec|isobox|'] },
+  UNIGEL1000N2: { cles:['sec|isobac|1100 ml'] }, UNIGEL500N: { cles:['sec|isobac|550 ml'] },
+  FILM_1100: { cles:['sec|filmiso|1100 ml'] }, FILM_550: { cles:['sec|filmiso|550 ml'] }, GUNI: { cles:['sec|bagueiso|'] },
+  'FFO-001': { cles:['sec|m_bouteillesautres_a17|355 ml'] }, 'FFO-002': { cles:['sec|bouteille|'] },
+  'FFO-003': { cles:['sec|m_bouteillesautres_a17|592 ml'] },
+  'FFO-011': { cles:['sec|m_membranes_a17|Small (verte)'] }, 'FFO-012': { cles:['sec|m_membranes_a17|Medium (jaune)'] },
+  'FFO-013': { cles:['sec|m_membranes_a17|Large (bleue)'] },
+  POCHETTE1: { cles:['sec|m_pochettekraft_a17|Petite 11×21'] }, POCHETTE2: { cles:['sec|m_pochettekraft_a17|Grande 15×27'] },
+  P_PANET: { cles:['sec|m_papierpanettone_a17|'] }, FICELLE: { cles:['sec|m_ficellejute_a17|'] },
+  '004285': { cles:['sec|lavette|Bleue'] }, '111063': { cles:['sec|lavette|Jaune'] },
+  '111064': { cles:['sec|lavette|Rose'] }, '111065': { cles:['sec|lavette|Verte'] },
+  R771127: { cles:['sec|desinfectant|Bactalim'] },
+  BACI: { cles:['sec|biscuit|Baci di Dama'], par:20 }, B_BRUTTI: { cles:['sec|biscuit|Brutti e buoni'], par:8 },
+  CANTUCCI: { cles:['sec|biscuit|Cantucci'], par:20 },
+  APA1: { cles:['sec|gaufrier|Pierre abrasive crêpière'] }, BROSSE5: { cles:['sec|gaufrier|Brosse gaufrier'] },
+  ATE1: { cles:['sec|gaufrier|Tampon Clean+'] }, ATE2: { cles:['sec|gaufrier|Recharges Clean+ (15)'] }
+};
+/* Référence lue sur le bon (« COP16BN », « cop16bn ») → entrée ci-dessus. */
+function codeAmorino(ref) {
+  const k = String(ref || '').toUpperCase().replace(/\s+/g, '');
+  return CODES_AMORINO[k] || null;
+}
+
+
 /* Fiches produit du sec : le « ? » à côté d'une ligne de l'inventaire.
    Le nom du catalogue n'est pas celui de l'étiquette (« Crème gianduja 5 kg »
    est un seau marqué « Pasta Nocciolata ») : l'équipe ne trouvait pas la

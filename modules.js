@@ -261,6 +261,23 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
      if (!liste.length) { toast('Aucune réception à confirmer'); return rendre(STATE.view); }
      const r = liste[0];
      const qtes = r.lignes.map(l => l.qte);
+     /* Sec non reconnu : le manager dit si c'est un article existant, un
+        nouveau (ajouté au catalogue), ou rien (compté au prochain inventaire). */
+     if (typeof chargerCatalogueSec === 'function') { try { await chargerCatalogueSec(); } catch (e) {} }
+     const rappro = r.lignes.map(() => '');
+     const optionsSec = () => '<option value="">Ne pas l’ajouter (compté au prochain inventaire)</option>' +
+       '<optgroup label="Nouvel article, dans la section…">' + (typeof SEC_SECTIONS !== 'undefined' ? SEC_SECTIONS : []).map(sc => {
+         const id = typeof sc === 'string' ? sc : sc.id;
+         return '<option value="neuf|' + esc(id) + '">Nouveau · ' + esc(id) + '</option>'; }).join('') + '</optgroup>' +
+       '<optgroup label="Article existant">' + (typeof catalogueSec === 'function' ? catalogueSec() : [])
+         .filter(x => x && typeof x === 'object' && !x.masque)
+         .map(x => (x.variantes && x.variantes.length ? x.variantes : ['']).map(v =>
+           '<option value="' + esc('sec|' + x.id + '|' + v) + '">' + esc(x.nom + (v ? ' · ' + v : '')) + '</option>').join('')).join('') +
+       '</optgroup>';
+     const lieuLigne = (l, i) => l.famille === 'sec'
+       ? (l.cle ? 'au stock du sec : ' + esc(libelleSec(l.cle)) + ' · '
+         : '</div><select data-rap="' + i + '" style="margin-top:6px;width:100%">' + optionsSec() + '</select><div class="mini">')
+       : (l.cle && typeof libelleArticle === 'function' ? 'au stock : ' + esc(libelleArticle(l.cle)) + ' · ' : '');
      showSheet(
        '<h2 id="sheet-titre">Réception à confirmer</h2>' +
        '<p class="sub">' + esc(r.fournisseur) + ' · ' + esc(r.numero || 'sans n°') + ' · saisie par ' + esc(r.par || '—') +
@@ -269,13 +286,14 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
        '<p>Corrigez une quantité si besoin. Mettre 0 retire la ligne. Le stock ne change pas tant que vous ne confirmez pas.</p></div></div>' +
        '<div class="stack" style="margin-top:14px">' + r.lignes.map((l, i) =>
          '<div class="rang"><div style="flex:1;min-width:0"><b>' + esc(l.produit) + '</b>' +
-         '<div class="mini">' + (l.cle && typeof libelleArticle === 'function' ? 'au stock : ' + esc(libelleArticle(l.cle)) + ' · ' : '') + (l.lot ? 'lot ' + esc(l.lot) : 'sans lot') + ' · ' + (l.dlc ? 'DLC ' + esc(fmtD(l.dlc)) : 'sans DLC') + '</div></div>' +
+         '<div class="mini">' + lieuLigne(l, i) + (l.lot ? 'lot ' + esc(l.lot) : 'sans lot') + ' · ' + (l.dlc ? 'DLC ' + esc(fmtD(l.dlc)) : 'sans DLC') + '</div></div>' +
          '<input type="number" min="0" step="1" inputmode="numeric" data-q="' + i + '" value="' + esc(qtes[i]) + '" style="width:76px;text-align:center"></div>').join('') +
        '</div>' +
        '<div class="actions"><button class="btn clair" data-fermer>Laisser en attente</button>' +
        '<button class="btn menthe" id="rv-ok">Confirmer l’entrée en stock</button></div>' +
        '<button class="btn clair bloc" id="rv-ecarter" style="margin-top:10px">Écarter cette réception</button>');
      $$('[data-q]').forEach(inp => inp.oninput = () => { qtes[+inp.dataset.q] = inp.value; });
+     $$('[data-rap]').forEach(sel => sel.onchange = () => { rappro[+sel.dataset.rap] = sel.value; });
      $('#rv-ecarter').onclick = () => confirmer('Écarter cette réception ?',
        'Rien n’entrera au stock pour ce bon. La réception reste tracée au registre.', 'Écarter',
        async () => {
@@ -291,22 +309,40 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
        if (qtes.some(q => q === '' || !(num(q) >= 0) || !Number.isInteger(num(q)))) return toast('Quantité invalide : un nombre entier', 'erreur');
        enCours = true;
        try {
+         /* Articles nouveaux créés avant de marquer : un échec laisse la
+            réception en attente plutôt que perdue. */
+         const cles = r.lignes.map(l => l.cle);
+         for (let i = 0; i < r.lignes.length; i++) {
+           const l = r.lignes[i];
+           if (l.famille !== 'sec' || l.cle || !(num(qtes[i]) > 0)) continue;
+           if (/^neuf\|/.test(rappro[i])) {
+             try { cles[i] = await ajouterArticleSecRecu(l.produit, rappro[i].slice(5)); }
+             catch (e) { return toast('Ajout au catalogue impossible, réessayez', 'erreur'); }
+           } else cles[i] = rappro[i];
+         }
          /* Marquée d'abord : un second iPad qui confirme ensuite la trouve
             traitée et n'ajoute pas les bacs une seconde fois. */
          if (!(await marquerReceptionTraitee(r.id, 'confirmee'))) return;
          let n = 0;
+         const secRecus = [];
          for (let i = 0; i < r.lignes.length; i++) {
            const l = r.lignes[i], q = num(qtes[i]);
            if (!(q > 0)) continue;
+           /* Sec : journal du sec (stock attendu = comptage + réceptions). */
+           if (l.famille === 'sec') {
+             if (cles[i]) { secRecus.push({ cle:cles[i], q:q }); n += q; }
+             continue;
+           }
            /* Daté de la livraison, pas de la confirmation (voir ajouterMouvement). */
            await ajouterMouvement('reception', l.cle, q, { lot:l.lot, bl:r.numero, dlc:l.dlc, famille:l.famille, at:r.at });
            n += q;
          }
+         if (secRecus.length) await ajouterReceptionSec(secRecus, { id:r.id, at:r.at, bl:r.numero, par:STATE.user.prenom });
          const corrige = r.lignes.some((l, i) => num(qtes[i]) !== num(l.qte));
          /* Le manager a validé chaque ligne gardée : l'appli retient l'article
             de chaque référence pour les prochains bons. */
          if (typeof apprendreBL === 'function') {
-           try { await apprendreBL(r.lignes.filter((l, i) => num(qtes[i]) > 0)); } catch (e) {}
+           try { await apprendreBL(r.lignes.map((l, i) => Object.assign({}, l, { cle:cles[i] })).filter((l, i) => num(qtes[i]) > 0)); } catch (e) {}
          }
          await feed('ok', STATE.user.prenom + ' a confirmé l’entrée en stock du bon ' + (r.numero || 'sans n°') +
            ' (' + (r.par || '—') + ')' + (corrige ? ', quantités corrigées' : ''));
@@ -474,7 +510,7 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
          if (!r || r.masque || dejaFam.indexOf(r.id) >= 0) return;
          const unite = STOCK.unites.indexOf(r.unite) >= 0 ? r.unite : 'unité';
          (r.variantes && r.variantes.length ? r.variantes : ['']).forEach(v =>
-           out.push({ nom:r.nom + (v ? ' · ' + v : ''), lieu:'sec', fam:'', parfum:'', unite:unite }));
+           out.push({ nom:r.nom + (v ? ' · ' + v : ''), lieu:'sec', fam:'', parfum:'', unite:unite, cle:'sec|' + r.id + '|' + v }));
        });
        return out;
      }
@@ -498,9 +534,25 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
        if (!lignes.length) lignes.push({ produit:'', qte:1, unite:'bac', lot:'', dlc:'' });
        /* Référence déjà confirmée par un manager : l'article appris remplace
           le nom lu, souvent abîmé (voir apprendreBL). */
+       /* Sec : référence Amorino connue (CODES_AMORINO) ou déjà confirmée
+          par un manager → article du sec choisi d'office, quantité du bon
+          convertie en unités comptées (« par »). Aucun prix n'est touché. */
+       const choixSec = (l, cle, par) => {
+         const c = catalogue.filter(x => x.cle === cle)[0] ||
+           { nom:libelleSec(cle), lieu:'sec', fam:'', parfum:'', unite:'unité', cle:cle };
+         l.lieu = 'sec'; l.choix = c; l.produit = l.lu = c.nom; l.unite = c.unite; l.facteur = par || 1;
+       };
        lignes.forEach(l => {
+         if (!l.ref || typeof secDepuisCode !== 'function') return;
+         const sd = secDepuisCode(l.ref);
+         const a = memo && typeof cleMemoRef === 'function' ? memo[cleMemoRef(l.ref)] : null;
+         if (sd) { l.codeSec = true; choixSec(l, sd.cle, sd.par); }
+         else if (a && /^sec\|/.test(a.cle || '') && clesSecConnues().has(a.cle)) { l.codeSec = true; choixSec(l, a.cle, 1); }
+       });
+       lignes.forEach(l => {
+         if (l.codeSec) return;
          const a = memo && l.ref && typeof cleMemoRef === 'function' ? memo[cleMemoRef(l.ref)] : null;
-         if (!a || !a.cle) return;
+         if (!a || !a.cle || /^sec\|/.test(a.cle)) return;
          /* Une seule confirmation ne suffit pas à passer outre un nom bien lu :
             une association fausse s'imposerait à chaque bon. */
          if (!((a.vu || 1) >= 2 || !parfumDepuisDesignation(l.lu))) return;
@@ -525,7 +577,10 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
                '" data-lieu="' + i + '" data-z="' + z + '">' + (z === 'froid' ? 'Froid' : 'Sec') + '</button>').join('') + '</div>' +
              '<input type="search" data-r="' + i + '.produit" value="' + esc(l.produit) + '" placeholder="Chercher dans le catalogue ou écrire le nom" autocomplete="off">' +
              '<div class="chips" data-sugg="' + i + '" style="margin-top:6px">' + (l.choix && l.produit === l.choix.nom ? '' : puces(l, i, l.produit)) + '</div>' +
-             (l.appris && l.produit === l.lu ? '<p class="mini" style="margin-top:4px">Reconnu grâce aux livraisons précédentes (' + esc(l.ref) + ')</p>' : '') + '</div>' +
+             (l.appris && l.produit === l.lu ? '<p class="mini" style="margin-top:4px">Reconnu grâce aux livraisons précédentes (' + esc(l.ref) + ')</p>' : '') +
+             (l.choix && l.choix.cle && l.produit === l.choix.nom ? '<p class="mini" style="margin-top:4px">Entrera au stock du sec' +
+               (l.codeSec ? ' (référence ' + esc(l.ref) + ')' : '') +
+               (num(l.facteur) > 1 ? ' · 1 sur le bon = ' + num(l.facteur) + ' comptés à l’inventaire' : '') + '</p>' : '') + '</div>' +
              '<div class="grid g3" style="margin-top:10px">' +
              '<div class="champ"><label class="f">Quantité' + (l.qteDouteuse ? ' <b style="color:var(--corail-d)">à vérifier</b>' : '') + '</label><input type="number" min="1" data-r="' + i + '.qte" value="' + l.qte + '"></div>' +
              '<div class="champ"><label class="f">Unité</label><select data-r="' + i + '.unite">' +
@@ -568,6 +623,8 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
              const c = catalogue.filter(x => x.lieu === (l.lieu || 'froid') && x.nom === b.dataset.nom)[0];
              if (!c) return;
              l.choix = c; l.produit = c.nom; l.unite = c.unite;
+             const sd = c.cle && l.ref && typeof secDepuisCode === 'function' ? secDepuisCode(l.ref) : null;
+             l.facteur = sd && sd.cle === c.cle ? sd.par : 1;
              /* Le nom choisi ne porte pas de taille : sans taille saisie, le
                 bac par défaut est signalé à vérifier. */
              if (c.fam === 'glace' && !num(l.taille)) l.tailleDeduite = true;
@@ -658,7 +715,15 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
              compté à l'inventaire du sec. */
           if (l.choix && l.produit === l.choix.nom) {
             const c = l.choix;
-            if (!c.fam) { auSecSeul.push(l.produit.trim()); continue; }
+            if (!c.fam) {
+              if (!c.cle) { auSecSeul.push(l.produit.trim()); continue; }
+              /* Sec : entre au stock du sec à la confirmation, en unités
+                 comptées (carton de 8 ramettes → 8). */
+              auStock++;
+              aStocker.push({ cle:c.cle, produit:l.produit.trim(), qte:num(l.qte) * (num(l.facteur) || 1), ref:l.ref || '',
+                              lot:l.lot || '', dlc:l.dlc || '', famille:'sec' });
+              continue;
+            }
             const cleC = cleArticle(c.fam, c.parfum, c.fam === 'glace' ? (num(l.taille) || FOURNISSEUR.tailleParDefaut) : '');
             auStock++;
             aStocker.push({ cle:cleC, produit:l.produit.trim(), qte:num(l.qte), ref:l.ref || '',
@@ -666,6 +731,14 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
             continue;
           }
           const fam = devinerFamille(l.produit);
+          /* Rangé au sec sans article choisi : le manager dit, à la
+             confirmation, si c'est un article existant ou un nouveau. */
+          if (l.lieu === 'sec' && !(fam.lieu === 'sec' || fam.stock === 'sec')) {
+            auStock++;
+            aStocker.push({ cle:'', produit:l.produit.trim(), qte:num(l.qte), ref:l.ref || '',
+                            lot:l.lot || '', dlc:l.dlc || '', famille:'sec', aRapprocher:true });
+            continue;
+          }
           /* Même clé que l'ouverture : « Gelato pistache 3 litres » doit
              alimenter glace|Pistache|3, pas un article fantôme en 5 L que
              l'inventaire ne compte jamais. Seules les glaces ont une taille. */
