@@ -3104,12 +3104,14 @@ function formulaireAnomalie() {
           tâches, horaires et unités froides (ancien Back-office). */
        await V.parametres();
        const p0 = $('#page');
+       /* Même présentation que « Tâches hebdomadaires » : un bouton par catalogue. */
        if (p0) p0.insertAdjacentHTML('afterbegin',
-         carte('<div class="rang"><div style="flex:1;min-width:0"><b>Catalogues</b>' +
-           '<div class="mini">Sec et chambre froide : produits utilisés ou non, prix, stock minimum. ' +
-           'L’inventaire, la réception, la valeur du stock et les écarts les lisent.</div></div>' +
-           '<button class="btn clair sm" data-go="catalogue">Ouvrir</button></div>', 'solide'));
-       $$('#page [data-go]').forEach(b => b.onclick = () => rendre(b.dataset.go));
+         carte(entete('📦', 'Catalogues', 'Ce que la boutique utilise : produits, prix, minimums.') +
+           '<p class="mini">L’inventaire, la réception, la valeur du stock et les écarts les lisent. ' +
+           'Un article retiré n’apparaît plus nulle part ; son stock déjà compté reste.</p>' +
+           '<button class="btn clair bloc" data-cat="froid" style="margin-top:14px">Catalogue de la chambre froide</button>' +
+           '<button class="btn clair bloc" data-cat="sec" style="margin-top:8px">Catalogue du sec</button>', 'solide'));
+       $$('#page [data-cat]').forEach(b => b.onclick = () => { STATE.cataloguePartie = b.dataset.cat; rendre('catalogue'); });
      }
      const page = $('#page');
      if (!page) return;

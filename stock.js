@@ -2180,39 +2180,6 @@ function lirePrix(txt) {
   return (isFinite(v) && v >= 0) ? Math.round(v * 100) / 100 : NaN;
 }
 
-/* Fiche de prix : une ligne par clé. lignes = [{ cp, nom, unite }]. */
-function editerPrix(titre, lignes, apres) {
-  const val = cp => { const p = corrige(cp) ? num(_prixAchat[cp]) : prixAchatDefaut(cp); return p > 0 ? String(p).replace('.', ',') : ''; };
-  showSheet(
-    '<h2 id="sheet-titre">' + esc(titre) + '</h2>' +
-    '<p class="cs">Prix d’achat HT, par unité comptée à l’inventaire. Laissez vide pour ne pas valoriser. ' +
-    'Les prix ne s’affichent qu’au manager ; les inventaires déjà faits gardent leurs prix du jour.</p>' +
-    lignes.map((x, i) =>
-      '<div class="champ" style="margin-top:12px"><label class="f" for="px-' + i + '">' + esc(x.nom) +
-      (x.unite ? ' · € par ' + esc(x.unite) : '') + '</label>' +
-      '<input type="text" inputmode="decimal" id="px-' + i + '" value="' + esc(val(x.cp)) + '" placeholder="—"></div>').join('') +
-    '<div class="actions"><button class="btn clair" data-fermer>Annuler</button>' +
-    '<button class="btn menthe" id="px-ok">Enregistrer</button></div>');
-  let enCours = false;
-  $('#px-ok').onclick = async () => {
-    if (enCours) return;
-    const modifs = {};
-    for (let i = 0; i < lignes.length; i++) {
-      const v = lirePrix($('#px-' + i).value);
-      if (isNaN(v)) return toast('Prix illisible : ' + lignes[i].nom, 'erreur');
-      const d = prixAchatDefaut(lignes[i].cp);
-      /* Égal au prix du fichier : pas de correction à garder. */
-      modifs[lignes[i].cp] = (d !== null && v === d) || (d === null && v === 0) ? null : v;
-    }
-    enCours = true; $('#px-ok').disabled = true;
-    try { await enregistrerPrixAchat(modifs); }
-    catch (e) { enCours = false; $('#px-ok').disabled = false; return toast('Enregistrement impossible, réessayez', 'erreur'); }
-    await feed('ok', STATE.user.prenom + ' a modifié les prix : ' + titre);
-    closeSheet();
-    if (apres) apres();
-  };
-}
-
 /* Fiche d'une référence du sec : pour chaque déclinaison, active ou
    retirée, prix d'achat et stock minimum. Un seul endroit pour ce que
    l'inventaire, la réception, les minimums et la valeur lisent. Retirer ne
@@ -2404,87 +2371,100 @@ async function ficheArticle(r, apres) {
   };
 }
 
-/* Fiche de la chambre froide : chaque parfum de glace et chaque saveur des
-   autres familles, actif ou retiré, et son stock minimum. Retirer cache de
-   l'inventaire, de la réception et des minimums sans effacer le stock. */
-async function ficheFroid(apres) {
+/* Articles de la chambre froide, dans l'ordre du catalogue : parfums de
+   glace (prix par taille de bac, commun à tous les parfums), puis chaque
+   saveur des autres familles (prix commun à la famille), puis les familles
+   sans saveur. cr = clé « retiré », cs = clé du minimum. */
+function articlesFroid() {
+  const bacs = (FOURNISSEUR.taillesBac || TAILLES_BAC || []).map(t =>
+    ({ cp: cleArticle('glace', '', t), nom: 'bac ' + t + ' L' }));
+  const l = PARFUMS.slice().sort((x, y) => x.localeCompare(y)).map(p =>
+    ({ grp: 'Glaces', nom: p, cr: 'glace|' + p, cs: 'glace|' + p, unite: 'bacs', prix: bacs, commun: 'tous les parfums' }));
+  FAMILLES_PRODUIT.filter(f => f.id !== 'glace' && f.lieu !== 'sec' && f.stock !== 'sec').forEach(f => {
+    const prix = [{ cp: cleArticle(f.id, '', ''), nom: f.unite || 'unité' }];
+    const unite = f.unites || 'unités';
+    if (f.saveurs && f.saveurs.length) f.saveurs.forEach(sv =>
+      l.push({ grp: f.libelle, nom: sv, cr: f.id + '|' + sv, cs: cleArticle(f.id, sv, ''), unite, prix, commun: 'toutes les saveurs' }));
+    else l.push({ grp: 'Autres', nom: f.libelle, cr: f.id + '|', cs: cleArticle(f.id, '', ''), unite, prix });
+  });
+  return l;
+}
+
+/* Retirer ou réafficher un article de la chambre froide (relu juste avant :
+   un autre manager garde ses réglages). Faux si c'était le dernier parfum. */
+async function basculerFroid(cr, actif) {
+  const m = (await DB.get('catalogue:froid', null)) || {};
+  const ret = new Set(Array.isArray(m.retires) ? m.retires : []);
+  if (actif) ret.delete(cr); else ret.add(cr);
+  if (!actif && cr.indexOf('glace|') === 0 && !PARFUMS.some(p => !ret.has('glace|' + p))) {
+    toast('Gardez au moins un parfum de glace actif', 'erreur');
+    return false;
+  }
+  m.retires = [...ret];
+  await DB.set('catalogue:froid', m);
+  _froidRetires = ret;
+  return true;
+}
+
+/* Fiche d'un article de la chambre froide, comme celle du sec : active ou
+   non, prix d'achat HT et stock minimum. Le prix d'un bac est commun à tous
+   les parfums (celui d'une famille à toutes ses saveurs) : la fiche le dit. */
+async function ficheFroidArticle(x, apres) {
   let seuils;
   try { seuils = await chargerSeuils(); await chargerCatalogueFroid(); }
   catch (e) { return toast('Catalogue illisible, réessayez', 'erreur'); }
-  const lignes = PARFUMS.slice().sort((a, b) => a.localeCompare(b)).map(p =>
-    ({ grp: 'Glaces (bacs, toutes tailles)', nom: p, cr: 'glace|' + p, cs: 'glace|' + p }));
-  FAMILLES_PRODUIT.filter(f => f.id !== 'glace' && f.lieu !== 'sec' && f.stock !== 'sec').forEach(f => {
-    if (f.saveurs && f.saveurs.length) f.saveurs.forEach(sv =>
-      lignes.push({ grp: f.libelle + ' (en ' + (f.unites || 'unités') + ')', nom: sv, cr: f.id + '|' + sv, cs: cleArticle(f.id, sv, '') }));
-    else lignes.push({ grp: 'Autres (à l’unité)', nom: f.libelle + ' (en ' + (f.unites || 'unités') + ')', cr: f.id + '|', cs: cleArticle(f.id, '', '') });
-  });
-  lignes.forEach(x => { x.actif = !_froidRetires.has(x.cr); x.min = num(seuils[x.cs]) > 0 ? num(seuils[x.cs]) : 0; });
-  let grp = null;
+  const actif = !_froidRetires.has(x.cr);
+  const min = num(seuils[x.cs]) > 0 ? num(seuils[x.cs]) : 0;
+  /* Point décimal partout (2.5), comme la fiche du sec. */
+  const val = cp => { const p = corrige(cp) ? num(_prixAchat[cp]) : prixAchatDefaut(cp); return p > 0 ? String(p) : ''; };
   showSheet(
-    '<h2 id="sheet-titre">Catalogue · chambre froide</h2>' +
-    '<p class="cs">Décochez un parfum ou une saveur que la boutique ne prend plus : il disparaît de ' +
-    'l’inventaire, de la réception et des minimums. Le stock déjà compté reste. Minimum : arrivé à ce nombre, ' +
-    'l’article est « à commander ».</p>' +
-    '<input type="search" id="ff-rech" placeholder="Chercher" autocomplete="off" style="margin-top:10px">' +
-    '<div id="ff-liste" style="margin-top:6px">' + lignes.map((x, i) => {
-      const t = x.grp !== grp ? '<div class="entete" data-ffg="' + esc(x.grp) + '" style="margin-top:12px"><h3>' + esc(x.grp) + '</h3></div>' : '';
-      grp = x.grp;
-      return t + '<div class="rang" data-ffr="' + i + '" data-ffgr="' + esc(x.grp) + '" style="padding:6px 0">' +
-        '<label style="flex:1;min-width:0;display:flex;align-items:center;gap:8px"><input type="checkbox" data-ffa="' + i + '"' + (x.actif ? ' checked' : '') + '> ' + esc(x.nom) + '</label>' +
-        '<input type="number" min="0" step="any" inputmode="decimal" data-ffm="' + i + '" aria-label="Minimum ' + esc(x.nom) + '" placeholder="min" value="' + (x.min ? esc(String(x.min)) : '') + '" style="width:76px;text-align:center"></div>';
-    }).join('') + '</div>' +
+    '<h2 id="sheet-titre">' + esc(x.nom) + '</h2>' +
+    '<p class="mini">' + esc(x.grp) + ' · compté en ' + esc(x.unite) + '</p>' +
+    '<p class="cs">Prix d’achat HT' + (x.commun ? ', commun à ' + esc(x.commun) + (x.grp !== 'Glaces' ? ' de ' + esc(x.grp) : '') : '') +
+    ' ; minimum : arrivé à ce nombre, l’article est « à commander ». Retirer l’article le cache ' +
+    'de l’inventaire, de la réception et des minimums, sans effacer son stock.</p>' +
+    '<div class="card plat" style="margin-top:10px"><div class="rang">' +
+    '<b style="flex:1;min-width:0">' + esc(x.nom) + '</b>' +
+    '<label class="mini" style="display:flex;align-items:center;gap:6px"><input type="checkbox" id="ffa-actif"' + (actif ? ' checked' : '') + '> Active</label></div>' +
+    '<div class="grid g2" style="margin-top:8px">' +
+    x.prix.map((p, i) =>
+      '<div class="champ"><label class="f" for="ffp-' + i + '">Prix (€ par ' + esc(p.nom) + ')</label>' +
+      '<input type="text" inputmode="decimal" id="ffp-' + i + '" value="' + esc(val(p.cp)) + '" placeholder="—"></div>').join('') +
+    '<div class="champ"><label class="f" for="ffa-min">Minimum</label><input type="text" inputmode="decimal" id="ffa-min" value="' + (min ? esc(String(min)) : '') + '" placeholder="—"></div>' +
+    '</div></div>' +
     '<div class="actions"><button class="btn clair" data-fermer>Annuler</button>' +
-    '<button class="btn menthe" id="ff-ok">Enregistrer</button></div>');
-  const nrm = x => String(x || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
-  $('#ff-rech').oninput = e => {
-    const q = nrm(e.target.value.trim());
-    const vus = new Set();
-    $$('[data-ffr]').forEach(r => {
-      const x = lignes[+r.dataset.ffr];
-      const ok = !q || nrm(x.nom).indexOf(q) >= 0 || nrm(x.grp).indexOf(q) >= 0;
-      r.style.display = ok ? '' : 'none';
-      if (ok) vus.add(x.grp);
-    });
-    $$('[data-ffg]').forEach(h => { h.style.display = vus.has(h.dataset.ffg) ? '' : 'none'; });
-  };
+    '<button class="btn menthe" id="ffa-ok">Enregistrer</button></div>');
   let enCours = false;
-  $('#ff-ok').onclick = async () => {
+  $('#ffa-ok').onclick = async () => {
     if (enCours) return;
-    const actifs = {}, mins = {};
-    for (let i = 0; i < lignes.length; i++) {
-      const x = lignes[i];
-      const a = !!$('[data-ffa="' + i + '"]').checked;
-      if (a !== x.actif) actifs[x.cr] = a;
-      const fm = $('[data-ffm="' + i + '"]');
-      if (fm.validity && fm.validity.badInput) return toast('Minimum illisible : ' + x.nom, 'erreur');
-      const mv = fm.value.trim() === '' ? 0 : Number(fm.value);
-      if (!(mv >= 0)) return toast('Minimum invalide : ' + x.nom, 'erreur');
-      if (mv !== x.min) mins[x.cs] = mv;
+    const prix = {};
+    for (let i = 0; i < x.prix.length; i++) {
+      const cp = x.prix[i].cp;
+      const v = lirePrix($('#ffp-' + i).value);
+      if (isNaN(v)) return toast('Prix illisible : ' + x.prix[i].nom, 'erreur');
+      const d = prixAchatDefaut(cp);
+      const avant = corrige(cp) ? num(_prixAchat[cp]) : (d || 0);
+      if (v !== avant) prix[cp] = (d !== null && v === d) || (d === null && v === 0) ? null : v;
     }
-    if (!lignes.some((x, i) => x.cr.indexOf('glace|') === 0 && $('[data-ffa="' + i + '"]').checked)) {
-      return toast('Gardez au moins un parfum de glace actif', 'erreur');
-    }
-    enCours = true; $('#ff-ok').disabled = true;
+    const mt = $('#ffa-min').value.trim().replace(',', '.');
+    const mv = mt === '' ? 0 : Number(mt);
+    if (!(mv >= 0)) return toast('Minimum invalide', 'erreur');
+    const a = !!$('#ffa-actif').checked;
+    enCours = true; $('#ffa-ok').disabled = true;
     try {
-      if (Object.keys(actifs).length) {
-        /* Relu juste avant : un autre manager garde ses réglages. */
-        const m = (await DB.get('catalogue:froid', null)) || {};
-        const ret = new Set(Array.isArray(m.retires) ? m.retires : []);
-        Object.keys(actifs).forEach(k => { if (actifs[k]) ret.delete(k); else ret.add(k); });
-        m.retires = [...ret];
-        await DB.set('catalogue:froid', m);
-        _froidRetires = ret;
-      }
-      if (Object.keys(mins).length) {
+      if (a !== actif && !(await basculerFroid(x.cr, a))) { enCours = false; $('#ffa-ok').disabled = false; return; }
+      if (Object.keys(prix).length) await enregistrerPrixAchat(prix);
+      if (mv !== min) {
+        /* Relu juste avant : un autre manager garde ses minimums. */
         const frais = await chargerSeuils();
-        Object.keys(mins).forEach(k => { if (mins[k] > 0) frais[k] = mins[k]; else delete frais[k]; });
+        if (mv > 0) frais[x.cs] = mv; else delete frais[x.cs];
         await DB.set(CLE_SEUILS, frais);
       }
-    } catch (e) { enCours = false; $('#ff-ok').disabled = false; return toast('Enregistrement impossible, réessayez', 'erreur'); }
-    const n = Object.keys(actifs).length + Object.keys(mins).length;
-    if (n) await feed('ok', STATE.user.prenom + ' a mis à jour le catalogue de la chambre froide');
+    } catch (e) { enCours = false; $('#ffa-ok').disabled = false; return toast('Enregistrement impossible, réessayez', 'erreur'); }
+    const n = Object.keys(prix).length + (mv !== min ? 1 : 0) + (a !== actif ? 1 : 0);
+    if (n) await feed('ok', STATE.user.prenom + ' a mis à jour la fiche ' + x.nom + ' (chambre froide)');
     closeSheet();
-    toast(n ? 'Catalogue enregistré' : 'Rien n’a changé');
+    toast(n ? 'Fiche enregistrée' : 'Rien n’a changé');
     if (apres) apres();
   };
 }
@@ -2513,23 +2493,58 @@ V.catalogue = async function () {
     return (lo === hi ? eur(lo) : eur(lo) + ' à ' + eur(hi)) + '/' + esc(r.unite) +
       (ps.length < declis(r).length ? ' (incomplet)' : '');
   };
-  const froidPrix = () => (FOURNISSEUR.taillesBac || TAILLES_BAC || []).map(t =>
-      ({ cp: cleArticle('glace', '', t), nom: 'Bac de glace ' + t + ' L', unite: 'bac' }))
-    .concat(FAMILLES_PRODUIT.filter(f => f.id !== 'glace' && f.lieu !== 'sec' && f.stock !== 'sec')
-      .map(f => ({ cp: cleArticle(f.id, '', ''), nom: f.libelle, unite: f.unite })));
+  /* Onglet demandé depuis Réglages, sinon le dernier ouvert. */
+  if (STATE.cataloguePartie === 'froid' || STATE.cataloguePartie === 'sec') {
+    V.catalogue._partie = STATE.cataloguePartie;
+    STATE.cataloguePartie = null;
+  }
+  const partie = V.catalogue._partie === 'sec' ? 'sec' : 'froid';
+  let seuils = {};
+  try { seuils = await chargerSeuils(); } catch (e) {}
+  const froid = articlesFroid();
+  /* « 40,00 € à 52,00 €/bac » : même résumé que le sec. */
+  const prixFroid = x => {
+    const ps = x.prix.map(p => prixArticle(p.cp)).filter(p => p !== null);
+    if (!ps.length) return 'sans prix';
+    const lo = Math.min.apply(null, ps), hi = Math.max.apply(null, ps);
+    return (lo === hi ? eur(lo) : eur(lo) + ' à ' + eur(hi)) + '/' + esc(x.prix.length > 1 ? 'bac' : x.prix[0].nom) +
+      (ps.length < x.prix.length ? ' (incomplet)' : '');
+  };
+  const grpsFroid = [];
+  froid.forEach(x => { if (grpsFroid.indexOf(x.grp) < 0) grpsFroid.push(x.grp); });
 
   $('#vue-actions').innerHTML = '';
-  const nbRetFroid = _froidRetires.size;
-  $('#page').innerHTML =
-    carte('<div class="rang"><div style="flex:1;min-width:0"><b>Catalogue chambre froide</b>' +
-      '<div class="mini">' + parfumsActifs().length + ' parfums de glace actifs' +
-      (nbRetFroid ? ' · ' + nbRetFroid + ' ' + accord(nbRetFroid, 'article retiré', 'articles retirés') : '') +
-      ' · actif et stock minimum</div></div>' +
-      '<button class="btn clair sm" id="ct-froid">Gérer</button></div>') +
-    carte('<div class="rang"><div style="flex:1;min-width:0"><b>Prix chambre froide</b>' +
-      '<div class="mini">' + froidPrix().map(x => { const p = prixArticle(x.cp);
-        return esc(x.nom) + ' ' + (p !== null ? eur(p) : '—'); }).join(' · ') + '</div></div>' +
-      '<button class="btn clair sm" id="ct-prix-froid">Modifier</button></div>') +
+  const onglets = '<div class="tseg">' +
+    [['froid', 'Chambre froide', parfumsActifs().length + ' parfums'],
+     ['sec', 'Sec', (n => n + ' ' + accord(n, 'référence'))(cat.filter(r => !r.masque).length)]].map(x =>
+      '<button class="' + (x[0] === partie ? 'on' : '') + '" data-partie="' + x[0] + '">' +
+      '<span class="tsl">' + x[1] + '</span><small>' + x[2] + '</small></button>').join('') +
+    '</div>';
+
+  const corpsFroid = () =>
+    carte('<h2>Catalogue de la chambre froide</h2>' +
+      '<div class="cs">Ce que l’inventaire, la réception et les minimums proposent. ' +
+      '€ ouvre la fiche : active ou non, prix et stock minimum. ' +
+      '✕ retire l’article (↺ le réaffiche). Le stock déjà compté reste.</div>', 'solide') +
+    grpsFroid.map(g =>
+      '<div class="sec-bloc"><div class="entete sec-entete"><span class="sec-pastille"></span><h3>' + esc(g) + '</h3></div>' +
+      '<div class="stack">' + froid.map((x, i) => {
+        if (x.grp !== g) return '';
+        const off = _froidRetires.has(x.cr);
+        const mn = num(seuils[x.cs]) > 0 ? num(seuils[x.cs]) : 0;
+        return carte('<div class="rang"><div style="flex:1;min-width:0">' +
+          '<b' + (off ? ' style="text-decoration:line-through;opacity:.5"' : '') + '>' + esc(x.nom) + '</b>' +
+          '<div class="mini">' + esc(x.unite) + ' · ' + prixFroid(x) + (mn ? ' · minimum ' + esc(String(mn)) : '') + '</div></div>' +
+          '<div class="duo compact">' +
+          '<button class="btn clair" data-fprix="' + i + '" aria-label="Fiche : actif, prix, minimum">€</button>' +
+          '<button class="btn ' + (off ? 'menthe' : 'clair') + '" data-fmasque="' + i + '" ' +
+          'aria-label="' + (off ? 'Réafficher' : 'Retirer du catalogue') + '" title="' + (off ? 'Réafficher' : 'Retirer du catalogue') + '">' + (off ? '↺' : '✕') + '</button>' +
+          '</div></div>', off ? 'plat' : '');
+      }).join('') + '</div></div>').join('');
+
+  if (partie === 'froid') {
+    $('#page').innerHTML = onglets + corpsFroid();
+  } else $('#page').innerHTML = onglets +
     carte('<h2>Catalogue du sec</h2>' +
       '<div class="cs">Ce que l’inventaire et le réassort proposent. Retirez ce que ' +
       'vous ne comptez plus, ajoutez ce qui manque, changez une unité ou une ' +
@@ -2688,8 +2703,36 @@ V.catalogue = async function () {
     const r = cat.filter(x => x.id === b.dataset.prix)[0];
     if (r) ficheArticle(r, () => rendre('catalogue'));
   });
-  $('#ct-froid').onclick = () => ficheFroid(() => rendre('catalogue'));
-  $('#ct-prix-froid').onclick = () => editerPrix('Prix chambre froide', froidPrix(), () => rendre('catalogue'));
+  $$('[data-partie]').forEach(b => b.onclick = () => {
+    if (b.dataset.partie === partie) return;
+    V.catalogue._partie = b.dataset.partie;
+    rendre('catalogue');
+  });
+  $$('[data-fprix]').forEach(b => b.onclick = () => {
+    const x = froid[+b.dataset.fprix];
+    if (x) ficheFroidArticle(x, () => rendre('catalogue'));
+  });
+  $$('[data-fmasque]').forEach(b => b.onclick = async () => {
+    const x = froid[+b.dataset.fmasque];
+    if (!x) return;
+    const off = _froidRetires.has(x.cr);
+    if (!off) {
+      const ok = await new Promise(res => {
+        showSheet('<h2 id="sheet-titre">Retirer ' + esc(x.nom) + ' ?</h2>' +
+          '<p class="cs">L’article disparaît de l’inventaire, de la réception et des minimums. ' +
+          'Son stock et son prix sont gardés. Vous pourrez le réafficher avec ↺.</p>' +
+          '<div class="actions"><button class="btn clair" id="rt-non">Annuler</button>' +
+          '<button class="btn corail" id="rt-oui">Retirer</button></div>');
+        $('#rt-non').onclick = () => { closeSheet(); res(false); };
+        $('#rt-oui').onclick = () => { closeSheet(); res(true); };
+      });
+      if (!ok) return;
+    }
+    try { if (!(await basculerFroid(x.cr, off))) return; }
+    catch (e) { return toast('Enregistrement impossible, réessayez', 'erreur'); }
+    await feed('ok', STATE.user.prenom + (off ? ' a réaffiché ' : ' a retiré ') + x.nom + ' (chambre froide)');
+    rendre('catalogue');
+  });
 };
 
 /* Quantité du sec à revoir avant de valider : l'unité est souvent un carton
