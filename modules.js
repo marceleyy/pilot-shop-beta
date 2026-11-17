@@ -497,13 +497,15 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
      function catalogueReception() {
        const out = [];
        const auSec = f => f.lieu === 'sec' || f.stock === 'sec';
-       PARFUMS.forEach(p => out.push({ nom:'Glace ' + p, lieu:'froid', fam:'glace', parfum:p, unite:'bac' }));
+       /* Parfums et saveurs retirés au catalogue : plus proposés à la main. */
+       const actif = (f, sv) => typeof froidActif !== 'function' || froidActif(f, sv);
+       PARFUMS.filter(p => actif('glace', p)).forEach(p => out.push({ nom:'Glace ' + p, lieu:'froid', fam:'glace', parfum:p, unite:'bac' }));
        FAMILLES_PRODUIT.filter(f => f.id !== 'glace').forEach(f => {
          const lieu = auSec(f) ? 'sec' : 'froid';
          const unite = STOCK.unites.indexOf(f.unite) >= 0 ? f.unite : 'unité';
          if (f.parfums && f.saveurs && f.saveurs.length) {
-           f.saveurs.forEach(sv => out.push({ nom:f.libelle + ' ' + sv, lieu:lieu, fam:f.id, parfum:sv, unite:unite }));
-         } else {
+           f.saveurs.filter(sv => actif(f.id, sv)).forEach(sv => out.push({ nom:f.libelle + ' ' + sv, lieu:lieu, fam:f.id, parfum:sv, unite:unite }));
+         } else if (actif(f.id, '')) {
            out.push({ nom:f.libelle, lieu:lieu, fam:f.id, parfum:'', unite:unite });
          }
        });

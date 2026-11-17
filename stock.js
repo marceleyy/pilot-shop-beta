@@ -745,13 +745,22 @@ function clesRetireesSec(partie) {
   if (partie === 'sec') catalogueSec().forEach(r => (r.variantesRetirees || []).forEach(v => out.add('sec|' + r.id + '|' + v)));
   return out;
 }
+/* Même règle pour la chambre froide (parfum ou saveur retiré). */
+function estRetireeInv(partie, c, retireesSec, retiresAuComptage) {
+  if (partie === 'sec') return retireesSec.has(c);
+  const a = litArticle(c);
+  /* Retiré maintenant OU au moment du comptage : un parfum réactivé entre
+     les deux n'a pas été proposé à l'équipe, son stock reste. */
+  const k = a.famille + '|' + a.parfum;
+  return !froidActif(a.famille, a.parfum) || (retiresAuComptage || []).indexOf(k) >= 0;
+}
 
 function lignesAReprendre(a, partie, attendu) {
   const comptes = groupesComptes(a, partie);
   const retirees = clesRetireesSec(partie);
   const out = {};
   Object.keys(attendu || {}).forEach(c => {
-    if ((retirees.has(c) || !comptes.has(groupeInv(partie, c))) && num(attendu[c])) out[c] = num(attendu[c]);
+    if ((estRetireeInv(partie, c, retirees, a.retires) || !comptes.has(groupeInv(partie, c))) && num(attendu[c])) out[c] = num(attendu[c]);
   });
   return Object.assign(out, a.lignes || {});
 }
@@ -761,7 +770,7 @@ function lignesAttente(a, partie) {
   const comptes = groupesComptes(a, partie);
   const retirees = clesRetireesSec(partie);
   return [...new Set(Object.keys(av).concat(Object.keys(l)))]
-    .filter(c => comptes.has(groupeInv(partie, c)) && !(retirees.has(c) && !(c in l)))
+    .filter(c => comptes.has(groupeInv(partie, c)) && !(estRetireeInv(partie, c, retirees, a.retires) && !(c in l)))
     .map(c => ({ c: c, compte: num(l[c] || 0), attendu: num(av[c] || 0) }))
     .filter(x => x.compte || x.attendu)
     .map(x => Object.assign(x, { d: x.compte - x.attendu }))
@@ -794,6 +803,11 @@ async function verifierInventaire(partie) {
     return toast('Seul un manager peut confirmer un inventaire', 'erreur');
   }
   if (sec) await chargerCatalogueSec();
+  /* Sans la liste des retirés, leur stock serait effacé : pas de confirmation. */
+  else {
+    try { await chargerCatalogueFroid(); }
+    catch (e) { return toast('Catalogue de la chambre froide illisible, réessayez', 'erreur'); }
+  }
   let a = await inventaireEnAttente(partie);
   if (!a) { toast('Aucun inventaire à confirmer'); return rendre(STATE.view); }
   /* Stock du moment, sur l'ancien inventaire : l'inventaire en attente n'y
@@ -1395,8 +1409,8 @@ function articlesFroidSeuils() {
   const out = [];
   FAMILLES_PRODUIT.filter(f => f.id !== 'glace' && f.lieu !== 'sec' && f.stock !== 'sec').forEach(f => {
     if (f.parfums && f.saveurs && f.saveurs.length) {
-      f.saveurs.forEach(sv => out.push({ k: cleArticle(f.id, sv, ''), nom: f.libelle + ' · ' + sv, grp: f.libelle, u: f.unites || f.unite || 'unités' }));
-    } else {
+      saveursActives(f).forEach(sv => out.push({ k: cleArticle(f.id, sv, ''), nom: f.libelle + ' · ' + sv, grp: f.libelle, u: f.unites || f.unite || 'unités' }));
+    } else if (froidActif(f.id, '')) {
       out.push({ k: cleArticle(f.id, '', ''), nom: f.libelle, grp: f.libelle, u: f.unites || f.unite || 'unités' });
     }
   });
@@ -1414,6 +1428,7 @@ function articlesSousSeuil(seuils, articles, secLignes) {
     if (!(min > 0)) return;
     const p = k.split('|');
     if (p[0] === 'glace') {
+      if (!froidActif('glace', p[1])) return;
       const q = bacsParfum(articles, p[1]);
       if (q <= min) out.push({ cle: k, nom: p[1], q: q, min: min, unite: 'bac', partie: 'froid' });
     } else if (p[0] === 'sec') {
@@ -1438,7 +1453,7 @@ async function editerSeuils(partie, apres) {
   const seuils = await chargerSeuils();
   const items = [];
   if (partie === 'froid') {
-    PARFUMS.slice().sort((a, b) => a.localeCompare(b)).forEach(p =>
+    parfumsActifs().sort((a, b) => a.localeCompare(b)).forEach(p =>
       items.push({ k: 'glace|' + p, nom: p, grp: 'Bacs de glace, toutes tailles', u: 'bacs' }));
     articlesFroidSeuils().forEach(x => items.push(x));
   } else {
@@ -1958,6 +1973,31 @@ function catalogueSecBrut() {
     ? { id:r, nom:r, unite:'unité', decimal:false } : Object.assign({}, r));
 }
 
+/* Chambre froide : parfums de glace et saveurs retirés par le manager.
+   catalogue:froid = { retires: ['glace|Amarena', 'mac_classico|Mangue', 'gaufre|'] }
+   Retiré = absent de l'inventaire, de la réception et des minimums. Le stock
+   déjà compté n'est jamais effacé : il est reporté à chaque inventaire. */
+let _froidRetires = new Set();
+function froidActif(famille, saveur) {
+  return !_froidRetires.has((famille || '') + '|' + (saveur || ''));
+}
+function parfumsActifs() {
+  return PARFUMS.filter(p => froidActif('glace', p));
+}
+function saveursActives(f) {
+  return (f.saveurs || []).filter(sv => froidActif(f.id, sv));
+}
+/* Famille visible à l'inventaire : au moins une saveur active, ou, sans
+   saveur, la famille elle-même active. */
+function familleFroidActive(f) {
+  return f.saveurs && f.saveurs.length ? saveursActives(f).length > 0 : froidActif(f.id, '');
+}
+async function chargerCatalogueFroid() {
+  const m = await DB.get('catalogue:froid', null);   // une erreur garde l'ancienne liste
+  _froidRetires = new Set(m && Array.isArray(m.retires) ? m.retires : []);
+  return _froidRetires;
+}
+
 /* Synchrone, à partir du dernier chargement. */
 function catalogueSec() {
   return _catalogueSec || catalogueSecBrut();
@@ -1965,7 +2005,8 @@ function catalogueSec() {
 
 /* À appeler avant de dessiner un écran qui s'en sert. */
 async function chargerCatalogueSec() {
-  const [m] = await Promise.all([DB.get('catalogue:sec', null), chargerPrixAchat().catch(() => {})]);
+  const [m] = await Promise.all([DB.get('catalogue:sec', null), chargerPrixAchat().catch(() => {}),
+    chargerCatalogueFroid().catch(() => {})]);
   const base = catalogueSecBrut();
   if (!m) { _catalogueSec = base; return base; }
   const out = base.map(r => {
@@ -2221,6 +2262,91 @@ async function ficheArticle(r, apres) {
   };
 }
 
+/* Fiche de la chambre froide : chaque parfum de glace et chaque saveur des
+   autres familles, actif ou retiré, et son stock minimum. Retirer cache de
+   l'inventaire, de la réception et des minimums sans effacer le stock. */
+async function ficheFroid(apres) {
+  let seuils;
+  try { seuils = await chargerSeuils(); await chargerCatalogueFroid(); }
+  catch (e) { return toast('Catalogue illisible, réessayez', 'erreur'); }
+  const lignes = PARFUMS.slice().sort((a, b) => a.localeCompare(b)).map(p =>
+    ({ grp: 'Glaces (bacs, toutes tailles)', nom: p, cr: 'glace|' + p, cs: 'glace|' + p }));
+  FAMILLES_PRODUIT.filter(f => f.id !== 'glace' && f.lieu !== 'sec' && f.stock !== 'sec').forEach(f => {
+    if (f.saveurs && f.saveurs.length) f.saveurs.forEach(sv =>
+      lignes.push({ grp: f.libelle + ' (en ' + (f.unites || 'unités') + ')', nom: sv, cr: f.id + '|' + sv, cs: cleArticle(f.id, sv, '') }));
+    else lignes.push({ grp: 'Autres (à l’unité)', nom: f.libelle + ' (en ' + (f.unites || 'unités') + ')', cr: f.id + '|', cs: cleArticle(f.id, '', '') });
+  });
+  lignes.forEach(x => { x.actif = !_froidRetires.has(x.cr); x.min = num(seuils[x.cs]) > 0 ? num(seuils[x.cs]) : 0; });
+  let grp = null;
+  showSheet(
+    '<h2 id="sheet-titre">Catalogue · chambre froide</h2>' +
+    '<p class="cs">Décochez un parfum ou une saveur que la boutique ne prend plus : il disparaît de ' +
+    'l’inventaire, de la réception et des minimums. Le stock déjà compté reste. Minimum : arrivé à ce nombre, ' +
+    'l’article est « à commander ».</p>' +
+    '<input type="search" id="ff-rech" placeholder="Chercher" autocomplete="off" style="margin-top:10px">' +
+    '<div id="ff-liste" style="margin-top:6px">' + lignes.map((x, i) => {
+      const t = x.grp !== grp ? '<div class="entete" data-ffg="' + esc(x.grp) + '" style="margin-top:12px"><h3>' + esc(x.grp) + '</h3></div>' : '';
+      grp = x.grp;
+      return t + '<div class="rang" data-ffr="' + i + '" data-ffgr="' + esc(x.grp) + '" style="padding:6px 0">' +
+        '<label style="flex:1;min-width:0;display:flex;align-items:center;gap:8px"><input type="checkbox" data-ffa="' + i + '"' + (x.actif ? ' checked' : '') + '> ' + esc(x.nom) + '</label>' +
+        '<input type="number" min="0" step="any" inputmode="decimal" data-ffm="' + i + '" aria-label="Minimum ' + esc(x.nom) + '" placeholder="min" value="' + (x.min ? esc(String(x.min)) : '') + '" style="width:76px;text-align:center"></div>';
+    }).join('') + '</div>' +
+    '<div class="actions"><button class="btn clair" data-fermer>Annuler</button>' +
+    '<button class="btn menthe" id="ff-ok">Enregistrer</button></div>');
+  const nrm = x => String(x || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  $('#ff-rech').oninput = e => {
+    const q = nrm(e.target.value.trim());
+    const vus = new Set();
+    $$('[data-ffr]').forEach(r => {
+      const x = lignes[+r.dataset.ffr];
+      const ok = !q || nrm(x.nom).indexOf(q) >= 0 || nrm(x.grp).indexOf(q) >= 0;
+      r.style.display = ok ? '' : 'none';
+      if (ok) vus.add(x.grp);
+    });
+    $$('[data-ffg]').forEach(h => { h.style.display = vus.has(h.dataset.ffg) ? '' : 'none'; });
+  };
+  let enCours = false;
+  $('#ff-ok').onclick = async () => {
+    if (enCours) return;
+    const actifs = {}, mins = {};
+    for (let i = 0; i < lignes.length; i++) {
+      const x = lignes[i];
+      const a = !!$('[data-ffa="' + i + '"]').checked;
+      if (a !== x.actif) actifs[x.cr] = a;
+      const fm = $('[data-ffm="' + i + '"]');
+      if (fm.validity && fm.validity.badInput) return toast('Minimum illisible : ' + x.nom, 'erreur');
+      const mv = fm.value.trim() === '' ? 0 : Number(fm.value);
+      if (!(mv >= 0)) return toast('Minimum invalide : ' + x.nom, 'erreur');
+      if (mv !== x.min) mins[x.cs] = mv;
+    }
+    if (!lignes.some((x, i) => x.cr.indexOf('glace|') === 0 && $('[data-ffa="' + i + '"]').checked)) {
+      return toast('Gardez au moins un parfum de glace actif', 'erreur');
+    }
+    enCours = true; $('#ff-ok').disabled = true;
+    try {
+      if (Object.keys(actifs).length) {
+        /* Relu juste avant : un autre manager garde ses réglages. */
+        const m = (await DB.get('catalogue:froid', null)) || {};
+        const ret = new Set(Array.isArray(m.retires) ? m.retires : []);
+        Object.keys(actifs).forEach(k => { if (actifs[k]) ret.delete(k); else ret.add(k); });
+        m.retires = [...ret];
+        await DB.set('catalogue:froid', m);
+        _froidRetires = ret;
+      }
+      if (Object.keys(mins).length) {
+        const frais = await chargerSeuils();
+        Object.keys(mins).forEach(k => { if (mins[k] > 0) frais[k] = mins[k]; else delete frais[k]; });
+        await DB.set(CLE_SEUILS, frais);
+      }
+    } catch (e) { enCours = false; $('#ff-ok').disabled = false; return toast('Enregistrement impossible, réessayez', 'erreur'); }
+    const n = Object.keys(actifs).length + Object.keys(mins).length;
+    if (n) await feed('ok', STATE.user.prenom + ' a mis à jour le catalogue de la chambre froide');
+    closeSheet();
+    toast(n ? 'Catalogue enregistré' : 'Rien n’a changé');
+    if (apres) apres();
+  };
+}
+
 /* -----------------------------------------------------------------------------
    VUE — CATALOGUE (manager)
    -------------------------------------------------------------------------- */
@@ -2251,7 +2377,13 @@ V.catalogue = async function () {
       .map(f => ({ cp: cleArticle(f.id, '', ''), nom: f.libelle, unite: f.unite })));
 
   $('#vue-actions').innerHTML = '';
+  const nbRetFroid = _froidRetires.size;
   $('#page').innerHTML =
+    carte('<div class="rang"><div style="flex:1;min-width:0"><b>Catalogue chambre froide</b>' +
+      '<div class="mini">' + parfumsActifs().length + ' parfums de glace actifs' +
+      (nbRetFroid ? ' · ' + nbRetFroid + ' ' + accord(nbRetFroid, 'article retiré', 'articles retirés') : '') +
+      ' · actif et stock minimum</div></div>' +
+      '<button class="btn clair sm" id="ct-froid">Gérer</button></div>') +
     carte('<div class="rang"><div style="flex:1;min-width:0"><b>Prix chambre froide</b>' +
       '<div class="mini">' + froidPrix().map(x => { const p = prixArticle(x.cp);
         return esc(x.nom) + ' ' + (p !== null ? eur(p) : '—'); }).join(' · ') + '</div></div>' +
@@ -2369,6 +2501,7 @@ V.catalogue = async function () {
     const r = cat.filter(x => x.id === b.dataset.prix)[0];
     if (r) ficheArticle(r, () => rendre('catalogue'));
   });
+  $('#ct-froid').onclick = () => ficheFroid(() => rendre('catalogue'));
   $('#ct-prix-froid').onclick = () => editerPrix('Prix chambre froide', froidPrix(), () => rendre('catalogue'));
 };
 
@@ -2625,7 +2758,11 @@ V.inventaire = async function () {
      c'est lui qu'on relit et qu'on corrige. */
   const attenteDuJour = !!(attente && attente.jour === today());
   const dejaFaitAujourdhui = attenteDuJour || !!(precedent && precedent.jour === today());
-  if (dejaFaitAujourdhui) Object.assign(saisie, (attenteDuJour ? attente : precedent).lignes || {});
+  if (dejaFaitAujourdhui) {
+    const lj = (attenteDuJour ? attente : precedent).lignes || {};
+    /* Une ligne retirée (reportée, sans champ à l'écran) gonflerait les totaux. */
+    Object.keys(lj).forEach(c => { const x = litArticle(c); if (froidActif(x.famille, x.parfum)) saisie[c] = lj[c]; });
+  }
   const attenteSecDuJour = !!(attenteSec && attenteSec.jour === today());
   const secDejaFait = attenteSecDuJour || !!(secPrec && secPrec.jour === today());
   if (secDejaFait) Object.assign(saisieSec, (attenteSecDuJour ? attenteSec : secPrec).lignes || {});
@@ -2677,14 +2814,15 @@ V.inventaire = async function () {
     .filter(c => num(articles[c]) !== 0 && litArticle(c).famille === 'glace')
     .map(c => num(litArticle(c).taille))
     .filter(t => t && COURANTES.indexOf(t) < 0 && RARES.indexOf(t) < 0))].sort();
+  const PARFUMS_INV = parfumsActifs();
   let montrerRares = RARES.some(t =>
-    PARFUMS.some(p => num(articles[cleArticle('glace', p, t)]) !== 0 ||
+    PARFUMS_INV.some(p => num(articles[cleArticle('glace', p, t)]) !== 0 ||
                       saisie[cleArticle('glace', p, t)] !== undefined));
 
   /* Les familles comptées en chambre froide : tout sauf les glaces (qui ont
      leur bloc) et ce qui vit au sec — coulis, toppings, chantilly. Ceux-là
      apparaissaient ici en double, avec l'inventaire du sec. */
-  const autres = FAMILLES_PRODUIT.filter(f => f.id !== 'glace' && f.lieu !== 'sec');
+  const autres = FAMILLES_PRODUIT.filter(f => f.id !== 'glace' && f.lieu !== 'sec' && familleFroidActive(f));
 
   const totalBacs   = () => Object.keys(saisie).reduce((s, c) => s + num(saisie[c]), 0);
   const totalLitres = () => Object.keys(saisie).reduce((s, c) => {
@@ -2737,11 +2875,12 @@ V.inventaire = async function () {
        et « Coulis : 4 » ne disait pas lequel manquait. */
     if (f.saveurs) {
     const fid = 'f:' + f.id;
+    const svs = saveursActives(f);
     return '<div class="invp">' +
-      enteteFamille(fid, f.libelle, f.saveurs.map(sv => cleArticle(f.id, sv, '')),
-        f.saveurs.length, f.unites) +
+      enteteFamille(fid, f.libelle, svs.map(sv => cleArticle(f.id, sv, '')),
+        svs.length, f.unites) +
       (!deplies[fid] ? '' :
-      '<div class="stack" style="margin-top:8px">' + f.saveurs.map(sv => {
+      '<div class="stack" style="margin-top:8px">' + svs.map(sv => {
               const c = cleArticle(f.id, sv, '');
               const q = num(articles[c]);
               return '<div class="invl">' +
@@ -2766,11 +2905,11 @@ V.inventaire = async function () {
   const blocFroid = () =>
     '<div class="invp" style="margin-top:14px">' +
     enteteFamille('f:glace', 'Glaces',
-      Object.keys(saisie).filter(c => litArticle(c).famille === 'glace'), PARFUMS.length, 'bacs', 'parfums') +
+      Object.keys(saisie).filter(c => litArticle(c).famille === 'glace'), PARFUMS_INV.length, 'bacs', 'parfums') +
     (!deplies['f:glace'] ? '' :
     '<div class="entete" style="margin-top:8px"><button class="btn clair sm pousse" id="inv-rares">' +
     (montrerRares ? 'Masquer le 7 L' : '+ 7 L') + '</button></div>' +
-    '<div class="stack">' + PARFUMS.map(p => {
+    '<div class="stack">' + PARFUMS_INV.map(p => {
       const base = montrerRares ? COURANTES.concat(RARES) : COURANTES;
       const sup = ORPHELINES.filter(t => num(articles[cleArticle('glace', p, t)]) !== 0 ||
                                          saisie[cleArticle('glace', p, t)] !== undefined);
@@ -2985,7 +3124,7 @@ V.inventaire = async function () {
           : ''), 'solide') +
 
       '<div class="tseg">' +
-      [['froid', 'Chambre froide', PARFUMS.length + ' parfums'],
+      [['froid', 'Chambre froide', parfumsActifs().length + ' parfums'],
        ['sec',   'Sec',            (n => n + ' ' + accord(n, 'référence'))(catalogueSec().filter(r => typeof r !== 'object' || !r.masque).length)]].map(x =>
         '<button class="' + (x[0] === partie ? 'on' : '') + '" data-partie="' + x[0] + '">' +
         '<span class="tsl">' + x[1] + '</span><small>' + x[2] + '</small></button>').join('') +
@@ -3272,6 +3411,9 @@ V.inventaire = async function () {
        sont dans la chambre froide, l'équipier les a comptés. */
     const tout = (await stockReel()).articles;
     const avant = (await theoriqueAuComptage({ at: nowISO() }, tout)).theo;
+    /* Un parfum retiré n'est pas proposé au comptage : son stock est reporté
+       à la confirmation, il ne compte ni dans les manquants ni dans « avant ». */
+    Object.keys(avant).forEach(c => { const x = litArticle(c); if (!froidActif(x.famille, x.parfum)) delete avant[c]; });
     /* Manquants et surplus sont comptés séparément, sur l'union des articles
        attendus et saisis, comme enregistrerInventaire : une somme d'écarts
        signés laissait 2 bacs manquants et 2 en trop s'annuler en
@@ -3310,7 +3452,9 @@ V.inventaire = async function () {
           par: STATE.user ? STATE.user.prenom : null,
           employe: STATE.user ? STATE.user.id : null,
           note: $('#inv-note') ? $('#inv-note').value : '',
-          lignes: lignes, avant: avant
+          lignes: lignes, avant: avant,
+          /* Ce qui était retiré pendant le comptage : relu à la confirmation. */
+          retires: [..._froidRetires]
         };
         await DB.set(CLE_INV_ATTENTE, a);
         /* Le brouillon de la chambre froide est effacé — il n'a plus lieu
