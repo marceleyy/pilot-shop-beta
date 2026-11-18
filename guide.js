@@ -239,7 +239,7 @@ function lancerEtape(id) {
   if (id === 'appareils') return feuilleAppareils();
   if (id === 'parfums')   return feuilleParfums();
   if (id === 'produits')  return feuilleProduits();
-  if (id === 'sec')       return rendre('catalogue');
+  if (id === 'sec')       { STATE.cataloguePartie = 'sec'; return rendre('catalogue'); }
   if (id === 'periode')   return ouvrirPeriodeGuide();
   if (id === 'invglace')  { STATE.inventairePartie = 'froid'; return rendre('inventaire'); }
   if (id === 'invsec')    { STATE.inventairePartie = 'sec';   return rendre('inventaire'); }

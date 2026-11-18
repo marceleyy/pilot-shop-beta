@@ -709,7 +709,7 @@ const SEC_LIGNES = INVENTAIRE_SEC.reduce(
    (Chamonix). Clé = celle de l'inventaire : « sec|id|déclinaison » pour le sec,
    la famille pour la chambre froide, la taille en litres pour les bacs.
    Une référence absente n'a pas de prix : elle ne compte pas dans la valeur.
-   Le manager les corrige dans Catalogue › ✎ (sec) et « Prix chambre froide ». */
+   Le manager les corrige dans Réglages › Catalogues (onglets Chambre froide et Sec). */
 const PRIX_ACHAT = {
   glace: { 3: 22.52, 5: 36.44, 7: 51.01 },
   froid: {
