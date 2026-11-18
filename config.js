@@ -507,7 +507,8 @@ const FICHES = [
   /* Cafétéria : dosages et temps proposés par défaut, À VALIDER par la
      boutique avant mise en service (aucune fiche fournisseur dans le dépôt).
      Produits repris du catalogue du sec : capsules simple, double et déca,
-     thés en sachet, matcha en poudre, chocolat en poudre 220 g. */
+     thés en sachet, chocolat en poudre 220 g. Le matcha n'y figure pas : il
+     n'existe que comme ligne ajoutée par un manager (m_matcha_a17). */
   {
     id: 'f07', cat: 'Cafétéria', titre: 'Cafétéria : préparer les boissons chaudes', icone: '☕', duree: '2 min',
     resume: 'Expresso, déca, thé et matcha : une boisson se prépare à la commande.',
@@ -518,9 +519,9 @@ const FICHES = [
       'Déca : 1 capsule déca, même geste que l’expresso.',
       'Thé : 1 sachet dans le gobelet, eau chaude non bouillante. Infuser 3 min pour le thé vert, 4 min pour les thés noirs et le rooibos, puis retirer le sachet.',
       'Matcha : 2 g de poudre (1 cuillère doseuse), un fond d’eau chaude à 80 °C, fouetter jusqu’à ne plus voir de grumeaux, puis compléter de lait chaud ou d’eau.',
-      'Servir avec une bague de gobelet, une bûchette de sucre et une serviette ; couvercle pour emporter.'
+      'Servir avec une bûchette de sucre et une serviette ; bague et couvercle sur les gobelets qui en ont, pour emporter.'
     ],
-    securite: 'Gobelet brûlant : toujours une bague, et un couvercle pour emporter. Vider le bac à capsules et l’égouttoir chaque soir.',
+    securite: 'Gobelet brûlant : le tenir par la bague. Allergène lait pour toute boisson au lait. Vider le bac à capsules et l’égouttoir chaque soir.',
     validite: 'À la commande, jamais à l’avance.'
   },
   {
@@ -531,6 +532,7 @@ const FICHES = [
       'Verser 1 L de lait entier froid, puis 1 sachet de 220 g de chocolat en poudre (noir, lait ou noisette).',
       'Mettre en chauffe avec le malaxeur, couvercle fermé, environ 25 min, jusqu’à ce que le chocolat nappe la cuillère.',
       'Noter l’heure de préparation et le parfum sur l’étiquette de la cuve.',
+      'Laisser en maintien au chaud (au moins 63 °C) pendant le service, malaxeur en marche.',
       'Servir au robinet dans le gobelet petit, moyen ou grand ; chantilly sur demande.',
       'Ne jamais compléter une cuve entamée : la terminer, ou la vider avant d’en refaire une.',
       'En fin de journée : vider, laver cuve et malaxeur à l’eau chaude savonneuse, désinfecter au Bactalim 1 %, rincer, sécher.'

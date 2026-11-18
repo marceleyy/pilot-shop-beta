@@ -1592,8 +1592,8 @@ V.caisse = async function () {
       box.innerHTML = '<p class="verdict n">' + soucis.map(l => esc(l.t)).join('<br>') +
         '<br>Sous le seuil de ' + eur(seuil) + ' : pas de justification demandée.</p>';
     } else {
-      box.innerHTML = '<div class="verdict bad"><b>' + graves.length + ' ' + accord(graves.length, 'écart') + ' au-delà de ' +
-        eur(seuil) + '</b><span>' + soucis.map(l => esc(l.t)).join('<br>') +
+      box.innerHTML = '<div class="verdict bad"><b>' + graves.length + ' ' + accord(graves.length, 'écart') + ' de ' +
+        eur(seuil) + ' ou plus</b><span>' + soucis.map(l => esc(l.t)).join('<br>') +
         '<br>Expliquez-le dans le commentaire.</span></div>';
     }
   }
