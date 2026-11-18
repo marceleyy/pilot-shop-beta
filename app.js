@@ -237,6 +237,10 @@
          if (d[f] && !m[f]) { m[f] = d[f]; m[f + 'Par'] = d[f + 'Par']; m[f + 'At'] = d[f + 'At']; }
        });
        if (d.lu) m.lu = true;   // luPar, lui, est réuni juste après
+       /* Perte sortie de l'écart (ou recomptée) : le choix le plus récent l'emporte. */
+       if (String(d.horsEcartMaj || '') > String(m.horsEcartMaj || '')) {
+         m.horsEcart = d.horsEcart || ''; m.horsEcartPar = d.horsEcartPar || ''; m.horsEcartMaj = d.horsEcartMaj;
+       }
        /* Preuve supprimée sur un autre iPad : elle le reste ici aussi. */
        if (d.supprime && !m.supprime) { m.supprime = d.supprime; m.img = ''; }
        /* Pointage : une fin de service saisie sur un autre iPad n'est pas perdue. */
@@ -2349,7 +2353,10 @@ async function purgerLocalAncien() {
       s'y additionner, mais n'entrent pas dans le jeté de l'écart de période :
       un bac disparu a le plus souvent été vendu sans scan, il est déjà dans
       les ventes et le stock compté ; le compter jeté le compterait deux fois. */
-   const litresJetes = w => (w && w.motif === 'inventaire') ? 0 : litresPerte(w);
+   /* « horsEcart » : ligne que le manager a sortie de l'écart (bac fini sans
+      être tracé, jeté par erreur depuis les produits ouverts) : elle reste au
+      registre, mais ce n'est pas de la glace perdue. */
+   const litresJetes = w => (w && (w.motif === 'inventaire' || w.horsEcart)) ? 0 : litresPerte(w);
 
    /* Reporte le litrage détruit dans la période d'écart en cours. L'écart est
       rangé sous l'identifiant de la période (ecart:<id>), pas sous le mois :
@@ -4389,30 +4396,49 @@ function ouvrirPremierePeriode() {
    
      $('#mm').onchange = e => { STATE.moisFrigo = e.target.value || null; rendre('frigo'); };
    
+     /* perte faux : bac de glace fini (vendu) sans que sa fin ait été tracée.
+        Il sort des produits ouverts sans entrer au registre des pertes : le
+        compter jeté (3 ou 5 L pleins) gonflait le poids jeté de l'écart. */
+     const retirerLot = async (f, perte) => {
+       /* Litrage réel du lot : sa taille de bac pour une glace (5 L par
+          défaut si elle n'a pas été saisie), 0 pour le reste — une
+          chantilly ou un coulis n'a pas de litrage de glace, et lui
+          compter 5 L faussait l'écart de stock. */
+       const glace = f.type === 'g' || f.famille === 'glace';
+       const litrage = glace ? (num(f.taille) || FOURNISSEUR.tailleParDefaut) : 0;
+       if (perte) {
+         await DB.push('pertes:' + today(), { id:uid(), produit:f.nom + ' (lot ' + f.lot + ')', nombre:1,
+           litrage:litrage, parUnite:true, motif:'perime', par:STATE.user.prenom, employe:STATE.user.id, at:nowISO() });
+         await cumulerPertesMois(today());
+       }
+       /* Marqué jeté plutôt que supprimé : « lots: » est fusionné avec la
+          copie du serveur, qui faisait revenir une clé supprimée. */
+       const moisLot = f.mois || mois;
+       const rec = await DB.get('lots:' + moisLot, {});
+       if (rec[f.cle]) {
+         rec[f.cle] = Object.assign({}, rec[f.cle], { jete:nowISO(), jeteLot:f.lot, jetePar:STATE.user.prenom });
+         await DB.set('lots:' + moisLot, rec);
+       }
+       await feed(perte ? 'warn' : 'ok', STATE.user.prenom + (perte ? ' a jeté ' + f.nom + ' (DLC dépassée)'
+         : ' a retiré ' + f.nom + ' (bac fini, non tracé)'));
+       toast(perte ? 'Perte enregistrée' : 'Bac retiré, sans perte');
+       rendre('frigo');
+     };
      $$('[data-jeter]').forEach(b => b.onclick = () => {
        const f = fifo.filter(x => x.cle === b.dataset.jeter)[0];
+       if (f.type === 'g' || f.famille === 'glace') {
+         showSheet('<h2 id="sheet-titre">' + esc(f.nom) + ' · lot ' + esc(f.lot) + '</h2>' +
+           '<p class="sub">Ce bac a-t-il vraiment été jeté, ou était-il déjà fini sans que ce soit tracé ?</p>' +
+           '<div class="actions"><button class="btn clair" data-fermer>Annuler</button>' +
+           '<button class="btn clair" id="lj-fini">Bac fini, pas jeté</button>' +
+           '<button class="btn corail" id="lj-perte">Jeté : déclarer la perte</button></div>');
+         $('#lj-fini').onclick = () => { closeSheet(); return retirerLot(f, false); };
+         $('#lj-perte').onclick = () => { closeSheet(); return retirerLot(f, true); };
+         return;
+       }
        confirmer('Jeter ' + f.nom + ' ?',
          'Le lot ' + f.lot + ' sera enregistré en perte et retiré des produits ouverts.', 'Jeter et déclarer', async () => {
-           /* Litrage réel du lot : sa taille de bac pour une glace (5 L par
-              défaut si elle n'a pas été saisie), 0 pour le reste — une
-              chantilly ou un coulis n'a pas de litrage de glace, et lui
-              compter 5 L faussait l'écart de stock. */
-           const glace = f.type === 'g' || f.famille === 'glace';
-           const litrage = glace ? (num(f.taille) || FOURNISSEUR.tailleParDefaut) : 0;
-           await DB.push('pertes:' + today(), { id:uid(), produit:f.nom + ' (lot ' + f.lot + ')', nombre:1,
-             litrage:litrage, parUnite:true, motif:'perime', par:STATE.user.prenom, employe:STATE.user.id, at:nowISO() });
-           await cumulerPertesMois(today());
-           /* Marqué jeté plutôt que supprimé : « lots: » est fusionné avec la
-              copie du serveur, qui faisait revenir une clé supprimée. */
-           const moisLot = f.mois || mois;
-           const rec = await DB.get('lots:' + moisLot, {});
-           if (rec[f.cle]) {
-             rec[f.cle] = Object.assign({}, rec[f.cle], { jete:nowISO(), jeteLot:f.lot, jetePar:STATE.user.prenom });
-             await DB.set('lots:' + moisLot, rec);
-           }
-           await feed('warn', STATE.user.prenom + ' a jeté ' + f.nom + ' (DLC dépassée)');
-           toast('Perte enregistrée');
-           rendre('frigo');
+           await retirerLot(f, true);
          });
      });
    };
@@ -4849,25 +4875,59 @@ function ouvrirPremierePeriode() {
           période échue reste en cours jusqu'à sa clôture. */
        const jours = joursEntre(per.debut, today());
        DB.prelire(jours.map(d => 'pertes:' + d));
-       const lignes = [];
+       const lignes = [], sorties = [];
        try {
          for (const d of jours) (await DB.get('pertes:' + d, [])).forEach(w => {
            const l = litresJetes(w);
            if (l > 0) lignes.push({ jour:d, w:w, l:l });
+           else if (w && w.horsEcart && !w.supprime && w.motif !== 'inventaire') sorties.push({ jour:d, w:w, l:litresPerte(w) });
          });
        } catch (x) {
          if (box.isConnected) box.innerHTML = '<p class="mini">Détail des pertes indisponible pour le moment.</p>';
          return;
        }
        if (!box.isConnected) return;
-       if (!lignes.length) { box.innerHTML = '<p class="mini">Aucune perte de glace au registre sur la période.</p>'; return; }
+       /* Pertes sorties de l'écart : montrées à part, et recomptables. */
+       const horsTxt = sorties.length ? '<div class="dense" style="margin-top:12px"><div class="dense-h"><span class="c1">Pas comptées (bac fini, non tracé)</span>' +
+         '<span class="c w">Litres</span></div>' + sorties.map(x => '<div class="dl"><span class="c1">' + esc(fmtDC(x.jour)) + ' · ' +
+           esc(x.w.produit || 'produit ?') + (x.w.horsEcartPar ? ' · sortie par ' + esc(x.w.horsEcartPar) : '') + '</span>' +
+           '<span class="c w num">' + n1(x.l) + ' L</span>' +
+           '<button type="button" class="btn fantome sm" data-recompter="' + esc(x.jour + '|' + x.w.id) + '">Recompter</button></div>').join('') +
+         '</div>' : '';
+       const basculer = async (cle, sortir) => {
+         const jour = cle.slice(0, 10), id = cle.slice(11);
+         const liste = await DB.get('pertes:' + jour, []);
+         const w = liste.filter(x => x && x.id === id)[0];
+         if (!w) return toast('Ligne introuvable', 'erreur');
+         w.horsEcart = sortir ? nowISO() : ''; w.horsEcartPar = sortir ? STATE.user.prenom : ''; w.horsEcartMaj = nowISO();
+         await DB.set('pertes:' + jour, liste);
+         await cumulerPertesMois(jour);
+         feed('warn', STATE.user.prenom + (sortir ? ' a sorti de l’écart une perte : ' : ' a recompté dans l’écart une perte : ') +
+           (w.produit || '?') + ' (' + n1(litresPerte(w)) + ' L, ' + fmtDC(jour) + ')');
+         await feedEcrit();
+         toast(sortir ? 'Perte retirée de l’écart' : 'Perte recomptée dans l’écart');
+         rendre('ecarts');
+       };
+       if (!lignes.length) {
+         box.innerHTML = '<p class="mini">Aucune perte de glace au registre sur la période.</p>' + horsTxt;
+       } else {
        const total = lignes.reduce((t, x) => t + x.l, 0);
        box.innerHTML = '<div class="dense"><div class="dense-h"><span class="c1">Pertes au registre</span><span class="c w">Litres</span></div>' +
          lignes.map(x => '<div class="dl"><span class="c1">' + esc(fmtDC(x.jour)) + ' · ' + esc(x.w.produit || 'produit ?') +
            (x.w.parUnite && num(x.w.nombre) > 1 ? ' × ' + num(x.w.nombre) : '') + (x.w.par ? ' · ' + esc(x.w.par) : '') + '</span>' +
-           '<span class="c w num">' + n1(x.l) + ' L</span></div>').join('') +
+           '<span class="c w num">' + n1(x.l) + ' L</span>' +
+           (x.w.id ? '<button type="button" class="btn fantome sm" data-hors="' + esc(x.jour + '|' + x.w.id) + '">Pas une perte</button>' : '') +
+           '</div>').join('') +
          '<div class="dl"><span class="c1"><b>Total</b> · ' + n1(total * FOURNISSEUR.poidsMoyenLitre) + ' kg</span>' +
-         '<span class="c w num"><b>' + n1(total) + ' L</b></span></div></div>';
+         '<span class="c w num"><b>' + n1(total) + ' L</b></span></div></div>' + horsTxt;
+       }
+       /* Bac fini sans être tracé, ou jeté par erreur : sorti de l'écart, gardé
+          au registre (marqué, pas effacé : la fusion entre iPads le ferait revenir). */
+       $$('#ec-pertes [data-hors]').forEach(b => b.onclick = () =>
+         confirmer('Ne pas compter cette perte ?', 'La ligne reste au registre mais sort du poids jeté de l’écart ' +
+           '(bac fini sans être tracé, ou jeté par erreur). Vous pourrez la recompter.', 'Ne pas compter',
+           () => basculer(b.dataset.hors, true)));
+       $$('#ec-pertes [data-recompter]').forEach(b => b.onclick = () => basculer(b.dataset.recompter, false));
      })();
    
      $('#imp-btn').onclick = () => $('#import-caisse').click();
@@ -5940,6 +6000,9 @@ function modifierPeriode(per) {
    const HORS_ECART = /^(\d+ )?MAC\b|^MACARON|^COFFRET .*\bMAC\b|^GIANDUIOTTO/;
    const GRAMMAGES_NOMS = [
      [/CONE VIDE/, 0], [/MAC TRADITIONNEL/, 0],
+     /* Extras sans glace (chantilly, coulis, lait végétal…) : leur catégorie
+        mêle « BOISSON A LA GLACE », ils arrivaient « grammage à compléter ». */
+     [/^EXTRA (CHANTILLY|COULIS|LAIT|SAUCE|SIROP|TOPPING|CREME|NAPPAGE)/, 0],
      [HORS_ECART, 0],
      [/^POT ENFANT/, 81], [/^POT PETIT/, 133], [/^POT CLASSI/, 163], [/^POT GRAND/, 221],
      [/^POT GEANT/, 275], [/^POT (A )?PARTAG/, 529],
@@ -6071,7 +6134,24 @@ function modifierPeriode(per) {
          }
    
          /* --- Lecture 2 et 3 : par colonnes --- */
-         const rows = XLSX.utils.sheet_to_json(feuille, { defval:'' });
+         /* En-tête : la première ligne (parmi les 20 premières) qui nomme une
+            colonne de quantité ou de poids. L'export « Ventes par produit »
+            commence par un titre et la période : lu dès la ligne 1, ses
+            colonnes s'appelaient « Ventes par produit — … », « __EMPTY »…
+            et l'import refusait le fichier (« Aucune colonne de quantité »). */
+         /* En-tête reconnu : une cellule de quantité ou de poids ET une
+            cellule de libellé ou de référence, toutes deux du texte court
+            (pas une ligne de produit comme « BAC 2 KG »). */
+         const titre = (l, re) => l.some(x => typeof x === 'string' && x.length < 40 && re.test(x));
+         const iEntete = Math.max(0, brut.slice(0, 20).findIndex(l =>
+           titre(l, /qte|qté|quantit|nombre|^\s*nb\.?\s*$|poids|masse/i) &&
+           titre(l, /produit|libell|désignation|designation|article|\bnom\b|\bsku\b|référence|reference|\bref\b|code/i)));
+         /* « range » numérique de SheetJS : ligne absolue de la feuille, alors
+            que brut part de la première ligne de sa plage (!ref). */
+         const debutPlage = feuille['!ref'] ? XLSX.utils.decode_range(feuille['!ref']).s.r : 0;
+         const rows = XLSX.utils.sheet_to_json(feuille, { defval:'', range:debutPlage + iEntete })
+           /* Ligne « TOTAL » en bas de l'export : pas un produit. */
+           .filter(r => !Object.keys(r).some(k => /^\s*(sous[- ]?)?total\s*$/i.test(String(r[k]))));
          if (!rows.length) return reject(new Error('Aucune ligne de vente dans le fichier'));
    
          const cols = Object.keys(rows[0]);
@@ -6094,6 +6174,17 @@ function modifierPeriode(per) {
          else if (cMoy && cQte) {
            const l = rows.filter(r => num(r[cMoy]) > 0 && num(r[cQte]) > 0).map(r => num(r[cQte]) / num(r[cMoy])).sort((x, y) => x - y);
            if (l.length) jours = Math.round(l[l.length >> 1]);
+         }
+         /* Sinon la période écrite au-dessus de l'en-tête (« Période du
+            09/10/2026 au 01/11/2026 »), bornes comprises. */
+         if (!jours) {
+           const dessus = brut.slice(0, iEntete).map(l => l.join(' '));
+           const p = (dessus.filter(t => /p[ée]riode|\bdu\b.*\bau\b/i.test(t))[0] || dessus.join(' '))
+             .match(/(\d{2})\/(\d{2})\/(\d{4})\D+(\d{2})\/(\d{2})\/(\d{4})/);
+           if (p) {
+             const d0 = Date.UTC(+p[3], p[2] - 1, +p[1]), d1 = Date.UTC(+p[6], p[5] - 1, +p[4]);
+             if (d1 >= d0) jours = Math.round((d1 - d0) / 864e5) + 1;
+           }
          }
          const fini = o => resolve(jours > 0 ? Object.assign(o, { jours:jours }) : o);
    
