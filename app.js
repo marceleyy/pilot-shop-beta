@@ -4083,6 +4083,10 @@ function ouvrirPremierePeriode() {
      for (let i = 0; i < 3; i++) cles.push('feed:' + addD(j, -i));
      jours.forEach(d => cles.push(...clesEtatJour(d)));
      DB.prelire(cles);
+     /* Fermetures à jour avant de compter les jours manquants (config.js). */
+     const hz = await DB.get('horaires', null);
+     if (hz && Array.isArray(hz.fermetures)) HORAIRES.fermetures = hz.fermetures;
+     const ferme = fermetureDu(j), ouvertAuj = jourOuvert(j);
      const mt = await meteoRapide();
      const m = mt.m;
      const e = await etatJour(j);
@@ -4113,7 +4117,7 @@ function ouvrirPremierePeriode() {
        if (k) cumulCaisse += caisseResume(k, caisseVeille).ecart;
        caisseVeille = k;
        const n = await etatNettoyage(d);
-       if (n.total && n.faits === 0) sansNet++;
+       if (n.total && n.faits === 0 && jourOuvert(d)) sansNet++;
        const t = await DB.get('temp:' + d, {});
        ENCEINTES.forEach(en => {
          ['m','s'].forEach(mo => {
@@ -4175,7 +4179,8 @@ function ouvrirPremierePeriode() {
      const minutesDe = h => (/^\d{2}:\d{2}$/.test(h || '') ? +h.slice(0, 2) * 60 + +h.slice(3, 5) : null);
      const maintenant = new Date().getHours() * 60 + new Date().getMinutes();
      const passe = h => { const x = minutesDe(h); return x !== null && maintenant >= x; };
-     const matinDu = passe(horaires.ouverture), soirDu = passe(horaires.fermeture);
+     /* Boutique fermée ce jour-là : aucun relevé n'est dû. */
+     const matinDu = ouvertAuj && passe(horaires.ouverture), soirDu = ouvertAuj && passe(horaires.fermeture);
      if (matinDu && !e.tempM) A.push(['bad', 'Frigos du matin non relevés',
        'Relevé à faire dès l’ouverture (' + horaires.ouverture + '), avant la mise en vitrine.', 'temp', 'm']);
      if (soirDu && !e.tempS) A.push(['warn', 'Frigos du soir non relevés',
@@ -4203,10 +4208,13 @@ function ouvrirPremierePeriode() {
        '<div class="grid g2" id="ctl-meteo">' + widgetMeteo(m) +
        carte(entete('👥', enService.length ? enService.map(s => s.prenom).join(', ') : 'Personne en service',
          enService.length ? 'En poste depuis ' + enService.map(s => heure(s.debut)).join(', ') : 'Aucun pointage ouvert') +
-         '<div class="rang">' + pastilleLien(e.tempM ? 'ok' : (matinDu ? 'bad' : 'n'),
+         (!ouvertAuj
+           ? '<div class="rang">' + pastilleLien('n', ferme
+               ? 'Boutique fermée jusqu’au ' + fmtDC(ferme.au) : 'Jour de fermeture', 'reglages') + '</div>'
+           : '<div class="rang">' + pastilleLien(e.tempM ? 'ok' : (matinDu ? 'bad' : 'n'),
            e.tempM ? 'Frigos matin faits' : (matinDu ? 'Frigos matin manquants' : 'Frigos matin à faire'), 'temp', 'm') +
          pastilleLien(e.net ? 'ok' : 'warn', e.net + '/' + e.netTotal + ' nettoyage', 'clean') +
-         pastilleLien(e.caisse ? 'ok' : 'n', e.caisse ? 'Caisse faite' : 'Caisse ouverte', 'caisse') + '</div>', 'solide') + '</div>' +
+         pastilleLien(e.caisse ? 'ok' : 'n', e.caisse ? 'Caisse faite' : 'Caisse ouverte', 'caisse') + '</div>'), 'solide') + '</div>' +
    
        carte(entete('📅', libellePeriode(per), 'Fenêtre de calcul en cours.') +
          '<div class="grid g4">' +
@@ -5055,6 +5063,8 @@ function ouvrirPremierePeriode() {
      if (!num(e.litrageBL))     B.push({ id:'achats', txt:'Achats de la période non saisis', go:'ecarts' });
    
      for (const d of jours) {
+       /* Jour de fermeture : rien n'est attendu, rien ne bloque. */
+       if (!jourOuvert(d)) continue;
        const st = await etatJour(d);
        if (!st.tempM || !st.tempS) B.push({ id:'temp', txt:'Températures incomplètes le ' + fmtDC(d), go:'temp', jour:d,
                                             moment:st.tempM ? 's' : 'm' });

@@ -1392,6 +1392,24 @@ const HORAIRES_DEF = {
 };
 let HORAIRES = Object.assign({}, HORAIRES_DEF);
 
+/* Fermetures exceptionnelles (congés, travaux, fin de saison) : des plages
+   { du:'AAAA-MM-JJ', au:'AAAA-MM-JJ', motif } rangées dans les horaires, donc
+   partagées par toute l'équipe. Un jour fermé n'attend ni relevé, ni tâche,
+   ni caisse : il ne compte pas comme manquant. Dates comparées en texte. */
+function fermetureDu(jour) {
+  const l = Array.isArray(HORAIRES.fermetures) ? HORAIRES.fermetures : [];
+  return l.filter(f => f && f.du && f.au && f.du <= jour && jour <= f.au)[0] || null;
+}
+/* Jour où la boutique ouvre : jour d'ouverture de la semaine et hors fermeture. */
+function jourOuvert(jour) {
+  const p = String(jour).split('-');
+  const js = new Date(+p[0], +p[1] - 1, +p[2]).getDay() || 7;
+  const ouverts = HORAIRES.joursOuverture || [1, 2, 3, 4, 5, 6, 7];
+  return ouverts.indexOf(js) >= 0 && !fermetureDu(jour);
+}
+/* Nom attendu par le calendrier des relevés (navJour). */
+function jourFerme(jour) { return !jourOuvert(jour); }
+
 /* Preuve photo d'une tâche */
 /* Rappel sous les champs de texte libre (retours, passation, anomalies) :
    ces textes restent en base et sont lus par toute l'équipe. */
