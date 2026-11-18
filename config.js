@@ -484,20 +484,59 @@ const FICHES = [
   },
   {
     id: 'f06', cat: 'Caisse', titre: 'Clôture de caisse', icone: '💶', duree: '10 min',
-    resume: 'Ordre imposé pour que l’écart soit exploitable.',
+    /* Alignée sur l'écran Caisse › Fermeture (modules.js, V.caisse) : cinq
+       montants dans l'ordre du tiroir, puis deux contrôles automatiques
+       (carte : caisse contre TPE ; espèces : fond du matin + recettes −
+       retrait contre fond final). L'ancienne fiche parlait de « compter les
+       espèces, fonds de caisse déduit », alors que l'écran demande le retrait
+       et le fond laissé, et non un total d'espèces net. */
+    resume: 'Cinq montants à saisir, dans l’ordre du tiroir.',
     etapes: [
-      'Éditer le ticket Z de la caisse.',
+      'Éditer le ticket Z de la caisse : il donne les recettes CB et les recettes espèces.',
       'Éditer le totalisateur du TPE.',
-      'Compter les espèces, fonds de caisse déduit.',
-      'Saisir CB, espèces et TPE dans l’application.',
-      /* Le seuil annoncé ici était de 10 € alors que l'application alerte à
-         partir de 5 € : la fiche autorisait donc à ne pas expliquer un écart
-         que l'écran signale en rouge. Deux consignes contradictoires sur le
-         même geste, et c'est celle du papier qu'on retient. */
-      'Expliquer tout écart supérieur à 5 € dans le commentaire.'
+      'Dans Caisse, onglet Fermeture, saisir les recettes CB et espèces du ticket Z, puis le total du TPE.',
+      'Retirer uniquement des billets, pour un montant rond (50, 55, 60 €…), et saisir ce retrait. La monnaie reste dans le tiroir.',
+      'Compter ce qui reste dans le tiroir et le saisir en fond de caisse final.',
+      /* Même seuil que l'écran (SEUILS.ecartFondEur, comparaison >=) : le
+         rouge apparaît dès 5 €, pas au-delà. */
+      'Un écart de 5 € ou plus s’affiche en rouge : l’expliquer dans le commentaire, puis valider le comptage de fermeture.'
     ],
-    securite: 'Aucun retrait d’espèces sans le noter.',
+    securite: 'Aucun retrait d’espèces sans le saisir. Une fois validé, seul le manager peut corriger le comptage.',
     validite: 'Chaque soir'
+  },
+  /* Cafétéria : dosages et temps proposés par défaut, À VALIDER par la
+     boutique avant mise en service (aucune fiche fournisseur dans le dépôt).
+     Produits repris du catalogue du sec : capsules simple, double et déca,
+     thés en sachet, matcha en poudre, chocolat en poudre 220 g. */
+  {
+    id: 'f07', cat: 'Cafétéria', titre: 'Cafétéria : préparer les boissons chaudes', icone: '☕', duree: '2 min',
+    resume: 'Expresso, déca, thé et matcha : une boisson se prépare à la commande.',
+    etapes: [
+      'À l’ouverture, allumer la machine à capsules et faire couler un premier cycle à vide pour la chauffer.',
+      'Expresso : 1 capsule simple, gobelet expresso, touche courte (environ 40 ml).',
+      'Double expresso : 1 capsule double, gobelet petit (environ 80 ml).',
+      'Déca : 1 capsule déca, même geste que l’expresso.',
+      'Thé : 1 sachet dans le gobelet, eau chaude non bouillante. Infuser 3 min pour le thé vert, 4 min pour les thés noirs et le rooibos, puis retirer le sachet.',
+      'Matcha : 2 g de poudre (1 cuillère doseuse), un fond d’eau chaude à 80 °C, fouetter jusqu’à ne plus voir de grumeaux, puis compléter de lait chaud ou d’eau.',
+      'Servir avec une bague de gobelet, une bûchette de sucre et une serviette ; couvercle pour emporter.'
+    ],
+    securite: 'Gobelet brûlant : toujours une bague, et un couvercle pour emporter. Vider le bac à capsules et l’égouttoir chaque soir.',
+    validite: 'À la commande, jamais à l’avance.'
+  },
+  {
+    id: 'f08', cat: 'Cafétéria', titre: 'Chocolat chaud à la chocolatière', icone: '🍫', duree: '30 min',
+    resume: 'Un sachet de 220 g pour un litre de lait, cuve préparée le jour même.',
+    etapes: [
+      'Vérifier que la cuve est propre et sèche, couvercle et robinet en place.',
+      'Verser 1 L de lait entier froid, puis 1 sachet de 220 g de chocolat en poudre (noir, lait ou noisette).',
+      'Mettre en chauffe avec le malaxeur, couvercle fermé, environ 25 min, jusqu’à ce que le chocolat nappe la cuillère.',
+      'Noter l’heure de préparation et le parfum sur l’étiquette de la cuve.',
+      'Servir au robinet dans le gobelet petit, moyen ou grand ; chantilly sur demande.',
+      'Ne jamais compléter une cuve entamée : la terminer, ou la vider avant d’en refaire une.',
+      'En fin de journée : vider, laver cuve et malaxeur à l’eau chaude savonneuse, désinfecter au Bactalim 1 %, rincer, sécher.'
+    ],
+    securite: 'Cuve et robinet brûlants : ne pas ouvrir le couvercle en chauffe. Allergènes : lait, et fruits à coque pour le chocolat noisette.',
+    validite: 'Le jour même. Le reste en cuve le soir se jette et se déclare en perte.'
   }
 ];
 
