@@ -300,6 +300,9 @@ function feuilleHoraires() {
     PHASES[1].de = HORAIRES.finOuverture;   PHASES[1].a = HORAIRES.debutFermeture;
     PHASES[2].de = HORAIRES.debutFermeture; PHASES[2].a = HORAIRES.finFermeture;
     $('#gh-ok').disabled = true;
+    /* Fermetures relues en base : un autre appareil a pu en ajouter. */
+    const hb = await DB.get('horaires', null);
+    if (hb && Array.isArray(hb.fermetures)) HORAIRES.fermetures = hb.fermetures;
     await DB.set('horaires', HORAIRES);
     await cocherEtape('horaires');
     closeSheet();

@@ -14,9 +14,24 @@
    'use strict';
 
 PAGES.allergenes = { titre:'Allergènes', sous:'Parfums, nappages et cornets' };
-/* En tête du menu de l'équipe : c'est au comptoir que la question se pose. */
-if (MENU_PLUS.equipe.indexOf('allergenes') < 0) MENU_PLUS.equipe.unshift('allergenes');
-if (MENU_PLUS.manager.indexOf('allergenes') < 0) MENU_PLUS.manager.push('allergenes');
+/* Rangés dans la Bibliothèque (en tête) plutôt qu'au menu : le menu garde
+   les fonctions, la Bibliothèque ce qu'on consulte. */
+(function () {
+  const fichesOrigine = V.fiches;
+  V.fiches = async function () {
+    if (typeof fichesOrigine === 'function') await fichesOrigine.apply(this, arguments);
+    const p = document.getElementById('page');
+    if (!p) return;
+    p.insertAdjacentHTML('afterbegin',
+      '<div class="entete"><h3>Allergènes</h3></div><div class="stack">' +
+      carte('<div class="rang"><div style="flex:1;min-width:0"><b>Allergènes et régimes</b>' +
+        '<div class="mini">Parfums, nappages et cornets : « sans fruits à coque », « vegan »…</div></div>' +
+        '<span class="mi-fl">›</span></div>', 'tap').replace('<div class="card', '<div id="bib-allergenes" class="card') +
+      '</div>');
+    const b = document.getElementById('bib-allergenes');
+    if (b) b.onclick = () => rendre('allergenes');
+  };
+})();
 
 const ALLERGENES = {
   source: {

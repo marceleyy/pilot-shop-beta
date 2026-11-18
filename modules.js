@@ -12,8 +12,11 @@
    PAGES.reception  = { titre:'Réception',   sous:'Livraison, DLC et stock fermé' };
 PAGES.stock      = { titre:'Stock réel', sous:'Ce qui reste en chambre froide' };
 PAGES.inventaire = { titre:'Faire l’inventaire', sous:'Compter ce qui est physiquement là' };
-PAGES.catalogue  = { titre:'Catalogue du sec', sous:'Ce que l’inventaire propose' };
-PAGES.parametres = { titre:'Back-office', sous:'Tâches, horaires et unités froides' };
+PAGES.catalogue  = { titre:'Catalogues', sous:'Sec et chambre froide' };
+PAGES.parametres = { titre:'Réglages', sous:'Tâches, horaires, unités froides et catalogues' };
+/* Un seul endroit pour paramétrer : Réglages réunit l'ancien Back-office
+   (tâches, horaires, unités froides) et les deux catalogues. */
+PAGES.reglages.sous = 'Tâches, horaires, unités froides et catalogues';
 PAGES.hebdo      = { titre:'Tâches du jour', sous:'Plan hebdomadaire de la boutique' };
 PAGES.lots.titre = 'Traçabilité';
 PAGES.lots.sous  = 'Ouverture de tout nouveau produit';
@@ -32,13 +35,8 @@ if (MENU_PLUS.manager.indexOf('reception') < 0) MENU_PLUS.manager.splice(2, 0, '
    son menu. Les signalements de l'équipe étaient donc enregistrés sans que
    personne ne puisse les consulter ni les marquer traités. */
 if (MENU_PLUS.manager.indexOf('anomalie') < 0) MENU_PLUS.manager.unshift('anomalie');
-/* Le catalogue du sec est modifiable par le manager depuis l'application :
-   retirer une référence, en ajouter, changer une unité. Sans passer par le code. */
-if (MENU_PLUS.manager.indexOf('catalogue') < 0) {
-  const i = MENU_PLUS.manager.indexOf('inventaire');
-  MENU_PLUS.manager.splice(i >= 0 ? i + 1 : MENU_PLUS.manager.length, 0, 'catalogue');
-}
-if (MENU_PLUS.manager.indexOf('parametres') < 0) MENU_PLUS.manager.push('parametres');
+/* Catalogues et Back-office ne sont plus des entrées du menu : on les
+   ouvre depuis Réglages (réservés au manager, voir vueAutorisee). */
 /* Les tâches hebdomadaires méritent leur onglet : c'est le tableau que l'équipe
    consultait au mur, consulté plusieurs fois par jour. */
 if (MENU_PLUS.equipe.indexOf('hebdo') < 0)  MENU_PLUS.equipe.unshift('hebdo');
@@ -261,6 +259,23 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
      if (!liste.length) { toast('Aucune réception à confirmer'); return rendre(STATE.view); }
      const r = liste[0];
      const qtes = r.lignes.map(l => l.qte);
+     /* Sec non reconnu : le manager dit si c'est un article existant, un
+        nouveau (ajouté au catalogue), ou rien (compté au prochain inventaire). */
+     if (typeof chargerCatalogueSec === 'function') { try { await chargerCatalogueSec(); } catch (e) {} }
+     const rappro = r.lignes.map(() => '');
+     const optionsSec = () => '<option value="">Ne pas l’ajouter (compté au prochain inventaire)</option>' +
+       '<optgroup label="Nouvel article, dans la section…">' + (typeof SEC_SECTIONS !== 'undefined' ? SEC_SECTIONS : []).map(sc => {
+         const id = typeof sc === 'string' ? sc : sc.id;
+         return '<option value="neuf|' + esc(id) + '">Nouveau · ' + esc(id) + '</option>'; }).join('') + '</optgroup>' +
+       '<optgroup label="Article existant">' + (typeof catalogueSec === 'function' ? catalogueSec() : [])
+         .filter(x => x && typeof x === 'object' && !x.masque)
+         .map(x => (x.variantes && x.variantes.length ? x.variantes : ['']).filter(v => !cleVivanteSecSeule('sec|' + x.id + '|' + v)).map(v =>
+           '<option value="' + esc('sec|' + x.id + '|' + v) + '">' + esc(x.nom + (v ? ' · ' + v : '')) + '</option>').join('')).join('') +
+       '</optgroup>';
+     const lieuLigne = (l, i) => l.famille === 'sec'
+       ? (l.cle ? 'au stock du sec : ' + esc(libelleSec(l.cle)) + ' · '
+         : '</div><select data-rap="' + i + '" style="margin-top:6px;width:100%">' + optionsSec() + '</select><div class="mini">')
+       : (l.cle && typeof libelleArticle === 'function' ? 'au stock : ' + esc(libelleArticle(l.cle)) + ' · ' : '');
      showSheet(
        '<h2 id="sheet-titre">Réception à confirmer</h2>' +
        '<p class="sub">' + esc(r.fournisseur) + ' · ' + esc(r.numero || 'sans n°') + ' · saisie par ' + esc(r.par || '—') +
@@ -269,17 +284,19 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
        '<p>Corrigez une quantité si besoin. Mettre 0 retire la ligne. Le stock ne change pas tant que vous ne confirmez pas.</p></div></div>' +
        '<div class="stack" style="margin-top:14px">' + r.lignes.map((l, i) =>
          '<div class="rang"><div style="flex:1;min-width:0"><b>' + esc(l.produit) + '</b>' +
-         '<div class="mini">' + (l.cle && typeof libelleArticle === 'function' ? 'au stock : ' + esc(libelleArticle(l.cle)) + ' · ' : '') + (l.lot ? 'lot ' + esc(l.lot) : 'sans lot') + ' · ' + (l.dlc ? 'DLC ' + esc(fmtD(l.dlc)) : 'sans DLC') + '</div></div>' +
+         '<div class="mini">' + lieuLigne(l, i) + (l.lot ? 'lot ' + esc(l.lot) : 'sans lot') + ' · ' + (l.dlc ? 'DLC ' + esc(fmtD(l.dlc)) : 'sans DLC') + '</div></div>' +
          '<input type="number" min="0" step="1" inputmode="numeric" data-q="' + i + '" value="' + esc(qtes[i]) + '" style="width:76px;text-align:center"></div>').join('') +
        '</div>' +
        '<div class="actions"><button class="btn clair" data-fermer>Laisser en attente</button>' +
        '<button class="btn menthe" id="rv-ok">Confirmer l’entrée en stock</button></div>' +
        '<button class="btn clair bloc" id="rv-ecarter" style="margin-top:10px">Écarter cette réception</button>');
      $$('[data-q]').forEach(inp => inp.oninput = () => { qtes[+inp.dataset.q] = inp.value; });
+     $$('[data-rap]').forEach(sel => sel.onchange = () => { rappro[+sel.dataset.rap] = sel.value; });
      $('#rv-ecarter').onclick = () => confirmer('Écarter cette réception ?',
        'Rien n’entrera au stock pour ce bon. La réception reste tracée au registre.', 'Écarter',
        async () => {
          if (!(await marquerReceptionTraitee(r.id, 'ecartee'))) return;
+         if (typeof retirerReceptionSec === 'function') { try { await retirerReceptionSec(r.id); } catch (e) {} }
          await feed('warn', STATE.user.prenom + ' a écarté l’entrée en stock du bon ' + (r.numero || 'sans n°') + ' (' + (r.par || '—') + ')');
          toast('Réception écartée du stock');
          if ((await receptionsEnAttente()).length) return verifierReceptions();
@@ -291,13 +308,41 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
        if (qtes.some(q => q === '' || !(num(q) >= 0) || !Number.isInteger(num(q)))) return toast('Quantité invalide : un nombre entier', 'erreur');
        enCours = true;
        try {
+         /* Articles nouveaux créés avant de marquer : un échec laisse la
+            réception en attente plutôt que perdue. */
+         const cles = r.lignes.map(l => l.cle);
+         for (let i = 0; i < r.lignes.length; i++) {
+           const l = r.lignes[i];
+           if (l.famille !== 'sec' || l.cle || !(num(qtes[i]) > 0)) continue;
+           if (/^neuf\|/.test(rappro[i])) {
+             /* Retenue dans rappro : un nouvel essai ne la recrée pas. */
+             try { cles[i] = rappro[i] = await ajouterArticleSecRecu(l.produit, rappro[i].slice(5)); }
+             catch (e) { return toast('Ajout au catalogue impossible, réessayez', 'erreur'); }
+           } else cles[i] = rappro[i];
+         }
+         /* Sec écrit avant de marquer : un échec laisse la réception en
+            attente. Id par ligne du bon : un second iPad n'ajoute rien. */
+         const secRecus = [];
+         r.lignes.forEach((l, i) => { if (l.famille === 'sec' && cles[i] && num(qtes[i]) > 0) secRecus.push({ cle:cles[i], q:num(qtes[i]), i:i }); });
+         if (secRecus.length) await ajouterReceptionSec(secRecus, { id:r.id, at:r.at, bl:r.numero, par:STATE.user.prenom });
          /* Marquée d'abord : un second iPad qui confirme ensuite la trouve
             traitée et n'ajoute pas les bacs une seconde fois. */
-         if (!(await marquerReceptionTraitee(r.id, 'confirmee'))) return;
+         if (!(await marquerReceptionTraitee(r.id, 'confirmee'))) {
+           /* Écartée entre-temps sur un autre appareil : le sec écrit à
+              l'instant ne doit pas rester au stock. */
+           const deja = (await DB.get(CLE_RECEPTION_ATTENTE, [])).filter(x => x && x.id === r.id)[0];
+           if (secRecus.length && (!deja || deja.traite !== 'confirmee')) { try { await retirerReceptionSec(r.id); } catch (e) {} }
+           return;
+         }
          let n = 0;
          for (let i = 0; i < r.lignes.length; i++) {
            const l = r.lignes[i], q = num(qtes[i]);
            if (!(q > 0)) continue;
+           /* Sec : journal du sec (stock attendu = comptage + réceptions). */
+           if (l.famille === 'sec') {
+             if (cles[i]) n += q;
+             continue;
+           }
            /* Daté de la livraison, pas de la confirmation (voir ajouterMouvement). */
            await ajouterMouvement('reception', l.cle, q, { lot:l.lot, bl:r.numero, dlc:l.dlc, famille:l.famille, at:r.at });
            n += q;
@@ -306,14 +351,15 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
          /* Le manager a validé chaque ligne gardée : l'appli retient l'article
             de chaque référence pour les prochains bons. */
          if (typeof apprendreBL === 'function') {
-           try { await apprendreBL(r.lignes.filter((l, i) => num(qtes[i]) > 0)); } catch (e) {}
+           try { await apprendreBL(r.lignes.map((l, i) => Object.assign({}, l, { cle:cles[i] })).filter((l, i) => num(qtes[i]) > 0)); } catch (e) {}
          }
          await feed('ok', STATE.user.prenom + ' a confirmé l’entrée en stock du bon ' + (r.numero || 'sans n°') +
            ' (' + (r.par || '—') + ')' + (corrige ? ', quantités corrigées' : ''));
          closeSheet();
          /* Livraison antérieure au dernier inventaire : il l'a déjà comptée,
             le journal écarte le mouvement. */
-         const inv = await DB.get('stock:inventaire', null);
+         const toutSec = r.lignes.every((l, i) => !(num(qtes[i]) > 0) || l.famille === 'sec');
+         const inv = await DB.get(toutSec ? 'stock:sec' : 'stock:inventaire', null);
          toast(inv && inv.at && inv.at >= r.at
            ? 'Confirmée. L’inventaire du ' + fmtD(inv.jour) + ' comptait déjà cette livraison : stock inchangé'
            : n + ' ' + accord(n, 'unité ajoutée', 'unités ajoutées') + ' au stock');
@@ -457,13 +503,15 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
      function catalogueReception() {
        const out = [];
        const auSec = f => f.lieu === 'sec' || f.stock === 'sec';
-       PARFUMS.forEach(p => out.push({ nom:'Glace ' + p, lieu:'froid', fam:'glace', parfum:p, unite:'bac' }));
+       /* Parfums et saveurs retirés au catalogue : plus proposés à la main. */
+       const actif = (f, sv) => typeof froidActif !== 'function' || froidActif(f, sv);
+       PARFUMS.filter(p => actif('glace', p)).forEach(p => out.push({ nom:'Glace ' + p, lieu:'froid', fam:'glace', parfum:p, unite:'bac' }));
        FAMILLES_PRODUIT.filter(f => f.id !== 'glace').forEach(f => {
          const lieu = auSec(f) ? 'sec' : 'froid';
          const unite = STOCK.unites.indexOf(f.unite) >= 0 ? f.unite : 'unité';
          if (f.parfums && f.saveurs && f.saveurs.length) {
-           f.saveurs.forEach(sv => out.push({ nom:f.libelle + ' ' + sv, lieu:lieu, fam:f.id, parfum:sv, unite:unite }));
-         } else {
+           f.saveurs.filter(sv => actif(f.id, sv)).forEach(sv => out.push({ nom:f.libelle + ' ' + sv, lieu:lieu, fam:f.id, parfum:sv, unite:unite }));
+         } else if (actif(f.id, '')) {
            out.push({ nom:f.libelle, lieu:lieu, fam:f.id, parfum:'', unite:unite });
          }
        });
@@ -474,7 +522,7 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
          if (!r || r.masque || dejaFam.indexOf(r.id) >= 0) return;
          const unite = STOCK.unites.indexOf(r.unite) >= 0 ? r.unite : 'unité';
          (r.variantes && r.variantes.length ? r.variantes : ['']).forEach(v =>
-           out.push({ nom:r.nom + (v ? ' · ' + v : ''), lieu:'sec', fam:'', parfum:'', unite:unite }));
+           out.push({ nom:r.nom + (v ? ' · ' + v : ''), lieu:'sec', fam:'', parfum:'', unite:unite, cle:'sec|' + r.id + '|' + v }));
        });
        return out;
      }
@@ -498,9 +546,30 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
        if (!lignes.length) lignes.push({ produit:'', qte:1, unite:'bac', lot:'', dlc:'' });
        /* Référence déjà confirmée par un manager : l'article appris remplace
           le nom lu, souvent abîmé (voir apprendreBL). */
+       /* Sec : référence Amorino connue (CODES_AMORINO) ou déjà confirmée
+          par un manager → article du sec choisi d'office, quantité du bon
+          convertie en unités comptées (« par »). Aucun prix n'est touché. */
+       const choixSec = (l, cle, par) => {
+         const c = catalogue.filter(x => x.cle === cle)[0] ||
+           { nom:libelleSec(cle), lieu:'sec', fam:'', parfum:'', unite:'unité', cle:cle };
+         l.lieu = 'sec'; l.choix = c; l.produit = l.lu = c.nom; l.unite = c.unite; l.facteur = par || 1;
+       };
        lignes.forEach(l => {
+         if (!l.ref || typeof secDepuisCode !== 'function') return;
+         const sd = secDepuisCode(l.ref);
+         const a = memo && typeof cleMemoRef === 'function' ? memo[cleMemoRef(l.ref)] : null;
+         if (sd && sd.vivante) {
+           /* Coulis, toppings… : entrée de la famille, comme un choix au catalogue. */
+           const f = litArticle(sd.vivante);
+           const c = catalogue.filter(x => x.fam === f.famille && x.parfum === f.parfum)[0];
+           if (c) { l.codeSec = 'code'; l.lieu = c.lieu; l.choix = c; l.produit = l.lu = c.nom; l.unite = c.unite; l.facteur = sd.par; }
+         } else if (sd) { l.codeSec = 'code'; choixSec(l, sd.cle, sd.par); }
+         else if (a && /^sec\|/.test(a.cle || '') && clesSecConnues().has(a.cle) && !cleVivanteSecSeule(a.cle)) { l.codeSec = 'memo'; choixSec(l, a.cle, 1); }
+       });
+       lignes.forEach(l => {
+         if (l.codeSec) return;
          const a = memo && l.ref && typeof cleMemoRef === 'function' ? memo[cleMemoRef(l.ref)] : null;
-         if (!a || !a.cle) return;
+         if (!a || !a.cle || /^sec\|/.test(a.cle)) return;
          /* Une seule confirmation ne suffit pas à passer outre un nom bien lu :
             une association fausse s'imposerait à chaque bon. */
          if (!((a.vu || 1) >= 2 || !parfumDepuisDesignation(l.lu))) return;
@@ -525,7 +594,11 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
                '" data-lieu="' + i + '" data-z="' + z + '">' + (z === 'froid' ? 'Froid' : 'Sec') + '</button>').join('') + '</div>' +
              '<input type="search" data-r="' + i + '.produit" value="' + esc(l.produit) + '" placeholder="Chercher dans le catalogue ou écrire le nom" autocomplete="off">' +
              '<div class="chips" data-sugg="' + i + '" style="margin-top:6px">' + (l.choix && l.produit === l.choix.nom ? '' : puces(l, i, l.produit)) + '</div>' +
-             (l.appris && l.produit === l.lu ? '<p class="mini" style="margin-top:4px">Reconnu grâce aux livraisons précédentes (' + esc(l.ref) + ')</p>' : '') + '</div>' +
+             (l.appris && l.produit === l.lu ? '<p class="mini" style="margin-top:4px">Reconnu grâce aux livraisons précédentes (' + esc(l.ref) + ')</p>' : '') +
+             (l.codeSec && l.choix && l.produit === l.choix.nom ? '<p class="mini" style="margin-top:4px">' +
+               (l.codeSec === 'memo' ? 'Reconnu grâce aux livraisons précédentes (' + esc(l.ref) + '), à vérifier'
+                 : 'Référence Amorino ' + esc(l.ref)) +
+               (num(l.facteur) > 1 ? ' · 1 sur le bon = ' + num(l.facteur) + ' comptés à l’inventaire' : '') + '</p>' : '') + '</div>' +
              '<div class="grid g3" style="margin-top:10px">' +
              '<div class="champ"><label class="f">Quantité' + (l.qteDouteuse ? ' <b style="color:var(--corail-d)">à vérifier</b>' : '') + '</label><input type="number" min="1" data-r="' + i + '.qte" value="' + l.qte + '"></div>' +
              '<div class="champ"><label class="f">Unité</label><select data-r="' + i + '.unite">' +
@@ -568,6 +641,8 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
              const c = catalogue.filter(x => x.lieu === (l.lieu || 'froid') && x.nom === b.dataset.nom)[0];
              if (!c) return;
              l.choix = c; l.produit = c.nom; l.unite = c.unite;
+             const sd = l.ref && typeof secDepuisCode === 'function' ? secDepuisCode(l.ref) : null;
+             l.facteur = sd && (sd.cle === c.cle || (sd.vivante && c.fam && cleArticle(c.fam, c.parfum, '') === sd.vivante)) ? sd.par : 1;
              /* Le nom choisi ne porte pas de taille : sans taille saisie, le
                 bac par défaut est signalé à vérifier. */
              if (c.fam === 'glace' && !num(l.taille)) l.tailleDeduite = true;
@@ -658,14 +733,30 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
              compté à l'inventaire du sec. */
           if (l.choix && l.produit === l.choix.nom) {
             const c = l.choix;
-            if (!c.fam) { auSecSeul.push(l.produit.trim()); continue; }
+            if (!c.fam) {
+              if (!c.cle) { auSecSeul.push(l.produit.trim()); continue; }
+              /* Sec : entre au stock du sec à la confirmation, en unités
+                 comptées (carton de 8 ramettes → 8). */
+              auStock++;
+              aStocker.push({ cle:c.cle, produit:l.produit.trim(), qte:num(l.qte) * (num(l.facteur) || 1), ref:l.ref || '',
+                              lot:l.lot || '', dlc:l.dlc || '', famille:'sec' });
+              continue;
+            }
             const cleC = cleArticle(c.fam, c.parfum, c.fam === 'glace' ? (num(l.taille) || FOURNISSEUR.tailleParDefaut) : '');
             auStock++;
-            aStocker.push({ cle:cleC, produit:l.produit.trim(), qte:num(l.qte), ref:l.ref || '',
+            aStocker.push({ cle:cleC, produit:l.produit.trim(), qte:num(l.qte) * (num(l.facteur) || 1), ref:l.ref || '',
                             lot:l.lot || '', dlc:l.dlc || '', famille:c.fam });
             continue;
           }
           const fam = devinerFamille(l.produit);
+          /* Rangé au sec sans article choisi : le manager dit, à la
+             confirmation, si c'est un article existant ou un nouveau. */
+          if (l.lieu === 'sec' && !(fam.lieu === 'sec' || fam.stock === 'sec')) {
+            auStock++;
+            aStocker.push({ cle:'', produit:l.produit.trim(), qte:num(l.qte), ref:l.ref || '',
+                            lot:l.lot || '', dlc:l.dlc || '', famille:'sec', aRapprocher:true });
+            continue;
+          }
           /* Même clé que l'ouverture : « Gelato pistache 3 litres » doit
              alimenter glace|Pistache|3, pas un article fantôme en 5 L que
              l'inventaire ne compte jamais. Seules les glaces ont une taille. */
@@ -870,8 +961,11 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
        ? '<button class="btn corail sm" id="ptg">Fin de service</button>'
        : '<button class="btn menthe sm" id="ptg">Début de service</button>';
    
+     /* Boutique fermée ce jour (Réglages > Fermeture, ou jour hors semaine) :
+        ni relevé ni procédure attendus, la journée l'affiche simplement. */
+     const fermeJ = jourOuvert(j) ? null : (fermetureDu(j) || {});
      const R = [];
-     if (!e.tempM) R.push(['bad', 'Frigos du matin non relevés', 'À faire dès l’ouverture, avant la mise en vitrine.', 'temp', 'm']);
+     if (!e.tempM && !fermeJ) R.push(['bad', 'Frigos du matin non relevés', 'À faire dès l’ouverture, avant la mise en vitrine.', 'temp', 'm']);
      if (e.tempCrit) R.push(['bad', e.tempCrit + ' ' + accord(e.tempCrit, 'frigo') + ' en limite critique', 'Transférez les produits et prévenez ' + (typeof nomManager === 'function' ? nomManager() : 'le manager') + '.', 'temp',
        /* Le moment du dépassement (le soir s'il y en a un), pas celui de l'heure. */
        ENCEINTES.some(en => etatTemp(en, tempJour['s_' + en.id]) === 'crit') ? 's' : 'm']);
@@ -986,7 +1080,7 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
          : '<div class="alerte ok"><div style="flex:1"><b>Tout est à jour</b>' +
            '<p>Aucun relevé ni contrôle en retard.</p></div></div>') +
    
-       (msgs.length ? '<div class="entete"><h3>Carnet de relève</h3>' +
+       (msgs.length ? '<div class="entete"><h3>Messagerie</h3>' +
          '<button class="btn fantome sm pousse" data-go="releve">Tout voir</button></div>' +
          '<div class="stack">' + msgs.map(m => carte('<div class="rang">' +
            '<div style="flex:1"><b>' + esc(m.texte) + '</b><div class="mini">' + esc(m.par) + ' · ' +
@@ -1002,17 +1096,11 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
           On dessine maintenant la check-liste pour les trois phases, et les
           raccourcis viennent en dessous — ils restent utiles pendant le service,
           où tout arrive sans prévenir. */
-       (false
-         ? carte(entete('⚡', 'Service', 'Ce qui se déclare au fil de la journée.') +
-             '<div class="stack">' +
-             ['clean|🧽|Nettoyage en cours de service', 'pertes|🗑️|Déclarer une perte',
-             'lots|#️⃣|Traçabilité à l’ouverture d’un produit',
-             'reception|🚚|Réceptionner une livraison', 'reas|📦|Signaler une rupture'].map(x => {
-             const [id, ic, lb] = x.split('|');
-             return '<button type="button" class="menu-item" data-go="' + id + '">' +
-             '<span class="mi-tx"><span class="mi-t">' + lb + '</span></span>' +
-             '<span class="mi-fl">›</span></button>';
-             }).join('') + '</div>')
+       (fermeJ
+         ? carte(entete('🔒', 'Boutique fermée',
+             fermeJ.au ? 'Du ' + fmtD(fermeJ.du) + ' au ' + fmtD(fermeJ.au) : 'Jour de fermeture') +
+             (fermeJ.motif ? '<p class="mini">' + esc(fermeJ.motif) + '</p>' : '') +
+             '<p class="mini">Aucune procédure ni relevé à saisir aujourd’hui.</p>', 'solide')
    
          : (function () {
          /* Numérotation continue sur toute la procédure, tous blocs confondus. */
@@ -2069,6 +2157,10 @@ V.temp = async function () {
 V.parametres = async function () {
      const h = await DB.get('horaires', HORAIRES);
      Object.assign(HORAIRES, h);
+     /* Les fermetures passées depuis plus de 30 jours ne s'affichent plus. */
+     const fermetures = (Array.isArray(HORAIRES.fermetures) ? HORAIRES.fermetures : [])
+       .filter(f => f && f.du && f.au && f.au >= addD(today(), -30))
+       .sort((a, b) => a.du.localeCompare(b.du));
      const ench = await DB.get('enceintes', null);
      if (ench) ENCEINTES = ench;
      const hebdo = await DB.get('hebdo', null);
@@ -2091,6 +2183,21 @@ V.parametres = async function () {
          '<div class="champ"><label class="f">Début phase fermeture</label><input type="time" id="h5" value="' + esc(HORAIRES.debutFermeture) + '"></div>' +
          '<div class="champ"><label class="f">Fin phase fermeture</label><input type="time" id="h6" value="' + esc(HORAIRES.finFermeture) + '"></div></div>' +
          '<button class="btn menthe bloc" id="hv" style="margin-top:14px">Enregistrer les horaires</button>', 'solide') +
+
+       /* Fermeture sur une période : plus rien n'est attendu ces jours-là. */
+       carte(entete('🔒', 'Fermeture de la boutique', 'Congés, travaux, fin de saison : aucune saisie attendue, aucune alerte.') +
+         (fermetures.length
+           ? '<div class="stack">' + fermetures.map((f, i) =>
+               '<div class="tache"><span class="tx"><span class="tn">Du ' + esc(fmtD(f.du)) + ' au ' + esc(fmtD(f.au)) + '</span>' +
+               (f.motif ? '<span class="tm">' + esc(f.motif) + '</span>' : '') + '</span>' +
+               '<button class="btn clair sm" data-fsupp="' + i + '">Retirer</button></div>').join('') + '</div>'
+           : '<p class="mini">Aucune fermeture prévue.</p>') +
+         '<div class="grid g2" style="margin-top:12px">' +
+         '<div class="champ"><label class="f">Fermée du</label><input type="date" id="fdu"></div>' +
+         '<div class="champ"><label class="f">Au (inclus)</label><input type="date" id="fau"></div></div>' +
+         '<div class="champ" style="margin-top:10px"><label class="f">Motif (facultatif)</label>' +
+         '<input type="text" id="fmotif" maxlength="80" placeholder="Congés annuels"></div>' +
+         '<button class="btn menthe bloc" id="fajout" style="margin-top:12px">Fermer la boutique sur cette période</button>', 'solide') +
    
        carte(entete('❄️', 'Unités frigorifiques', 'Nom, cible et plage de boutons du relevé de températures.') +
          '<div class="stack">' + ENCEINTES.map((e, i) =>
@@ -2148,9 +2255,39 @@ V.parametres = async function () {
      PHASES[0].de = HORAIRES.debutOuverture; PHASES[0].a = HORAIRES.finOuverture;
      PHASES[1].de = HORAIRES.finOuverture;   PHASES[1].a = HORAIRES.debutFermeture;
      PHASES[2].de = HORAIRES.debutFermeture; PHASES[2].a = HORAIRES.finFermeture;
+     /* Fermetures relues en base : un autre appareil a pu en ajouter ou en
+        retirer depuis l'ouverture de l'écran. */
+     const hb = await DB.get('horaires', null);
+     if (hb && Array.isArray(hb.fermetures)) HORAIRES.fermetures = hb.fermetures;
      await DB.set('horaires', HORAIRES);
      toast('Horaires enregistrés');
      };
+
+  /* Relit les horaires en base avant d'écrire : un autre appareil a pu
+     ajouter une fermeture depuis l'ouverture de l'écran. */
+  const ecrireFermetures = async modif => {
+    const enBase = (await DB.get('horaires', null)) || {};
+    const l = modif(Array.isArray(enBase.fermetures) ? enBase.fermetures.slice() : []);
+    HORAIRES.fermetures = l;
+    await DB.set('horaires', Object.assign({}, HORAIRES, enBase, { fermetures:l }));
+    rendre(STATE.view);
+  };
+  $('#fajout').onclick = async () => {
+    const du = $('#fdu').value, au = $('#fau').value, motif = $('#fmotif').value.trim().slice(0, 80);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(du) || !/^\d{4}-\d{2}-\d{2}$/.test(au)) return toast('Indiquez les deux dates', 'erreur');
+    if (au < du) return toast('La fin de la fermeture doit suivre son début', 'erreur');
+    await ecrireFermetures(l => l.concat([{ du:du, au:au, motif:motif }]));
+    toast('Boutique fermée du ' + fmtD(du) + ' au ' + fmtD(au));
+  };
+  $$('[data-fsupp]').forEach(b => b.onclick = () => {
+    const f = fermetures[+b.dataset.fsupp];
+    confirmer('Retirer cette fermeture ?',
+      'Du ' + fmtD(f.du) + ' au ' + fmtD(f.au) + ' : les saisies redeviennent attendues ces jours-là.',
+      'Retirer', async () => {
+        await ecrireFermetures(l => l.filter(x => !(x && x.du === f.du && x.au === f.au)));
+        toast('Fermeture retirée');
+      });
+  });
 
   $('#hb-ouvrir').onclick = organiserSemaine;
   $('#hb-resp').onclick   = attribuerResponsables;
@@ -2164,7 +2301,7 @@ V.parametres = async function () {
          'Supprimer', async () => {
            ENCEINTES.splice(+b.dataset.supp, 1);
            await DB.set('enceintes', ENCEINTES);
-           toast('Unité supprimée'); rendre('parametres');
+           toast('Unité supprimée'); rendre(STATE.view);
          });
      });
      $('#ea').onclick = async () => {
@@ -2176,7 +2313,7 @@ V.parametres = async function () {
        ENCEINTES.push({ id:'u' + uid().slice(0, 4), nom:'Nouvelle unité', cible:'—',
                         lo:-24, hi:8, pas:1, vert:[-20, -17], crit:-15, zone:'boutique' });
        await DB.set('enceintes', ENCEINTES);
-       await rendre('parametres');
+       await rendre(STATE.view);
        $$('[data-e]').forEach(i => { if (enCours[i.dataset.e] !== undefined) i.value = enCours[i.dataset.e]; });
      };
      $('#ev').onclick = async () => {
@@ -2281,7 +2418,7 @@ async function organiserSemaine() {
       await feed('ok', STATE.user.prenom + ' a réorganisé les tâches de la semaine');
       closeSheet();
       toast('Semaine enregistrée');
-      rendre('parametres');
+      rendre(STATE.view);
     };
 
     $('#os-raz').onclick = () => confirmer('Rétablir le tableau d’origine ?',
@@ -2290,7 +2427,7 @@ async function organiserSemaine() {
       'Rétablir', async () => {
         await DB.del('hebdo:plan');
         TACHES_HEBDO = TACHES_HEBDO_DEF.map(t => Object.assign({}, t, { jours:(t.jours || []).slice() }));
-        closeSheet(); toast('Tableau rétabli'); rendre('parametres');
+        closeSheet(); toast('Tableau rétabli'); rendre(STATE.view);
       },
       /* La confirmation occupe la même feuille : « Annuler » fermait tout et
          perdait l'organisation en cours. On y revient, bascules comprises. */
@@ -2402,7 +2539,7 @@ function modifierAsynchrone(id) {
       await feed('ok', STATE.user.prenom + (nouvelle ? ' a ajouté' : ' a modifié') + ' la tâche « ' + nom + ' »');
       closeSheet();
       toast(nouvelle ? 'Tâche ajoutée' : 'Tâche modifiée');
-      rendre('parametres');
+      rendre(STATE.view);
     };
 
     if ($('#as-supp')) $('#as-supp').onclick = () => {
@@ -2416,7 +2553,7 @@ function modifierAsynchrone(id) {
           await DB.set('asynchrones', sc);
           appliquerAsynchrones(sc);
           await feed('ok', STATE.user.prenom + ' a supprimé la tâche « ' + a.nom + ' »');
-          closeSheet(); toast('Tâche supprimée'); rendre('parametres');
+          closeSheet(); toast('Tâche supprimée'); rendre(STATE.view);
         },
         /* « Annuler » revient à la feuille, saisie en cours comprise. */
         () => { dessiner(); _feuilleModifiee = true; });
@@ -2506,7 +2643,7 @@ async function attribuerResponsables() {
       await feed('ok', STATE.user.prenom + ' a mis à jour les responsables de la semaine');
       closeSheet();
       toast('Responsables enregistrés');
-      rendre('parametres');
+      rendre(STATE.view);
     };
   };
   dessiner();
@@ -3009,18 +3146,26 @@ function formulaireAnomalie() {
        await V_reglages_origine.call(this);
      } else {
        $('#vue-actions').innerHTML = '';
-       $('#page').innerHTML =
-         carte('<h2>Réglages</h2><div class="cs">Paramètres de la boutique ' +
-           esc(APP.site) + ' · version ' + esc(APP.version) + '.</div>' +
-           '<button class="btn clair bloc" data-go="parametres" style="margin-top:14px">' +
-           'Back-office : tâches, horaires et unités froides</button>' +
-           '<button class="btn clair bloc" data-go="equipe" style="margin-top:8px">Équipe</button>',
-           'solide');
+       /* Réglages = un seul endroit : les catalogues en tête, puis les
+          tâches, horaires et unités froides (ancien Back-office). */
+       await V.parametres();
+       const p0 = $('#page');
+       if (p0) p0.insertAdjacentHTML('afterbegin',
+         carte('<div class="rang"><div style="flex:1;min-width:0"><b>Catalogues</b>' +
+           '<div class="mini">Sec et chambre froide : produits utilisés ou non, prix, stock minimum. ' +
+           'L’inventaire, la réception, la valeur du stock et les écarts les lisent.</div></div>' +
+           '<button class="btn clair sm" data-go="catalogue">Ouvrir</button></div>', 'solide'));
        $$('#page [data-go]').forEach(b => b.onclick = () => rendre(b.dataset.go));
      }
      const page = $('#page');
      if (!page) return;
-   
+
+     /* Diagnostic technique replié : utile au dépannage seulement. */
+     const ouvrirDiag = document.createElement('div');
+     ouvrirDiag.innerHTML = '<p class="mini" style="text-align:center;margin-top:18px">' +
+       esc(APP.site) + ' · version ' + esc(APP.version) + ' · ' +
+       '<button type="button" class="lien" id="dg-ouvrir" style="background:none;border:0;padding:0;color:inherit;text-decoration:underline;cursor:pointer;font:inherit">diagnostic technique</button></p>';
+     page.appendChild(ouvrirDiag.firstChild);
      const bloc = document.createElement('div');
      bloc.innerHTML = carte(entete('🩺', 'Diagnostic de la base',
        'Pour vérifier que cet appareil communique bien avec la base. Utile surtout quand quelque chose ne s’enregistre pas.') +
@@ -3056,7 +3201,11 @@ function formulaireAnomalie() {
          : '<p class="mini" style="margin-top:14px">Mode local : aucune base configurée, rien à tester.</p>') +
        '<div id="dg-res" style="margin-top:12px"></div>' +
        '<button class="btn fantome bloc" id="dg-purge" style="margin-top:8px">Vider la file d’attente</button>', 'plat');
-     page.appendChild(bloc.firstChild);
+     const diag = bloc.firstChild;
+     /* Reste ouvert d'un rafraîchissement à l'autre (test, file vidée). */
+     diag.hidden = !V.reglages._diag;
+     page.appendChild(diag);
+     $('#dg-ouvrir').onclick = () => { diag.hidden = !diag.hidden; V.reglages._diag = !diag.hidden; };
    
      /* Le test écrit puis efface une ligne dans des tables du registre : on le
         dit avant de le faire, au lieu de le découvrir après. */

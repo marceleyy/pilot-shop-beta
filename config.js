@@ -664,7 +664,8 @@ const INVENTAIRE_SEC = [
      qu'il ne veut pas compter. */
   { id:'spatule',   sec:'Service', nom:'Spatules en bois 11 cm',     unite:'carton', decimal:true },
   { id:'cialdi',    sec:'Service', nom:'Mini wafers emballés (La Cialdina)', unite:'carton', decimal:true },
-  { id:'gaufrette', sec:'Service', nom:'Wafer al Gianduja (carton 12 boîtes)', unite:'carton', decimal:true },
+  /* Comptée à la boîte depuis le 17/11 (carton de 12 à 32 € : 2,67 € la boîte). */
+  { id:'gaufrette', sec:'Service', nom:'Wafer al Gianduja (boîte de 50)', unite:'boîte', decimal:true },
   { id:'garniture', sec:'Coulis et toppings', nom:'Garnitures gaufres et crêpes', unite:'pot', decimal:true,
     /* « Sauce caramel 700 g » = le flacon « Coulis · Caramel » : comptée là. */
     variantes:['Sauce caramel 2 L','Chocolat de couverture 5 kg','Crème gianduja 5 kg',
@@ -725,39 +726,40 @@ const PRIX_ACHAT = {
   sec: {
     'sec|cornet|Petit': 37.67, 'sec|cornet|Classique': 26.47, 'sec|cornet|Grand': 35.63,
     'sec|chococone|Petit': 29.73, 'sec|chococone|Classique': 34.07, 'sec|chococone|Grand': 28.16,
-    'sec|cornetsg|': 17.31,
+    'sec|cornetsg|': 15.75,
     'sec|conepapier|Petit': 55.35, 'sec|conepapier|Grand': 63.47,
     'sec|cuillere|': 70, 'sec|serviette|': 80.1, 'sec|barquette|': 63.48,
-    'sec|gobelet|Expresso': 2, 'sec|gobelet|Petit': 2.69, 'sec|gobelet|Moyen': 3.66, 'sec|gobelet|Grand': 5.58,
+    'sec|gobelet|Expresso': 2.1, 'sec|gobelet|Petit': 2.83, 'sec|gobelet|Moyen': 3.85, 'sec|gobelet|Grand': 5.88,
     'sec|bague|Petit': 4.2, 'sec|bague|Moyen': 4.26, 'sec|bague|Grand': 4.26,
     'sec|paille|': 4.8,
     'sec|chocochaud|Noir': 12.5, 'sec|chocochaud|Lait': 12.5, 'sec|chocochaud|Noisette': 12.5,
     'sec|chocochaud|Amande': 12.5, 'sec|chocochaud|Blanc': 12.5, 'sec|chocochaud|Caramel': 12.5,
     'sec|chocochaud|Aztèque': 12.5, 'sec|chocochaud|Orange cannelle': 12.5, 'sec|chocochaud|Gianduja': 12.5,
     'sec|chocochaud|Coco': 12.5, 'sec|chocochaud|Panettone': 12.5,
-    'sec|tablette|Lait': 106.7,
+    'sec|tablette|Noir': 106.7, 'sec|tablette|Lait': 106.7,
     'sec|the|Breakfast': 15, 'sec|the|Vert': 15, 'sec|the|Vert Yuanne': 15,
-    'sec|topping|Pistache': 6, 'sec|topping|Caramel': 3, 'sec|topping|Café': 9,
-    'sec|macaroncarton|Petit 2p': 18.49, 'sec|macaroncarton|Moyen 4p': 10.87,
-    'sec|isobac|1100 ml': 58, 'sec|isobac|550 ml': 49,
+    'sec|topping|Pistache': 13.7, 'sec|topping|Caramel': 4.01, 'sec|topping|Café': 20,
+    'sec|macaroncarton|Petit 2p': 20.1, 'sec|macaroncarton|Moyen 4p': 10.87,
+    'sec|isobac|1100 ml': 69.6, 'sec|isobac|550 ml': 53,
     'sec|lavette|Rose': 7.05, 'sec|lavette|Jaune': 7.05, 'sec|lavette|Bleue': 7.05, 'sec|lavette|Verte': 8.65,
     'sec|topping|Noisette': 1.15,   // sachet de 150 g (carton 20 × 150 g à 23 €)
-    'sec|spatule|': 3.89, 'sec|cialdi|': 14.5, 'sec|gaufrette|': 32,
+    'sec|spatule|': 3.89, 'sec|cialdi|': 14.5, 'sec|gaufrette|': 2.67,
     'sec|garniture|Sauce caramel 2 L': 17, 'sec|coulis|Caramel': 4.96,   // flacon 700 g (TOPCARAMS, 6 × 700 g à 29,75 €)
     'sec|garniture|Chocolat de couverture 5 kg': 38.75, 'sec|garniture|Crème gianduja 5 kg': 32,
     'sec|garniture|Crème pistache 3 kg': 38.1, 'sec|garniture|Noisettes caramélisées 1 kg': 13.15,
     'sec|garniture|Dulce de leche 1,2 kg': 8.9,
     'sec|decor|Cremino pistache 5,5 kg': 63.34, 'sec|decor|Cremino noisette 5,5 kg': 63.34,
-    'sec|decor|Amarena 3 kg': 34, 'sec|decor|Céréales chocolat 800 g': 16.88,
-    'sec|decor|Chocolat en poudre 1 kg': 6.8,
+    'sec|decor|Amarena 3 kg': 13.89, 'sec|decor|Céréales chocolat 800 g': 16.88,
+    'sec|decor|Chocolat en poudre 1 kg': 16.36,
     'sec|filmiso|1100 ml': 3, 'sec|filmiso|550 ml': 2, 'sec|bagueiso|': 14, 'sec|bouteille|': 4.85,
     'sec|biscuit|Baci di Dama': 3.9, 'sec|biscuit|Brutti e buoni': 3.8,
     /* Pots : prix d'une RAMETTE, l'unité comptée. Petit et Classique :
        carton de 8 ramettes de 250 (98,96 € et 103,35 €). Grand : carton de
        1 400 = 7 ramettes de 200 (85,02 €). Géant (Grandissimo) : ramette de
-       160 à 15,02 €. Waffle stick : 150 coupes à 17,26 €. */
+       160 à 15,02 €. À partager : 17,26 € (prix vu en boutique le 16/11).
+       Waffle stick : 150 coupes à 17,26 €. */
     'sec|pot|Petit': 12.37, 'sec|pot|Classique': 12.92, 'sec|pot|Grand': 12.15,
-    'sec|pot|Géant': 15.02, 'sec|pot|Waffle stick': 17.26,
+    'sec|pot|Géant': 15.02, 'sec|pot|À partager': 17.26, 'sec|pot|Waffle stick': 17.26,
     'sec|gaufrier|Pierre abrasive crêpière': 22.6, 'sec|gaufrier|Brosse gaufrier': 15
   }
 };
@@ -785,12 +787,92 @@ const CONTENU_SEC = {
   'sec|sackraft|Grand': '1 carton = 200 sacs',
   'sec|lavette|': '1 pack = 25 lavettes',
   'sec|chocochaud|': '1 boîte = 15 sachets', 'sec|tablette|': '1 carton = 25 sachets de 220 g',
-  'sec|cialdi|': '1 carton = 400 mini wafers', 'sec|gaufrette|': '1 carton = 12 boîtes de 50',
+  'sec|cialdi|': '1 carton = 400 mini wafers', 'sec|gaufrette|': '1 boîte = 50 mini gaufrettes · carton de 12 boîtes',
   'sec|biscuit|Baci di Dama': 'carton de 20 sachets de 120 g', 'sec|biscuit|Brutti e buoni': 'carton de 8 sachets de 120 g',
   'sec|topping|Noisette': 'carton de 20 sachets de 150 g', 'sec|decor|Amarena 3 kg': 'carton de 6 boîtes de 3 kg',
   'sec|sucrecristal|': '1 pack = 1 000 bûchettes de 4 g'
 };
 const contenuSec = c => CONTENU_SEC[c] || CONTENU_SEC[String(c).split('|').slice(0, 2).join('|') + '|'] || '';
+
+/* Références Amorino des bons de livraison → ligne du sec. Sert à la
+   réception : une ligne « COP16BN 1 » entre directement au stock du sec,
+   sans rien deviner. « cles » : la première qui existe dans le catalogue de
+   la boutique (un manager a pu renommer une déclinaison). « par » : combien
+   d'unités comptées fait une unité du bon (COP16BN = carton de 8 ramettes).
+   Tarif « Articles publiés avec prix standard », novembre 2026. Une
+   référence absente d'ici est demandée au manager à la confirmation, puis
+   retenue pour les bons suivants. Les prix ne sont jamais touchés. */
+const CODES_AMORINO = {
+  CORNP: { cles:['sec|cornet|Petit'] }, CORNM1: { cles:['sec|cornet|Classique'] }, CORNG: { cles:['sec|cornet|Grand'] },
+  CORNPCHOC: { cles:['sec|chococone|Petit'] }, CORNMCHOC: { cles:['sec|chococone|Classique'] }, CORNGCHOC: { cles:['sec|chococone|Grand'] },
+  CORNMSG: { cles:['sec|cornetsg|'] }, CONE35: { cles:['sec|conepapier|Petit'] }, CONE44: { cles:['sec|conepapier|Grand'] },
+  COP16BN: { cles:['sec|pot|Petit'], par:8 }, COP10MGN: { cles:['sec|pot|Grand'], par:7 },
+  COPM2NB: { cles:['sec|pot|Géant'] }, COPM4NB: { cles:['sec|pot|Waffle stick'] },
+  COUVP: { cles:['sec|m_couverclecoupe_a17|Petit'] }, COUVM: { cles:['sec|m_couverclecoupe_a17|Classique'] },
+  COUVG: { cles:['sec|m_couverclecoupe_a17|Grand'] }, COUVGT: { cles:['sec|m_couverclecoupe_a17|Géant'] },
+  COUVM4: { cles:['sec|m_couverclecoupe_a17|Waffle stick'] }, COUVASS_GAU: { cles:['sec|m_couvercleassiet_a17|'] },
+  COUVC8OZV2: { cles:['sec|m_couverclesgobelet_3afy|Petit', 'sec|couvercle|Petit'] },
+  'COUVC12/16OZV2': { cles:['sec|m_couverclesgobelet_3afy|Grand', 'sec|couvercle|Grand'] },
+  COUVDOME90: { cles:['sec|m_couverclesgobelet_3afy|Dôme Ø 90 mm'] },
+  KNIFE_BB: { cles:['sec|couvert|Couteau'] }, FORK_BB: { cles:['sec|couvert|Fourchette'] },
+  CUILLEREGO_BB: { cles:['sec|couvert|Cuillère'] }, CUILLEREP_BOIS3: { cles:['sec|m_cuillereboisemb_a17|'] },
+  SPOONI: { cles:['sec|cuillere|'] }, SERV24: { cles:['sec|serviette|'] }, ASSGAU: { cles:['sec|barquette|'] },
+  GOBSP4: { cles:['sec|gobelet|Expresso'] }, GOBSP8: { cles:['sec|gobelet|Petit'] },
+  GOBSP12: { cles:['sec|gobelet|Moyen'] }, GOBSP15: { cles:['sec|gobelet|Grand'] },
+  BGOBBP: { cles:['sec|bague|Petit'] }, BGOBBG: { cles:['sec|bague|Grand'] },
+  PAILLE: { cles:['sec|paille|'] }, PAILLE_E: { cles:['sec|m_pailleemballee_a17|'] },
+  PORTE2GOB: { cles:['sec|m_porte2gobelets_a17|'] }, SPATB11: { cles:['sec|spatule|'] },
+  SUCREBR: { cles:['sec|sucrecristal|'] }, SUCREB: { cles:['sec|m_sucreblanc_a17|'] }, SUGARG: { cles:['sec|m_sucreglace_a17|'] },
+  CIALDI: { cles:['sec|cialdi|'] }, WAFERN: { cles:['sec|gaufrette|'], par:12 },
+  CHOCOLATTE: { cles:['sec|tablette|Lait'] }, CHOCOLATF: { cles:['sec|tablette|Noir'] },
+  CHOCFOND: { cles:['sec|chocochaud|Noir'] }, CHOCMILK: { cles:['sec|chocochaud|Lait'] },
+  CHOCNOCC: { cles:['sec|chocochaud|Noisette'] }, CHOCMAND: { cles:['sec|chocochaud|Amande'] },
+  CHOCBIANCA: { cles:['sec|chocochaud|Blanc'] }, CHOCCARAM: { cles:['sec|chocochaud|Caramel'] },
+  CHOCXOCOATL: { cles:['sec|chocochaud|Aztèque'] }, CHOCARANC: { cles:['sec|chocochaud|Orange cannelle'] },
+  CHOCGIAND: { cles:['sec|chocochaud|Gianduja'] }, CHOCCOCCO: { cles:['sec|chocochaud|Coco'] },
+  CHOCPANET: { cles:['sec|chocochaud|Panettone'] },
+  TEABREAKB50N: { cles:['sec|the|Breakfast'] }, TEAEARLB50N: { cles:['sec|the|Earl grey'] },
+  TEAROOIBOSB50N: { cles:['sec|the|Rooibos'] }, TEAINFUB50N: { cles:['sec|the|Infusion pomme orange'] },
+  TEAYUNB50N: { cles:['sec|the|Vert Yuanne'] }, THEMATCHAP3: { cles:['sec|m_matcha_a17|'] },
+  TOPCARAM: { cles:['sec|coulis|Sauce caramel', 'sec|garniture|Sauce caramel 2 L'] },
+  TOPCHOCG2: { cles:['sec|coulis|Chocolat de couverture', 'sec|garniture|Chocolat de couverture 5 kg'] },
+  TOPNOCCIO: { cles:['sec|coulis|Crème gianduja', 'sec|garniture|Crème gianduja 5 kg'] },
+  TOPPISTAC: { cles:['sec|coulis|Crème pistache', 'sec|garniture|Crème pistache 3 kg'] },
+  TOPNOISC: { cles:['sec|coulis|Noisettes caramélisées', 'sec|garniture|Noisettes caramélisées 1 kg'] },
+  TOPDULCE: { cles:['sec|coulis|Dulce de leche', 'sec|garniture|Dulce de leche 1,2 kg'] },
+  TOPPISTA500: { cles:['sec|topping|Pistache'] }, CARAMP: { cles:['sec|topping|Caramel'] },
+  TOPCAFE3: { cles:['sec|topping|Café'] },
+  TOPCREMINOLP: { cles:['sec|decor|Cremino pistache 5,5 kg'] }, TOPCREMINOLV: { cles:['sec|decor|Cremino noisette 5,5 kg'] },
+  TOPAMARENA: { cles:['sec|decor|Amarena 3 kg'], par:6 }, TOPCRUNCH: { cles:['sec|decor|Céréales chocolat 800 g'], par:4 },
+  TOPTIRA: { cles:['sec|decor|Chocolat en poudre 1 kg'] },
+  'BAG1-2': { cles:['sec|sackraft|Petit'] }, 'BAG2-2': { cles:['sec|sackraft|Grand'] },
+  'BAGTA1-3': { cles:['sec|m_sacslivraison_a17|Petit'] }, 'BAGTA2-3': { cles:['sec|m_sacslivraison_a17|Grand'] },
+  SACISO1: { cles:['sec|m_sacsisothermes_a17|Petit'] }, SACISO2: { cles:['sec|m_sacsisothermes_a17|Grand'] },
+  ADHSAC_VL: { cles:['sec|m_adhesifsac_a17|'] }, GMACISO1: { cles:['sec|m_gaineisomac_a17|'] },
+  SEPGIAND: { cles:['sec|m_separateurgian_a17|'] }, GLACIERE_AMO: { cles:['sec|m_glaciere_a17|'] },
+  MACBOX2N: { cles:['sec|macaroncarton|Petit 2p'] }, MAC_ISO1: { cles:['sec|isobox|'] },
+  UNIGEL1000N2: { cles:['sec|isobac|1100 ml'] }, UNIGEL500N: { cles:['sec|isobac|550 ml'] },
+  FILM_1100: { cles:['sec|filmiso|1100 ml'] }, FILM_550: { cles:['sec|filmiso|550 ml'] }, GUNI: { cles:['sec|bagueiso|'] },
+  'FFO-001': { cles:['sec|m_bouteillesautres_a17|355 ml'] }, 'FFO-002': { cles:['sec|bouteille|'] },
+  'FFO-003': { cles:['sec|m_bouteillesautres_a17|592 ml'] },
+  'FFO-011': { cles:['sec|m_membranes_a17|Small (verte)'] }, 'FFO-012': { cles:['sec|m_membranes_a17|Medium (jaune)'] },
+  'FFO-013': { cles:['sec|m_membranes_a17|Large (bleue)'] },
+  POCHETTE1: { cles:['sec|m_pochettekraft_a17|Petite 11×21'] }, POCHETTE2: { cles:['sec|m_pochettekraft_a17|Grande 15×27'] },
+  P_PANET: { cles:['sec|m_papierpanettone_a17|'] }, FICELLE: { cles:['sec|m_ficellejute_a17|'] },
+  '004285': { cles:['sec|lavette|Bleue'] }, '111063': { cles:['sec|lavette|Jaune'] },
+  '111064': { cles:['sec|lavette|Rose'] }, '111065': { cles:['sec|lavette|Verte'] },
+  R771127: { cles:['sec|desinfectant|Bactalim'] },
+  BACI: { cles:['sec|biscuit|Baci di Dama'], par:20 }, B_BRUTTI: { cles:['sec|biscuit|Brutti e buoni'], par:8 },
+  CANTUCCI: { cles:['sec|biscuit|Cantucci'], par:20 },
+  APA1: { cles:['sec|gaufrier|Pierre abrasive crêpière'] }, BROSSE5: { cles:['sec|gaufrier|Brosse gaufrier'] },
+  ATE1: { cles:['sec|gaufrier|Tampon Clean+'] }, ATE2: { cles:['sec|gaufrier|Recharges Clean+ (15)'] }
+};
+/* Référence lue sur le bon (« COP16BN », « cop16bn ») → entrée ci-dessus. */
+function codeAmorino(ref) {
+  const k = String(ref || '').toUpperCase().replace(/\s+/g, '');
+  return CODES_AMORINO[k] || null;
+}
+
 
 /* Fiches produit du sec : le « ? » à côté d'une ligne de l'inventaire.
    Le nom du catalogue n'est pas celui de l'étiquette (« Crème gianduja 5 kg »
@@ -808,8 +890,8 @@ const INFO_PRODUITS = {
     compter: 'Un sachet = 1. Un carton plein = 20.' },
   'sec|cialdi|': { photo: 'produits/cialdina.jpg', etiquette: 'La Cialdina, mini wafers emballés un par un, carton de 2 kg (400 pièces)', code: 'CIALDI',
     compter: 'Un carton = 1. Un sac à moitié plein = 0,5.' },
-  'sec|gaufrette|': { photo: 'produits/wafer-gianduja.jpg', etiquette: 'Wafer al Gianduja, boîte de 400 g, carton de 12 boîtes', code: 'WAFERN',
-    compter: 'Un carton de 12 boîtes = 1. Six boîtes seules = 0,5.' },
+  'sec|gaufrette|': { photo: 'produits/wafer-gianduja.jpg', etiquette: 'Wafer al Gianduja, boîte de 50 mini gaufrettes, carton de 12 boîtes', code: 'WAFERN',
+    compter: 'À la boîte depuis le 17/11 : une boîte = 1, un carton fermé = 12.' },
   'sec|garniture|Crème pistache 3 kg': { photo: 'produits/chococream-pistache.jpg', etiquette: 'Chococream Pistacchio 15 %, seau de 3 kg', code: 'TOPPISTAC',
     compter: 'Un seau = 1.' },
   'sec|coulis|Caramel': { etiquette: 'Sauce caramel beurre salé, flacon de 700 g (carton de 6)', code: 'TOPCARAMS (FTP074)',
@@ -1100,7 +1182,7 @@ const PAGES = {
   inv:      { titre: 'Inventaires',       sous: 'Glace et sec' },
   caisse:   { titre: 'Caisse',            sous: 'Fonds, recettes et écarts' },
   fiches:   { titre: 'Bibliothèque',      sous: 'Protocoles et fiches techniques' },
-  releve:   { titre: 'Carnet de relève',  sous: 'Messages entre les services' },
+  releve:   { titre: 'Messagerie',        sous: 'Messages entre les services' },
   ecarts:   { titre: 'Écarts glace',      sous: 'Rendement de la période' },
   frigo:    { titre: 'Produits ouverts',  sous: 'Du plus urgent au moins urgent' },
   periodes: { titre: 'Périodes',          sous: 'Clôture et fenêtre de calcul' },
@@ -1309,6 +1391,24 @@ const HORAIRES_DEF = {
   joursOuverture: [1,2,3,4,5,6,7]
 };
 let HORAIRES = Object.assign({}, HORAIRES_DEF);
+
+/* Fermetures exceptionnelles (congés, travaux, fin de saison) : des plages
+   { du:'AAAA-MM-JJ', au:'AAAA-MM-JJ', motif } rangées dans les horaires, donc
+   partagées par toute l'équipe. Un jour fermé n'attend ni relevé, ni tâche,
+   ni caisse : il ne compte pas comme manquant. Dates comparées en texte. */
+function fermetureDu(jour) {
+  const l = Array.isArray(HORAIRES.fermetures) ? HORAIRES.fermetures : [];
+  return l.filter(f => f && f.du && f.au && f.du <= jour && jour <= f.au)[0] || null;
+}
+/* Jour où la boutique ouvre : jour d'ouverture de la semaine et hors fermeture. */
+function jourOuvert(jour) {
+  const p = String(jour).split('-');
+  const js = new Date(+p[0], +p[1] - 1, +p[2]).getDay() || 7;
+  const ouverts = HORAIRES.joursOuverture || [1, 2, 3, 4, 5, 6, 7];
+  return ouverts.indexOf(js) >= 0 && !fermetureDu(jour);
+}
+/* Nom attendu par le calendrier des relevés (navJour). */
+function jourFerme(jour) { return !jourOuvert(jour); }
 
 /* Preuve photo d'une tâche */
 /* Rappel sous les champs de texte libre (retours, passation, anomalies) :

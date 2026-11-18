@@ -168,7 +168,7 @@
       iPad disparaissaient (vérifié : ventes et imports effacés). */
    const FUSIONNER = ['checklist:', 'hebdo:', 'temp:', 'caisse:', 'reassort:',
                       'preuves:', 'ruptures', 'releve', 'lots:', 'clean:',
-                      'anomalies', 'reception:', 'stock:mv:', 'stock:m13:', 'pointage:', 'ecart:',
+                      'anomalies', 'reception:', 'stock:mv:', 'stock:sec-mv', 'stock:m13:', 'pointage:', 'ecart:',
                       /* Deux iPads qui ajoutent une ligne au même moment : sans fusion,
                          la seconde écriture effaçait la ligne de l'autre. */
                       'feed:', 'pertes:',
@@ -192,7 +192,7 @@
    /* « stock:m13: » : entrées et sorties de l'armoire −13, en ajout seul. Deux
       iPads qui y posent chacun un bac ne doivent pas s'effacer. */
    /* « pertes: » : une perte retirée est marquée « supprime », comme une preuve. */
-   const UNIR = ['ruptures', 'releve', 'anomalies', 'reception:', 'stock:mv:', 'stock:m13:', 'pointage:', 'preuves:',
+   const UNIR = ['ruptures', 'releve', 'anomalies', 'reception:', 'stock:mv:', 'stock:sec-mv', 'stock:m13:', 'pointage:', 'preuves:',
                  'feed:', 'pertes:'];
    const ts = x => (x && (x.a || x.at)) || '';
    /* « k » : identifiant de ligne du journal, dont « id » est celui de la personne. */
@@ -237,6 +237,10 @@
          if (d[f] && !m[f]) { m[f] = d[f]; m[f + 'Par'] = d[f + 'Par']; m[f + 'At'] = d[f + 'At']; }
        });
        if (d.lu) m.lu = true;   // luPar, lui, est réuni juste après
+       /* Perte sortie de l'écart (ou recomptée) : le choix le plus récent l'emporte. */
+       if (String(d.horsEcartMaj || '') > String(m.horsEcartMaj || '')) {
+         m.horsEcart = d.horsEcart || ''; m.horsEcartPar = d.horsEcartPar || ''; m.horsEcartMaj = d.horsEcartMaj;
+       }
        /* Preuve supprimée sur un autre iPad : elle le reste ici aussi. */
        if (d.supprime && !m.supprime) { m.supprime = d.supprime; m.img = ''; }
        /* Pointage : une fin de service saisie sur un autre iPad n'est pas perdue. */
@@ -1672,12 +1676,7 @@ function renderNav() {
        '<span class="mi-s">' + esc(PAGES[id].sous) + '</span></span>' +
        '<span class="mi-fl">›</span>' +
        '</button>').join('') +
-       /* Le retour bêta vit ici et non plus en bouton flottant : posé sur
-          le contenu, il couvrait « HS » et « + » des frigos sur téléphone. */
-       (APP.beta ? '<button type="button" class="menu-item" id="mp-retour">' +
-         '<span class="mi-tx"><span class="mi-t">Signaler un souci</span>' +
-         '<span class="mi-s">Un bug, un chiffre faux, une idée : c’est transmis à ' + esc(destinataireSouci()) + '</span></span>' +
-         '<span class="mi-fl">›</span></button>' : '') +
+       /* « Signaler un souci » retiré du menu : Anomalie, en haut, fait la même chose. */
        /* Une personne qui travaille dans deux boutiques (guide.js). */
        (typeof changerDeBoutique === 'function' && STATE.user.role === 'manager' ? '<button type="button" class="menu-item" id="mp-boutique">' +
          '<span class="mi-tx"><span class="mi-t">Changer de boutique</span>' +
@@ -2354,7 +2353,10 @@ async function purgerLocalAncien() {
       s'y additionner, mais n'entrent pas dans le jeté de l'écart de période :
       un bac disparu a le plus souvent été vendu sans scan, il est déjà dans
       les ventes et le stock compté ; le compter jeté le compterait deux fois. */
-   const litresJetes = w => (w && w.motif === 'inventaire') ? 0 : litresPerte(w);
+   /* « horsEcart » : ligne que le manager a sortie de l'écart (bac fini sans
+      être tracé, jeté par erreur depuis les produits ouverts) : elle reste au
+      registre, mais ce n'est pas de la glace perdue. */
+   const litresJetes = w => (w && (w.motif === 'inventaire' || w.horsEcart)) ? 0 : litresPerte(w);
 
    /* Reporte le litrage détruit dans la période d'écart en cours. L'écart est
       rangé sous l'identifiant de la période (ecart:<id>), pas sous le mois :
@@ -3033,6 +3035,8 @@ function vueAccueil() {
 function vueAutorisee(id) {
   const role = STATE.user && STATE.user.role;
   if (!role || role === 'manager') return true;
+  /* Ouverts depuis Réglages, hors menu : réservés au manager. */
+  if (['parametres', 'catalogue'].indexOf(id) >= 0) return false;
   const de = r => (TABS[r] || []).map(t => t.id).concat(MENU_PLUS[r] || []);
   return de('manager').indexOf(id) < 0 || de(role).indexOf(id) >= 0;
 }
@@ -3094,7 +3098,10 @@ function navJour(jour) {
   const hier = addD(jour, -1), demain = addD(jour, 1);
   return '<div class="navjour">' +
     '<button type="button" data-nj="' + hier + '" aria-label="Jour précédent">' + ic('gauche', 22) + '</button>' +
-    '<div class="nj-c"><b>' + nomJour(jour) + '</b><span>' + fmtD(jour) + '</span></div>' +
+    /* La date ouvre le calendrier : on saute à un jour sans cliquer
+       trente fois sur la flèche pour rattraper un relevé oublié. */
+    '<button type="button" class="nj-c" data-cal="' + jour + '" aria-label="Choisir une date dans le calendrier">' +
+    '<b>' + nomJour(jour) + '</b><span>' + fmtD(jour) + ' ' + ic('periodes', 14) + '</span></button>' +
     '<button type="button" data-nj="' + demain + '" aria-label="Jour suivant">' + ic('droite', 22) + '</button>' +
     '</div>' +
     (jour === today() ? '' :
@@ -3112,17 +3119,128 @@ function brancherNavJour(vue) {
     if (V.temp && V.temp._d !== undefined) V.temp._d = STATE.jour;
     rendre(vue);
   });
+  $$('[data-cal]').forEach(b => b.onclick = () => ouvrirCalendrier(vue, b.dataset.cal));
   /* En consultation, on neutralise tout ce qui modifie. */
   if (!peutModifier(STATE.jour)) {
     $$('#page button').forEach(b => {
       /* Les vignettes restent ouvrables : en consultation, on regarde une
          photo sans pouvoir la supprimer (voirPreuve en lecture seule). */
-      if (b.dataset.nj !== undefined || b.dataset.vign !== undefined) return;
+      if (b.dataset.nj !== undefined || b.dataset.cal !== undefined || b.dataset.vign !== undefined) return;
       b.disabled = true;
       b.classList.add('fige');
     });
     $$('#page input, #page select, #page textarea').forEach(i => { i.disabled = true; });
   }
+}
+
+/* -----------------------------------------------------------------------------
+   CALENDRIER DE NAVIGATION
+   Ouvert depuis la date de navJour. Sur les Frigos, chaque jour passé porte
+   l'état de son relevé (complet, incomplet, manquant) : on voit d'un coup
+   d'œil ce qu'il reste à rattraper. Un jour où la boutique est fermée
+   (jourFerme, si la fonction existe) n'est jamais compté comme manquant.
+   -------------------------------------------------------------------------- */
+async function etatsCalendrier(vue, jours) {
+  const E = {};
+  if (vue !== 'temp') return E;
+  const auj = today();
+  const passes = jours.filter(d => d <= auj);
+  /* Un lot à nous : les relevés du mois partent en une requête (DB.prelire).
+     Pas pendant un dessin d'écran : on lui volerait le sien. */
+  const n = _rendusLances === _dernierRenduFini ? DB.ouvrirLot() : 0;
+  try {
+    DB.prelire(passes.map(d => 'temp:' + d));
+    const recs = await Promise.all(passes.map(d => DB.get('temp:' + d, {})));
+    /* Mois sans aucun relevé (avant la mise en service de l'application) :
+       rien n'est marqué, au lieu de trente jours rouges trompeurs. */
+    if (!recs.some(t => t && Object.keys(t).length)) { E._vide = true; return E; }
+    passes.forEach((d, i) => {
+      let ferme = false;
+      try { ferme = typeof jourFerme === 'function' && !!jourFerme(d); } catch (e) {}
+      if (ferme) { E[d] = 'ferme'; return; }
+      const t = recs[i] || {};
+      /* Même règle que etatJour : validé ET au moins une mesure. */
+      const fait = m => !!(t.valide && t.valide[m]) && releveMesure(t, m);
+      const nb = (fait('m') ? 1 : 0) + (fait('s') ? 1 : 0);
+      /* Aujourd'hui n'est ni incomplet ni manquant : la journée n'est pas finie. */
+      E[d] = nb === 2 ? 'ok' : d === auj ? '' : nb === 1 ? 'partiel' : 'manque';
+    });
+  } finally { if (n) DB.fermerLot(n); }
+  return E;
+}
+
+async function ouvrirCalendrier(vue, jour, mois) {
+  /* Clics rapides sur les mois : seul le dernier demandé s'affiche. */
+  const ticket = ouvrirCalendrier._n = (ouvrirCalendrier._n || 0) + 1;
+  const depuisFeuille = !!mois;
+  const vueOuverte = STATE.view;
+  mois = mois || monthKey(jour);
+  const auj = today();
+  const premier = mois + '-01';
+  const jours = [];
+  for (let d = premier; monthKey(d) === mois; d = addD(d, 1)) jours.push(d);
+  const etats = await etatsCalendrier(vue, jours);
+  if (ticket !== ouvrirCalendrier._n) return;
+  /* Lecture lente : l'utilisateur a changé d'écran, refermé le calendrier ou
+     ouvert une autre feuille entre-temps. On ne recouvre rien. */
+  if (STATE.view !== vueOuverte) return;
+  if (depuisFeuille ? $('#sheet').hidden : !$('#sheet').hidden) return;
+
+  const LIB = { ok:'complet', partiel:'incomplet', manque:'manquant', ferme:'boutique fermée' };
+  const cases = Array(jourISO(premier) - 1).fill('<span class="cal-v"></span>').join('') + jours.map(d => {
+    const et = etats[d] || '';
+    const cls = ['cal-j', et, d === auj ? 'auj' : '', d === jour ? 'sel' : ''].filter(Boolean).join(' ');
+    return '<button type="button" class="' + cls + '" data-calj="' + d + '"' +
+      (d > auj ? ' disabled' : '') +
+      ' aria-label="' + esc(nomJour(d) + ' ' + fmtD(d) + (LIB[et] ? ', ' + LIB[et] : '')) + '">' +
+      (+d.slice(8)) + '</button>';
+  }).join('');
+  const aRattraper = jours.filter(d => etats[d] === 'manque' || etats[d] === 'partiel').length;
+  const moisPrec = monthKey(addD(premier, -1));
+  const moisSuiv = monthKey(addD(premier, 32));
+  /* Un an d'historique au plus dans le calendrier. */
+  const moisMin = monthKey(addD(auj, -365));
+  /* L'équipe ne corrige pas le passé (peutModifier) : on ne lui dit pas
+     « à rattraper » pour des jours qu'elle ne peut que consulter. */
+  const corrige = peutModifier(addD(auj, -1));
+  const ferme = typeof jourFerme === 'function';
+
+  showSheet(
+    '<h2 id="sheet-titre">Aller à une date</h2>' +
+    (vue === 'temp'
+      ? '<p class="sub">' + (etats._vide
+          ? 'Aucun relevé enregistré en ' + esc(fmtM(premier)) + '.'
+          : aRattraper
+          ? aRattraper + ' jour' + (aRattraper > 1 ? 's' : '') +
+            (corrige ? ' à rattraper' : ' incomplet' + (aRattraper > 1 ? 's' : '')) + ' en ' + esc(fmtM(premier)) + '.'
+          : 'Tous les relevés sont faits en ' + esc(fmtM(premier)) + '.') + '</p>'
+      : '') +
+    '<div class="navjour cal-nav">' +
+      '<button type="button" data-calm="' + moisPrec + '" aria-label="Mois précédent"' +
+        (moisPrec < moisMin ? ' disabled' : '') + '>' + ic('gauche', 22) + '</button>' +
+      '<div class="nj-c"><b>' + esc(fmtM(premier)) + '</b></div>' +
+      '<button type="button" data-calm="' + moisSuiv + '" aria-label="Mois suivant"' +
+        (moisSuiv > monthKey(auj) ? ' disabled' : '') + '>' + ic('droite', 22) + '</button>' +
+    '</div>' +
+    '<div class="cal-g" role="group" aria-label="' + esc(fmtM(premier)) + '">' +
+      ['L', 'M', 'M', 'J', 'V', 'S', 'D'].map(x => '<span class="cal-t" aria-hidden="true">' + x + '</span>').join('') +
+      cases +
+    '</div>' +
+    (vue === 'temp'
+      ? '<div class="cal-leg"><span><i class="ok"></i>Complet</span><span><i class="partiel"></i>Incomplet</span>' +
+        '<span><i class="manque"></i>Manquant</span>' + (ferme ? '<span><i class="ferme"></i>Fermé</span>' : '') + '</div>'
+      : '') +
+    '<div class="actions"><button class="btn clair" data-fermer>Fermer</button>' +
+    (jour !== auj ? '<button class="btn" data-calj="' + auj + '">Aujourd’hui</button>' : '') + '</div>'
+  );
+
+  $$('#sheet-corps [data-calm]').forEach(b => b.onclick = () => ouvrirCalendrier(vue, jour, b.dataset.calm));
+  /* rendre(vue, false, jour) : le saut de date déjà utilisé par les liens
+     des Périodes (STATE.jour, V.temp._d et _auj posés au même endroit). */
+  $$('#sheet-corps [data-calj]').forEach(b => b.onclick = () => {
+    closeSheet();
+    rendre(vue, false, b.dataset.calj);
+  });
 }
 
 /* -----------------------------------------------------------------------------
@@ -4079,6 +4197,10 @@ function ouvrirPremierePeriode() {
      for (let i = 0; i < 3; i++) cles.push('feed:' + addD(j, -i));
      jours.forEach(d => cles.push(...clesEtatJour(d)));
      DB.prelire(cles);
+     /* Fermetures à jour avant de compter les jours manquants (config.js). */
+     const hz = await DB.get('horaires', null);
+     if (hz && Array.isArray(hz.fermetures)) HORAIRES.fermetures = hz.fermetures;
+     const ferme = fermetureDu(j), ouvertAuj = jourOuvert(j);
      const mt = await meteoRapide();
      const m = mt.m;
      const e = await etatJour(j);
@@ -4109,7 +4231,7 @@ function ouvrirPremierePeriode() {
        if (k) cumulCaisse += caisseResume(k, caisseVeille).ecart;
        caisseVeille = k;
        const n = await etatNettoyage(d);
-       if (n.total && n.faits === 0) sansNet++;
+       if (n.total && n.faits === 0 && jourOuvert(d)) sansNet++;
        const t = await DB.get('temp:' + d, {});
        ENCEINTES.forEach(en => {
          ['m','s'].forEach(mo => {
@@ -4171,7 +4293,8 @@ function ouvrirPremierePeriode() {
      const minutesDe = h => (/^\d{2}:\d{2}$/.test(h || '') ? +h.slice(0, 2) * 60 + +h.slice(3, 5) : null);
      const maintenant = new Date().getHours() * 60 + new Date().getMinutes();
      const passe = h => { const x = minutesDe(h); return x !== null && maintenant >= x; };
-     const matinDu = passe(horaires.ouverture), soirDu = passe(horaires.fermeture);
+     /* Boutique fermée ce jour-là : aucun relevé n'est dû. */
+     const matinDu = ouvertAuj && passe(horaires.ouverture), soirDu = ouvertAuj && passe(horaires.fermeture);
      if (matinDu && !e.tempM) A.push(['bad', 'Frigos du matin non relevés',
        'Relevé à faire dès l’ouverture (' + horaires.ouverture + '), avant la mise en vitrine.', 'temp', 'm']);
      if (soirDu && !e.tempS) A.push(['warn', 'Frigos du soir non relevés',
@@ -4199,10 +4322,13 @@ function ouvrirPremierePeriode() {
        '<div class="grid g2" id="ctl-meteo">' + widgetMeteo(m) +
        carte(entete('👥', enService.length ? enService.map(s => s.prenom).join(', ') : 'Personne en service',
          enService.length ? 'En poste depuis ' + enService.map(s => heure(s.debut)).join(', ') : 'Aucun pointage ouvert') +
-         '<div class="rang">' + pastilleLien(e.tempM ? 'ok' : (matinDu ? 'bad' : 'n'),
+         (!ouvertAuj
+           ? '<div class="rang">' + pastilleLien('n', ferme
+               ? 'Boutique fermée jusqu’au ' + fmtDC(ferme.au) : 'Jour de fermeture', 'reglages') + '</div>'
+           : '<div class="rang">' + pastilleLien(e.tempM ? 'ok' : (matinDu ? 'bad' : 'n'),
            e.tempM ? 'Frigos matin faits' : (matinDu ? 'Frigos matin manquants' : 'Frigos matin à faire'), 'temp', 'm') +
          pastilleLien(e.net ? 'ok' : 'warn', e.net + '/' + e.netTotal + ' nettoyage', 'clean') +
-         pastilleLien(e.caisse ? 'ok' : 'n', e.caisse ? 'Caisse faite' : 'Caisse ouverte', 'caisse') + '</div>', 'solide') + '</div>' +
+         pastilleLien(e.caisse ? 'ok' : 'n', e.caisse ? 'Caisse faite' : 'Caisse ouverte', 'caisse') + '</div>'), 'solide') + '</div>' +
    
        carte(entete('📅', libellePeriode(per), 'Fenêtre de calcul en cours.') +
          '<div class="grid g4">' +
@@ -4392,30 +4518,49 @@ function ouvrirPremierePeriode() {
    
      $('#mm').onchange = e => { STATE.moisFrigo = e.target.value || null; rendre('frigo'); };
    
+     /* perte faux : bac de glace fini (vendu) sans que sa fin ait été tracée.
+        Il sort des produits ouverts sans entrer au registre des pertes : le
+        compter jeté (3 ou 5 L pleins) gonflait le poids jeté de l'écart. */
+     const retirerLot = async (f, perte) => {
+       /* Litrage réel du lot : sa taille de bac pour une glace (5 L par
+          défaut si elle n'a pas été saisie), 0 pour le reste — une
+          chantilly ou un coulis n'a pas de litrage de glace, et lui
+          compter 5 L faussait l'écart de stock. */
+       const glace = f.type === 'g' || f.famille === 'glace';
+       const litrage = glace ? (num(f.taille) || FOURNISSEUR.tailleParDefaut) : 0;
+       if (perte) {
+         await DB.push('pertes:' + today(), { id:uid(), produit:f.nom + ' (lot ' + f.lot + ')', nombre:1,
+           litrage:litrage, parUnite:true, motif:'perime', par:STATE.user.prenom, employe:STATE.user.id, at:nowISO() });
+         await cumulerPertesMois(today());
+       }
+       /* Marqué jeté plutôt que supprimé : « lots: » est fusionné avec la
+          copie du serveur, qui faisait revenir une clé supprimée. */
+       const moisLot = f.mois || mois;
+       const rec = await DB.get('lots:' + moisLot, {});
+       if (rec[f.cle]) {
+         rec[f.cle] = Object.assign({}, rec[f.cle], { jete:nowISO(), jeteLot:f.lot, jetePar:STATE.user.prenom });
+         await DB.set('lots:' + moisLot, rec);
+       }
+       await feed(perte ? 'warn' : 'ok', STATE.user.prenom + (perte ? ' a jeté ' + f.nom + ' (DLC dépassée)'
+         : ' a retiré ' + f.nom + ' (bac fini, non tracé)'));
+       toast(perte ? 'Perte enregistrée' : 'Bac retiré, sans perte');
+       rendre('frigo');
+     };
      $$('[data-jeter]').forEach(b => b.onclick = () => {
        const f = fifo.filter(x => x.cle === b.dataset.jeter)[0];
+       if (f.type === 'g' || f.famille === 'glace') {
+         showSheet('<h2 id="sheet-titre">' + esc(f.nom) + ' · lot ' + esc(f.lot) + '</h2>' +
+           '<p class="sub">Ce bac a-t-il vraiment été jeté, ou était-il déjà fini sans que ce soit tracé ?</p>' +
+           '<div class="actions"><button class="btn clair" data-fermer>Annuler</button>' +
+           '<button class="btn clair" id="lj-fini">Bac fini, pas jeté</button>' +
+           '<button class="btn corail" id="lj-perte">Jeté : déclarer la perte</button></div>');
+         $('#lj-fini').onclick = () => { closeSheet(); return retirerLot(f, false); };
+         $('#lj-perte').onclick = () => { closeSheet(); return retirerLot(f, true); };
+         return;
+       }
        confirmer('Jeter ' + f.nom + ' ?',
          'Le lot ' + f.lot + ' sera enregistré en perte et retiré des produits ouverts.', 'Jeter et déclarer', async () => {
-           /* Litrage réel du lot : sa taille de bac pour une glace (5 L par
-              défaut si elle n'a pas été saisie), 0 pour le reste — une
-              chantilly ou un coulis n'a pas de litrage de glace, et lui
-              compter 5 L faussait l'écart de stock. */
-           const glace = f.type === 'g' || f.famille === 'glace';
-           const litrage = glace ? (num(f.taille) || FOURNISSEUR.tailleParDefaut) : 0;
-           await DB.push('pertes:' + today(), { id:uid(), produit:f.nom + ' (lot ' + f.lot + ')', nombre:1,
-             litrage:litrage, parUnite:true, motif:'perime', par:STATE.user.prenom, employe:STATE.user.id, at:nowISO() });
-           await cumulerPertesMois(today());
-           /* Marqué jeté plutôt que supprimé : « lots: » est fusionné avec la
-              copie du serveur, qui faisait revenir une clé supprimée. */
-           const moisLot = f.mois || mois;
-           const rec = await DB.get('lots:' + moisLot, {});
-           if (rec[f.cle]) {
-             rec[f.cle] = Object.assign({}, rec[f.cle], { jete:nowISO(), jeteLot:f.lot, jetePar:STATE.user.prenom });
-             await DB.set('lots:' + moisLot, rec);
-           }
-           await feed('warn', STATE.user.prenom + ' a jeté ' + f.nom + ' (DLC dépassée)');
-           toast('Perte enregistrée');
-           rendre('frigo');
+           await retirerLot(f, true);
          });
      });
    };
@@ -4852,25 +4997,59 @@ function ouvrirPremierePeriode() {
           période échue reste en cours jusqu'à sa clôture. */
        const jours = joursEntre(per.debut, today());
        DB.prelire(jours.map(d => 'pertes:' + d));
-       const lignes = [];
+       const lignes = [], sorties = [];
        try {
          for (const d of jours) (await DB.get('pertes:' + d, [])).forEach(w => {
            const l = litresJetes(w);
            if (l > 0) lignes.push({ jour:d, w:w, l:l });
+           else if (w && w.horsEcart && !w.supprime && w.motif !== 'inventaire') sorties.push({ jour:d, w:w, l:litresPerte(w) });
          });
        } catch (x) {
          if (box.isConnected) box.innerHTML = '<p class="mini">Détail des pertes indisponible pour le moment.</p>';
          return;
        }
        if (!box.isConnected) return;
-       if (!lignes.length) { box.innerHTML = '<p class="mini">Aucune perte de glace au registre sur la période.</p>'; return; }
+       /* Pertes sorties de l'écart : montrées à part, et recomptables. */
+       const horsTxt = sorties.length ? '<div class="dense" style="margin-top:12px"><div class="dense-h"><span class="c1">Pas comptées (bac fini, non tracé)</span>' +
+         '<span class="c w">Litres</span></div>' + sorties.map(x => '<div class="dl"><span class="c1">' + esc(fmtDC(x.jour)) + ' · ' +
+           esc(x.w.produit || 'produit ?') + (x.w.horsEcartPar ? ' · sortie par ' + esc(x.w.horsEcartPar) : '') + '</span>' +
+           '<span class="c w num">' + n1(x.l) + ' L</span>' +
+           '<button type="button" class="btn fantome sm" data-recompter="' + esc(x.jour + '|' + x.w.id) + '">Recompter</button></div>').join('') +
+         '</div>' : '';
+       const basculer = async (cle, sortir) => {
+         const jour = cle.slice(0, 10), id = cle.slice(11);
+         const liste = await DB.get('pertes:' + jour, []);
+         const w = liste.filter(x => x && x.id === id)[0];
+         if (!w) return toast('Ligne introuvable', 'erreur');
+         w.horsEcart = sortir ? nowISO() : ''; w.horsEcartPar = sortir ? STATE.user.prenom : ''; w.horsEcartMaj = nowISO();
+         await DB.set('pertes:' + jour, liste);
+         await cumulerPertesMois(jour);
+         feed('warn', STATE.user.prenom + (sortir ? ' a sorti de l’écart une perte : ' : ' a recompté dans l’écart une perte : ') +
+           (w.produit || '?') + ' (' + n1(litresPerte(w)) + ' L, ' + fmtDC(jour) + ')');
+         await feedEcrit();
+         toast(sortir ? 'Perte retirée de l’écart' : 'Perte recomptée dans l’écart');
+         rendre('ecarts');
+       };
+       if (!lignes.length) {
+         box.innerHTML = '<p class="mini">Aucune perte de glace au registre sur la période.</p>' + horsTxt;
+       } else {
        const total = lignes.reduce((t, x) => t + x.l, 0);
        box.innerHTML = '<div class="dense"><div class="dense-h"><span class="c1">Pertes au registre</span><span class="c w">Litres</span></div>' +
          lignes.map(x => '<div class="dl"><span class="c1">' + esc(fmtDC(x.jour)) + ' · ' + esc(x.w.produit || 'produit ?') +
            (x.w.parUnite && num(x.w.nombre) > 1 ? ' × ' + num(x.w.nombre) : '') + (x.w.par ? ' · ' + esc(x.w.par) : '') + '</span>' +
-           '<span class="c w num">' + n1(x.l) + ' L</span></div>').join('') +
+           '<span class="c w num">' + n1(x.l) + ' L</span>' +
+           (x.w.id ? '<button type="button" class="btn fantome sm" data-hors="' + esc(x.jour + '|' + x.w.id) + '">Pas une perte</button>' : '') +
+           '</div>').join('') +
          '<div class="dl"><span class="c1"><b>Total</b> · ' + n1(total * FOURNISSEUR.poidsMoyenLitre) + ' kg</span>' +
-         '<span class="c w num"><b>' + n1(total) + ' L</b></span></div></div>';
+         '<span class="c w num"><b>' + n1(total) + ' L</b></span></div></div>' + horsTxt;
+       }
+       /* Bac fini sans être tracé, ou jeté par erreur : sorti de l'écart, gardé
+          au registre (marqué, pas effacé : la fusion entre iPads le ferait revenir). */
+       $$('#ec-pertes [data-hors]').forEach(b => b.onclick = () =>
+         confirmer('Ne pas compter cette perte ?', 'La ligne reste au registre mais sort du poids jeté de l’écart ' +
+           '(bac fini sans être tracé, ou jeté par erreur). Vous pourrez la recompter.', 'Ne pas compter',
+           () => basculer(b.dataset.hors, true)));
+       $$('#ec-pertes [data-recompter]').forEach(b => b.onclick = () => basculer(b.dataset.recompter, false));
      })();
    
      $('#imp-btn').onclick = () => $('#import-caisse').click();
@@ -4998,6 +5177,8 @@ function ouvrirPremierePeriode() {
      if (!num(e.litrageBL))     B.push({ id:'achats', txt:'Achats de la période non saisis', go:'ecarts' });
    
      for (const d of jours) {
+       /* Jour de fermeture : rien n'est attendu, rien ne bloque. */
+       if (!jourOuvert(d)) continue;
        const st = await etatJour(d);
        if (!st.tempM || !st.tempS) B.push({ id:'temp', txt:'Températures incomplètes le ' + fmtDC(d), go:'temp', jour:d,
                                             moment:st.tempM ? 's' : 'm' });
@@ -5943,6 +6124,9 @@ function modifierPeriode(per) {
    const HORS_ECART = /^(\d+ )?MAC\b|^MACARON|^COFFRET .*\bMAC\b|^GIANDUIOTTO/;
    const GRAMMAGES_NOMS = [
      [/CONE VIDE/, 0], [/MAC TRADITIONNEL/, 0],
+     /* Extras sans glace (chantilly, coulis, lait végétal…) : leur catégorie
+        mêle « BOISSON A LA GLACE », ils arrivaient « grammage à compléter ». */
+     [/^EXTRA (CHANTILLY|COULIS|LAIT|SAUCE|SIROP|TOPPING|CREME|NAPPAGE)/, 0],
      [HORS_ECART, 0],
      [/^POT ENFANT/, 81], [/^POT PETIT/, 133], [/^POT CLASSI/, 163], [/^POT GRAND/, 221],
      [/^POT GEANT/, 275], [/^POT (A )?PARTAG/, 529],
@@ -6074,7 +6258,24 @@ function modifierPeriode(per) {
          }
    
          /* --- Lecture 2 et 3 : par colonnes --- */
-         const rows = XLSX.utils.sheet_to_json(feuille, { defval:'' });
+         /* En-tête : la première ligne (parmi les 20 premières) qui nomme une
+            colonne de quantité ou de poids. L'export « Ventes par produit »
+            commence par un titre et la période : lu dès la ligne 1, ses
+            colonnes s'appelaient « Ventes par produit — … », « __EMPTY »…
+            et l'import refusait le fichier (« Aucune colonne de quantité »). */
+         /* En-tête reconnu : une cellule de quantité ou de poids ET une
+            cellule de libellé ou de référence, toutes deux du texte court
+            (pas une ligne de produit comme « BAC 2 KG »). */
+         const titre = (l, re) => l.some(x => typeof x === 'string' && x.length < 40 && re.test(x));
+         const iEntete = Math.max(0, brut.slice(0, 20).findIndex(l =>
+           titre(l, /qte|qté|quantit|nombre|^\s*nb\.?\s*$|poids|masse/i) &&
+           titre(l, /produit|libell|désignation|designation|article|\bnom\b|\bsku\b|référence|reference|\bref\b|code/i)));
+         /* « range » numérique de SheetJS : ligne absolue de la feuille, alors
+            que brut part de la première ligne de sa plage (!ref). */
+         const debutPlage = feuille['!ref'] ? XLSX.utils.decode_range(feuille['!ref']).s.r : 0;
+         const rows = XLSX.utils.sheet_to_json(feuille, { defval:'', range:debutPlage + iEntete })
+           /* Ligne « TOTAL » en bas de l'export : pas un produit. */
+           .filter(r => !Object.keys(r).some(k => /^\s*(sous[- ]?)?total\s*$/i.test(String(r[k]))));
          if (!rows.length) return reject(new Error('Aucune ligne de vente dans le fichier'));
    
          const cols = Object.keys(rows[0]);
@@ -6097,6 +6298,17 @@ function modifierPeriode(per) {
          else if (cMoy && cQte) {
            const l = rows.filter(r => num(r[cMoy]) > 0 && num(r[cQte]) > 0).map(r => num(r[cQte]) / num(r[cMoy])).sort((x, y) => x - y);
            if (l.length) jours = Math.round(l[l.length >> 1]);
+         }
+         /* Sinon la période écrite au-dessus de l'en-tête (« Période du
+            09/10/2026 au 01/11/2026 »), bornes comprises. */
+         if (!jours) {
+           const dessus = brut.slice(0, iEntete).map(l => l.join(' '));
+           const p = (dessus.filter(t => /p[ée]riode|\bdu\b.*\bau\b/i.test(t))[0] || dessus.join(' '))
+             .match(/(\d{2})\/(\d{2})\/(\d{4})\D+(\d{2})\/(\d{2})\/(\d{4})/);
+           if (p) {
+             const d0 = Date.UTC(+p[3], p[2] - 1, +p[1]), d1 = Date.UTC(+p[6], p[5] - 1, +p[4]);
+             if (d1 >= d0) jours = Math.round((d1 - d0) / 864e5) + 1;
+           }
          }
          const fini = o => resolve(jours > 0 ? Object.assign(o, { jours:jours }) : o);
    

@@ -250,7 +250,7 @@ async function preuvesPreAudit(fin) {
   const ouverts = (typeof HORAIRES !== 'undefined' && HORAIRES.joursOuverture) || [1, 2, 3, 4, 5, 6, 7];
   jours.forEach((d, i) => {
     const t = lus[i][0] || {};
-    const ouvert = ouverts.indexOf(jourISO(d)) >= 0;
+    const ouvert = typeof jourOuvert === 'function' ? jourOuvert(d) : ouverts.indexOf(jourISO(d)) >= 0;
     let critJour = false;
     RELEVES.moments.forEach(m => {
       const releve = releveMesure(t, m.id);
@@ -270,7 +270,7 @@ async function preuvesPreAudit(fin) {
     (Array.isArray(lus[i][2]) ? lus[i][2] : []).forEach(r => { receptions++; if (r && r.refuse) refusees++; });
 
     const n = lus[i][3];
-    if (n.total) { netFaits += n.faits; netTotal += n.total; if (!n.faits) joursSansNet++; }
+    if (n.total && ouvert) { netFaits += n.faits; netTotal += n.total; if (!n.faits) joursSansNet++; }
   });
 
   const taux = attendus ? faits / attendus : 0;
