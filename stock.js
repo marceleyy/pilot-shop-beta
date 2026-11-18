@@ -1471,7 +1471,8 @@ function articlesSousSeuil(seuils, articles, secLignes) {
       if (!connues.has(k)) return;
       const q = qteSec(k, articles, secLignes);
       const r = catalogueSec().filter(x => typeof x === 'object' && x.id === p[1])[0];
-      if (q <= min) out.push({ cle: k, nom: libelleSec(k), q: q, min: min, unite: (r && r.unite) || 'unité', partie: 'sec' });
+      if (q <= min) out.push({ cle: k, nom: libelleSec(k), q: q, min: min, unite: (r && r.unite) || 'unité', partie: 'sec',
+        sec: (r && r.sec) || 'Autres' });
     } else {
       const it = froid.get(k);
       if (!it) return;
@@ -1480,90 +1481,6 @@ function articlesSousSeuil(seuils, articles, secLignes) {
     }
   });
   return out.sort((a, b) => (a.q / a.min) - (b.q / b.min));
-}
-
-/* Feuille de saisie des minimums d'une partie (« froid » : glaces, « sec »). */
-async function editerSeuils(partie, apres) {
-  if (!(STATE.user && STATE.user.role === 'manager')) return toast('Réservé au manager', 'erreur');
-  if (typeof chargerCatalogueSec === 'function') { try { await chargerCatalogueSec(); } catch (e) {} }
-  const seuils = await chargerSeuils();
-  const items = [];
-  if (partie === 'froid') {
-    parfumsActifs().sort((a, b) => a.localeCompare(b)).forEach(p =>
-      items.push({ k: 'glace|' + p, nom: p, grp: 'Bacs de glace, toutes tailles', u: 'bacs' }));
-    articlesFroidSeuils().forEach(x => items.push(x));
-  } else {
-    catalogueSec().filter(r => r && typeof r === 'object' && !r.masque).forEach(r =>
-      (r.variantes && r.variantes.length ? r.variantes : ['']).forEach(v =>
-        items.push({ k: 'sec|' + r.id + '|' + v, nom: r.nom + (v ? ' · ' + v : ''), grp: r.sec || 'Autres', u: r.unite || 'unité' })));
-    /* Une référence ajoutée tombe en fin de catalogue : regroupée sous sa
-       section, dans l'ordre des sections (tri stable). */
-    const ordre = (typeof SEC_SECTIONS !== 'undefined' ? SEC_SECTIONS : []).map(x => typeof x === 'string' ? x : x.id);
-    const rang = g => { const i = ordre.indexOf(g); return i < 0 ? 999 : i; };
-    items.sort((a, b) => rang(a.grp) - rang(b.grp));
-  }
-  const nrm = x => String(x || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
-  let grp = null;
-  showSheet(
-    '<h2 id="sheet-titre">Stock minimum · ' + (partie === 'froid' ? 'chambre froide' : 'sec') + '</h2>' +
-    '<p class="sub">Arrivé à ce nombre ou en dessous, l’article est signalé sur Stock et sur la tour de contrôle (à commander). Vide : pas de minimum.</p>' +
-    '<input type="search" id="sl-rech" placeholder="Chercher un article" autocomplete="off">' +
-    '<div id="sl-liste" style="margin-top:10px">' + items.map((it, i) => {
-      const titre = it.grp !== grp ? '<div class="entete" data-slg="' + esc(it.grp) + '" style="margin-top:12px"><h3>' + esc(it.grp) + '</h3></div>' : '';
-      grp = it.grp;
-      const v = seuils[it.k];
-      return titre + '<div class="rang" data-slr="' + i + '" data-slgr="' + esc(it.grp) + '" style="padding:6px 0">' +
-        '<div style="flex:1;min-width:0">' + esc(it.nom) + '<div class="mini">en ' + esc(it.u) + '</div></div>' +
-        '<input type="number" min="0" step="any" inputmode="decimal" data-sl="' + i + '" value="' + (num(v) > 0 ? esc(String(v)) : '') + '" style="width:76px;text-align:center"></div>';
-    }).join('') + '</div>' +
-    '<div class="actions"><button class="btn clair" data-fermer>Annuler</button>' +
-    '<button class="btn menthe" id="sl-ok">Enregistrer</button></div>');
-  const touches = {}, illisibles = {};
-  $$('[data-sl]').forEach(inp => inp.oninput = () => {
-    const i = +inp.dataset.sl;
-    /* « 4,5, » : le navigateur rend '' ; sans ce test, le minimum était effacé. */
-    illisibles[i] = !!(inp.validity && inp.validity.badInput);
-    touches[i] = inp.value.trim();
-  });
-  $('#sl-rech').oninput = () => {
-    const mots = nrm($('#sl-rech').value).split(/\s+/).filter(Boolean);
-    const visibles = new Set();
-    $$('[data-slr]').forEach(el => {
-      const it = items[+el.dataset.slr];
-      const ok = mots.every(m => nrm(it.nom).indexOf(m) >= 0);
-      el.style.display = ok ? '' : 'none';
-      if (ok) visibles.add(it.grp);
-    });
-    $$('[data-slg]').forEach(el => { el.style.display = visibles.has(el.dataset.slg) ? '' : 'none'; });
-  };
-  let enCours = false;
-  $('#sl-ok').onclick = async () => {
-    if (enCours) return;
-    if (Object.keys(illisibles).some(i => illisibles[i]) ||
-        Object.keys(touches).some(i => touches[i] !== '' && !(Number(touches[i].replace(',', '.')) >= 0))) {
-      return toast('Minimum invalide : un nombre positif', 'erreur');
-    }
-    /* Seules les valeurs réellement changées comptent. */
-    const avant = i => num(seuils[items[+i].k]) > 0 ? num(seuils[items[+i].k]) : 0;
-    const idx = Object.keys(touches).filter(i => (touches[i] === '' ? 0 : num(touches[i])) !== avant(i));
-    if (!idx.length) { closeSheet(); return; }
-    enCours = true;
-    try {
-      /* Relu juste avant : seules les lignes touchées changent, un autre
-         manager qui saisit en même temps garde les siennes. */
-      const frais = await chargerSeuils();
-      idx.forEach(i => {
-        const k = items[+i].k, v = touches[i];
-        if (v === '' || !(num(v) > 0)) delete frais[k]; else frais[k] = num(v);
-      });
-      await DB.set(CLE_SEUILS, frais);
-      await feed('ok', STATE.user.prenom + ' a réglé le stock minimum de ' + idx.length + ' ' + accord(idx.length, 'article'));
-      closeSheet();
-      toast('Stock minimum enregistré');
-      if (apres) apres();
-    } catch (e) { toast('Enregistrement impossible, réessayez', 'erreur'); }
-    finally { enCours = false; }
-  };
 }
 
 /* -----------------------------------------------------------------------------
@@ -1576,9 +1493,6 @@ V.stock = async function () {
   /* Livraisons du sec confirmées depuis le dernier comptage. */
   const secAttendu = sec ? await stockSecAttendu(sec).catch(() => null) : null;
   const seuils = await chargerSeuils().catch(() => ({}));
-  const manager = !!(STATE.user && STATE.user.role === 'manager');
-  const boutonSeuils = p => manager
-    ? '<button class="btn clair bloc" data-seuils="' + p + '" style="margin-top:10px">Stock minimum ' + (p === 'froid' ? 'de la chambre froide' : 'du sec') + '</button>' : '';
   /* « À commander : 3 pour un minimum de 4 » (au minimum ou en dessous) ou « Minimum 4 ». */
   const ligneMin = (q, min, u) => !(min > 0) ? ''
     : q <= min ? '<div class="mini" style="color:var(--corail-d)"><b>À commander : ' + nSeuil(q) + ' pour un minimum de ' + nSeuil(min) + (u ? ' ' + esc(u) : '') + '</b></div>'
@@ -1600,7 +1514,12 @@ V.stock = async function () {
       ? '<button class="btn menthe sm" data-verif="' + p + '">Vérifier</button>' : '') + '</div>';
 
   /* Deux onglets, comme l'inventaire. On mémorise le dernier ouvert. */
-  let partie = STATE.stockPartie === 'sec' ? 'sec' : 'froid';
+  let partie = ['sec', 'commander'].indexOf(STATE.stockPartie) >= 0 ? STATE.stockPartie : 'froid';
+  /* Articles au minimum ou en dessous (même calcul que la tour de contrôle). */
+  let aCommander = [];
+  try { aCommander = articlesSousSeuil(seuils, articles, secAttendu ? secAttendu.lignes : (sec && sec.lignes) || {}); } catch (e) {}
+  /* Plus rien à commander : l'onglet disparaît, on revient à la chambre froide. */
+  if (partie === 'commander' && !aCommander.length) partie = STATE.stockPartie = 'froid';
 
   const estSec = c => {
     const fam = FAMILLES_PRODUIT.filter(x => x.id === litArticle(c).famille)[0];
@@ -1650,7 +1569,6 @@ V.stock = async function () {
       : '') +
 
     '<button class="btn menthe bloc xl" id="st-inv" style="margin-top:16px">Faire l’inventaire</button>' +
-    boutonSeuils('froid') +
 
     (clesFroid.length || Object.keys(parFamille).length
       ? Object.keys(parFamille).map(fid => {
@@ -1688,11 +1606,34 @@ V.stock = async function () {
       : vide('', 'Chambre froide vide. Commencez par un inventaire.'));
   };
 
+  /* ---------- À commander : seulement les articles proches de la rupture ----------
+     Chambre froide puis rayons du sec, du plus urgent au moins urgent
+     (articlesSousSeuil trie déjà par quantité / minimum). */
+  const blocCommander = () => {
+    if (!aCommander.length) return vide('', 'Aucun article au minimum ou en dessous.');
+    const groupes = [];
+    const ajoute = (titre, liste) => { if (liste.length) groupes.push([titre, liste]); };
+    ajoute('Chambre froide', aCommander.filter(x => x.partie === 'froid'));
+    const rayons = (typeof SEC_SECTIONS !== 'undefined' ? SEC_SECTIONS.map(x => typeof x === 'string' ? x : x.id) : []);
+    const secs = aCommander.filter(x => x.partie === 'sec');
+    rayons.forEach(r => ajoute(r, secs.filter(x => x.sec === r)));
+    ajoute('Autres', secs.filter(x => rayons.indexOf(x.sec) < 0));
+    return carte('<p class="cs"><b>' + aCommander.length + ' ' + accord(aCommander.length, 'article', 'articles') +
+      '</b> au minimum ou en dessous, du plus urgent au moins urgent.</p>', 'solide') +
+      groupes.map(g => '<div class="entete"><h3>' + esc(g[0]) + '</h3>' +
+        '<span class="pousse mini num">' + g[1].length + '</span></div>' +
+        '<div class="stack">' + g[1].map(x => carte('<div class="rang"><div style="flex:1;min-width:0"><b>' + esc(x.nom) + '</b>' +
+          '<div class="mini">Minimum ' + nSeuil(x.min) + ' ' + esc(x.partie === 'froid' && x.cle.indexOf('glace|') ? x.unite : accord(x.min, x.unite)) + '</div></div>' +
+          '<b class="num" style="font-size:20px">' + nSeuil(x.q) + '</b>' +
+          '<span class="mini" style="margin-left:6px">/ ' + nSeuil(x.min) + '</span></div>',
+          x.q <= 0 ? 'corail' : 'ambre')).join('') + '</div>').join('');
+  };
+
   /* ---------- Sec ---------- */
   const blocSec = () => {
     if (!sec || !sec.lignes || !Object.keys(sec.lignes).length) {
       return carte('<p class="cs">Le sec n’a jamais été compté.</p>' + bandeauAttente(attenteSec, 'sec') +
-        '<button class="btn menthe bloc xl" id="st-inv-sec" style="margin-top:12px">Compter le sec</button>' + boutonSeuils('sec'), 'solide');
+        '<button class="btn menthe bloc xl" id="st-inv-sec" style="margin-top:12px">Compter le sec</button>', 'solide');
     }
     const cat = (typeof catalogueSec === 'function') ? catalogueSec() : INVENTAIRE_SEC;
     const sections = (typeof SEC_SECTIONS !== 'undefined')
@@ -1744,7 +1685,6 @@ V.stock = async function () {
       (nbRecus ? ', plus les livraisons confirmées depuis (' + nbRecus + ' ' + accord(nbRecus, 'référence reçue', 'références reçues') + ')' : '') +
       '.</p>' + bandeauAttente(attenteSec, 'sec'), 'solide') +
       '<button class="btn menthe bloc xl" id="st-inv-sec" style="margin-top:16px">Recompter le sec</button>' +
-      boutonSeuils('sec') +
 
       sections.map(s => {
         const refs = cat.filter(r => (r.sec || 'Autres') === s.id && !r.masque && parRef[r.id]);
@@ -1795,10 +1735,11 @@ V.stock = async function () {
     $('#page').innerHTML =
       '<div class="tseg">' +
       [['froid', 'Chambre froide', t.bacs + ' ' + accord(t.bacs, 'bac')], ['sec', 'Sec', sec ? Object.keys(sec.lignes || {}).length + ' réf.' : 'jamais compté']]
+        .concat(aCommander.length ? [['commander', 'À commander', aCommander.length + ' ' + accord(aCommander.length, 'article', 'articles')]] : [])
         .map(x => '<button class="' + (x[0] === partie ? 'on' : '') + '" data-partie="' + x[0] + '">' +
           '<span class="tsl">' + x[1] + '</span><small>' + x[2] + '</small></button>').join('') +
       '</div>' +
-      (partie === 'froid' ? blocFroid() : blocSec());
+      (partie === 'commander' ? blocCommander() : partie === 'froid' ? blocFroid() : blocSec());
 
     $$('[data-partie]').forEach(b => b.onclick = () => {
       partie = b.dataset.partie; STATE.stockPartie = partie; dessiner();
@@ -1810,7 +1751,6 @@ V.stock = async function () {
     if (rv && typeof verifierReceptions === 'function') rv.onclick = verifierReceptions;
     const bs = $('#st-inv-sec');
     if (bs) bs.onclick = () => { STATE.inventairePartie = 'sec'; rendre('inventaire'); };
-    $$('[data-seuils]').forEach(b => b.onclick = () => editerSeuils(b.dataset.seuils, () => rendre('stock')));
   };
   dessiner();
 };
@@ -1897,7 +1837,7 @@ V.controle = async function () {
             : apresReceptions && apresReceptions.parentNode === page ? apresReceptions : page.firstChild;
           page.insertBefore(bm, ancre ? ancre.nextSibling : null);
           bm.querySelector('[data-voirseuil]').onclick = () => {
-            STATE.stockPartie = sous.some(x => x.partie === 'froid') ? 'froid' : 'sec'; rendre('stock'); };
+            STATE.stockPartie = 'commander'; rendre('stock'); };
         }
       }
     } catch (e) {}
