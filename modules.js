@@ -961,8 +961,11 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
        ? '<button class="btn corail sm" id="ptg">Fin de service</button>'
        : '<button class="btn menthe sm" id="ptg">Début de service</button>';
    
+     /* Boutique fermée ce jour (Réglages > Fermeture, ou jour hors semaine) :
+        ni relevé ni procédure attendus, la journée l'affiche simplement. */
+     const fermeJ = jourOuvert(j) ? null : (fermetureDu(j) || {});
      const R = [];
-     if (!e.tempM) R.push(['bad', 'Frigos du matin non relevés', 'À faire dès l’ouverture, avant la mise en vitrine.', 'temp', 'm']);
+     if (!e.tempM && !fermeJ) R.push(['bad', 'Frigos du matin non relevés', 'À faire dès l’ouverture, avant la mise en vitrine.', 'temp', 'm']);
      if (e.tempCrit) R.push(['bad', e.tempCrit + ' ' + accord(e.tempCrit, 'frigo') + ' en limite critique', 'Transférez les produits et prévenez ' + (typeof nomManager === 'function' ? nomManager() : 'le manager') + '.', 'temp',
        /* Le moment du dépassement (le soir s'il y en a un), pas celui de l'heure. */
        ENCEINTES.some(en => etatTemp(en, tempJour['s_' + en.id]) === 'crit') ? 's' : 'm']);
@@ -1093,17 +1096,11 @@ if (MENU_PLUS.manager.indexOf('hebdo') < 0) MENU_PLUS.manager.unshift('hebdo');
           On dessine maintenant la check-liste pour les trois phases, et les
           raccourcis viennent en dessous — ils restent utiles pendant le service,
           où tout arrive sans prévenir. */
-       (false
-         ? carte(entete('⚡', 'Service', 'Ce qui se déclare au fil de la journée.') +
-             '<div class="stack">' +
-             ['clean|🧽|Nettoyage en cours de service', 'pertes|🗑️|Déclarer une perte',
-             'lots|#️⃣|Traçabilité à l’ouverture d’un produit',
-             'reception|🚚|Réceptionner une livraison', 'reas|📦|Signaler une rupture'].map(x => {
-             const [id, ic, lb] = x.split('|');
-             return '<button type="button" class="menu-item" data-go="' + id + '">' +
-             '<span class="mi-tx"><span class="mi-t">' + lb + '</span></span>' +
-             '<span class="mi-fl">›</span></button>';
-             }).join('') + '</div>')
+       (fermeJ
+         ? carte(entete('🔒', 'Boutique fermée',
+             fermeJ.au ? 'Du ' + fmtD(fermeJ.du) + ' au ' + fmtD(fermeJ.au) : 'Jour de fermeture') +
+             (fermeJ.motif ? '<p class="mini">' + esc(fermeJ.motif) + '</p>' : '') +
+             '<p class="mini">Aucune procédure ni relevé à saisir aujourd’hui.</p>', 'solide')
    
          : (function () {
          /* Numérotation continue sur toute la procédure, tous blocs confondus. */
@@ -2160,6 +2157,10 @@ V.temp = async function () {
 V.parametres = async function () {
      const h = await DB.get('horaires', HORAIRES);
      Object.assign(HORAIRES, h);
+     /* Les fermetures passées depuis plus de 30 jours ne s'affichent plus. */
+     const fermetures = (Array.isArray(HORAIRES.fermetures) ? HORAIRES.fermetures : [])
+       .filter(f => f && f.du && f.au && f.au >= addD(today(), -30))
+       .sort((a, b) => a.du.localeCompare(b.du));
      const ench = await DB.get('enceintes', null);
      if (ench) ENCEINTES = ench;
      const hebdo = await DB.get('hebdo', null);
@@ -2182,6 +2183,21 @@ V.parametres = async function () {
          '<div class="champ"><label class="f">Début phase fermeture</label><input type="time" id="h5" value="' + esc(HORAIRES.debutFermeture) + '"></div>' +
          '<div class="champ"><label class="f">Fin phase fermeture</label><input type="time" id="h6" value="' + esc(HORAIRES.finFermeture) + '"></div></div>' +
          '<button class="btn menthe bloc" id="hv" style="margin-top:14px">Enregistrer les horaires</button>', 'solide') +
+
+       /* Fermeture sur une période : plus rien n'est attendu ces jours-là. */
+       carte(entete('🔒', 'Fermeture de la boutique', 'Congés, travaux, fin de saison : aucune saisie attendue, aucune alerte.') +
+         (fermetures.length
+           ? '<div class="stack">' + fermetures.map((f, i) =>
+               '<div class="tache"><span class="tx"><span class="tn">Du ' + esc(fmtD(f.du)) + ' au ' + esc(fmtD(f.au)) + '</span>' +
+               (f.motif ? '<span class="tm">' + esc(f.motif) + '</span>' : '') + '</span>' +
+               '<button class="btn clair sm" data-fsupp="' + i + '">Retirer</button></div>').join('') + '</div>'
+           : '<p class="mini">Aucune fermeture prévue.</p>') +
+         '<div class="grid g2" style="margin-top:12px">' +
+         '<div class="champ"><label class="f">Fermée du</label><input type="date" id="fdu"></div>' +
+         '<div class="champ"><label class="f">Au (inclus)</label><input type="date" id="fau"></div></div>' +
+         '<div class="champ" style="margin-top:10px"><label class="f">Motif (facultatif)</label>' +
+         '<input type="text" id="fmotif" maxlength="80" placeholder="Congés annuels"></div>' +
+         '<button class="btn menthe bloc" id="fajout" style="margin-top:12px">Fermer la boutique sur cette période</button>', 'solide') +
    
        carte(entete('❄️', 'Unités frigorifiques', 'Nom, cible et plage de boutons du relevé de températures.') +
          '<div class="stack">' + ENCEINTES.map((e, i) =>
@@ -2239,9 +2255,39 @@ V.parametres = async function () {
      PHASES[0].de = HORAIRES.debutOuverture; PHASES[0].a = HORAIRES.finOuverture;
      PHASES[1].de = HORAIRES.finOuverture;   PHASES[1].a = HORAIRES.debutFermeture;
      PHASES[2].de = HORAIRES.debutFermeture; PHASES[2].a = HORAIRES.finFermeture;
+     /* Fermetures relues en base : un autre appareil a pu en ajouter ou en
+        retirer depuis l'ouverture de l'écran. */
+     const hb = await DB.get('horaires', null);
+     if (hb && Array.isArray(hb.fermetures)) HORAIRES.fermetures = hb.fermetures;
      await DB.set('horaires', HORAIRES);
      toast('Horaires enregistrés');
      };
+
+  /* Relit les horaires en base avant d'écrire : un autre appareil a pu
+     ajouter une fermeture depuis l'ouverture de l'écran. */
+  const ecrireFermetures = async modif => {
+    const enBase = (await DB.get('horaires', null)) || {};
+    const l = modif(Array.isArray(enBase.fermetures) ? enBase.fermetures.slice() : []);
+    HORAIRES.fermetures = l;
+    await DB.set('horaires', Object.assign({}, HORAIRES, enBase, { fermetures:l }));
+    rendre(STATE.view);
+  };
+  $('#fajout').onclick = async () => {
+    const du = $('#fdu').value, au = $('#fau').value, motif = $('#fmotif').value.trim().slice(0, 80);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(du) || !/^\d{4}-\d{2}-\d{2}$/.test(au)) return toast('Indiquez les deux dates', 'erreur');
+    if (au < du) return toast('La fin de la fermeture doit suivre son début', 'erreur');
+    await ecrireFermetures(l => l.concat([{ du:du, au:au, motif:motif }]));
+    toast('Boutique fermée du ' + fmtD(du) + ' au ' + fmtD(au));
+  };
+  $$('[data-fsupp]').forEach(b => b.onclick = () => {
+    const f = fermetures[+b.dataset.fsupp];
+    confirmer('Retirer cette fermeture ?',
+      'Du ' + fmtD(f.du) + ' au ' + fmtD(f.au) + ' : les saisies redeviennent attendues ces jours-là.',
+      'Retirer', async () => {
+        await ecrireFermetures(l => l.filter(x => !(x && x.du === f.du && x.au === f.au)));
+        toast('Fermeture retirée');
+      });
+  });
 
   $('#hb-ouvrir').onclick = organiserSemaine;
   $('#hb-resp').onclick   = attribuerResponsables;
