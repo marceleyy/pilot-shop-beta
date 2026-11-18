@@ -3098,7 +3098,10 @@ function navJour(jour) {
   const hier = addD(jour, -1), demain = addD(jour, 1);
   return '<div class="navjour">' +
     '<button type="button" data-nj="' + hier + '" aria-label="Jour précédent">' + ic('gauche', 22) + '</button>' +
-    '<div class="nj-c"><b>' + nomJour(jour) + '</b><span>' + fmtD(jour) + '</span></div>' +
+    /* La date ouvre le calendrier : on saute à un jour sans cliquer
+       trente fois sur la flèche pour rattraper un relevé oublié. */
+    '<button type="button" class="nj-c" data-cal="' + jour + '" aria-label="Choisir une date dans le calendrier">' +
+    '<b>' + nomJour(jour) + '</b><span>' + fmtD(jour) + ' ' + ic('periodes', 14) + '</span></button>' +
     '<button type="button" data-nj="' + demain + '" aria-label="Jour suivant">' + ic('droite', 22) + '</button>' +
     '</div>' +
     (jour === today() ? '' :
@@ -3116,17 +3119,128 @@ function brancherNavJour(vue) {
     if (V.temp && V.temp._d !== undefined) V.temp._d = STATE.jour;
     rendre(vue);
   });
+  $$('[data-cal]').forEach(b => b.onclick = () => ouvrirCalendrier(vue, b.dataset.cal));
   /* En consultation, on neutralise tout ce qui modifie. */
   if (!peutModifier(STATE.jour)) {
     $$('#page button').forEach(b => {
       /* Les vignettes restent ouvrables : en consultation, on regarde une
          photo sans pouvoir la supprimer (voirPreuve en lecture seule). */
-      if (b.dataset.nj !== undefined || b.dataset.vign !== undefined) return;
+      if (b.dataset.nj !== undefined || b.dataset.cal !== undefined || b.dataset.vign !== undefined) return;
       b.disabled = true;
       b.classList.add('fige');
     });
     $$('#page input, #page select, #page textarea').forEach(i => { i.disabled = true; });
   }
+}
+
+/* -----------------------------------------------------------------------------
+   CALENDRIER DE NAVIGATION
+   Ouvert depuis la date de navJour. Sur les Frigos, chaque jour passé porte
+   l'état de son relevé (complet, incomplet, manquant) : on voit d'un coup
+   d'œil ce qu'il reste à rattraper. Un jour où la boutique est fermée
+   (jourFerme, si la fonction existe) n'est jamais compté comme manquant.
+   -------------------------------------------------------------------------- */
+async function etatsCalendrier(vue, jours) {
+  const E = {};
+  if (vue !== 'temp') return E;
+  const auj = today();
+  const passes = jours.filter(d => d <= auj);
+  /* Un lot à nous : les relevés du mois partent en une requête (DB.prelire).
+     Pas pendant un dessin d'écran : on lui volerait le sien. */
+  const n = _rendusLances === _dernierRenduFini ? DB.ouvrirLot() : 0;
+  try {
+    DB.prelire(passes.map(d => 'temp:' + d));
+    const recs = await Promise.all(passes.map(d => DB.get('temp:' + d, {})));
+    /* Mois sans aucun relevé (avant la mise en service de l'application) :
+       rien n'est marqué, au lieu de trente jours rouges trompeurs. */
+    if (!recs.some(t => t && Object.keys(t).length)) { E._vide = true; return E; }
+    passes.forEach((d, i) => {
+      let ferme = false;
+      try { ferme = typeof jourFerme === 'function' && !!jourFerme(d); } catch (e) {}
+      if (ferme) { E[d] = 'ferme'; return; }
+      const t = recs[i] || {};
+      /* Même règle que etatJour : validé ET au moins une mesure. */
+      const fait = m => !!(t.valide && t.valide[m]) && releveMesure(t, m);
+      const nb = (fait('m') ? 1 : 0) + (fait('s') ? 1 : 0);
+      /* Aujourd'hui n'est ni incomplet ni manquant : la journée n'est pas finie. */
+      E[d] = nb === 2 ? 'ok' : d === auj ? '' : nb === 1 ? 'partiel' : 'manque';
+    });
+  } finally { if (n) DB.fermerLot(n); }
+  return E;
+}
+
+async function ouvrirCalendrier(vue, jour, mois) {
+  /* Clics rapides sur les mois : seul le dernier demandé s'affiche. */
+  const ticket = ouvrirCalendrier._n = (ouvrirCalendrier._n || 0) + 1;
+  const depuisFeuille = !!mois;
+  const vueOuverte = STATE.view;
+  mois = mois || monthKey(jour);
+  const auj = today();
+  const premier = mois + '-01';
+  const jours = [];
+  for (let d = premier; monthKey(d) === mois; d = addD(d, 1)) jours.push(d);
+  const etats = await etatsCalendrier(vue, jours);
+  if (ticket !== ouvrirCalendrier._n) return;
+  /* Lecture lente : l'utilisateur a changé d'écran, refermé le calendrier ou
+     ouvert une autre feuille entre-temps. On ne recouvre rien. */
+  if (STATE.view !== vueOuverte) return;
+  if (depuisFeuille ? $('#sheet').hidden : !$('#sheet').hidden) return;
+
+  const LIB = { ok:'complet', partiel:'incomplet', manque:'manquant', ferme:'boutique fermée' };
+  const cases = Array(jourISO(premier) - 1).fill('<span class="cal-v"></span>').join('') + jours.map(d => {
+    const et = etats[d] || '';
+    const cls = ['cal-j', et, d === auj ? 'auj' : '', d === jour ? 'sel' : ''].filter(Boolean).join(' ');
+    return '<button type="button" class="' + cls + '" data-calj="' + d + '"' +
+      (d > auj ? ' disabled' : '') +
+      ' aria-label="' + esc(nomJour(d) + ' ' + fmtD(d) + (LIB[et] ? ', ' + LIB[et] : '')) + '">' +
+      (+d.slice(8)) + '</button>';
+  }).join('');
+  const aRattraper = jours.filter(d => etats[d] === 'manque' || etats[d] === 'partiel').length;
+  const moisPrec = monthKey(addD(premier, -1));
+  const moisSuiv = monthKey(addD(premier, 32));
+  /* Un an d'historique au plus dans le calendrier. */
+  const moisMin = monthKey(addD(auj, -365));
+  /* L'équipe ne corrige pas le passé (peutModifier) : on ne lui dit pas
+     « à rattraper » pour des jours qu'elle ne peut que consulter. */
+  const corrige = peutModifier(addD(auj, -1));
+  const ferme = typeof jourFerme === 'function';
+
+  showSheet(
+    '<h2 id="sheet-titre">Aller à une date</h2>' +
+    (vue === 'temp'
+      ? '<p class="sub">' + (etats._vide
+          ? 'Aucun relevé enregistré en ' + esc(fmtM(premier)) + '.'
+          : aRattraper
+          ? aRattraper + ' jour' + (aRattraper > 1 ? 's' : '') +
+            (corrige ? ' à rattraper' : ' incomplet' + (aRattraper > 1 ? 's' : '')) + ' en ' + esc(fmtM(premier)) + '.'
+          : 'Tous les relevés sont faits en ' + esc(fmtM(premier)) + '.') + '</p>'
+      : '') +
+    '<div class="navjour cal-nav">' +
+      '<button type="button" data-calm="' + moisPrec + '" aria-label="Mois précédent"' +
+        (moisPrec < moisMin ? ' disabled' : '') + '>' + ic('gauche', 22) + '</button>' +
+      '<div class="nj-c"><b>' + esc(fmtM(premier)) + '</b></div>' +
+      '<button type="button" data-calm="' + moisSuiv + '" aria-label="Mois suivant"' +
+        (moisSuiv > monthKey(auj) ? ' disabled' : '') + '>' + ic('droite', 22) + '</button>' +
+    '</div>' +
+    '<div class="cal-g" role="group" aria-label="' + esc(fmtM(premier)) + '">' +
+      ['L', 'M', 'M', 'J', 'V', 'S', 'D'].map(x => '<span class="cal-t" aria-hidden="true">' + x + '</span>').join('') +
+      cases +
+    '</div>' +
+    (vue === 'temp'
+      ? '<div class="cal-leg"><span><i class="ok"></i>Complet</span><span><i class="partiel"></i>Incomplet</span>' +
+        '<span><i class="manque"></i>Manquant</span>' + (ferme ? '<span><i class="ferme"></i>Fermé</span>' : '') + '</div>'
+      : '') +
+    '<div class="actions"><button class="btn clair" data-fermer>Fermer</button>' +
+    (jour !== auj ? '<button class="btn" data-calj="' + auj + '">Aujourd’hui</button>' : '') + '</div>'
+  );
+
+  $$('#sheet-corps [data-calm]').forEach(b => b.onclick = () => ouvrirCalendrier(vue, jour, b.dataset.calm));
+  /* rendre(vue, false, jour) : le saut de date déjà utilisé par les liens
+     des Périodes (STATE.jour, V.temp._d et _auj posés au même endroit). */
+  $$('#sheet-corps [data-calj]').forEach(b => b.onclick = () => {
+    closeSheet();
+    rendre(vue, false, b.dataset.calj);
+  });
 }
 
 /* -----------------------------------------------------------------------------
