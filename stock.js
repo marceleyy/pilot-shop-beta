@@ -1602,10 +1602,7 @@ V.stock = async function () {
   /* Deux onglets, comme l'inventaire. On mémorise le dernier ouvert. */
   let partie = STATE.stockPartie === 'sec' ? 'sec' : 'froid';
 
-  const estSec = c => {
-    const fam = FAMILLES_PRODUIT.filter(x => x.id === litArticle(c).famille)[0];
-    return !!(fam && (fam.lieu === 'sec' || fam.stock === 'sec'));
-  };
+  const estSec = articleEstSec;
   /* Chambre froide : tout ce qui n'est pas marqué « sec ». */
   const clesFroid = Object.keys(articles)
     .filter(c => num(articles[c]) !== 0 && !estSec(c))
@@ -3793,11 +3790,26 @@ function retirerDeArmoire(b) {
   $('#ar-err').onclick = () => sortir('erreur');
 }
 
+/* Sec ou chambre froide : la même règle pour le Stock réel, l'inventaire
+   et la Traçabilité (famille marquée lieu ou stock « sec »). */
+function articleEstSec(c) {
+  const fam = FAMILLES_PRODUIT.filter(x => x.id === litArticle(c).famille)[0];
+  return !!(fam && (fam.lieu === 'sec' || fam.stock === 'sec'));
+}
+
 V.lots = async function () {
   const mouv = await tousMouvements(null);
-  const ouvertures = mouv.map(litMouvement)
-    .filter(m => m.type === 'ouverture').slice(-40).reverse();
-  const armoire = await bacsArmoire().catch(() => []);
+  /* Deux onglets, comme le Stock réel : le surgelé et le sec ne se mélangent
+     plus. Les 40 dernières ouvertures de CHAQUE partie, sinon une journée de
+     coulis chassait les bacs de glace de la liste. */
+  const toutes = mouv.map(litMouvement).filter(m => m.type === 'ouverture');
+  const parPartie = { froid: [], sec: [] };
+  toutes.forEach(m => parPartie[articleEstSec(m.cle) ? 'sec' : 'froid'].push(m));
+  const totaux = { froid: parPartie.froid.length, sec: parPartie.sec.length };
+  Object.keys(parPartie).forEach(k => parPartie[k] = parPartie[k].slice(-40).reverse());
+  const partie = STATE.lotsPartie === 'sec' ? 'sec' : 'froid';
+  const ouvertures = parPartie[partie];
+  const armoire = partie === 'froid' ? await bacsArmoire().catch(() => []) : [];
   const seuilH = (typeof seuilOrangeHeures === 'function')
     ? seuilOrangeHeures((DLC_RULES.gelato || DLC_RULES.defaut).h) : 72;
 
@@ -3818,7 +3830,15 @@ V.lots = async function () {
       '<button class="btn clair bloc" id="lo-main" style="margin-top:8px">' +
       'Saisir à la main</button>', 'solide') +
 
-    (armoire.length
+    '<div class="tseg" style="margin-top:20px">' +
+    [['froid', 'Chambre froide'], ['sec', 'Sec']].map(x => {
+      const n = totaux[x[0]];
+      return '<button type="button" class="' + (x[0] === partie ? 'on' : '') + '" data-lpartie="' + x[0] + '">' +
+        '<span class="tsl">' + x[1] + '</span><small>' + n + ' ' + accord(n, 'ouverture') + '</small></button>';
+    }).join('') + '</div>' +
+
+    /* L'armoire −13 n'accueille que des bacs : elle reste côté chambre froide. */
+    (partie === 'sec' ? '' : armoire.length
       ? '<div class="entete" style="margin-top:20px"><h3>À l’armoire −13</h3>' +
         '<span class="pousse mini num">' + armoire.length + '</span></div>' +
         '<div class="stack">' + armoire.map(b => {
@@ -3859,7 +3879,12 @@ V.lots = async function () {
             (sous.length ? '<small>' + esc(sous.join(' · ')) + '</small>' : '') + '</span>' +
             '<span class="invc">' + fmtD(m.jour) + '<br>' + esc(m.lot || '—') + '</span></div>';
         }).join('') + '</div>'
-      : vide('', 'Aucune ouverture enregistrée.'));
+      : vide('', partie === 'sec' ? 'Aucune ouverture de sec enregistrée.'
+                                  : 'Aucune ouverture de chambre froide enregistrée.'));
+
+  $$('[data-lpartie]').forEach(b => b.onclick = () => {
+    STATE.lotsPartie = b.dataset.lpartie; rendre('lots');
+  });
 
   /* « Valider et scanner le suivant » : la prise de vue repart après chaque
      ouverture confirmée. Le drapeau enchainer n'était lu par personne : le
@@ -4169,6 +4194,8 @@ function confirmerOuverture(r) {
          bac n'est pas déduit deux fois au prochain essai. */
       if (bA) await noterArmoire({ t: 'sortie', r: bA.id, v: 'vitrine' });
       await ajouterMouvement('ouverture', cle, 1, { lot: lot, famille: fam.id, parfum: parfum });
+      /* Traçabilité : on rouvre sur l'onglet de ce qui vient d'être ouvert. */
+      STATE.lotsPartie = articleEstSec(cle) ? 'sec' : 'froid';
 
       /* Le frigo virtuel lit la clé « lots: », pas le journal de stock : sans
          cette écriture il restait désespérément vide alors que l'équipe scannait
