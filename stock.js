@@ -1863,8 +1863,10 @@ V.controle = async function () {
           bm.style.marginTop = '14px';
           const liste = sous.slice(0, 8).map(x => esc(x.nom) + ' ' + nSeuil(x.q) + '/' + nSeuil(x.min)).join(', ') +
             (sous.length > 8 ? ' et ' + (sous.length - 8) + ' autre' + (sous.length > 9 ? 's' : '') : '');
+          const nMetro = sous.filter(x => x.metro).length, nCmd = sous.length - nMetro;
           bm.innerHTML = '<div class="alerte warn"><span class="ai">•</span><div style="flex:1;min-width:0"><b>' +
-            sous.length + ' ' + accord(sous.length, 'article à commander', 'articles à commander') + ' (au minimum ou en dessous)</b>' +
+            [nCmd ? nCmd + ' ' + accord(nCmd, 'article à commander', 'articles à commander') : '',
+             nMetro ? nMetro + ' à acheter chez Métro' : ''].filter(Boolean).join(', ') + ' (au minimum ou en dessous)</b>' +
             '<p>' + liste + '</p></div><button class="btn menthe sm" data-voirseuil>Voir</button></div>';
           /* Sous la valeur du stock, sinon sous les réceptions à confirmer. */
           const apres = $('#valeur-stock') && $('#valeur-stock').parentNode === page ? $('#valeur-stock') : $('#ctl-meteo');
@@ -1979,6 +1981,11 @@ V.controle = async function () {
    Son stock n'est jamais effacé : il reste au dernier comptage.
    -------------------------------------------------------------------------- */
 let _catalogueSec = null;
+/* Fournisseur par référence du sec, sous sa propre clé « catalogue:fournisseurs » :
+   { id: 'metro' }. Absent = Amorino. À part de « catalogue:sec », que ✎ et ✕
+   réécrivent en entier depuis une copie lue à l'ouverture de l'écran. */
+const CLE_FOURNISSEURS = 'catalogue:fournisseurs';
+let _fournisseurs = {};
 
 function catalogueSecBrut() {
   return INVENTAIRE_SEC.map(r => typeof r === 'string'
@@ -2017,10 +2024,11 @@ function catalogueSec() {
 
 /* À appeler avant de dessiner un écran qui s'en sert. */
 async function chargerCatalogueSec() {
-  const [m] = await Promise.all([DB.get('catalogue:sec', null), chargerPrixAchat().catch(() => {}),
-    chargerCatalogueFroid().catch(() => {})]);
+  const [m, fo] = await Promise.all([DB.get('catalogue:sec', null), DB.get(CLE_FOURNISSEURS, null).catch(() => null),
+    chargerPrixAchat().catch(() => {}), chargerCatalogueFroid().catch(() => {})]);
+  _fournisseurs = (fo && typeof fo === 'object' && !Array.isArray(fo)) ? fo : {};
   const base = catalogueSecBrut();
-  if (!m) { _catalogueSec = base; return base; }
+  if (!m) { base.forEach(x => { if (_fournisseurs[x.id]) x.fournisseur = _fournisseurs[x.id]; }); _catalogueSec = base; return base; }
   const out = base.map(r => {
     const mod = (m.modifs || {})[r.id];
     const x = mod ? Object.assign({}, r, mod) : r;
@@ -2051,10 +2059,7 @@ async function chargerCatalogueSec() {
     /* Garde-fou (la fiche l'empêche) : tout retiré = référence retirée. */
     if (!x.variantes.length) { x.variantes = vs; x.masque = true; }
   });
-  /* Fournisseur par référence : { id: 'metro' }. Absent = Amorino. Gardé à
-     part de « modifs », que ✎ réécrit en entier. */
-  const fo = (m.fournisseurs && typeof m.fournisseurs === 'object') ? m.fournisseurs : {};
-  out.forEach(x => { if (fo[x.id]) x.fournisseur = fo[x.id]; });
+  out.forEach(x => { if (_fournisseurs[x.id]) x.fournisseur = _fournisseurs[x.id]; });
   _catalogueSec = out;
   return out;
 }
@@ -2612,12 +2617,13 @@ V.catalogue = async function () {
         brouillon.min = {};
       }
       if (Object.keys(metros).length) {
-        /* Relu juste avant, comme le froid : les autres réglages du sec restent. */
-        const ms = (await DB.get('catalogue:sec', null)) || { masques:[], modifs:{}, ajouts:[] };
-        const fo = Object.assign({}, ms.fournisseurs || {});
+        /* Relu juste avant, comme le froid : un autre manager garde ses réglages. */
+        const lu = await DB.get(CLE_FOURNISSEURS, null);
+        const fo = Object.assign({}, (lu && typeof lu === 'object' && !Array.isArray(lu)) ? lu : {});
         Object.keys(metros).forEach(id => { if (metros[id]) fo[id] = 'metro'; else delete fo[id]; });
-        ms.fournisseurs = fo;
-        await enregistrerCatalogueSec(ms);
+        await DB.set(CLE_FOURNISSEURS, fo);
+        _fournisseurs = fo;
+        _catalogueSec = null;
         cat.forEach(r => { if (metros[r.id] !== undefined) r.fournisseur = metros[r.id] ? 'metro' : ''; });
         brouillon.metro = {};
       }

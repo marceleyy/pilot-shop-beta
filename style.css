@@ -573,6 +573,9 @@ select{background-image:linear-gradient(45deg,transparent 50%,var(--brume) 50%),
 .tseg button small{font-size:11.5px;font-weight:500;opacity:.9}
 .tseg button.on{background:var(--blanc);color:var(--encre);
   border-color:var(--encre);box-shadow:var(--ombre)}
+/* Jusqu’à quatre onglets (Stock réel) : ils se partagent la largeur et passent à la ligne. */
+.tseg button{min-width:0;padding-left:4px;padding-right:4px;text-align:center}
+.tseg button .tsl,.tseg button small{overflow-wrap:anywhere}
 .tseg button.on svg.ic{stroke-width:2}
 
 /* Ligne d'enceinte : l'état se lit au contour, sans avoir à chercher */
