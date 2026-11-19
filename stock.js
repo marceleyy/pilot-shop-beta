@@ -2028,7 +2028,7 @@ V.controle = async function () {
 
     /* Consommation, couverture du stock et achats du mois : sans attendre,
        pour ne pas retarder les anomalies signalées (plus bas). */
-    carteConsommation(page);
+    carteConsommation(page).catch(e => console.warn('Consommation indisponible', e));
   }
 
   /* -----------------------------------------------------------------------------
