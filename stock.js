@@ -1553,7 +1553,7 @@ V.stock = async function () {
       kpi('Poids', n1(t.kg) + ' kg', '', 'glace seule') + '</div>' +
       (inventaire
         ? '<p class="rappel" style="margin-top:14px">Dernier inventaire le ' +
-          fmtD(inventaire.jour) + (inventaire.par ? ' par ' + esc(inventaire.par) : '') + '.</p>'
+          esc(fmtD(inventaire.jour)) + (inventaire.par ? ' par ' + esc(inventaire.par) : '') + '.</p>'
         : '<p class="rappel" style="margin-top:14px">Aucun inventaire : le stock part de zéro.</p>') +
       bandeauAttente(attente, 'froid') +
       (recAttente.length && typeof bandeauReceptions === 'function'
@@ -1874,7 +1874,7 @@ V.controle = async function () {
         return carte('<div class="rang" style="align-items:flex-start">' +
           '<div style="flex:1;min-width:0"><b>' + esc(a.titre) + '</b>' +
           '<p class="mini" style="margin-top:3px">' + esc(cat) + ' · ' +
-          esc(a.par) + ' · ' + fmtD(a.jour) + (a.at ? ' à ' + heure(a.at) : '') + '</p>' +
+          esc(a.par) + ' · ' + esc(fmtD(a.jour)) + (a.at ? ' à ' + heure(a.at) : '') + '</p>' +
           (a.detail ? '<p class="mini" style="margin-top:4px">' + esc(a.detail) + '</p>' : '') +
           '</div>' +
           '<button class="btn clair sm" data-anores="' + esc(a.id) + '">Traité</button></div>',
@@ -2577,10 +2577,14 @@ V.catalogue = async function () {
   };
 
   /* ✕ retire la référence (après confirmation), ↺ la réaffiche. */
+  /* Double appui : le second annulait le premier (retirée puis réaffichée
+     aussitôt), avec deux enregistrements et deux lignes contradictoires. */
+  let masqueEnCours = false;
   const basculer = async id => {
-    const i = m.masques.indexOf(id);
     const r = cat.filter(x => x.id === id)[0];
-    /* Retirer demande confirmation : le bouton est petit et sans texte. */
+    /* Retirer demande confirmation : le bouton est petit et sans texte.
+       Elle se fait avant le verrou : une feuille fermée d'un appui à côté
+       ne rend jamais la main, et laisserait le bouton bloqué. */
     if (r && !r.masque) {
       const ok = await new Promise(res => {
         showSheet('<h2 id="sheet-titre">Retirer ' + esc(r.nom) + ' ?</h2>' +
@@ -2593,16 +2597,29 @@ V.catalogue = async function () {
       });
       if (!ok) return;
     }
-    /* Toutes ses déclinaisons retirées (✎ ou deux fiches en même temps) :
-       ↺ les réactive, sinon la référence resterait cachée. */
-    const toutRetire = r && r.masque && r.variantesToutes && r.variantesRetirees &&
-      r.variantesRetirees.length >= r.variantesToutes.length;
-    if (toutRetire && Array.isArray(m.retirees)) m.retirees = m.retirees.filter(k => k.split('|')[1] !== id);
-    if (i >= 0) m.masques.splice(i, 1); else if (!toutRetire) m.masques.push(id);
-    const reaffiche = i >= 0 || toutRetire;
-    await enregistrerCatalogueSec(m);
-    await feed('ok', STATE.user.prenom + (reaffiche ? ' a réaffiché ' : ' a retiré ') + id + ' du catalogue');
-    rendre('catalogue');
+    if (masqueEnCours) return;
+    masqueEnCours = true;
+    try {
+      const i = m.masques.indexOf(id);
+      const avantMasques = m.masques.slice();
+      const avantRetirees = Array.isArray(m.retirees) ? m.retirees.slice() : m.retirees;
+      /* Toutes ses déclinaisons retirées (✎ ou deux fiches en même temps) :
+         ↺ les réactive, sinon la référence resterait cachée. */
+      const toutRetire = r && r.masque && r.variantesToutes && r.variantesRetirees &&
+        r.variantesRetirees.length >= r.variantesToutes.length;
+      if (toutRetire && Array.isArray(m.retirees)) m.retirees = m.retirees.filter(k => k.split('|')[1] !== id);
+      if (i >= 0) m.masques.splice(i, 1); else if (!toutRetire) m.masques.push(id);
+      const reaffiche = i >= 0 || toutRetire;
+      try { await enregistrerCatalogueSec(m); }
+      catch (e) {
+        /* Échec : on remet les listes comme avant, sinon l'appui suivant
+           enregistrait l'état d'origine en croyant changer. */
+        m.masques = avantMasques; m.retirees = avantRetirees;
+        return toast('Enregistrement impossible, réessayez', 'erreur');
+      }
+      await feed('ok', STATE.user.prenom + (reaffiche ? ' a réaffiché ' : ' a retiré ') + id + ' du catalogue');
+      rendre('catalogue');
+    } finally { masqueEnCours = false; }
   };
 
   const editer = (r, section) => {
@@ -3323,7 +3340,7 @@ V.inventaire = async function () {
               (ouvert ? '' : '<button class="btn clair sm" id="inv-rouvrir">Rouvrir</button>') +
               '</div>'
             : '<p class="rappel" style="margin-top:12px">Dernier comptage : ' +
-              fmtD(dernier.jour) + (dernier.par ? ' par ' + esc(dernier.par) : '') + '</p>')
+              esc(fmtD(dernier.jour)) + (dernier.par ? ' par ' + esc(dernier.par) : '') + '</p>')
           : ''), 'solide') +
 
       '<div class="tseg">' +
@@ -3967,13 +3984,30 @@ function confirmerOuverture(r) {
 
     const garder = () => {
       const l = $('#co-lot'); if (l) r.lot = l.value.trim().toUpperCase();
-      const sp = $('#co-parfum'); if (sp) parfum = sp.value;
+      /* « choisir » ne remplace pas le mot lu : passer par une famille sans
+         ce parfum puis revenir le retrouve. */
+      const sp = $('#co-parfum'); if (sp && sp.value) parfum = sp.value;
       const jm = $('#co-j13'); if (jm) jourM13 = jm.value;
     };
     /* Annuler : la feuille est redessinée par dessiner() sans passer par
        showSheet, qui seul branche [data-fermer] — le bouton ne faisait rien. */
     const annuler = () => { fini = true; closeSheet(); resolve(false); };
     let enCours = false;
+    /* Feuille refermée par le voile, Échap ou le retour du téléphone : seul
+       le bouton Annuler répondait, et l'appelant attendait pour toujours —
+       en mode chaîne, la liste des ouvertures ne se redessinait plus. */
+    let veille = null;
+    const lacher = () => { if (veille) { veille.disconnect(); veille = null; } };
+    const surveiller = () => {
+      const sh = $('#sheet');
+      if (veille || !sh || typeof MutationObserver === 'undefined') return;
+      veille = new MutationObserver(() => {
+        if (!sh.hidden) return;
+        lacher();
+        if (!fini) { fini = true; resolve(false); }
+      });
+      veille.observe(sh, { attributes: true, attributeFilter: ['hidden'] });
+    };
 
     const dessiner = () => {
       const fam = FAMILLES_PRODUIT.filter(f => f.id === famille)[0];
@@ -4040,15 +4074,30 @@ function confirmerOuverture(r) {
             /* Les coulis et toppings ont leurs propres saveurs : proposer les
                vingt-trois parfums de glace pour un flacon de coulis n'avait
                aucun sens et rendait le choix impraticable. */
-            '<select id="co-parfum">' + (fam.saveurs || PARFUMS).map(p => {
+            '<select id="co-parfum">' + (() => {
               /* Le mot lu sur l'étiquette est comparé sans accent ni casse, et
                  sur ses cinq premières lettres : « Pistache » lu sur un bac et
-                 « Pistacchio » de la liste des macarons se retrouvent. */
+                 « Pistacchio » de la liste des macarons se retrouvent.
+                 UNE seule option retenue — l'égalité d'abord, sinon le premier
+                 préfixe : marquées toutes, le navigateur gardait la dernière,
+                 et « Chocolat noir » lu devenait « Chocolat bio ». Rien de
+                 reconnu : « choisir » reste affiché, et le contrôle à
+                 l'enregistrement demande le parfum au lieu de prendre le
+                 premier de la liste. */
+              const liste = fam.saveurs || PARFUMS;
               const nrm = s => String(s||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z]/g,'');
-              const a = nrm(p), b = nrm(parfum);
-              const proche = b && (a === b || (a.length >= 5 && b.length >= 5 && a.slice(0,5) === b.slice(0,5)));
-              return '<option' + (proche ? ' selected' : '') + '>' + esc(p) + '</option>';
-            }).join('') +
+              const b = nrm(parfum);
+              let choix = b ? liste.findIndex(p => nrm(p) === b) : -1;
+              if (choix < 0 && b.length >= 5) {
+                const proches = liste.map((p, i) => i).filter(i => {
+                  const a = nrm(liste[i]); return a.length >= 5 && a.slice(0,5) === b.slice(0,5); });
+                /* Plusieurs parfums proches (« Chocolat » : noir, équateur, bio) :
+                   on ne devine pas, la personne choisit. */
+                if (proches.length === 1) choix = proches[0];
+              }
+              return '<option value=""' + (choix < 0 ? ' selected' : '') + '>— choisir —</option>' +
+                liste.map((p, i) => '<option' + (i === choix ? ' selected' : '') + '>' + esc(p) + '</option>').join('');
+            })() +
             '</select></div>' +
             (fam.id === 'glace'
               ? '<div class="champ" style="margin-top:14px"><label class="f">Taille du bac</label>' +
@@ -4154,7 +4203,15 @@ function confirmerOuverture(r) {
           ' Soit une ouverture précédente n’a pas été scannée, soit une livraison ' +
           'n’a pas été saisie. Confirmez si le bac est bien là : un recomptage ' +
           'sera proposé pour remettre les compteurs à plat.',
-          'Confirmer l’ouverture', () => { poser(fam, lot); }, annuler);
+          'Confirmer l’ouverture', async () => {
+            /* confirmer() vient de refermer la feuille : ce n'est pas un abandon. */
+            lacher();
+            try { await poser(fam, lot); }
+            catch (e) {
+              toast('Enregistrement impossible, réessayez', 'erreur');
+              if (!fini) { fini = true; resolve(false); }
+            }
+          }, annuler);
       }
       await poser(fam, lot);
     }
@@ -4191,7 +4248,11 @@ function confirmerOuverture(r) {
             /* Plus aucun bac de ce parfum à l'armoire : on demande la date
                plutôt que de partir d'aujourd'hui sans prévenir. */
             armoire = frais; bacId = '';
+            /* Passé par « Ce bac n'est plus au stock », la feuille est fermée :
+               on la rouvre pour que la date puisse être saisie. */
+            if ($('#sheet').hidden) showSheet('<div class="vide">…</div>');
             dessiner();
+            surveiller();
             return toast('Ce bac est déjà sorti de l’armoire : indiquez sa date de sortie du −20', 'erreur');
           }
           toast('Ce bac était déjà sorti : le suivant de l’armoire est pris');
@@ -4245,5 +4306,6 @@ function confirmerOuverture(r) {
 
     showSheet('<div class="vide">…</div>');
     dessiner();
+    surveiller();
   });
 }
