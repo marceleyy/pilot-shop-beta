@@ -4517,7 +4517,8 @@ function ouvrirPremierePeriode() {
              ' par ' + esc(f.par || '—') + ' · ' + Math.round(f.heures / 24 * 10) / 10 + ' j de vie</div></div>' +
              '<div class="fr"><b>' + resteLisible(f.resteH) + '</b>' +
              '<span>limite ' + fmtDC(f.limite) + '</span></div>' +
-             (f.c === 'rouge' ? '<button class="btn corail sm" data-jeter="' + esc(f.cle) + '">Jeter</button>' : '') +
+             (f.c === 'rouge' ? '<button class="btn corail sm" data-jeter="' + esc(f.cle) + '">Jeter</button>'
+               : (f.type === 'g' || f.famille === 'glace') ? '<button class="btn clair sm" data-fini="' + esc(f.cle) + '">Bac fini</button>' : '') +
              '</div>').join('') + '</div>').join('')
          : vide('🧊', 'Aucun lot ouvert ce mois. Les saisies de l’équipe apparaissent ici.'));
    
@@ -4526,7 +4527,7 @@ function ouvrirPremierePeriode() {
      /* perte faux : bac de glace fini (vendu) sans que sa fin ait été tracée.
         Il sort des produits ouverts sans entrer au registre des pertes : le
         compter jeté (3 ou 5 L pleins) gonflait le poids jeté de l'écart. */
-     const retirerLot = async (f, perte) => {
+     const retirerLot = async (f, perte, declare) => {
        /* Litrage réel du lot : sa taille de bac pour une glace (5 L par
           défaut si elle n'a pas été saisie), 0 pour le reste — une
           chantilly ou un coulis n'a pas de litrage de glace, et lui
@@ -4543,14 +4544,24 @@ function ouvrirPremierePeriode() {
        const moisLot = f.mois || mois;
        const rec = await DB.get('lots:' + moisLot, {});
        if (rec[f.cle]) {
-         rec[f.cle] = Object.assign({}, rec[f.cle], { jete:nowISO(), jeteLot:f.lot, jetePar:STATE.user.prenom });
+         rec[f.cle] = Object.assign({}, rec[f.cle], { jete:nowISO(), jeteLot:f.lot, jetePar:STATE.user.prenom,
+                                                   fini:!perte });
          await DB.set('lots:' + moisLot, rec);
        }
        await feed(perte ? 'warn' : 'ok', STATE.user.prenom + (perte ? ' a jeté ' + f.nom + ' (DLC dépassée)'
+         : declare ? ' a déclaré fini le bac ' + f.nom + ' (lot ' + f.lot + ')'
          : ' a retiré ' + f.nom + ' (bac fini, non tracé)'));
-       toast(perte ? 'Perte enregistrée' : 'Bac retiré, sans perte');
+       toast(perte ? 'Perte enregistrée' : declare ? 'Bac fini, retiré de la vitrine' : 'Bac retiré, sans perte');
        rendre('frigo');
      };
+     /* Bac de glace terminé avant sa date limite : il sort de la vitrine
+        (produits ouverts) sans perte, au lieu de passer « périmé » plus tard. */
+     $$('[data-fini]').forEach(b => b.onclick = () => {
+       const f = fifo.filter(x => x.cle === b.dataset.fini)[0];
+       if (!f) return;
+       confirmer('Bac ' + f.nom + ' fini ?',
+         'Le lot ' + f.lot + ' sort de la vitrine, sans perte.', 'Bac fini', () => retirerLot(f, false, true));
+     });
      $$('[data-jeter]').forEach(b => b.onclick = () => {
        const f = fifo.filter(x => x.cle === b.dataset.jeter)[0];
        if (f.type === 'g' || f.famille === 'glace') {
