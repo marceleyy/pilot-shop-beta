@@ -442,15 +442,20 @@ const FICHES = [
     validite: 'Traçabilité dans le registre nettoyage.'
   },
   {
-    id: 'f03', cat: 'Produit', titre: 'Chantilly : montage et conservation', icone: '🥛', duree: '5 min',
-    resume: 'Durée de vie 48 h après ouverture, sans exception.',
+    /* Recette donnée par la boutique (19/11) : 1 L de crème + un pot de sucre
+       glace à ras, mélangés. Les règles de conservation de l'ancienne fiche
+       (0 à +4 °C, 48 h, pas de reste mêlé à du neuf) sont gardées. */
+    id: 'f03', cat: 'Produit', titre: 'Chantilly : recette et conservation', icone: '🥛', duree: '5 min',
+    resume: '1 litre de crème pour un pot de sucre glace à ras. Durée de vie 48 h.',
     etapes: [
-      'Vérifier la température de la machine, entre 0 et +4 °C.',
-      'Verser la crème froide, ne jamais mélanger un reste avec une brique neuve.',
-      'Noter la date et l’heure d’ouverture sur l’étiquette.',
-      'Saisir le lot dans l’application au moment du remplissage.'
+      'Prendre 1 L de crème liquide bien froide, sortie du frigo au dernier moment.',
+      'Remplir un pot de sucre glace à ras, sans tasser.',
+      'Verser la crème et le sucre glace dans un récipient propre, mélanger au fouet jusqu’à ce que le sucre soit dissous.',
+      'Vérifier la température de la machine à chantilly, entre 0 et +4 °C.',
+      'Verser le mélange dans la cuve vide et propre : ne jamais ajouter un reste à une préparation neuve.',
+      'Noter la date et l’heure de préparation sur l’étiquette, et saisir le lot de crème dans l’application.'
     ],
-    securite: 'Au-delà de 48 h, jeter et enregistrer la perte.',
+    securite: 'Au-delà de 48 h, jeter et enregistrer la perte. Allergène : lait.',
     validite: '48 heures'
   },
   {
@@ -504,24 +509,67 @@ const FICHES = [
     securite: 'Aucun retrait d’espèces sans le saisir. Une fois validé, seul le manager peut corriger le comptage.',
     validite: 'Chaque soir'
   },
-  /* Cafétéria : dosages et temps proposés par défaut, À VALIDER par la
-     boutique avant mise en service (aucune fiche fournisseur dans le dépôt).
-     Produits repris du catalogue du sec : capsules simple, double et déca,
-     thés en sachet, chocolat en poudre 220 g. Le matcha n'y figure pas : il
-     n'existe que comme ligne ajoutée par un manager (m_matcha_a17). */
+  /* Cafétéria : dosages et volumes proposés par défaut, À VALIDER par la
+     boutique (seule la recette du chocolat chaud a été donnée : 1 L de lait
+     + un sachet de 220 g). Produits repris du catalogue du sec : capsules
+     simple, double et déca, thés en sachet, chocolat en poudre 220 g. Le
+     matcha n'y figure pas : il n'existe que comme ligne ajoutée par un
+     manager (m_matcha_a17). Une fiche par boisson, pour qu'on la suive
+     pas à pas au comptoir. */
   {
-    id: 'f07', cat: 'Cafétéria', titre: 'Cafétéria : préparer les boissons chaudes', icone: '☕', duree: '2 min',
-    resume: 'Expresso, déca, thé et matcha : une boisson se prépare à la commande.',
+    id: 'f07', cat: 'Cafétéria', titre: 'Expresso, double, déca et allongé', icone: '☕', duree: '1 min',
+    resume: 'Une capsule par café, préparé à la commande.',
     etapes: [
-      'À l’ouverture, allumer la machine à capsules et faire couler un premier cycle à vide pour la chauffer.',
-      'Expresso : 1 capsule simple, gobelet expresso, touche courte (environ 40 ml).',
-      'Double expresso : 1 capsule double, gobelet petit (environ 80 ml).',
-      'Déca : 1 capsule déca, même geste que l’expresso.',
-      'Thé : 1 sachet dans le gobelet, eau chaude non bouillante. Infuser 3 min pour le thé vert, 4 min pour les thés noirs et le rooibos, puis retirer le sachet.',
-      'Matcha : 2 g de poudre (1 cuillère doseuse), un fond d’eau chaude à 80 °C, fouetter jusqu’à ne plus voir de grumeaux, puis compléter de lait chaud ou d’eau.',
-      'Servir avec une bûchette de sucre et une serviette ; bague et couvercle sur les gobelets qui en ont, pour emporter.'
+      'À l’ouverture, allumer la machine et faire couler un cycle à vide pour la chauffer.',
+      'Poser le gobelet sous la tête : expresso pour un simple ou un déca, petit pour un double ou un allongé.',
+      'Insérer la capsule : simple pour l’expresso et l’allongé, double pour le double, déca pour le déca.',
+      'Lancer la touche courte (environ 40 ml) ; pour un double, environ 80 ml.',
+      'Allongé : compléter avec de l’eau chaude jusqu’à environ 120 ml.',
+      'Éjecter la capsule, servir avec une bûchette de sucre et une serviette.'
     ],
-    securite: 'Gobelet brûlant : le tenir par la bague. Allergène lait pour toute boisson au lait. Vider le bac à capsules et l’égouttoir chaque soir.',
+    securite: 'Gobelet brûlant : le tenir par la bague. Vider le bac à capsules et l’égouttoir chaque soir.',
+    validite: 'À la commande, jamais à l’avance.'
+  },
+  {
+    id: 'f09', cat: 'Cafétéria', titre: 'Cappuccino', icone: '☕', duree: '2 min',
+    resume: 'Un tiers de café, deux tiers de lait mousseux.',
+    etapes: [
+      'Verser environ 120 ml de lait froid dans le pichet propre.',
+      'Faire mousser le lait jusqu’à une mousse fine et brillante, sans le faire bouillir.',
+      'Couler un expresso (1 capsule simple) dans le gobelet moyen.',
+      'Verser le lait sur le café en retenant la mousse, puis finir par la mousse sur le dessus.',
+      'Saupoudrer de cacao si le client le souhaite.',
+      'Rincer et essuyer aussitôt le mousseur ou la buse vapeur.'
+    ],
+    securite: 'Allergène : lait. Ne jamais remousser un lait déjà chauffé.',
+    validite: 'À la commande, jamais à l’avance.'
+  },
+  {
+    id: 'f10', cat: 'Cafétéria', titre: 'Café latte', icone: '☕', duree: '2 min',
+    resume: 'Plus de lait que le cappuccino, une fine couche de mousse.',
+    etapes: [
+      'Verser environ 200 ml de lait froid dans le pichet propre.',
+      'Chauffer le lait avec peu de mousse, sans le faire bouillir.',
+      'Couler un expresso (1 capsule simple) dans le grand gobelet.',
+      'Verser le lait chaud sur le café, puis une fine couche de mousse.',
+      'Sirop ou topping sur demande, à ajouter avant le lait.',
+      'Rincer et essuyer aussitôt le mousseur ou la buse vapeur.'
+    ],
+    securite: 'Allergène : lait. Ne jamais remousser un lait déjà chauffé.',
+    validite: 'À la commande, jamais à l’avance.'
+  },
+  {
+    id: 'f11', cat: 'Cafétéria', titre: 'Thé et matcha latte', icone: '🍵', duree: '4 min',
+    resume: 'Un sachet par thé ; 2 g de poudre par matcha.',
+    etapes: [
+      'Thé : poser 1 sachet dans le gobelet et verser l’eau chaude, non bouillante.',
+      'Infuser 3 min pour le thé vert, 4 min pour les thés noirs et le rooibos, puis retirer le sachet.',
+      'Matcha : mettre 2 g de poudre (1 cuillère doseuse) dans le gobelet.',
+      'Ajouter un fond d’eau à 80 °C et fouetter jusqu’à ne plus voir de grumeaux.',
+      'Compléter avec environ 200 ml de lait chauffé et légèrement moussé.',
+      'Servir avec une bûchette de sucre et une serviette.'
+    ],
+    securite: 'Gobelet brûlant : le tenir par la bague. Allergène lait pour le matcha latte.',
     validite: 'À la commande, jamais à l’avance.'
   },
   {
