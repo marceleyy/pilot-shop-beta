@@ -1515,12 +1515,18 @@ V.stock = async function () {
 
   /* Deux onglets, comme l'inventaire. On mémorise le dernier ouvert. */
   let partie = ['sec', 'commander'].indexOf(STATE.stockPartie) >= 0 ? STATE.stockPartie : 'froid';
+  let rech = '';
   /* Articles au minimum ou en dessous (même calcul que la tour de contrôle). */
   let aCommander = [];
   try { aCommander = articlesSousSeuil(seuils, articles, secAttendu ? secAttendu.lignes : (sec && sec.lignes) || {}); } catch (e) {}
   /* Plus rien à commander : l'onglet disparaît, on revient à la chambre froide. */
   if (partie === 'commander' && !aCommander.length) partie = STATE.stockPartie = 'froid';
 
+  /* Recherche : texte sans accents ni majuscules, posé sur chaque ligne
+     (data-q). Le filtre cache les lignes au clavier, sans redessiner. */
+  const nrmQ = x => String(x || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .replace(/\u0153/g, 'oe').replace(/\u00e6/g, 'ae');
+  const dq = (...x) => ' data-q="' + esc(nrmQ(x.filter(Boolean).join(' '))) + '"';
   const estSec = articleEstSec;
   /* Chambre froide : tout ce qui n'est pas marqué « sec ». */
   const clesFroid = Object.keys(articles)
@@ -1583,7 +1589,7 @@ V.stock = async function () {
                   const n = tailles.reduce((s, c) => s + num(articles[c]), 0);
                   const negatif = tailles.some(c => num(articles[c]) < 0);
                   const min = num(seuils['glace|' + p]);
-                  return carte('<div class="rang"><div style="flex:1;min-width:0"><b>' + esc(p) + '</b>' +
+                  return carte('<div class="rang"' + dq(p, fam && fam.libelle) + '><div style="flex:1;min-width:0"><b>' + esc(p) + '</b>' +
                     '<div class="mini tailles">' + (tailles.length ? tailles.map(c => { const q = num(articles[c]);
                       return '<span class="tq' + (q < 0 ? ' neg' : '') + '"><b>' + q + '</b>×' + esc(litArticle(c).taille) + ' L</span>';
                     }).join('') : 'aucun bac') + '</div>' + ligneMin(n, min, accord(min, 'bac')) + '</div>' +
@@ -1591,7 +1597,7 @@ V.stock = async function () {
                 }).join('');
               })()
             : parFamille[fid].map(c => { const a = litArticle(c), q = num(articles[c]), min = num(seuils[c]);
-                return carte('<div class="rang"><div style="flex:1;min-width:0"><b>' +
+                return carte('<div class="rang"' + dq(a.parfum, fam ? fam.libelle : fid) + '><div style="flex:1;min-width:0"><b>' +
                   esc(a.parfum || (fam ? fam.libelle : fid)) + '</b>' +
                   (fam ? '<div class="mini">En ' + esc(fam.unites) + '</div>' : '') + ligneMin(q, min, fam ? (min > 1 ? fam.unites : fam.unite) : '') + '</div>' +
                   '<b class="num" style="font-size:20px">' + q + '</b></div>', q < 0 ? 'corail' : min > 0 && q <= min ? 'ambre' : '');
@@ -1619,7 +1625,7 @@ V.stock = async function () {
       '</b> au minimum ou en dessous, du plus urgent au moins urgent.</p>', 'solide') +
       groupes.map(g => '<div class="entete"><h3>' + esc(g[0]) + '</h3>' +
         '<span class="pousse mini num">' + g[1].length + '</span></div>' +
-        '<div class="stack">' + g[1].map(x => carte('<div class="rang"><div style="flex:1;min-width:0"><b>' + esc(x.nom) + '</b>' +
+        '<div class="stack">' + g[1].map(x => carte('<div class="rang"' + dq(x.nom, g[0]) + '><div style="flex:1;min-width:0"><b>' + esc(x.nom) + '</b>' +
           '<div class="mini">Minimum ' + nSeuil(x.min) + ' ' + esc(x.partie === 'froid' && x.cle.indexOf('glace|') ? x.unite : accord(x.min, x.unite)) + '</div></div>' +
           '<b class="num" style="font-size:20px">' + nSeuil(x.q) + '</b>' +
           '<span class="mini" style="margin-left:6px">/ ' + nSeuil(x.min) + '</span></div>',
@@ -1708,7 +1714,7 @@ V.stock = async function () {
               ? lignes.filter(x => minDe(x.v) > 0 && x.q <= minDe(x.v))
               : (minDe('') > 0 && total <= minDe('') ? [{ v: '', q: total }] : []);
             const aMin = minDe('') > 0 || lignes.some(x => minDe(x.v) > 0);
-            return carte('<div class="rang"><div style="flex:1;min-width:0"><b>' + esc(r.nom) + '</b>' +
+            return carte('<div class="rang"' + dq(r.nom, r.id, (r.variantes || []).join(' '), lignes.map(x => x.v).join(' '), s.id) + '><div style="flex:1;min-width:0"><b>' + esc(r.nom) + '</b>' +
               (suivi ? '<div class="mini">Suivi en direct : comptage moins ouvertures</div>' : '') +
               (r.variantes && r.variantes.length
                 ? (sous.length ? '<div class="mini" style="color:var(--corail-d)"><b>À commander : ' +
@@ -1736,11 +1742,50 @@ V.stock = async function () {
         .map(x => '<button class="' + (x[0] === partie ? 'on' : '') + '" data-partie="' + x[0] + '">' +
           '<span class="tsl">' + x[1] + '</span><small>' + x[2] + '</small></button>').join('') +
       '</div>' +
-      (partie === 'commander' ? blocCommander() : partie === 'froid' ? blocFroid() : blocSec());
+      '<input type="search" id="st-rech" placeholder="Chercher un produit" autocomplete="off" aria-label="Chercher un produit" value="' + esc(rech) + '">' +
+      '<div id="st-corps">' + (partie === 'commander' ? blocCommander() : partie === 'froid' ? blocFroid() : blocSec()) + '</div>';
 
     $$('[data-partie]').forEach(b => b.onclick = () => {
+      const garde = rech.trim() !== '';
       partie = b.dataset.partie; STATE.stockPartie = partie; dessiner();
+      /* Une recherche en cours : le champ garde la main (clavier ouvert). */
+      const z = $('#st-rech'); if (garde && z) { z.focus(); z.setSelectionRange(z.value.length, z.value.length); }
     });
+    /* Filtre : une ligne reste si sa recherche contient le texte tapé ; un
+       groupe (famille, rayon) sans ligne visible disparaît avec son titre.
+       Le texte tapé suit d'un onglet à l'autre. */
+    const visible = r => { const c = r.closest('.card'); return !c || c.style.display !== 'none'; };
+    const filtrer = () => {
+      const q = nrmQ(rech.trim());
+      $$('#st-corps [data-q]').forEach(r => {
+        const c = r.closest('.card'); if (c) c.style.display = !q || r.dataset.q.indexOf(q) >= 0 ? '' : 'none';
+      });
+      $$('#st-corps .stack').forEach(st => {
+        const lignes = $$('[data-q]', st);
+        if (!lignes.length) return;
+        const voit = !q || lignes.some(visible);
+        st.style.display = voit ? '' : 'none';
+        const tete = st.previousElementSibling;
+        if (tete && tete.classList.contains('entete')) tete.style.display = voit ? '' : 'none';
+        const bloc = st.closest('.sec-bloc'); if (bloc) bloc.style.display = voit ? '' : 'none';
+      });
+      /* Pendant une recherche, les résumés (chiffres, bandeaux, bouton
+         d'inventaire) s'effacent : les lignes trouvées remontent sous le champ. */
+      $$('#st-corps > .card.solide, #st-corps > .alerte, #st-inv, #st-inv-sec').forEach(x => { x.style.display = q ? 'none' : ''; });
+      let rien = $('#st-rien');
+      const aucun = q && !$$('#st-corps [data-q]').some(visible);
+      if (aucun && !rien) {
+        rien = document.createElement('p');
+        rien.id = 'st-rien'; rien.className = 'rappel'; rien.style.marginTop = '14px';
+        $('#st-corps').appendChild(rien);
+      }
+      if (rien) {
+        rien.hidden = !aucun;
+        rien.textContent = 'Aucun produit ne correspond à « ' + rech.trim() + ' » dans cet onglet.';
+      }
+    };
+    $('#st-rech').oninput = e => { rech = e.target.value; filtrer(); };
+    filtrer();
     const bi = $('#st-inv');
     if (bi) bi.onclick = () => { STATE.inventairePartie = 'froid'; rendre('inventaire'); };
     $$('[data-verif]').forEach(b => b.onclick = () => verifierInventaire(b.dataset.verif));
