@@ -1472,7 +1472,7 @@ function articlesSousSeuil(seuils, articles, secLignes) {
       const q = qteSec(k, articles, secLignes);
       const r = catalogueSec().filter(x => typeof x === 'object' && x.id === p[1])[0];
       if (q <= min) out.push({ cle: k, nom: libelleSec(k), q: q, min: min, unite: (r && r.unite) || 'unité', partie: 'sec',
-        sec: (r && r.sec) || 'Autres' });
+        sec: (r && r.sec) || 'Autres', metro: estMetro(r) });
     } else {
       const it = froid.get(k);
       if (!it) return;
@@ -1514,12 +1514,30 @@ V.stock = async function () {
       ? '<button class="btn menthe sm" data-verif="' + p + '">Vérifier</button>' : '') + '</div>';
 
   /* Deux onglets, comme l'inventaire. On mémorise le dernier ouvert. */
-  let partie = ['sec', 'commander'].indexOf(STATE.stockPartie) >= 0 ? STATE.stockPartie : 'froid';
-  /* Articles au minimum ou en dessous (même calcul que la tour de contrôle). */
+  let partie = ['sec', 'commander', 'metro'].indexOf(STATE.stockPartie) >= 0 ? STATE.stockPartie : 'froid';
+  /* Articles au minimum ou en dessous (même calcul que la tour de contrôle).
+     Ceux achetés chez Métro ont leur propre onglet. */
+  const lignesSec = secAttendu ? secAttendu.lignes : (sec && sec.lignes) || {};
   let aCommander = [];
-  try { aCommander = articlesSousSeuil(seuils, articles, secAttendu ? secAttendu.lignes : (sec && sec.lignes) || {}); } catch (e) {}
+  try { aCommander = articlesSousSeuil(seuils, articles, lignesSec).filter(x => !x.metro); } catch (e) {}
   /* Plus rien à commander : l'onglet disparaît, on revient à la chambre froide. */
   if (partie === 'commander' && !aCommander.length) partie = STATE.stockPartie = 'froid';
+
+  /* Liste Métro : chaque ligne (déclinaison) des références marquées Métro
+     dans le catalogue, avec son stock et son minimum. */
+  const listeMetro = [];
+  catalogueSec().filter(r => !r.masque && estMetro(r)).forEach(r => {
+    ((r.variantes && r.variantes.length) ? r.variantes : ['']).forEach(v => {
+      const k = 'sec|' + r.id + '|' + v;
+      let q = 0;
+      try { q = qteSec(k, articles, lignesSec); } catch (e) {}
+      const min = num(seuils[k]);
+      listeMetro.push({ cle: k, nom: v ? r.nom + ' · ' + v : r.nom, q: q, min: min, unite: r.unite || 'unité',
+        sec: r.sec || 'Autres', aAcheter: min > 0 && q <= min });
+    });
+  });
+  const aAcheter = listeMetro.filter(x => x.aAcheter).sort((a, b) => (a.q / a.min) - (b.q / b.min));
+  if (partie === 'metro' && !listeMetro.length) partie = STATE.stockPartie = 'froid';
 
   const estSec = articleEstSec;
   /* Chambre froide : tout ce qui n'est pas marqué « sec ». */
@@ -1624,6 +1642,25 @@ V.stock = async function () {
           '<b class="num" style="font-size:20px">' + nSeuil(x.q) + '</b>' +
           '<span class="mini" style="margin-left:6px">/ ' + nSeuil(x.min) + '</span></div>',
           x.q <= 0 ? 'corail' : 'ambre')).join('') + '</div>').join('');
+  };
+
+  /* ---------- Commande Métro : ce qu'il faut acheter en magasin ----------
+     Même règle que « À commander » (au minimum ou en dessous), limitée aux
+     références marquées Métro dans Réglages › Catalogue. Le reste de la liste
+     suit, pour vérifier sur place. */
+  const blocMetro = () => {
+    const rang = (x, teinte) => carte('<div class="rang"><div style="flex:1;min-width:0"><b>' + esc(x.nom) + '</b>' +
+      '<div class="mini">' + esc(x.sec) + (x.min > 0 ? ' · minimum ' + nSeuil(x.min) + ' ' + esc(accord(x.min, x.unite)) : ' · pas de minimum') +
+      '</div></div><b class="num" style="font-size:20px">' + nSeuil(x.q) + '</b>' +
+      (x.min > 0 ? '<span class="mini" style="margin-left:6px">/ ' + nSeuil(x.min) + '</span>' : ''), teinte);
+    const reste = listeMetro.filter(x => !x.aAcheter).sort((a, b) => a.nom.localeCompare(b.nom));
+    return carte('<p class="cs">' + (aAcheter.length
+        ? '<b>' + aAcheter.length + ' ' + accord(aAcheter.length, 'article', 'articles') + ' à acheter chez Métro</b>, du plus urgent au moins urgent.'
+        : 'Rien à acheter chez Métro : tout est au-dessus de son minimum.') + '</p>', 'solide') +
+      (aAcheter.length ? '<div class="entete"><h3>À acheter</h3><span class="pousse mini num">' + aAcheter.length + '</span></div>' +
+        '<div class="stack">' + aAcheter.map(x => rang(x, x.q <= 0 ? 'corail' : 'ambre')).join('') + '</div>' : '') +
+      (reste.length ? '<div class="entete"><h3>Reste de la liste Métro</h3><span class="pousse mini num">' + reste.length + '</span></div>' +
+        '<div class="stack">' + reste.map(x => rang(x, '')).join('') + '</div>' : '');
   };
 
   /* ---------- Sec ---------- */
@@ -1733,10 +1770,11 @@ V.stock = async function () {
       '<div class="tseg">' +
       [['froid', 'Chambre froide', t.bacs + ' ' + accord(t.bacs, 'bac')], ['sec', 'Sec', sec ? Object.keys(sec.lignes || {}).length + ' réf.' : 'jamais compté']]
         .concat(aCommander.length ? [['commander', 'À commander', aCommander.length + ' ' + accord(aCommander.length, 'article', 'articles')]] : [])
+        .concat(listeMetro.length ? [['metro', 'Commande Métro', aAcheter.length ? aAcheter.length + ' à acheter' : 'rien à acheter']] : [])
         .map(x => '<button class="' + (x[0] === partie ? 'on' : '') + '" data-partie="' + x[0] + '">' +
           '<span class="tsl">' + x[1] + '</span><small>' + x[2] + '</small></button>').join('') +
       '</div>' +
-      (partie === 'commander' ? blocCommander() : partie === 'froid' ? blocFroid() : blocSec());
+      (partie === 'commander' ? blocCommander() : partie === 'metro' ? blocMetro() : partie === 'froid' ? blocFroid() : blocSec());
 
     $$('[data-partie]').forEach(b => b.onclick = () => {
       partie = b.dataset.partie; STATE.stockPartie = partie; dessiner();
@@ -1834,7 +1872,7 @@ V.controle = async function () {
             : apresReceptions && apresReceptions.parentNode === page ? apresReceptions : page.firstChild;
           page.insertBefore(bm, ancre ? ancre.nextSibling : null);
           bm.querySelector('[data-voirseuil]').onclick = () => {
-            STATE.stockPartie = 'commander'; rendre('stock'); };
+            STATE.stockPartie = sous.some(x => !x.metro) ? 'commander' : 'metro'; rendre('stock'); };
         }
       }
     } catch (e) {}
@@ -2013,9 +2051,16 @@ async function chargerCatalogueSec() {
     /* Garde-fou (la fiche l'empêche) : tout retiré = référence retirée. */
     if (!x.variantes.length) { x.variantes = vs; x.masque = true; }
   });
+  /* Fournisseur par référence : { id: 'metro' }. Absent = Amorino. Gardé à
+     part de « modifs », que ✎ réécrit en entier. */
+  const fo = (m.fournisseurs && typeof m.fournisseurs === 'object') ? m.fournisseurs : {};
+  out.forEach(x => { if (fo[x.id]) x.fournisseur = fo[x.id]; });
   _catalogueSec = out;
   return out;
 }
+
+/* Référence achetée chez Métro (et non commandée à Amorino). */
+const estMetro = r => !!r && r.fournisseur === 'metro';
 
 async function enregistrerCatalogueSec(m) {
   await DB.set('catalogue:sec', m);
@@ -2352,13 +2397,15 @@ V.catalogue = async function () {
      automatique de la vue. Annuler ou Enregistrer les vident. */
   const brouillon = STATE.catalogueBrouillon =
     STATE.catalogueBrouillon || { prix:{}, min:{}, actif:{} };
+  brouillon.metro = brouillon.metro || {};
   const noms = {};
   const nbBrouillon = () => Object.keys(brouillon.prix).length +
-    Object.keys(brouillon.min).length + Object.keys(brouillon.actif).length;
+    Object.keys(brouillon.min).length + Object.keys(brouillon.actif).length + Object.keys(brouillon.metro).length;
   /* Point décimal (2.5), comme la fiche : l'export le lit tel quel. */
   const prixInit = cp => { const p = corrige(cp) ? num(_prixAchat[cp]) : prixAchatDefaut(cp); return p > 0 ? String(p) : ''; };
   const minInit = k => num(seuils[k]) > 0 ? String(num(seuils[k])) : '';
   const actifInit = cr => !_froidRetires.has(cr);
+  const metroInit = id => estMetro(cat.filter(r => r.id === id)[0]);
   const val = (o, k, init) => o[k] !== undefined ? o[k] : init(k);
   const nrm = x => String(x || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
 
@@ -2405,7 +2452,9 @@ V.catalogue = async function () {
       '<b' + (r.masque ? ' style="text-decoration:line-through;opacity:.5"' : '') + '>' + esc(r.nom) + '</b>' +
       '<div class="mini">' + esc(r.unite) + (r.decimal === false ? ' · entiers' : ' · demi possible') +
       (nbRet ? ' · ' + nbRet + ' ' + accord(nbRet, 'déclinaison retirée', 'déclinaisons retirées') : '') +
-      (r.masque ? ' · retirée du catalogue' : '') + '</div></div>' +
+      (r.masque ? ' · retirée du catalogue' : '') + '</div>' +
+      (r.masque ? '' : '<label class="mini cat-metro"><input type="checkbox" data-metro="' + esc(r.id) + '"' +
+        (val(brouillon.metro, r.id, metroInit) ? ' checked' : '') + '> Acheté chez Métro</label>') + '</div>' +
       '<div class="duo compact">' +
       (avecDecl ? '<button class="btn clair" data-fiche="' + esc(r.id) + '" aria-label="Déclinaisons actives ou retirées" title="Déclinaisons actives ou retirées">☰</button>' : '') +
       '<button class="btn clair" data-edit="' + esc(r.id) + '" aria-label="Modifier" title="Nom, unité, déclinaisons">✎</button>' +
@@ -2490,6 +2539,11 @@ V.catalogue = async function () {
       i.closest('.cat-ligne').classList.toggle('off', !i.checked);
       majBarre();
     });
+    $$('[data-metro]').forEach(i => i.onchange = () => {
+      const k = i.dataset.metro;
+      if (i.checked === metroInit(k)) delete brouillon.metro[k]; else brouillon.metro[k] = i.checked;
+      majBarre();
+    });
     $('#ct-rech').oninput = e => {
       const q = nrm(e.target.value.trim());
       $$('#ct-corps [data-q]').forEach(r => { r.style.display = !q || r.dataset.q.indexOf(q) >= 0 ? '' : 'none'; });
@@ -2498,7 +2552,7 @@ V.catalogue = async function () {
       });
     };
     $('#ct-annul').onclick = () => {
-      brouillon.prix = {}; brouillon.min = {}; brouillon.actif = {};
+      brouillon.prix = {}; brouillon.min = {}; brouillon.actif = {}; brouillon.metro = {};
       enCours = false;
       dessiner();
     };
@@ -2534,6 +2588,7 @@ V.catalogue = async function () {
       if (mv !== (num(seuils[k]) > 0 ? num(seuils[k]) : 0)) mins[k] = mv;
     }
     const actifs = Object.assign({}, brouillon.actif);
+    const metros = Object.assign({}, brouillon.metro);
     if (Object.keys(actifs).length && !PARFUMS.some(p => val(actifs, 'glace|' + p, actifInit))) {
       return toast('Gardez au moins un parfum de glace actif', 'erreur');
     }
@@ -2556,6 +2611,16 @@ V.catalogue = async function () {
         seuils = frais;
         brouillon.min = {};
       }
+      if (Object.keys(metros).length) {
+        /* Relu juste avant, comme le froid : les autres réglages du sec restent. */
+        const ms = (await DB.get('catalogue:sec', null)) || { masques:[], modifs:{}, ajouts:[] };
+        const fo = Object.assign({}, ms.fournisseurs || {});
+        Object.keys(metros).forEach(id => { if (metros[id]) fo[id] = 'metro'; else delete fo[id]; });
+        ms.fournisseurs = fo;
+        await enregistrerCatalogueSec(ms);
+        cat.forEach(r => { if (metros[r.id] !== undefined) r.fournisseur = metros[r.id] ? 'metro' : ''; });
+        brouillon.metro = {};
+      }
       if (Object.keys(prix).length) await enregistrerPrixAchat(prix);
       brouillon.prix = {};
     } catch (e) {
@@ -2564,12 +2629,12 @@ V.catalogue = async function () {
       dessiner();
       return toast('Enregistrement incomplet, réessayez', 'erreur');
     }
-    const n = Object.keys(actifs).length + Object.keys(mins).length + Object.keys(prix).length;
+    const n = Object.keys(actifs).length + Object.keys(mins).length + Object.keys(prix).length + Object.keys(metros).length;
     if (n) {
       try {
         await feed('ok', STATE.user.prenom + ' a mis à jour le catalogue (' +
           [Object.keys(prix).length ? 'prix' : '', Object.keys(mins).length ? 'minimums' : '',
-           Object.keys(actifs).length ? 'produits actifs' : ''].filter(Boolean).join(', ') + ')');
+           Object.keys(actifs).length ? 'produits actifs' : '', Object.keys(metros).length ? 'liste Métro' : ''].filter(Boolean).join(', ') + ')');
       } catch (e) { /* le journal n'empêche pas l'enregistrement */ }
     }
     toast(n ? 'Catalogue enregistré' : 'Rien n’a changé');
