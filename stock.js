@@ -1753,6 +1753,188 @@ V.stock = async function () {
 };
 
 /* -----------------------------------------------------------------------------
+   CONSOMMATION, COUVERTURE DU STOCK ET ACHATS (tour de contrôle, manager)
+   • Consommation : bacs de glace ouverts (traçabilité), en litres, par
+     semaine (lundi → dimanche) ou par mois.
+   • Couverture du stock : stock de glace de la chambre froide divisé par la
+     consommation moyenne d'un jour d'ouverture sur les 28 derniers jours.
+     Les jours de fermeture (réglages) ne comptent pas dans la moyenne.
+   • Achats du mois : livraisons confirmées (chambre froide et sec) au prix
+     d'achat du catalogue. Sans frais de port : c'est la marchandise seule.
+   -------------------------------------------------------------------------- */
+const CONSO = { semaines: 8, mois: 6, fenetreJours: 28,
+  moisCourts: ['janv.', 'févr.', 'mars', 'avr.', 'mai', 'juin', 'juil.', 'août', 'sept.', 'oct.', 'nov.', 'déc.'] };
+
+function lundiDe(jour) {
+  const p = String(jour).split('-');
+  return addD(jour, 1 - (new Date(+p[0], +p[1] - 1, +p[2]).getDay() || 7));
+}
+
+/* Litres d'un bac de glace, 0 pour tout le reste (macarons, sec…). */
+function litresGlace(cle, q) {
+  const a = litArticle(cle);
+  return a.famille === 'glace' && num(a.taille) > 0 ? num(q) * num(a.taille) : 0;
+}
+
+async function donneesConso() {
+  const j = today();
+  const debutMois = j.slice(0, 8) + '01';
+  /* Six mois en arrière couvrent aussi les huit semaines. */
+  const depuis = monthKey(addD(debutMois, -31 * (CONSO.mois - 1))) + '-01';
+  await chargerPrixAchat().catch(() => {});
+  const [mouv, s, secMv] = await Promise.all([
+    tousMouvements(depuis), stockReel(), DB.get(CLE_SEC_MV, []).catch(() => [])]);
+
+  const parJour = {};                       // litres ouverts par jour
+  const achats = { mois: 0, moisPrec: 0, sansPrix: 0, livraisons: new Set() };
+  const moisPrec = monthKey(addD(debutMois, -1));
+  const compterAchat = (cle, q, jour, bl) => {
+    const m = monthKey(jour);
+    if (m !== monthKey(j) && m !== moisPrec) return;
+    const p = prixArticle(cle);
+    if (p === null) { if (m === monthKey(j)) achats.sansPrix++; return; }
+    if (m === monthKey(j)) { achats.mois += q * p; achats.livraisons.add(bl || jour); }
+    else achats.moisPrec += q * p;
+  };
+  mouv.forEach(x => {
+    const m = litMouvement(x);
+    if (!m.cle || !m.jour) return;
+    if (m.type === 'ouverture') {
+      const l = litresGlace(m.cle, m.qte);
+      if (l) parJour[m.jour] = (parJour[m.jour] || 0) + l;
+    } else if (m.type === 'reception') compterAchat(m.cle, m.qte, m.jour, x.b);
+  });
+  (secMv || []).forEach(m => {
+    if (!m || !m.cle || m.supprime || !m.at) return;
+    compterAchat(m.cle, num(m.q), isoOf(new Date(m.at)), m.bl);
+  });
+
+  /* Séries : la dernière barre est la période en cours. */
+  const semaines = [];
+  for (let i = CONSO.semaines - 1; i >= 0; i--) {
+    const lu = addD(lundiDe(j), -7 * i);
+    let v = 0;
+    for (let d = 0; d < 7; d++) v += parJour[addD(lu, d)] || 0;
+    semaines.push({ l: fmtDC(lu), titre: 'Semaine du ' + fmtDC(lu), v: v, encours: i === 0 });
+  }
+  const mois = [];
+  for (let i = CONSO.mois - 1; i >= 0; i--) {
+    const d = new Date(+debutMois.slice(0, 4), +debutMois.slice(5, 7) - 1 - i, 1);
+    const mk = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0');
+    let v = 0;
+    Object.keys(parJour).forEach(k => { if (monthKey(k) === mk) v += parJour[k]; });
+    mois.push({ l: CONSO.moisCourts[d.getMonth()], titre: MOIS[d.getMonth()] + ' ' + d.getFullYear(), v: v, encours: i === 0 });
+  }
+
+  /* Moyenne par jour d'ouverture, hier compris, aujourd'hui exclu (en cours). */
+  let litres = 0, ouverts = 0;
+  for (let i = 1; i <= CONSO.fenetreJours; i++) {
+    const d = addD(j, -i);
+    if (!jourOuvert(d)) continue;
+    ouverts++; litres += parJour[d] || 0;
+  }
+  const parJourMoy = ouverts ? litres / ouverts : 0;
+
+  /* Stock de glace fermé : chambre froide (un article négatif ne retire rien). */
+  let stockL = 0, stockBacs = 0;
+  Object.keys(s.articles || {}).forEach(c => {
+    const q = num(s.articles[c]);
+    if (q <= 0) return;
+    const l = litresGlace(c, q);
+    if (l) { stockL += l; stockBacs += q; }
+  });
+
+  return { semaines: semaines, mois: mois, parJourMoy: parJourMoy, ouverts: ouverts,
+           stockL: stockL, stockBacs: stockBacs, inventaire: !!s.inventaire,
+           achats: { mois: achats.mois, moisPrec: achats.moisPrec, sansPrix: achats.sansPrix,
+                     livraisons: achats.livraisons.size, nomMois: MOIS[+j.slice(5, 7) - 1],
+                     nomMoisPrec: MOIS[+moisPrec.slice(5, 7) - 1] } };
+}
+
+function nL(v) { return n1(v) + ' L'; }
+
+/* Barres en HTML pur : la barre en cours est hachurée, elle n'est pas finie. */
+function barresConso(serie) {
+  const max = Math.max(1, ...serie.map(x => x.v));
+  const resume = serie.map(x => x.titre + ' : ' + nL(x.v) + (x.encours ? ' (en cours)' : '')).join(', ');
+  return '<div role="img" aria-label="' + esc(resume) + '" style="display:flex;align-items:stretch;gap:6px;height:140px;margin-top:12px">' +
+    serie.map(x => {
+      const h = x.v > 0 ? Math.max(3, Math.round(x.v / max * 100)) : 0;
+      return '<div title="' + esc(x.titre + ' : ' + nL(x.v)) + '" style="flex:1;min-width:0;display:flex;flex-direction:column;align-items:center;gap:4px">' +
+        '<span class="mini" style="font-size:11px;white-space:nowrap">' + (x.v > 0 ? n1(x.v) : '') + '</span>' +
+        '<div style="flex:1;width:100%;display:flex;align-items:flex-end;justify-content:center">' +
+          '<div style="width:100%;max-width:36px;height:' + h + '%;border-radius:6px 6px 2px 2px;' +
+          (x.encours ? 'background:repeating-linear-gradient(135deg,var(--menthe-l) 0 5px,#fff 5px 9px);border:1.5px solid var(--menthe-d)'
+                     : 'background:var(--menthe-d)') + '"></div></div>' +
+        '<span class="mini" style="font-size:11px;white-space:nowrap">' + esc(x.l) + '</span></div>';
+    }).join('') + '</div>';
+}
+
+function texteCouverture(jours) {
+  if (jours >= 14) return '≈ ' + Math.round(jours / 7) + ' semaines';
+  const n = Math.max(0, Math.floor(jours));
+  return n + ' ' + accord(n, 'jour');
+}
+
+function htmlCarteConso(d, mode) {
+  const serie = mode === 'mois' ? d.mois : d.semaines;
+  const fini = serie[serie.length - 2], cours = serie[serie.length - 1];
+  const parPeriode = mode === 'mois' ? 'Mois dernier' : 'Semaine dernière';
+
+  let couv = '—', couvCls = '', couvD;
+  if (!d.inventaire) couvD = 'Inventaire de la chambre froide à faire';
+  else if (!(d.parJourMoy > 0)) couvD = 'Aucun bac ouvert sur 4 semaines';
+  else {
+    const jrs = d.stockL / d.parJourMoy;
+    couv = texteCouverture(jrs);
+    couvCls = jrs < 5 ? 'bad' : jrs < 10 ? 'warn' : 'ok';
+    couvD = nL(d.stockL) + ' en stock ÷ ' + nL(d.parJourMoy) + ' par jour d’ouverture';
+  }
+
+  const a = d.achats;
+  const achatsD = (a.livraisons ? a.livraisons + ' ' + accord(a.livraisons, 'livraison') : 'Aucune livraison') +
+    (a.sansPrix ? ' · ' + a.sansPrix + ' ' + accord(a.sansPrix, 'ligne') + ' sans prix' : '') +
+    (a.moisPrec > 0 ? ' · ' + a.nomMoisPrec + ' : ' + eur(a.moisPrec) : '');
+
+  return carte('<div class="ch" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">' +
+      '<h2 style="flex:1;min-width:0">Consommation de glace</h2>' +
+      '<div style="display:flex;gap:6px">' +
+      [['semaine', 'Semaine'], ['mois', 'Mois']].map(x =>
+        '<button class="btn ' + (x[0] === mode ? '' : 'fantome ') + 'sm" data-consomode="' + x[0] + '"' +
+        (x[0] === mode ? ' aria-pressed="true"' : ' aria-pressed="false"') + '>' + x[1] + '</button>').join('') +
+      '</div></div>' +
+    '<div class="grid g3" style="margin-top:8px">' +
+      kpi(parPeriode, nL(fini.v), '', 'En cours : ' + nL(cours.v)) +
+      kpi('Couverture du stock', couv, couvCls, couvD) +
+      kpi('Achats de ' + a.nomMois, eur(a.mois) + ' HT', '', achatsD) +
+    '</div>' +
+    barresConso(serie) +
+    '<div class="mini" style="margin-top:8px">Bacs de glace ouverts (traçabilité). Achats : livraisons confirmées au prix du catalogue, hors frais de port.</div>',
+    'plat');
+}
+
+/* Dessine ou redessine la carte sous les alertes de stock de la tour de
+   contrôle. Le choix Semaine / Mois est gardé le temps de la session. */
+async function carteConsommation(page) {
+  let d;
+  try { d = await donneesConso(); } catch (e) { console.warn('Consommation indisponible', e); return; }
+  if (STATE.view !== 'controle' || page !== $('#page')) return;
+  const vieille = $('#conso-stock'); if (vieille) vieille.remove();
+  const bc = document.createElement('div');
+  bc.id = 'conso-stock';
+  bc.style.marginTop = '14px';
+  const dessiner = () => {
+    bc.innerHTML = htmlCarteConso(d, STATE.consoMode === 'mois' ? 'mois' : 'semaine');
+    bc.querySelectorAll('[data-consomode]').forEach(b => b.onclick = () => {
+      STATE.consoMode = b.dataset.consomode; dessiner();
+    });
+  };
+  dessiner();
+  const apres = [$('#sous-seuil'), $('#ctl-meteo')].filter(x => x && x.parentNode === page)[0];
+  page.insertBefore(bc, apres ? apres.nextSibling : page.firstChild);
+}
+
+/* -----------------------------------------------------------------------------
    ALERTES DE STOCK SUR LA TOUR DE CONTRÔLE
    Le manager n'ira pas consulter l'écran Stock tous les jours. Un article
    négatif depuis trois semaines fausse pourtant tout l'écart de période.
@@ -1838,6 +2020,10 @@ V.controle = async function () {
         }
       }
     } catch (e) {}
+
+    /* Consommation, couverture du stock et achats du mois. */
+    await carteConsommation(page);
+    if (STATE.view !== 'controle' || page !== $('#page')) return;
   }
 
   /* -----------------------------------------------------------------------------
