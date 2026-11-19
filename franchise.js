@@ -77,15 +77,17 @@ async function calculerIndicateurs() {
     let crit = 0, relevesManquants = 0;
     ENCEINTES.forEach(en => ['m', 's'].forEach(mo => { if (etatTemp(en, t[mo + '_' + en.id]) === 'crit') crit++; }));
     /* En retard : un jour d'ouverture passé, relevé non validé ou tâche non faite. */
-    const aSuivre = d < auj && d >= depart;
-    if (aSuivre && ouverts.indexOf(jourSemaineIso(d)) >= 0) {
+    /* Jour hors semaine d'ouverture ou dans une fermeture : rien n'est dû. */
+    const aSuivre = d < auj && d >= depart &&
+      (typeof jourOuvert === 'function' ? jourOuvert(d) : ouverts.indexOf(jourSemaineIso(d)) >= 0);
+    if (aSuivre) {
       const v = t.valide || {};
       /* Validé ET mesuré, comme pour l'état de la journée. */
       relevesManquants = (v.m && releveMesure(t, 'm') ? 0 : 1) + (v.s && releveMesure(t, 's') ? 0 : 1);
     }
     const litres = (Array.isArray(pertes) ? pertes : []).reduce((s, w) => s + litresJetes(w), 0);
     return { crit:crit, relevesManquants:relevesManquants,
-             tachesManquantes:net && net.total ? Math.max(0, net.total - net.faits) : 0, litres:litres };
+             tachesManquantes:aSuivre && net && net.total ? Math.max(0, net.total - net.faits) : 0, litres:litres };
   })());
 
   const somme = k => parJour.reduce((s, x) => s + x[k], 0);
