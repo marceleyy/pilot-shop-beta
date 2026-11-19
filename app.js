@@ -2239,7 +2239,10 @@ async function purgerLocalAncien() {
          '<button class="btn menthe bloc" id="pa" style="margin-top:18px">Enregistrer la perte</button>') +
    
        '<div class="entete"><h3>Jetés aujourd’hui</h3>' +
-       '<span class="pousse mini num">' + n1(visibles.reduce((s, w) => s + litresPerte(w), 0)) + ' L</span></div>' +
+       '<span class="pousse mini num">' + n1(visibles.reduce((s, w) => s + litresPerte(w), 0)) + ' L</span>' +
+       /* L'historique (Plus › Historique › Pertes) est réservé au manager. */
+       (vueAutorisee('histo')
+         ? '<button class="btn clair sm" id="ph" style="margin-left:10px">Historique</button>' : '') + '</div>' +
    
        (visibles.length ? '<div class="stack">' + visibles.map(w => {
          /* « inventaire » : bacs manquants repris à la confirmation d'un inventaire (stock.js). */
@@ -2253,6 +2256,8 @@ async function purgerLocalAncien() {
            '<button class="btn fantome sm" data-del="' + esc(w.id || ('@' + liste.indexOf(w))) + '">Retirer</button></div>');
        }).join('') + '</div>' : vide('🗑️', 'Aucune perte déclarée aujourd’hui.'));
    
+     if ($('#ph')) $('#ph').onclick = () => { V.histo._t = 'pertes'; rendre('histo'); };
+
      let motif = MOTIFS_PERTE[0].id;
      $$('#pm [data-m]').forEach(b => b.onclick = () => {
        $$('#pm .chip').forEach(x => x.classList.remove('on'));
@@ -5578,6 +5583,17 @@ function modifierPeriode(per) {
         (chambre froide, sec) : on les lit à part. Chaque ligne s'ouvre sur le
         comptage complet (voirInventaire, stock.js). */
      let cles = defs[onglet].p ? (await DB.list(defs[onglet].p)).reverse() : [];
+     /* Pertes : une ligne par produit jeté, sur une période choisie (7, 30,
+        90 jours ou tout). Avant, une ligne par jour sans le détail des produits. */
+     const perP = V.histo._pp || 'tout';
+     if (onglet === 'pertes') {
+       if (perP !== 'tout') {
+         const depuis = addD(today(), -(+perP - 1));
+         cles = cles.filter(c => c.slice(defs.pertes.p.length) >= depuis);
+       }
+       DB.prelire(cles);
+     }
+     const totPertes = { n:0, l:0, inv:0 };
      /* Nettoyage : l'écran écrit « hebdo:<jour> », l'ancien registre « clean:<jour> ».
         Ne lire que le second laissait l'onglet vide. */
      if (onglet === 'clean') {
@@ -5634,9 +5650,19 @@ function modifierPeriode(per) {
          lignes.push([fmtD(j), f + ' / ' + liste.length, r ? r + ' ' + accord(r, 'rupture') : 'Aucune', '—', r ? 'bad' : 'ok']);
        }
        else if (onglet === 'pertes') {
-         const vv = v.filter(w => w && !w.supprime);
-         if (!vv.length) continue;
-         lignes.push([fmtD(j), vv.length + ' ' + accord(vv.length, 'ligne'), n1(vv.reduce((s, w) => s + litresPerte(w), 0)) + ' L', vv[0].par || '—', 'warn']);
+         (Array.isArray(v) ? v : []).filter(w => w && !w.supprime).slice().reverse().forEach(w => {
+           /* « inventaire » : bacs manquants au comptage, repris à la
+              confirmation d'un inventaire (stock.js). Pas jetés : affichés à
+              part et hors du total, comme dans l'écart (litresJetes). */
+           const inv = w.motif === 'inventaire';
+           const m = inv ? { label:'Manquant inventaire' }
+                         : (MOTIFS_PERTE.filter(x => x.id === w.motif)[0] || { label:'—' });
+           const l = litresPerte(w);
+           if (!inv) { totPertes.n++; totPertes.l += litresJetes(w); }
+           else totPertes.inv += l;
+           lignes.push([fmtD(j) + ' · ' + (w.produit || 'produit ?'),
+                        (num(w.nombre) || 1) + ' ×' + (l ? ' · ' + n1(l) + ' L' : ''), m.label, w.par || '—', inv ? 'n' : 'warn']);
+         });
        }
        else if (onglet === 'pointage') {
          if (!v.length) continue;
@@ -5650,6 +5676,8 @@ function modifierPeriode(per) {
        }
      }
    
+     const entetes = onglet === 'pertes' ? ['Date · produit', 'Quantité', 'Motif', 'Par'] : ['Date', 'Volume', 'Résultat', 'Par'];
+
      /* L'historique ne montre que l'historique : le registre pour un contrôle
         sanitaire reste sur la Tour de contrôle, il faisait doublon ici. */
      $('#vue-actions').innerHTML = '<button class="btn clair sm" id="csv">CSV</button>';
@@ -5658,12 +5686,22 @@ function modifierPeriode(per) {
        '<div class="chips" style="margin-bottom:14px">' + Object.keys(defs).map(k =>
          '<button type="button" class="chip' + (onglet === k ? ' on' : '') + '" data-h="' + k + '">' +
          esc(defs[k].l) + '</button>').join('') + '</div>' +
+
+       (onglet === 'pertes'
+         ? '<div class="chips" id="hp" style="margin-bottom:10px">' +
+           [['7', '7 jours'], ['30', '30 jours'], ['90', '3 mois'], ['tout', 'Tout']].map(x =>
+             '<button type="button" class="chip' + (perP === x[0] ? ' on' : '') + '" data-pp="' + x[0] + '">' + x[1] + '</button>').join('') +
+           '</div><p class="mini">' + totPertes.n + ' ' + accord(totPertes.n, 'perte') + ' · ' + n1(totPertes.l) + ' L de glace jetés' +
+           (totPertes.l ? ' (≈ ' + eur(totPertes.l * FOURNISSEUR.poidsMoyenLitre * FOURNISSEUR.prixMoyenKg) + ')' : '') +
+           (totPertes.inv ? ' · ' + n1(totPertes.inv) + ' L manquants à l’inventaire, comptés à part' : '') + '</p>'
+         : '') +
    
        (onglet === 'inventaires' && lignes.length
          ? '<p class="mini" style="margin-top:14px">Touchez un inventaire pour voir tous ses produits.</p>' : '') +
        (lignes.length
          ? '<div class="dense" style="margin-top:14px"><div class="dense-h">' +
-           '<span class="c1">Date</span><span class="c w">Volume</span><span class="c w">Résultat</span><span class="c ww">Par</span></div>' +
+           '<span class="c1">' + entetes[0] + '</span><span class="c w">' + entetes[1] + '</span><span class="c w">' + entetes[2] +
+           '</span><span class="c ww">' + entetes[3] + '</span></div>' +
            '<div class="dense-scroll">' + lignes.map(l =>
              '<div class="dl"' + (l[5] !== undefined
                ? ' data-inv="' + l[5] + '" role="button" tabindex="0" style="cursor:pointer"' : '') +
@@ -5674,6 +5712,7 @@ function modifierPeriode(per) {
          : vide('📚', 'Aucun enregistrement pour ce registre.'));
    
      $$('[data-h]').forEach(b => b.onclick = () => { V.histo._t = b.dataset.h; rendre('histo'); });
+     $$('#hp [data-pp]').forEach(b => b.onclick = () => { V.histo._pp = b.dataset.pp; rendre('histo'); });
      $$('[data-inv]').forEach(r => {
        const ouvrir = () => {
          const x = invs[+r.dataset.inv];
@@ -5688,10 +5727,10 @@ function modifierPeriode(per) {
        const q = x => { x = String(x == null ? '' : x);
                         if (/^[=+\-@\t\r]/.test(x) && !/^-[\d\s\u00a0\u202f.,]+\s*€?$/.test(x)) x = "'" + x;
                         return '"' + x.replace(/"/g, '""') + '"'; };
-       const csv = ['Date;Volume;Resultat;Par'].concat(lignes.map(l => l.slice(0, 4).map(q).join(';'))).join('\n');
+       const csv = [entetes.map(q).join(';')].concat(lignes.map(l => l.slice(0, 4).map(q).join(';'))).join('\n');
        const a = document.createElement('a');
        a.href = URL.createObjectURL(new Blob(['\ufeff' + csv], { type:'text/csv;charset=utf-8' }));
-       a.download = 'pilot-shop-' + onglet + '-' + today() + '.csv';
+       a.download = 'pilot-shop-' + onglet + (onglet === 'pertes' && perP !== 'tout' ? '-' + perP + 'j' : '') + '-' + today() + '.csv';
        a.click();
        toast('Export CSV téléchargé');
      };

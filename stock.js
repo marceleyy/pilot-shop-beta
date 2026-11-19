@@ -2031,7 +2031,7 @@ async function enregistrerCatalogueSec(m) {
    Chaque inventaire enregistré garde les prix du jour (champ « prix ») :
    sa valeur ne change pas quand un prix change ensuite.
    Les prix ne s'affichent qu'au manager. Renommer une déclinaison lui fait
-   perdre son prix : il se ressaisit avec le bouton €.
+   perdre son prix : il se ressaisit dans Catalogue (onglet Sec).
    Clé de prix : « sec|id|déclinaison » pour le sec, « glace||3 » pour un bac
    (le prix dépend de la taille, pas du parfum), « famille|| » pour le reste
    de la chambre froide.
@@ -2115,39 +2115,6 @@ function lirePrix(txt) {
   if (!t) return 0;
   const v = Number(t);
   return (isFinite(v) && v >= 0) ? Math.round(v * 100) / 100 : NaN;
-}
-
-/* Fiche de prix : une ligne par clé. lignes = [{ cp, nom, unite }]. */
-function editerPrix(titre, lignes, apres) {
-  const val = cp => { const p = corrige(cp) ? num(_prixAchat[cp]) : prixAchatDefaut(cp); return p > 0 ? String(p).replace('.', ',') : ''; };
-  showSheet(
-    '<h2 id="sheet-titre">' + esc(titre) + '</h2>' +
-    '<p class="cs">Prix d’achat HT, par unité comptée à l’inventaire. Laissez vide pour ne pas valoriser. ' +
-    'Les prix ne s’affichent qu’au manager ; les inventaires déjà faits gardent leurs prix du jour.</p>' +
-    lignes.map((x, i) =>
-      '<div class="champ" style="margin-top:12px"><label class="f" for="px-' + i + '">' + esc(x.nom) +
-      (x.unite ? ' · € par ' + esc(x.unite) : '') + '</label>' +
-      '<input type="text" inputmode="decimal" id="px-' + i + '" value="' + esc(val(x.cp)) + '" placeholder="—"></div>').join('') +
-    '<div class="actions"><button class="btn clair" data-fermer>Annuler</button>' +
-    '<button class="btn menthe" id="px-ok">Enregistrer</button></div>');
-  let enCours = false;
-  $('#px-ok').onclick = async () => {
-    if (enCours) return;
-    const modifs = {};
-    for (let i = 0; i < lignes.length; i++) {
-      const v = lirePrix($('#px-' + i).value);
-      if (isNaN(v)) return toast('Prix illisible : ' + lignes[i].nom, 'erreur');
-      const d = prixAchatDefaut(lignes[i].cp);
-      /* Égal au prix du fichier : pas de correction à garder. */
-      modifs[lignes[i].cp] = (d !== null && v === d) || (d === null && v === 0) ? null : v;
-    }
-    enCours = true; $('#px-ok').disabled = true;
-    try { await enregistrerPrixAchat(modifs); }
-    catch (e) { enCours = false; $('#px-ok').disabled = false; return toast('Enregistrement impossible, réessayez', 'erreur'); }
-    await feed('ok', STATE.user.prenom + ' a modifié les prix : ' + titre);
-    closeSheet();
-    if (apres) apres();
-  };
 }
 
 /* Fiche d'une référence du sec : pour chaque déclinaison, active ou
@@ -2341,13 +2308,9 @@ async function ficheArticle(r, apres) {
   };
 }
 
-/* Fiche de la chambre froide : chaque parfum de glace et chaque saveur des
-   autres familles, actif ou retiré, et son stock minimum. Retirer cache de
-   l'inventaire, de la réception et des minimums sans effacer le stock. */
-async function ficheFroid(apres) {
-  let seuils;
-  try { seuils = await chargerSeuils(); await chargerCatalogueFroid(); }
-  catch (e) { return toast('Catalogue illisible, réessayez', 'erreur'); }
+/* Lignes du catalogue de la chambre froide : chaque parfum de glace et chaque
+   saveur des autres familles. cr = clé actif/retiré, cs = clé du minimum. */
+function lignesCatalogueFroid() {
   const lignes = PARFUMS.slice().sort((a, b) => a.localeCompare(b)).map(p =>
     ({ grp: 'Glaces (bacs, toutes tailles)', nom: p, cr: 'glace|' + p, cs: 'glace|' + p }));
   FAMILLES_PRODUIT.filter(f => f.id !== 'glace' && f.lieu !== 'sec' && f.stock !== 'sec').forEach(f => {
@@ -2355,79 +2318,15 @@ async function ficheFroid(apres) {
       lignes.push({ grp: f.libelle + ' (en ' + (f.unites || 'unités') + ')', nom: sv, cr: f.id + '|' + sv, cs: cleArticle(f.id, sv, '') }));
     else lignes.push({ grp: 'Autres (à l’unité)', nom: f.libelle + ' (en ' + (f.unites || 'unités') + ')', cr: f.id + '|', cs: cleArticle(f.id, '', '') });
   });
-  lignes.forEach(x => { x.actif = !_froidRetires.has(x.cr); x.min = num(seuils[x.cs]) > 0 ? num(seuils[x.cs]) : 0; });
-  let grp = null;
-  showSheet(
-    '<h2 id="sheet-titre">Catalogue · chambre froide</h2>' +
-    '<p class="cs">Décochez un parfum ou une saveur que la boutique ne prend plus : il disparaît de ' +
-    'l’inventaire, de la réception et des minimums. Le stock déjà compté reste. Minimum : arrivé à ce nombre, ' +
-    'l’article est « à commander ».</p>' +
-    '<input type="search" id="ff-rech" placeholder="Chercher" autocomplete="off" style="margin-top:10px">' +
-    '<div id="ff-liste" style="margin-top:6px">' + lignes.map((x, i) => {
-      const t = x.grp !== grp ? '<div class="entete" data-ffg="' + esc(x.grp) + '" style="margin-top:12px"><h3>' + esc(x.grp) + '</h3></div>' : '';
-      grp = x.grp;
-      return t + '<div class="rang" data-ffr="' + i + '" data-ffgr="' + esc(x.grp) + '" style="padding:6px 0">' +
-        '<label style="flex:1;min-width:0;display:flex;align-items:center;gap:8px"><input type="checkbox" data-ffa="' + i + '"' + (x.actif ? ' checked' : '') + '> ' + esc(x.nom) + '</label>' +
-        '<input type="number" min="0" step="any" inputmode="decimal" data-ffm="' + i + '" aria-label="Minimum ' + esc(x.nom) + '" placeholder="min" value="' + (x.min ? esc(String(x.min)) : '') + '" style="width:76px;text-align:center"></div>';
-    }).join('') + '</div>' +
-    '<div class="actions"><button class="btn clair" data-fermer>Annuler</button>' +
-    '<button class="btn menthe" id="ff-ok">Enregistrer</button></div>');
-  const nrm = x => String(x || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
-  $('#ff-rech').oninput = e => {
-    const q = nrm(e.target.value.trim());
-    const vus = new Set();
-    $$('[data-ffr]').forEach(r => {
-      const x = lignes[+r.dataset.ffr];
-      const ok = !q || nrm(x.nom).indexOf(q) >= 0 || nrm(x.grp).indexOf(q) >= 0;
-      r.style.display = ok ? '' : 'none';
-      if (ok) vus.add(x.grp);
-    });
-    $$('[data-ffg]').forEach(h => { h.style.display = vus.has(h.dataset.ffg) ? '' : 'none'; });
-  };
-  let enCours = false;
-  $('#ff-ok').onclick = async () => {
-    if (enCours) return;
-    const actifs = {}, mins = {};
-    for (let i = 0; i < lignes.length; i++) {
-      const x = lignes[i];
-      const a = !!$('[data-ffa="' + i + '"]').checked;
-      if (a !== x.actif) actifs[x.cr] = a;
-      const fm = $('[data-ffm="' + i + '"]');
-      if (fm.validity && fm.validity.badInput) return toast('Minimum illisible : ' + x.nom, 'erreur');
-      const mv = fm.value.trim() === '' ? 0 : Number(fm.value);
-      if (!(mv >= 0)) return toast('Minimum invalide : ' + x.nom, 'erreur');
-      if (mv !== x.min) mins[x.cs] = mv;
-    }
-    if (!lignes.some((x, i) => x.cr.indexOf('glace|') === 0 && $('[data-ffa="' + i + '"]').checked)) {
-      return toast('Gardez au moins un parfum de glace actif', 'erreur');
-    }
-    enCours = true; $('#ff-ok').disabled = true;
-    try {
-      if (Object.keys(actifs).length) {
-        /* Relu juste avant : un autre manager garde ses réglages. */
-        const m = (await DB.get('catalogue:froid', null)) || {};
-        const ret = new Set(Array.isArray(m.retires) ? m.retires : []);
-        Object.keys(actifs).forEach(k => { if (actifs[k]) ret.delete(k); else ret.add(k); });
-        m.retires = [...ret];
-        await DB.set('catalogue:froid', m);
-        _froidRetires = ret;
-      }
-      if (Object.keys(mins).length) {
-        const frais = await chargerSeuils();
-        Object.keys(mins).forEach(k => { if (mins[k] > 0) frais[k] = mins[k]; else delete frais[k]; });
-        await DB.set(CLE_SEUILS, frais);
-      }
-    } catch (e) { enCours = false; $('#ff-ok').disabled = false; return toast('Enregistrement impossible, réessayez', 'erreur'); }
-    const n = Object.keys(actifs).length + Object.keys(mins).length;
-    if (n) await feed('ok', STATE.user.prenom + ' a mis à jour le catalogue de la chambre froide');
-    closeSheet();
-    toast(n ? 'Catalogue enregistré' : 'Rien n’a changé');
-    if (apres) apres();
-  };
+  return lignes;
 }
 
 /* -----------------------------------------------------------------------------
    VUE — CATALOGUE (manager)
+   Deux onglets, comme le stock et l'inventaire : chambre froide et sec.
+   Prix et minimums se modifient en ligne ; une barre « Enregistrer » apparaît
+   dès la première saisie et enregistre tout d'un coup. Seul endroit où se
+   règlent les stocks minimum.
    -------------------------------------------------------------------------- */
 V.catalogue = async function () {
   if (!STATE.user || STATE.user.role !== 'manager') {
@@ -2435,75 +2334,253 @@ V.catalogue = async function () {
   }
   const m = (await DB.get('catalogue:sec', null)) || { masques:[], modifs:{}, ajouts:[] };
   m.masques = m.masques || []; m.modifs = m.modifs || {}; m.ajouts = m.ajouts || [];
-  await chargerCatalogueSec();
+  let seuils;
+  try { await chargerCatalogueSec(); await chargerCatalogueFroid(); seuils = await chargerSeuils(); }
+  catch (e) { $('#page').innerHTML = vide('', 'Catalogue illisible, réessayez.'); return; }
   const cat = catalogueSec();
+  const froid = lignesCatalogueFroid();
   const sections = (typeof SEC_SECTIONS !== 'undefined')
     ? SEC_SECTIONS.map(s => typeof s === 'string' ? { id:s } : s) : [];
   const UNITES = ['carton','ramette','pack','boîte','brique','flacon','pot','rouleau','sachet','unité'];
-
-  const declis = r => (r.variantes && r.variantes.length ? r.variantes : ['']);
-  /* « 26,47 €/carton », une fourchette, ou « sans prix ». */
-  const prixResume = r => {
-    const ps = declis(r).map(v => prixArticle('sec|' + r.id + '|' + v)).filter(p => p !== null);
-    if (!ps.length) return 'sans prix';
-    const lo = Math.min.apply(null, ps), hi = Math.max.apply(null, ps);
-    return (lo === hi ? eur(lo) : eur(lo) + ' à ' + eur(hi)) + '/' + esc(r.unite) +
-      (ps.length < declis(r).length ? ' (incomplet)' : '');
-  };
   const froidPrix = () => (FOURNISSEUR.taillesBac || TAILLES_BAC || []).map(t =>
       ({ cp: cleArticle('glace', '', t), nom: 'Bac de glace ' + t + ' L', unite: 'bac' }))
     .concat(FAMILLES_PRODUIT.filter(f => f.id !== 'glace' && f.lieu !== 'sec' && f.stock !== 'sec')
       .map(f => ({ cp: cleArticle(f.id, '', ''), nom: f.libelle, unite: f.unite })));
 
-  $('#vue-actions').innerHTML = '';
-  const nbRetFroid = _froidRetires.size;
-  $('#page').innerHTML =
-    carte('<div class="rang"><div style="flex:1;min-width:0"><b>Catalogue chambre froide</b>' +
-      '<div class="mini">' + parfumsActifs().length + ' parfums de glace actifs' +
-      (nbRetFroid ? ' · ' + nbRetFroid + ' ' + accord(nbRetFroid, 'article retiré', 'articles retirés') : '') +
-      ' · actif et stock minimum</div></div>' +
-      '<button class="btn clair sm" id="ct-froid">Gérer</button></div>') +
-    carte('<div class="rang"><div style="flex:1;min-width:0"><b>Prix chambre froide</b>' +
-      '<div class="mini">' + froidPrix().map(x => { const p = prixArticle(x.cp);
-        return esc(x.nom) + ' ' + (p !== null ? eur(p) : '—'); }).join(' · ') + '</div></div>' +
-      '<button class="btn clair sm" id="ct-prix-froid">Modifier</button></div>') +
-    carte('<h2>Catalogue du sec</h2>' +
-      '<div class="cs">Ce que l’inventaire et le réassort proposent. Retirez ce que ' +
-      'vous ne comptez plus, ajoutez ce qui manque, changez une unité ou une ' +
-      'déclinaison. € ouvre la fiche : code, nom des déclinaisons, actives ou non, prix et stock minimum. ' +
-      '✕ retire la référence (↺ la réaffiche). ' +
-      'Vos réglages survivent aux mises à jour.</div>', 'solide') +
+  /* Saisies pas encore enregistrées. Gardées dans STATE : elles survivent au
+     changement d'onglet, à un retour sur la page et au rafraîchissement
+     automatique de la vue. Annuler ou Enregistrer les vident. */
+  const brouillon = STATE.catalogueBrouillon =
+    STATE.catalogueBrouillon || { prix:{}, min:{}, actif:{} };
+  const noms = {};
+  const nbBrouillon = () => Object.keys(brouillon.prix).length +
+    Object.keys(brouillon.min).length + Object.keys(brouillon.actif).length;
+  /* Point décimal (2.5), comme la fiche : l'export le lit tel quel. */
+  const prixInit = cp => { const p = corrige(cp) ? num(_prixAchat[cp]) : prixAchatDefaut(cp); return p > 0 ? String(p) : ''; };
+  const minInit = k => num(seuils[k]) > 0 ? String(num(seuils[k])) : '';
+  const actifInit = cr => !_froidRetires.has(cr);
+  const val = (o, k, init) => o[k] !== undefined ? o[k] : init(k);
+  const nrm = x => String(x || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
 
+  const champPrix = (cp, nom) => { noms[cp] = nom;
+    return '<input type="text" inputmode="decimal" data-px="' + esc(cp) + '" value="' + esc(val(brouillon.prix, cp, prixInit)) +
+      '" placeholder="—" aria-label="Prix HT ' + esc(nom) + '">'; };
+  const champMin = (k, nom) => { noms[k] = nom;
+    return '<input type="text" inputmode="decimal" data-mn="' + esc(k) + '" value="' + esc(val(brouillon.min, k, minInit)) +
+      '" placeholder="—" aria-label="Minimum ' + esc(nom) + '">'; };
+
+  /* ---------- Chambre froide ---------- */
+  const blocFroid = () => {
+    const grps = [];
+    froid.forEach(x => {
+      let g = grps[grps.length - 1];
+      if (!g || g.nom !== x.grp) grps.push(g = { nom: x.grp, l: [] });
+      g.l.push(x);
+    });
+    return carte('<h2>Prix d’achat</h2><div class="cs">HT, par unité comptée à l’inventaire. ' +
+        'Vide : l’article n’entre pas dans la valeur du stock.</div>' +
+        '<div class="cat-liste">' + froidPrix().map(x =>
+          '<div class="cat-ligne" data-q="' + esc(nrm(x.nom)) + '"><span class="cat-nom"><span>' + esc(x.nom) +
+          '<small class="mini">€ par ' + esc(x.unite || 'unité') + '</small></span></span>' + champPrix(x.cp, x.nom) + '</div>').join('') +
+        '</div>', 'solide') +
+      '<p class="cs" style="margin-top:16px">Décochez ce que la boutique ne prend plus : il disparaît de l’inventaire, ' +
+      'de la réception et des minimums, son stock reste. Minimum : arrivé à ce nombre, l’article est « à commander ».</p>' +
+      grps.map(g => '<div class="cat-groupe">' +
+        '<div class="entete cat-tete"><h3>' + esc(g.nom) + '</h3><span class="cat-col">Minimum</span></div>' +
+        carte('<div class="cat-liste">' + g.l.map(x => {
+          const a = val(brouillon.actif, x.cr, actifInit);
+          return '<div class="cat-ligne' + (a ? '' : ' off') + '" data-q="' + esc(nrm(x.nom + ' ' + x.grp)) + '">' +
+            '<label class="cat-nom"><input type="checkbox" data-act="' + esc(x.cr) + '"' + (a ? ' checked' : '') +
+            '><span>' + esc(x.nom) + '</span></label>' + champMin(x.cs, x.nom) + '</div>';
+        }).join('') + '</div>') + '</div>').join('');
+  };
+
+  /* ---------- Sec ---------- */
+  const refSec = r => {
+    const avecDecl = !!((r.variantesToutes && r.variantesToutes.length) || (r.variantes && r.variantes.length));
+    const lignes = r.masque ? [] : (avecDecl ? (r.variantes || []) : ['']);
+    const nbRet = (r.variantesRetirees || []).length;
+    return '<div data-q="' + esc(nrm([r.nom, r.sec].concat(r.variantesToutes || r.variantes || []).join(' '))) + '">' + carte(
+      '<div class="rang"><div style="flex:1;min-width:0">' +
+      '<b' + (r.masque ? ' style="text-decoration:line-through;opacity:.5"' : '') + '>' + esc(r.nom) + '</b>' +
+      '<div class="mini">' + esc(r.unite) + (r.decimal === false ? ' · entiers' : ' · demi possible') +
+      (nbRet ? ' · ' + nbRet + ' ' + accord(nbRet, 'déclinaison retirée', 'déclinaisons retirées') : '') +
+      (r.masque ? ' · retirée du catalogue' : '') + '</div></div>' +
+      '<div class="duo compact">' +
+      (avecDecl ? '<button class="btn clair" data-fiche="' + esc(r.id) + '" aria-label="Déclinaisons actives ou retirées" title="Déclinaisons actives ou retirées">☰</button>' : '') +
+      '<button class="btn clair" data-edit="' + esc(r.id) + '" aria-label="Modifier" title="Nom, unité, déclinaisons">✎</button>' +
+      '<button class="btn ' + (r.masque ? 'menthe' : 'clair') + '" data-masque="' + esc(r.id) + '" ' +
+      'aria-label="' + (r.masque ? 'Réafficher' : 'Retirer du catalogue') + '" title="' + (r.masque ? 'Réafficher' : 'Retirer du catalogue') + '">' + (r.masque ? '↺' : '✕') + '</button>' +
+      '</div></div>' +
+      (lignes.length ? '<div class="cat-liste cat-sous">' +
+        '<div class="cat-ligne cat-entetes"><span class="cat-nom">' + (avecDecl ? 'Déclinaison' : '') + '</span>' +
+        '<span class="cat-col">€ HT / ' + esc(r.unite) + '</span><span class="cat-col">Minimum</span></div>' +
+        lignes.map(v => {
+          const cp = 'sec|' + r.id + '|' + v, nom = v ? r.nom + ' · ' + v : r.nom;
+          return '<div class="cat-ligne"><span class="cat-nom"><span>' + esc(v || 'Prix et minimum') + '</span></span>' +
+            champPrix(cp, nom) + champMin(cp, nom) + '</div>';
+        }).join('') + '</div>' : ''),
+      r.masque ? 'plat' : '') + '</div>';
+  };
+  const blocSec = () =>
+    '<p class="cs">Ce que l’inventaire, la réception et le réassort proposent. ✎ change le nom, l’unité ou les ' +
+    'déclinaisons, ☰ retire ou réactive une déclinaison, ✕ retire la référence (↺ la réaffiche). ' +
+    'Vos réglages survivent aux mises à jour.</p>' +
     sections.map(s => {
       const refs = cat.filter(r => (r.sec || 'Autres') === s.id);
       if (!refs.length) return '';
-      return '<div class="sec-bloc"' + (s.teinte ? ' style="--sec-teinte:' + s.teinte + '"' : '') + '>' +
+      return '<div class="sec-bloc cat-groupe"' + (s.teinte ? ' style="--sec-teinte:' + s.teinte + '"' : '') + '>' +
         '<div class="entete sec-entete"><span class="sec-pastille"></span><h3>' + esc(s.id) + '</h3>' +
         '<button class="btn clair sm" data-ajout="' + esc(s.id) + '">+ Ajouter</button></div>' +
-        '<div class="stack">' + refs.map(r =>
-          carte('<div class="rang">' +
-            '<div style="flex:1;min-width:0">' +
-            '<b' + (r.masque ? ' style="text-decoration:line-through;opacity:.5"' : '') + '>' +
-            esc(r.nom) + '</b>' +
-            '<div class="mini">' + esc(r.unite) + (r.decimal === false ? ' · entiers' : ' · demi possible') +
-            (r.variantes && r.variantes.length ? ' · ' + r.variantes.length + ' déclinaisons' : '') +
-            (r.variantesRetirees && r.variantesRetirees.length ? ' · ' + r.variantesRetirees.length + ' retirée' + (r.variantesRetirees.length > 1 ? 's' : '') : '') +
-            ' · ' + prixResume(r) +
-            '</div></div>' +
-            '<div class="duo compact">' +
-            '<button class="btn clair" data-prix="' + esc(r.id) + '" aria-label="Fiche : actif, prix, minimum">€</button>' +
-            '<button class="btn clair" data-edit="' + esc(r.id) + '" aria-label="Modifier">✎</button>' +
-            '<button class="btn ' + (r.masque ? 'menthe' : 'clair') + '" data-masque="' + esc(r.id) + '" ' +
-            'aria-label="' + (r.masque ? 'Réafficher' : 'Retirer du catalogue') + '" title="' + (r.masque ? 'Réafficher' : 'Retirer du catalogue') + '">' + (r.masque ? '↺' : '✕') + '</button>' +
-            '</div></div>', r.masque ? 'plat' : '')
-        ).join('') + '</div></div>';
+        '<div class="stack">' + refs.map(refSec).join('') + '</div></div>';
     }).join('');
 
+  let partie = STATE.cataloguePartie === 'sec' ? 'sec' : 'froid';
+
+  /* Une fiche ouverte relit le catalogue en rentrant : les saisies en cours
+     seraient perdues sans prévenir. */
+  const libre = () => {
+    if (!nbBrouillon()) return true;
+    toast('Enregistrez ou annulez d’abord vos changements', 'erreur');
+    return false;
+  };
+
+  const majBarre = () => {
+    const n = nbBrouillon();
+    $('#ct-barre').hidden = !n;
+    $('#ct-nb').textContent = n + ' ' + accord(n, 'changement non enregistré', 'changements non enregistrés');
+  };
+  /* « 2,5 » pour « 2.5 », « 0 » pour vide : même valeur, pas un changement. */
+  const lireMin = t => { t = String(t).trim().replace(',', '.'); return t === '' ? 0 : Number(t); };
+  const memeValeur = (lire, a, b) => { const x = lire(a), y = lire(b); return x === y || (isNaN(x) && isNaN(y) && a.trim() === b.trim()); };
+  const noter = (o, k, v, init, lire) => {
+    if (memeValeur(lire, v, init(k))) delete o[k]; else o[k] = v;
+    majBarre();
+  };
+
+  const dessiner = () => {
+    const nbParfums = parfumsActifs().length;
+    const nbSec = cat.filter(r => !r.masque).length;
+    $('#vue-actions').innerHTML = '';
+    $('#page').innerHTML =
+      '<div class="tseg">' +
+      [['froid', 'Chambre froide', nbParfums + ' ' + accord(nbParfums, 'parfum actif', 'parfums actifs')],
+       ['sec', 'Sec', nbSec + ' ' + accord(nbSec, 'référence')]]
+        .map(x => '<button class="' + (x[0] === partie ? 'on' : '') + '" data-partie="' + x[0] + '">' +
+          '<span class="tsl">' + x[1] + '</span><small>' + x[2] + '</small></button>').join('') +
+      '</div>' +
+      '<input type="search" id="ct-rech" placeholder="Chercher un produit" autocomplete="off" aria-label="Chercher un produit">' +
+      '<div id="ct-corps">' + (partie === 'froid' ? blocFroid() : blocSec()) + '</div>' +
+      '<div class="cat-barre" id="ct-barre" hidden><span id="ct-nb"></span>' +
+      '<button class="btn clair sm" id="ct-annul">Annuler</button>' +
+      '<button class="btn menthe sm" id="ct-enr">Enregistrer</button></div>';
+    brancher();
+    majBarre();
+  };
+
+  const brancher = () => {
+    $$('[data-partie]').forEach(b => b.onclick = () => {
+      partie = b.dataset.partie; STATE.cataloguePartie = partie; dessiner();
+    });
+    $$('[data-px]').forEach(i => i.oninput = () => noter(brouillon.prix, i.dataset.px, i.value, prixInit, lirePrix));
+    $$('[data-mn]').forEach(i => i.oninput = () => noter(brouillon.min, i.dataset.mn, i.value, minInit, lireMin));
+    $$('[data-act]').forEach(i => i.onchange = () => {
+      const k = i.dataset.act;
+      if (i.checked === actifInit(k)) delete brouillon.actif[k]; else brouillon.actif[k] = i.checked;
+      i.closest('.cat-ligne').classList.toggle('off', !i.checked);
+      majBarre();
+    });
+    $('#ct-rech').oninput = e => {
+      const q = nrm(e.target.value.trim());
+      $$('#ct-corps [data-q]').forEach(r => { r.style.display = !q || r.dataset.q.indexOf(q) >= 0 ? '' : 'none'; });
+      $$('#ct-corps .cat-groupe, #ct-corps .card.solide').forEach(g => {
+        g.style.display = !q || $$('[data-q]', g).some(r => r.style.display !== 'none') ? '' : 'none';
+      });
+    };
+    $('#ct-annul').onclick = () => {
+      brouillon.prix = {}; brouillon.min = {}; brouillon.actif = {};
+      enCours = false;
+      dessiner();
+    };
+    $('#ct-enr').onclick = enregistrer;
+
+    $$('[data-masque]').forEach(b => b.onclick = () => { if (libre()) basculer(b.dataset.masque); });
+    $$('[data-edit]').forEach(b => b.onclick = () => {
+      if (libre()) editer(cat.filter(r => r.id === b.dataset.edit)[0]);
+    });
+    $$('[data-ajout]').forEach(b => b.onclick = () => { if (libre()) editer(null, b.dataset.ajout); });
+    $$('[data-fiche]').forEach(b => b.onclick = () => {
+      if (!libre()) return;
+      const r = cat.filter(x => x.id === b.dataset.fiche)[0];
+      if (r) ficheArticle(r, () => rendre('catalogue'));
+    });
+  };
+
+  let enCours = false;
+  const enregistrer = async () => {
+    if (enCours) return;
+    const prix = {}, mins = {};
+    for (const cp of Object.keys(brouillon.prix)) {
+      const v = lirePrix(brouillon.prix[cp]);
+      if (isNaN(v)) return toast('Prix illisible : ' + noms[cp], 'erreur');
+      const d = prixAchatDefaut(cp);
+      const avant = corrige(cp) ? num(_prixAchat[cp]) : (d || 0);
+      /* Égal au prix du fichier : pas de correction à garder. */
+      if (v !== avant) prix[cp] = (d !== null && v === d) || (d === null && v === 0) ? null : v;
+    }
+    for (const k of Object.keys(brouillon.min)) {
+      const mv = lireMin(brouillon.min[k]);
+      if (!(mv >= 0) || !isFinite(mv)) return toast('Minimum invalide : ' + noms[k], 'erreur');
+      if (mv !== (num(seuils[k]) > 0 ? num(seuils[k]) : 0)) mins[k] = mv;
+    }
+    const actifs = Object.assign({}, brouillon.actif);
+    if (Object.keys(actifs).length && !PARFUMS.some(p => val(actifs, 'glace|' + p, actifInit))) {
+      return toast('Gardez au moins un parfum de glace actif', 'erreur');
+    }
+    enCours = true; $('#ct-enr').disabled = true;
+    try {
+      if (Object.keys(actifs).length) {
+        /* Relu juste avant : un autre manager garde ses réglages. */
+        const mf = (await DB.get('catalogue:froid', null)) || {};
+        const ret = new Set(Array.isArray(mf.retires) ? mf.retires : []);
+        Object.keys(actifs).forEach(k => { if (actifs[k]) ret.delete(k); else ret.add(k); });
+        mf.retires = [...ret];
+        await DB.set('catalogue:froid', mf);
+        _froidRetires = ret;
+        brouillon.actif = {};
+      }
+      if (Object.keys(mins).length) {
+        const frais = await chargerSeuils();
+        Object.keys(mins).forEach(k => { if (mins[k] > 0) frais[k] = mins[k]; else delete frais[k]; });
+        await DB.set(CLE_SEUILS, frais);
+        seuils = frais;
+        brouillon.min = {};
+      }
+      if (Object.keys(prix).length) await enregistrerPrixAchat(prix);
+      brouillon.prix = {};
+    } catch (e) {
+      /* Écritures séparées : ce qui est passé sort du brouillon, le reste attend. */
+      enCours = false;
+      dessiner();
+      return toast('Enregistrement incomplet, réessayez', 'erreur');
+    }
+    const n = Object.keys(actifs).length + Object.keys(mins).length + Object.keys(prix).length;
+    if (n) {
+      try {
+        await feed('ok', STATE.user.prenom + ' a mis à jour le catalogue (' +
+          [Object.keys(prix).length ? 'prix' : '', Object.keys(mins).length ? 'minimums' : '',
+           Object.keys(actifs).length ? 'produits actifs' : ''].filter(Boolean).join(', ') + ')');
+      } catch (e) { /* le journal n'empêche pas l'enregistrement */ }
+    }
+    toast(n ? 'Catalogue enregistré' : 'Rien n’a changé');
+    rendre('catalogue');
+  };
+
+  /* ✕ retire la référence (après confirmation), ↺ la réaffiche. */
   /* Double appui : le second annulait le premier (retirée puis réaffichée
      aussitôt), avec deux enregistrements et deux lignes contradictoires. */
   let masqueEnCours = false;
-  $$('[data-masque]').forEach(b => b.onclick = async () => {
-    const id = b.dataset.masque;
+  const basculer = async id => {
     const r = cat.filter(x => x.id === id)[0];
     /* Retirer demande confirmation : le bouton est petit et sans texte.
        Elle se fait avant le verrou : une feuille fermée d'un appui à côté
@@ -2521,7 +2598,7 @@ V.catalogue = async function () {
       if (!ok) return;
     }
     if (masqueEnCours) return;
-    masqueEnCours = true; b.disabled = true;
+    masqueEnCours = true;
     try {
       const i = m.masques.indexOf(id);
       const avantMasques = m.masques.slice();
@@ -2542,8 +2619,8 @@ V.catalogue = async function () {
       }
       await feed('ok', STATE.user.prenom + (reaffiche ? ' a réaffiché ' : ' a retiré ') + id + ' du catalogue');
       rendre('catalogue');
-    } finally { masqueEnCours = false; b.disabled = false; }
-  });
+    } finally { masqueEnCours = false; }
+  };
 
   const editer = (r, section) => {
     const neuf = !r;
@@ -2610,7 +2687,7 @@ V.catalogue = async function () {
           const perdues = avant.filter(v => variantes.indexOf(v) < 0 && num(enStock['sec|' + r.id + '|' + v]) > 0);
           if (perdues.length) {
             enCours = false; $('#ct-ok').disabled = false;
-            return toast(perdues.join(', ') + ' a encore du stock : retirez-la dans la fiche € (décocher) ou renommez-la', 'erreur');
+            return toast(perdues.join(', ') + ' a encore du stock : retirez-la avec ☰ (décocher) ou renommez-la', 'erreur');
           }
         }
       }
@@ -2634,16 +2711,7 @@ V.catalogue = async function () {
     };
   };
 
-  $$('[data-edit]').forEach(b => b.onclick = () => {
-    editer(cat.filter(r => r.id === b.dataset.edit)[0]);
-  });
-  $$('[data-ajout]').forEach(b => b.onclick = () => editer(null, b.dataset.ajout));
-  $$('[data-prix]').forEach(b => b.onclick = () => {
-    const r = cat.filter(x => x.id === b.dataset.prix)[0];
-    if (r) ficheArticle(r, () => rendre('catalogue'));
-  });
-  $('#ct-froid').onclick = () => ficheFroid(() => rendre('catalogue'));
-  $('#ct-prix-froid').onclick = () => editerPrix('Prix chambre froide', froidPrix(), () => rendre('catalogue'));
+  dessiner();
 };
 
 /* Quantité du sec à revoir avant de valider : l'unité est souvent un carton
