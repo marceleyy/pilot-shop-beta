@@ -538,7 +538,7 @@ const FICHES = [
       'Faire mousser le lait jusqu’à une mousse fine et brillante, sans le faire bouillir.',
       'Couler un expresso (1 capsule simple) dans le gobelet moyen.',
       'Verser le lait sur le café en retenant la mousse, puis finir par la mousse sur le dessus.',
-      'Saupoudrer de cacao si le client le souhaite.',
+      'Saupoudrer de chocolat en poudre si le client le souhaite.',
       'Rincer et essuyer aussitôt le mousseur ou la buse vapeur.'
     ],
     securite: 'Allergène : lait. Ne jamais remousser un lait déjà chauffé.',
@@ -552,7 +552,7 @@ const FICHES = [
       'Chauffer le lait avec peu de mousse, sans le faire bouillir.',
       'Couler un expresso (1 capsule simple) dans le grand gobelet.',
       'Verser le lait chaud sur le café, puis une fine couche de mousse.',
-      'Sirop ou topping sur demande, à ajouter avant le lait.',
+      'Topping sur demande, à ajouter avant le lait.',
       'Rincer et essuyer aussitôt le mousseur ou la buse vapeur.'
     ],
     securite: 'Allergène : lait. Ne jamais remousser un lait déjà chauffé.',
@@ -562,14 +562,14 @@ const FICHES = [
     id: 'f11', cat: 'Cafétéria', titre: 'Thé et matcha latte', icone: '🍵', duree: '4 min',
     resume: 'Un sachet par thé ; 2 g de poudre par matcha.',
     etapes: [
-      'Thé : poser 1 sachet dans le gobelet et verser l’eau chaude, non bouillante.',
+      'Thé : poser 1 sachet dans le gobelet petit et verser l’eau chaude, non bouillante.',
       'Infuser 3 min pour le thé vert, 4 min pour les thés noirs et le rooibos, puis retirer le sachet.',
-      'Matcha : mettre 2 g de poudre (1 cuillère doseuse) dans le gobelet.',
+      'Matcha : mettre 2 g de poudre (1 cuillère doseuse) dans le grand gobelet.',
       'Ajouter un fond d’eau à 80 °C et fouetter jusqu’à ne plus voir de grumeaux.',
       'Compléter avec environ 200 ml de lait chauffé et légèrement moussé.',
-      'Servir avec une bûchette de sucre et une serviette.'
+      'Servir avec une bûchette de sucre et une serviette ; rincer et essuyer aussitôt le mousseur.'
     ],
-    securite: 'Gobelet brûlant : le tenir par la bague. Allergène lait pour le matcha latte.',
+    securite: 'Gobelet brûlant : le tenir par la bague. Allergène lait pour le matcha latte. Ne jamais remousser un lait déjà chauffé.',
     validite: 'À la commande, jamais à l’avance.'
   },
   {
