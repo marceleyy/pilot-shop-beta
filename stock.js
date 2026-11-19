@@ -1762,7 +1762,7 @@ V.stock = async function () {
    • Achats du mois : livraisons confirmées (chambre froide et sec) au prix
      d'achat du catalogue. Sans frais de port : c'est la marchandise seule.
    -------------------------------------------------------------------------- */
-const CONSO = { semaines: 8, mois: 6, fenetreJours: 28,
+const CONSO = { semaines: 8, mois: 6, fenetreJours: 28, joursMin: 3,
   moisCourts: ['janv.', 'févr.', 'mars', 'avr.', 'mai', 'juin', 'juil.', 'août', 'sept.', 'oct.', 'nov.', 'déc.'] };
 
 function lundiDe(jour) {
@@ -1792,9 +1792,10 @@ async function donneesConso() {
     const m = monthKey(jour);
     if (m !== monthKey(j) && m !== moisPrec) return;
     const p = prixArticle(cle);
-    if (p === null) { if (m === monthKey(j)) achats.sansPrix++; return; }
-    if (m === monthKey(j)) { achats.mois += q * p; achats.livraisons.add(bl || jour); }
-    else achats.moisPrec += q * p;
+    if (m === monthKey(j)) {
+      achats.livraisons.add(bl ? 'bl:' + bl : 'j:' + jour);
+      if (p === null) achats.sansPrix++; else achats.mois += q * p;
+    } else if (p !== null) achats.moisPrec += q * p;
   };
   mouv.forEach(x => {
     const m = litMouvement(x);
@@ -1802,10 +1803,10 @@ async function donneesConso() {
     if (m.type === 'ouverture') {
       const l = litresGlace(m.cle, m.qte);
       if (l) parJour[m.jour] = (parJour[m.jour] || 0) + l;
-    } else if (m.type === 'reception') compterAchat(m.cle, m.qte, m.jour, x.b);
+    } else if (m.type === 'reception') compterAchat(m.cle, m.qte, m.jour, x.b || x.bl);
   });
   (secMv || []).forEach(m => {
-    if (!m || !m.cle || m.supprime || !m.at) return;
+    if (!m || !m.cle || m.supprime || !m.at || isNaN(new Date(m.at).getTime())) return;
     compterAchat(m.cle, num(m.q), isoOf(new Date(m.at)), m.bl);
   });
 
@@ -1826,12 +1827,13 @@ async function donneesConso() {
     mois.push({ l: CONSO.moisCourts[d.getMonth()], titre: MOIS[d.getMonth()] + ' ' + d.getFullYear(), v: v, encours: i === 0 });
   }
 
-  /* Moyenne par jour d'ouverture, hier compris, aujourd'hui exclu (en cours). */
+  /* Moyenne par jour d'ouverture, hier compris, aujourd'hui exclu (en cours).
+     Un bac ouvert un jour de fermeture (préparation) compte quand même. */
   let litres = 0, ouverts = 0;
   for (let i = 1; i <= CONSO.fenetreJours; i++) {
     const d = addD(j, -i);
-    if (!jourOuvert(d)) continue;
-    ouverts++; litres += parJour[d] || 0;
+    litres += parJour[d] || 0;
+    if (jourOuvert(d)) ouverts++;
   }
   const parJourMoy = ouverts ? litres / ouverts : 0;
 
@@ -1883,6 +1885,7 @@ function htmlCarteConso(d, mode) {
 
   let couv = '—', couvCls = '', couvD;
   if (!d.inventaire) couvD = 'Inventaire de la chambre froide à faire';
+  else if (d.ouverts < CONSO.joursMin) couvD = 'Pas assez de jours d’ouverture sur 4 semaines';
   else if (!(d.parJourMoy > 0)) couvD = 'Aucun bac ouvert sur 4 semaines';
   else {
     const jrs = d.stockL / d.parJourMoy;
@@ -1930,8 +1933,9 @@ async function carteConsommation(page) {
     });
   };
   dessiner();
-  const apres = [$('#sous-seuil'), $('#ctl-meteo')].filter(x => x && x.parentNode === page)[0];
-  page.insertBefore(bc, apres ? apres.nextSibling : page.firstChild);
+  /* Sous les articles à commander, sinon sous les réceptions à confirmer. */
+  const apres = [$('#sous-seuil'), $('#rc-attente'), $('#ctl-meteo')].filter(x => x && x.parentNode === page)[0];
+  page.insertBefore(bc, apres ? apres.nextSibling : (page.firstChild ? page.firstChild.nextSibling : null));
 }
 
 /* -----------------------------------------------------------------------------
@@ -1954,6 +1958,7 @@ V.controle = async function () {
   if (recAttente.length && typeof bandeauReceptions === 'function' && page.firstChild) {
     const br = document.createElement('div');
     apresReceptions = br;
+    br.id = 'rc-attente';
     br.style.marginTop = '14px';
     br.innerHTML = bandeauReceptions(recAttente);
     page.insertBefore(br, page.firstChild.nextSibling);
@@ -2021,9 +2026,9 @@ V.controle = async function () {
       }
     } catch (e) {}
 
-    /* Consommation, couverture du stock et achats du mois. */
-    await carteConsommation(page);
-    if (STATE.view !== 'controle' || page !== $('#page')) return;
+    /* Consommation, couverture du stock et achats du mois : sans attendre,
+       pour ne pas retarder les anomalies signalées (plus bas). */
+    carteConsommation(page);
   }
 
   /* -----------------------------------------------------------------------------
