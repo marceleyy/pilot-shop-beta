@@ -2670,23 +2670,35 @@ V.clean = async function () {
 
   $('#vue-actions').innerHTML = '';
 
-  /* Boutique fermée ce jour (Réglages › Horaires et fermeture, ou jour hors
-     semaine) : aucun nettoyage n'est dû. L'écran proposait quand même les
-     tâches du tableau pendant l'intersaison. Si quelque chose a été validé
-     ce jour-là malgré tout, on garde la liste pour le montrer. */
-  const fermeJ = jourOuvert(j) ? null : (fermetureDu(j) || {});
-  if (fermeJ && !faits && !preuves.length) {
-    $('#page').innerHTML = navJour(j) +
-      carte(entete('🔒', 'Boutique fermée',
-        fermeJ.au ? 'Du ' + fmtD(fermeJ.du) + ' au ' + fmtD(fermeJ.au) : 'Jour de fermeture') +
+  /* Fermeture datée (Réglages › Horaires et fermeture) : rien n'est dû, et
+     l'écran proposait quand même le tableau pendant l'intersaison. On affiche
+     « Boutique fermée » et on replie la liste, que l'équipe peut rouvrir pour
+     consigner un nettoyage fait malgré tout. Un jour hors semaine n'est pas
+     concerné : le manager peut y avoir placé un grand nettoyage. Si quelque
+     chose est déjà enregistré ce jour-là, la liste reste visible. Horaires
+     relus d'abord : une fermeture ajoutée ou retirée ailleurs compte tout de suite. */
+  const hz = await DB.get('horaires', null);
+  if (hz && Array.isArray(hz.fermetures)) HORAIRES.fermetures = hz.fermetures;
+  const fermeJ = fermetureDu(j);
+  const dejaSaisi = Object.keys(rec).length > 0 || preuves.length > 0;
+  const bandeauFerme = fermeJ
+    ? carte(entete('🔒', 'Boutique fermée', 'Du ' + fmtD(fermeJ.du) + ' au ' + fmtD(fermeJ.au)) +
         (fermeJ.motif ? '<p class="mini">' + esc(fermeJ.motif) + '</p>' : '') +
-        '<p class="mini">Aucun nettoyage à valider ce jour.</p>', 'solide');
+        '<p class="mini">Aucun nettoyage n’est attendu pendant la fermeture.</p>' +
+        (!dejaSaisi && STATE.cleanFermeVoir !== j && taches.length
+          ? '<button class="btn clair sm" id="cl-voir" style="margin-top:10px">Afficher les tâches quand même</button>' : ''),
+        'solide')
+    : '';
+  if (fermeJ && !dejaSaisi && STATE.cleanFermeVoir !== j) {
+    $('#page').innerHTML = navJour(j) + bandeauFerme;
     brancherNavJour('clean');
+    const bv = $('#cl-voir');
+    if (bv) bv.onclick = () => { STATE.cleanFermeVoir = j; rendre('clean'); };
     return;
   }
 
   $('#page').innerHTML =
-    navJour(j) +
+    navJour(j) + bandeauFerme +
     /* L'avancement tient dans une bande plutôt que dans une carte à moitié
        vide : une ligne de texte et une jauge ne justifiaient pas soixante
        pixels de hauteur à elles seules. */
