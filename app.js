@@ -5149,9 +5149,13 @@ function ouvrirPremierePeriode() {
    async function blocagesCloture(per) {
      const B = [];
      const jours = joursEntre(per.debut, today() < per.fin ? today() : per.fin);
-     DB.prelire(['ecart:' + per.id, 'stock:inventaire', 'stock:sec']
+     DB.prelire(['ecart:' + per.id, 'stock:inventaire', 'stock:sec', 'horaires']
        .concat(...jours.map(clesEtatJour)));
      const e = await DB.get('ecart:' + per.id, {});
+     /* Horaires à jour (un autre appareil a pu ajouter une fermeture ou changer
+        les jours d'ouverture) : un jour fermé ne doit pas bloquer la clôture. */
+     const hz = await DB.get('horaires', null);
+     if (hz) Object.assign(HORAIRES, hz);
 
      /* L'inventaire est la condition première : sans comptage réel de fin, le
         stock est une invention et l'écart calculé ne veut rien dire.
@@ -5622,6 +5626,7 @@ function modifierPeriode(per) {
    
      for (const c of cles) {
        const j = c.replace(defs[onglet].p, '');
+       const avant = lignes.length;
        const v = onglet === 'clean'
          ? Object.assign({}, await DB.get(c, {}), await DB.get('hebdo:' + j, {}))
          : await DB.get(c);
@@ -5674,8 +5679,31 @@ function modifierPeriode(per) {
          (Array.isArray(v) ? v : []).slice().reverse().forEach(f =>
            lignes.push([fmtD(f.at ? isoOf(new Date(f.at)) : today()), f.type, f.texte, f.par, 'warn']));
        }
+       /* Date de la ligne, pour y ranger les fermetures (ci-dessous). */
+       for (let k = avant; k < lignes.length; k++) lignes[k].j = j;
      }
-   
+
+     /* Fermetures (Réglages › Horaires) : une ligne « Boutique fermée » par
+        période, à sa date, dans les registres tenus jour par jour. Sans elle,
+        un jour fermé ressemblait à un jour oublié. */
+     if (['caisse', 'temp', 'clean', 'reassort', 'pointage'].indexOf(onglet) >= 0) {
+       const hz = await DB.get('horaires', null);
+       const fz = hz && Array.isArray(hz.fermetures) ? hz.fermetures
+                : Array.isArray(HORAIRES.fermetures) ? HORAIRES.fermetures : [];
+       const auj = today(), dateOk = s => /^\d{4}-\d{2}-\d{2}$/.test(s);
+       const valides = fz.filter(f => f && dateOk(f.du) && dateOk(f.au) && f.du <= f.au && f.du <= auj);
+       /* Saisie faite un jour fermé : gardée, mais plus en rouge. */
+       lignes.forEach(l => { if (l.j && valides.some(f => f.du <= l.j && l.j <= f.au)) l[4] = 'n'; });
+       valides.forEach(f => {
+         const n = joursEntre(f.du, f.au).length;
+         const l = [(f.du === f.au ? fmtD(f.du) : 'Du ' + fmtDC(f.du) + ' au ' + fmtD(f.au)) + (f.motif ? ' · ' + f.motif : ''),
+                    n + ' ' + accord(n, 'jour'), 'Boutique fermée', '—', 'n'];
+         l.j = f.au < auj ? f.au : auj;
+         lignes.push(l);
+       });
+       lignes.sort((a, b) => String(b.j || '').localeCompare(String(a.j || '')));
+     }
+
      const entetes = onglet === 'pertes' ? ['Date · produit', 'Quantité', 'Motif', 'Par'] : ['Date', 'Volume', 'Résultat', 'Par'];
 
      /* L'historique ne montre que l'historique : le registre pour un contrôle

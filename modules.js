@@ -2174,7 +2174,9 @@ V.parametres = async function () {
       '<button class="btn clair bloc" id="hb-ouvrir" style="margin-top:14px">Organiser la semaine</button>' +
       '<button class="btn clair bloc" id="hb-resp" style="margin-top:8px">Attribuer les responsables</button>', 'solide') +
 
-    carte(entete('🕐', 'Horaires', 'Bornes des phases de la journée dans « Ma journée ».') +
+    /* Horaires et fermeture temporaire dans la même carte : le manager cherchait
+       la fermeture à côté des horaires et ne voyait pas la carte suivante. */
+    carte(entete('🕐', 'Horaires et fermeture', 'Bornes des phases de la journée, congés et intersaison.') +
          '<div class="grid g2">' +
          '<div class="champ"><label class="f">Ouverture boutique</label><input type="time" id="h1" value="' + esc(HORAIRES.ouverture) + '"></div>' +
          '<div class="champ"><label class="f">Fermeture boutique</label><input type="time" id="h2" value="' + esc(HORAIRES.fermeture) + '"></div>' +
@@ -2182,10 +2184,13 @@ V.parametres = async function () {
          '<div class="champ"><label class="f">Fin phase ouverture</label><input type="time" id="h4" value="' + esc(HORAIRES.finOuverture) + '"></div>' +
          '<div class="champ"><label class="f">Début phase fermeture</label><input type="time" id="h5" value="' + esc(HORAIRES.debutFermeture) + '"></div>' +
          '<div class="champ"><label class="f">Fin phase fermeture</label><input type="time" id="h6" value="' + esc(HORAIRES.finFermeture) + '"></div></div>' +
-         '<button class="btn menthe bloc" id="hv" style="margin-top:14px">Enregistrer les horaires</button>', 'solide') +
+         '<button class="btn menthe bloc" id="hv" style="margin-top:14px">Enregistrer les horaires</button>' +
 
        /* Fermeture sur une période : plus rien n'est attendu ces jours-là. */
-       carte(entete('🔒', 'Fermeture de la boutique', 'Congés, travaux, fin de saison : aucune saisie attendue, aucune alerte.') +
+         '<div id="fermeture" style="margin-top:22px;padding-top:16px;border-top:1px solid var(--line)">' +
+         '<b>🔒 Fermeture temporaire</b>' +
+         '<p class="mini">Congés, travaux, intersaison : aucune saisie attendue, aucune alerte. ' +
+         'L’historique affiche « Boutique fermée » sur la période.</p>' +
          (fermetures.length
            ? '<div class="stack">' + fermetures.map((f, i) =>
                '<div class="tache"><span class="tx"><span class="tn">Du ' + esc(fmtD(f.du)) + ' au ' + esc(fmtD(f.au)) + '</span>' +
@@ -2197,7 +2202,7 @@ V.parametres = async function () {
          '<div class="champ"><label class="f">Au (inclus)</label><input type="date" id="fau"></div></div>' +
          '<div class="champ" style="margin-top:10px"><label class="f">Motif (facultatif)</label>' +
          '<input type="text" id="fmotif" maxlength="80" placeholder="Congés annuels"></div>' +
-         '<button class="btn menthe bloc" id="fajout" style="margin-top:12px">Fermer la boutique sur cette période</button>', 'solide') +
+         '<button class="btn menthe bloc" id="fajout" style="margin-top:12px">Fermer la boutique sur cette période</button></div>', 'solide') +
    
        carte(entete('❄️', 'Unités frigorifiques', 'Nom, cible et plage de boutons du relevé de températures.') +
          '<div class="stack">' + ENCEINTES.map((e, i) =>
