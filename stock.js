@@ -4159,6 +4159,30 @@ V.lots = async function () {
   };
 };
 
+/* Bacs de glace encore en vitrine (clés « g_<parfum> » de « lots: »), lus sur
+   le mois en cours et le précédent comme calculFIFO : un bac fini sans que ce
+   soit dit y restait jusqu'à sa date limite, puis passait « périmé ». Même
+   règle de marque « jeté » que calculFIFO. */
+async function bacsVitrine() {
+  const m = monthKey(today());
+  const prec = isoOf(new Date(+m.slice(0, 4), +m.slice(5, 7) - 2, 15)).slice(0, 7);
+  const [rp, rm] = await Promise.all([DB.get('lots:' + prec, {}), DB.get('lots:' + m, {})]);
+  const rec = {}, src = {};
+  [[prec, rp], [m, rm]].forEach(([mo, r]) => Object.keys(r || {}).forEach(k => {
+    if (r[k]) { rec[k] = r[k]; src[k] = mo; }
+  }));
+  return Object.keys(rec).filter(k => k.indexOf('g_') === 0).map(k => {
+    const v = rec[k];
+    if (!v.lot || !v.ouv) return null;
+    if (v.jete && (!v.jeteLot || v.jeteLot === v.lot) && (!v.at || v.at <= v.jete)) return null;
+    /* Un bac dont la DLC est dépassée n'est pas proposé : il doit passer par
+       « Jeter » du Frigo (perte ou fini), pas disparaître en « fini ». */
+    const h = (DLC_RULES[regleDLC(k.slice(2), 'g')] || DLC_RULES.defaut).h;
+    if (new Date(v.ouv + 'T08:00:00').getTime() + h * 3600e3 < Date.now()) return null;
+    return { cle: k, parfum: k.slice(2), lot: v.lot, ouv: v.ouv, at: v.at || '', mois: src[k] };
+  }).filter(Boolean).sort((a, b) => a.parfum.localeCompare(b.parfum, 'fr'));
+}
+
 /* Feuille de confirmation après un scan : famille, parfum, taille, lot. */
 function confirmerOuverture(r) {
   return new Promise(resolve => {
@@ -4183,12 +4207,17 @@ function confirmerOuverture(r) {
        lequel des bacs de l'armoire, pour reprendre sa date de sortie du −20. */
     let dest = '', orig = '', bacId = '', jourM13 = '';
     let armoire = [];
+    /* Bac de la vitrine que le nouveau remplace (clé « g_<parfum> »), ou ''.
+       Le parfum remplacé est déclaré fini : il sort des produits ouverts. */
+    let remplace = '', vitrine = [];
+    const chargeVitrine = bacsVitrine().then(l => { vitrine = l; }).catch(() => {});
     /* Jeton propre à cette feuille : si elle a été refermée (voile, retour)
        ou remplacée par une autre, la liste qui arrive ne la redessine pas. */
     let fini = false, armoireChargee = false;
     const jeton = uid();
-    const chargement = bacsArmoire().then(l => { armoire = l; })
-      .catch(() => {}).then(() => {
+    const chargement = Promise.all([
+      bacsArmoire().then(l => { armoire = l; }).catch(() => {}), chargeVitrine
+    ]).then(() => {
         armoireChargee = true;
         const sh = $('#sheet');
         if (!fini && sh && !sh.hidden && $('#co-ok') && $('#co-ok').dataset.jeton === jeton) {
@@ -4210,6 +4239,21 @@ function confirmerOuverture(r) {
        showSheet, qui seul branche [data-fermer] — le bouton ne faisait rien. */
     const annuler = () => { fini = true; closeSheet(); resolve(false); };
     let enCours = false;
+
+    /* Le même parfum n'est pas proposé : sa ligne est déjà remplacée par la
+       nouvelle ouverture. */
+    const candidatsVitrine = () => vitrine.filter(b => b.cle !== 'g_' + parfum);
+    const choixRemplace = () => {
+      const l = candidatsVitrine();
+      if (!l.some(b => b.cle === remplace)) remplace = '';
+      if (!l.length) return '';
+      return '<div class="champ" style="margin-top:14px"><label class="f">Remplace un bac de la vitrine ?</label>' +
+        '<div class="pastilles">' +
+        '<button type="button" class="pas' + (remplace ? '' : ' on') + '" data-remp="">Non</button>' +
+        l.map(b => '<button type="button" class="pas' + (b.cle === remplace ? ' on' : '') +
+          '" data-remp="' + esc(b.cle) + '">' + esc(b.parfum) + '</button>').join('') + '</div>' +
+        '<p class="mini" style="margin-top:6px">Le bac choisi est déclaré fini et sort de la vitrine, sans perte.</p></div>';
+    };
 
     const dessiner = () => {
       const fam = FAMILLES_PRODUIT.filter(f => f.id === famille)[0];
@@ -4252,7 +4296,8 @@ function confirmerOuverture(r) {
             ? '<div class="rappel" style="margin-top:12px">' + cands.length + ' ' + accord(cands.length, 'bac de ce parfum attend', 'bacs de ce parfum attendent') +
               ' déjà à l’armoire −13, depuis le ' + esc(fmtDC(cands[0].jour)) +
               '. Le plus ancien part d’abord.</div>'
-            : '');
+            : '') +
+          (dest === 'vitrine' ? choixRemplace() : '');
       const sousTitre = !glace ? 'Ce produit est ouvert et part en service.'
         : dest === 'm13' ? 'Le bac reste au stock. La date du jour est sa date de sortie du −20.'
         : dest === 'vitrine' ? 'Le bac monte en vitrine : il sort du stock.'
@@ -4320,6 +4365,9 @@ function confirmerOuverture(r) {
       });
       $$('[data-bac]').forEach(b => b.onclick = () => {
         garder(); bacId = b.dataset.bac; dessiner();
+      });
+      $$('[data-remp]').forEach(b => b.onclick = () => {
+        garder(); remplace = b.dataset.remp; dessiner();
       });
       const sp = $('#co-parfum');
       /* Le parfum change les bacs de l'armoire proposés : on redessine. */
@@ -4470,10 +4518,36 @@ function confirmerOuverture(r) {
                         famille: fam.id, taille: fam.parfums ? taille : null };
       await DB.set('lots:' + m, lots);
 
+      /* Bac remplacé : marqué fini comme « Bac fini » du Frigo (jete +
+         jeteLot + fini, sans perte), sous le mois où il a été ouvert. Après
+         l'écriture du nouveau bac : un échec ici ne bloque pas l'ouverture
+         (déjà déduite du stock) et ne pousse pas à la refaire. Relu juste
+         avant : on ne marque que le même bac (même lot, même ouverture). */
+      const rv = (fam.id === 'glace' && dest === 'vitrine' && remplace && remplace !== cleFifo)
+        ? vitrine.filter(b => b.cle === remplace)[0] || null : null;
+      let remplaceNom = '';
+      if (rv) {
+        try {
+          const recR = await DB.get('lots:' + rv.mois, {});
+          const e = recR[rv.cle];
+          const dejaFini = e && e.jete && (!e.jeteLot || e.jeteLot === e.lot) && (!e.at || e.at <= e.jete);
+          if (e && !dejaFini && e.lot === rv.lot && (e.at || '') === rv.at) {
+            recR[rv.cle] = Object.assign({}, e, { jete: nowISO(), jeteLot: rv.lot,
+                                                  jetePar: STATE.user.prenom, fini: true });
+            await DB.set('lots:' + rv.mois, recR);
+            remplaceNom = rv.parfum;
+          } else if (!dejaFini) {
+            toast('Le bac ' + rv.parfum + ' a changé entre-temps : déclarez-le fini depuis le Frigo', 'erreur');
+          }
+        } catch (err) {
+          toast('Le bac ' + rv.parfum + ' n’a pas pu être déclaré fini : faites-le depuis le Frigo', 'erreur');
+        }
+      }
+
       await feed('ok', STATE.user.prenom +
         (fam.id === 'glace' ? ' a mis en vitrine ' : ' a ouvert ') +
         (parfum || fam.libelle) + (bA || orig === 'm13' ? ' (depuis l’armoire −13)' : '') +
-        ' · lot ' + lot);
+        ' · lot ' + lot + (remplaceNom ? ' · remplace ' + remplaceNom + ' (bac fini)' : ''));
       fini = true;
       closeSheet();
       resolve(true);
