@@ -3156,10 +3156,12 @@ function formulaireAnomalie() {
        await V.parametres();
        const p0 = $('#page');
        if (p0) p0.insertAdjacentHTML('afterbegin',
-         carte('<div class="rang"><div style="flex:1;min-width:0"><b>Catalogues</b>' +
-           '<div class="mini">Sec et chambre froide : produits utilisés ou non, prix, stock minimum. ' +
-           'L’inventaire, la réception, la valeur du stock et les écarts les lisent.</div></div>' +
-           '<button class="btn clair sm" data-go="catalogue">Ouvrir</button></div>', 'solide'));
+         /* Même gabarit que « Tâches hebdomadaires » et « Horaires » (entête,
+            texte, bouton pleine largeur). Le catalogue reste sur sa propre
+            page : déplié ici, il rallongeait trop les Réglages. */
+         carte(entete('📦', 'Catalogues', 'Sec et chambre froide : produits utilisés ou non, prix, stock minimum.') +
+           '<p class="mini">L’inventaire, la réception, la valeur du stock et les écarts les lisent.</p>' +
+           '<button class="btn clair bloc" data-go="catalogue" style="margin-top:14px">Ouvrir les catalogues</button>', 'solide'));
        $$('#page [data-go]').forEach(b => b.onclick = () => rendre(b.dataset.go));
      }
      const page = $('#page');
