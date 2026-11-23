@@ -2685,7 +2685,7 @@ V.clean = async function () {
     ? carte(entete('🔒', 'Boutique fermée', 'Du ' + fmtD(fermeJ.du) + ' au ' + fmtD(fermeJ.au)) +
         (fermeJ.motif ? '<p class="mini">' + esc(fermeJ.motif) + '</p>' : '') +
         '<p class="mini">Aucun nettoyage n’est attendu pendant la fermeture.</p>' +
-        (!dejaSaisi && STATE.cleanFermeVoir !== j && taches.length
+        (!dejaSaisi && STATE.cleanFermeVoir !== j && taches.length && peutModifier(j)
           ? '<button class="btn clair sm" id="cl-voir" style="margin-top:10px">Afficher les tâches quand même</button>' : ''),
         'solide')
     : '';
