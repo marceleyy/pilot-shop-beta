@@ -2670,6 +2670,21 @@ V.clean = async function () {
 
   $('#vue-actions').innerHTML = '';
 
+  /* Boutique fermée ce jour (Réglages › Horaires et fermeture, ou jour hors
+     semaine) : aucun nettoyage n'est dû. L'écran proposait quand même les
+     tâches du tableau pendant l'intersaison. Si quelque chose a été validé
+     ce jour-là malgré tout, on garde la liste pour le montrer. */
+  const fermeJ = jourOuvert(j) ? null : (fermetureDu(j) || {});
+  if (fermeJ && !faits && !preuves.length) {
+    $('#page').innerHTML = navJour(j) +
+      carte(entete('🔒', 'Boutique fermée',
+        fermeJ.au ? 'Du ' + fmtD(fermeJ.du) + ' au ' + fmtD(fermeJ.au) : 'Jour de fermeture') +
+        (fermeJ.motif ? '<p class="mini">' + esc(fermeJ.motif) + '</p>' : '') +
+        '<p class="mini">Aucun nettoyage à valider ce jour.</p>', 'solide');
+    brancherNavJour('clean');
+    return;
+  }
+
   $('#page').innerHTML =
     navJour(j) +
     /* L'avancement tient dans une bande plutôt que dans une carte à moitié
