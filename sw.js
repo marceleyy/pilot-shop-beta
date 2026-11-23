@@ -36,7 +36,6 @@ const PRECACHE = [
   '/franchise.js',
   /* Fiche allergènes : elle doit répondre au comptoir, réseau ou pas. */
   '/allergenes.js',
-  '/commande.js',
   '/preaudit.js',
   /* Fiches produit du sec (« ? ») : l'inventaire se fait en réserve, sans réseau. */
   '/produits/amarena.jpg',
