@@ -1472,7 +1472,7 @@ function articlesSousSeuil(seuils, articles, secLignes) {
       const q = qteSec(k, articles, secLignes);
       const r = catalogueSec().filter(x => typeof x === 'object' && x.id === p[1])[0];
       if (q <= min) out.push({ cle: k, nom: libelleSec(k), q: q, min: min, unite: (r && r.unite) || 'unité', partie: 'sec',
-        sec: (r && r.sec) || 'Autres' });
+        sec: (r && r.sec) || 'Autres', metro: estMetro(r) });
     } else {
       const it = froid.get(k);
       if (!it) return;
@@ -1514,12 +1514,36 @@ V.stock = async function () {
       ? '<button class="btn menthe sm" data-verif="' + p + '">Vérifier</button>' : '') + '</div>';
 
   /* Deux onglets, comme l'inventaire. On mémorise le dernier ouvert. */
-  let partie = ['sec', 'commander'].indexOf(STATE.stockPartie) >= 0 ? STATE.stockPartie : 'froid';
-  /* Articles au minimum ou en dessous (même calcul que la tour de contrôle). */
+  let partie = ['sec', 'commander', 'metro'].indexOf(STATE.stockPartie) >= 0 ? STATE.stockPartie : 'froid';
+  let rech = '';
+  /* Articles au minimum ou en dessous (même calcul que la tour de contrôle).
+     Ceux achetés chez Métro ont leur propre onglet. */
+  const lignesSec = secAttendu ? secAttendu.lignes : (sec && sec.lignes) || {};
   let aCommander = [];
-  try { aCommander = articlesSousSeuil(seuils, articles, secAttendu ? secAttendu.lignes : (sec && sec.lignes) || {}); } catch (e) {}
+  try { aCommander = articlesSousSeuil(seuils, articles, lignesSec).filter(x => !x.metro); } catch (e) {}
   /* Plus rien à commander : l'onglet disparaît, on revient à la chambre froide. */
   if (partie === 'commander' && !aCommander.length) partie = STATE.stockPartie = 'froid';
+
+  /* Recherche : texte sans accents ni majuscules, posé sur chaque ligne
+     (data-q). Le filtre cache les lignes au clavier, sans redessiner. */
+  const nrmQ = x => String(x || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .replace(/\u0153/g, 'oe').replace(/\u00e6/g, 'ae');
+  const dq = (...x) => ' data-q="' + esc(nrmQ(x.filter(Boolean).join(' '))) + '"';
+  /* Liste Métro : chaque ligne (déclinaison) des références marquées Métro
+     dans le catalogue, avec son stock et son minimum. */
+  const listeMetro = [];
+  catalogueSec().filter(r => !r.masque && estMetro(r)).forEach(r => {
+    ((r.variantes && r.variantes.length) ? r.variantes : ['']).forEach(v => {
+      const k = 'sec|' + r.id + '|' + v;
+      let q = 0;
+      try { q = qteSec(k, articles, lignesSec); } catch (e) {}
+      const min = num(seuils[k]);
+      listeMetro.push({ cle: k, nom: v ? r.nom + ' · ' + v : r.nom, q: q, min: min, unite: r.unite || 'unité',
+        sec: r.sec || 'Autres', aAcheter: min > 0 && q <= min });
+    });
+  });
+  const aAcheter = listeMetro.filter(x => x.aAcheter).sort((a, b) => (a.q / a.min) - (b.q / b.min));
+  if (partie === 'metro' && !listeMetro.length) partie = STATE.stockPartie = 'froid';
 
   const estSec = articleEstSec;
   /* Chambre froide : tout ce qui n'est pas marqué « sec ». */
@@ -1583,7 +1607,7 @@ V.stock = async function () {
                   const n = tailles.reduce((s, c) => s + num(articles[c]), 0);
                   const negatif = tailles.some(c => num(articles[c]) < 0);
                   const min = num(seuils['glace|' + p]);
-                  return carte('<div class="rang"><div style="flex:1;min-width:0"><b>' + esc(p) + '</b>' +
+                  return carte('<div class="rang"' + dq(p, fam && fam.libelle) + '><div style="flex:1;min-width:0"><b>' + esc(p) + '</b>' +
                     '<div class="mini tailles">' + (tailles.length ? tailles.map(c => { const q = num(articles[c]);
                       return '<span class="tq' + (q < 0 ? ' neg' : '') + '"><b>' + q + '</b>×' + esc(litArticle(c).taille) + ' L</span>';
                     }).join('') : 'aucun bac') + '</div>' + ligneMin(n, min, accord(min, 'bac')) + '</div>' +
@@ -1591,7 +1615,7 @@ V.stock = async function () {
                 }).join('');
               })()
             : parFamille[fid].map(c => { const a = litArticle(c), q = num(articles[c]), min = num(seuils[c]);
-                return carte('<div class="rang"><div style="flex:1;min-width:0"><b>' +
+                return carte('<div class="rang"' + dq(a.parfum, fam ? fam.libelle : fid) + '><div style="flex:1;min-width:0"><b>' +
                   esc(a.parfum || (fam ? fam.libelle : fid)) + '</b>' +
                   (fam ? '<div class="mini">En ' + esc(fam.unites) + '</div>' : '') + ligneMin(q, min, fam ? (min > 1 ? fam.unites : fam.unite) : '') + '</div>' +
                   '<b class="num" style="font-size:20px">' + q + '</b></div>', q < 0 ? 'corail' : min > 0 && q <= min ? 'ambre' : '');
@@ -1619,11 +1643,30 @@ V.stock = async function () {
       '</b> au minimum ou en dessous, du plus urgent au moins urgent.</p>', 'solide') +
       groupes.map(g => '<div class="entete"><h3>' + esc(g[0]) + '</h3>' +
         '<span class="pousse mini num">' + g[1].length + '</span></div>' +
-        '<div class="stack">' + g[1].map(x => carte('<div class="rang"><div style="flex:1;min-width:0"><b>' + esc(x.nom) + '</b>' +
+        '<div class="stack">' + g[1].map(x => carte('<div class="rang"' + dq(x.nom, g[0]) + '><div style="flex:1;min-width:0"><b>' + esc(x.nom) + '</b>' +
           '<div class="mini">Minimum ' + nSeuil(x.min) + ' ' + esc(x.partie === 'froid' && x.cle.indexOf('glace|') ? x.unite : accord(x.min, x.unite)) + '</div></div>' +
           '<b class="num" style="font-size:20px">' + nSeuil(x.q) + '</b>' +
           '<span class="mini" style="margin-left:6px">/ ' + nSeuil(x.min) + '</span></div>',
           x.q <= 0 ? 'corail' : 'ambre')).join('') + '</div>').join('');
+  };
+
+  /* ---------- Commande Métro : ce qu'il faut acheter en magasin ----------
+     Même règle que « À commander » (au minimum ou en dessous), limitée aux
+     références marquées Métro dans Réglages › Catalogue. Le reste de la liste
+     suit, pour vérifier sur place. */
+  const blocMetro = () => {
+    const rang = (x, teinte) => carte('<div class="rang"' + dq(x.nom, x.sec) + '><div style="flex:1;min-width:0"><b>' + esc(x.nom) + '</b>' +
+      '<div class="mini">' + esc(x.sec) + (x.min > 0 ? ' · minimum ' + nSeuil(x.min) + ' ' + esc(accord(x.min, x.unite)) : ' · pas de minimum') +
+      '</div></div><b class="num" style="font-size:20px">' + nSeuil(x.q) + '</b>' +
+      (x.min > 0 ? '<span class="mini" style="margin-left:6px">/ ' + nSeuil(x.min) + '</span>' : ''), teinte);
+    const reste = listeMetro.filter(x => !x.aAcheter).sort((a, b) => a.nom.localeCompare(b.nom));
+    return carte('<p class="cs">' + (aAcheter.length
+        ? '<b>' + aAcheter.length + ' ' + accord(aAcheter.length, 'article', 'articles') + ' à acheter chez Métro</b>, du plus urgent au moins urgent.'
+        : 'Rien à acheter chez Métro : tout est au-dessus de son minimum.') + '</p>', 'solide') +
+      (aAcheter.length ? '<div class="entete"><h3>À acheter</h3><span class="pousse mini num">' + aAcheter.length + '</span></div>' +
+        '<div class="stack">' + aAcheter.map(x => rang(x, x.q <= 0 ? 'corail' : 'ambre')).join('') + '</div>' : '') +
+      (reste.length ? '<div class="entete"><h3>Reste de la liste Métro</h3><span class="pousse mini num">' + reste.length + '</span></div>' +
+        '<div class="stack">' + reste.map(x => rang(x, '')).join('') + '</div>' : '');
   };
 
   /* ---------- Sec ---------- */
@@ -1708,7 +1751,7 @@ V.stock = async function () {
               ? lignes.filter(x => minDe(x.v) > 0 && x.q <= minDe(x.v))
               : (minDe('') > 0 && total <= minDe('') ? [{ v: '', q: total }] : []);
             const aMin = minDe('') > 0 || lignes.some(x => minDe(x.v) > 0);
-            return carte('<div class="rang"><div style="flex:1;min-width:0"><b>' + esc(r.nom) + '</b>' +
+            return carte('<div class="rang"' + dq(r.nom, r.id, (r.variantes || []).join(' '), lignes.map(x => x.v).join(' '), s.id) + '><div style="flex:1;min-width:0"><b>' + esc(r.nom) + '</b>' +
               (suivi ? '<div class="mini">Suivi en direct : comptage moins ouvertures</div>' : '') +
               (r.variantes && r.variantes.length
                 ? (sous.length ? '<div class="mini" style="color:var(--corail-d)"><b>À commander : ' +
@@ -1733,14 +1776,54 @@ V.stock = async function () {
       '<div class="tseg">' +
       [['froid', 'Chambre froide', t.bacs + ' ' + accord(t.bacs, 'bac')], ['sec', 'Sec', sec ? Object.keys(sec.lignes || {}).length + ' réf.' : 'jamais compté']]
         .concat(aCommander.length ? [['commander', 'À commander', aCommander.length + ' ' + accord(aCommander.length, 'article', 'articles')]] : [])
+        .concat(listeMetro.length ? [['metro', 'Commande Métro', aAcheter.length ? aAcheter.length + ' à acheter' : 'rien à acheter']] : [])
         .map(x => '<button class="' + (x[0] === partie ? 'on' : '') + '" data-partie="' + x[0] + '">' +
           '<span class="tsl">' + x[1] + '</span><small>' + x[2] + '</small></button>').join('') +
       '</div>' +
-      (partie === 'commander' ? blocCommander() : partie === 'froid' ? blocFroid() : blocSec());
+      '<input type="search" id="st-rech" placeholder="Chercher un produit" autocomplete="off" aria-label="Chercher un produit" value="' + esc(rech) + '">' +
+      '<div id="st-corps">' + (partie === 'commander' ? blocCommander() : partie === 'metro' ? blocMetro() : partie === 'froid' ? blocFroid() : blocSec()) + '</div>';
 
     $$('[data-partie]').forEach(b => b.onclick = () => {
+      const garde = rech.trim() !== '';
       partie = b.dataset.partie; STATE.stockPartie = partie; dessiner();
+      /* Une recherche en cours : le champ garde la main (clavier ouvert). */
+      const z = $('#st-rech'); if (garde && z) { z.focus(); z.setSelectionRange(z.value.length, z.value.length); }
     });
+    /* Filtre : une ligne reste si sa recherche contient le texte tapé ; un
+       groupe (famille, rayon) sans ligne visible disparaît avec son titre.
+       Le texte tapé suit d'un onglet à l'autre. */
+    const visible = r => { const c = r.closest('.card'); return !c || c.style.display !== 'none'; };
+    const filtrer = () => {
+      const q = nrmQ(rech.trim());
+      $$('#st-corps [data-q]').forEach(r => {
+        const c = r.closest('.card'); if (c) c.style.display = !q || r.dataset.q.indexOf(q) >= 0 ? '' : 'none';
+      });
+      $$('#st-corps .stack').forEach(st => {
+        const lignes = $$('[data-q]', st);
+        if (!lignes.length) return;
+        const voit = !q || lignes.some(visible);
+        st.style.display = voit ? '' : 'none';
+        const tete = st.previousElementSibling;
+        if (tete && tete.classList.contains('entete')) tete.style.display = voit ? '' : 'none';
+        const bloc = st.closest('.sec-bloc'); if (bloc) bloc.style.display = voit ? '' : 'none';
+      });
+      /* Pendant une recherche, les résumés (chiffres, bandeaux, bouton
+         d'inventaire) s'effacent : les lignes trouvées remontent sous le champ. */
+      $$('#st-corps > .card.solide, #st-corps > .alerte, #st-inv, #st-inv-sec').forEach(x => { x.style.display = q ? 'none' : ''; });
+      let rien = $('#st-rien');
+      const aucun = q && !$$('#st-corps [data-q]').some(visible);
+      if (aucun && !rien) {
+        rien = document.createElement('p');
+        rien.id = 'st-rien'; rien.className = 'rappel'; rien.style.marginTop = '14px';
+        $('#st-corps').appendChild(rien);
+      }
+      if (rien) {
+        rien.hidden = !aucun;
+        rien.textContent = 'Aucun produit ne correspond à « ' + rech.trim() + ' » dans cet onglet.';
+      }
+    };
+    $('#st-rech').oninput = e => { rech = e.target.value; filtrer(); };
+    filtrer();
     const bi = $('#st-inv');
     if (bi) bi.onclick = () => { STATE.inventairePartie = 'froid'; rendre('inventaire'); };
     $$('[data-verif]').forEach(b => b.onclick = () => verifierInventaire(b.dataset.verif));
@@ -1751,6 +1834,192 @@ V.stock = async function () {
   };
   dessiner();
 };
+
+/* -----------------------------------------------------------------------------
+   CONSOMMATION, COUVERTURE DU STOCK ET ACHATS (tour de contrôle, manager)
+   • Consommation : bacs de glace ouverts (traçabilité), en litres, par
+     semaine (lundi → dimanche) ou par mois.
+   • Couverture du stock : stock de glace de la chambre froide divisé par la
+     consommation moyenne d'un jour d'ouverture sur les 28 derniers jours.
+     Les jours de fermeture (réglages) ne comptent pas dans la moyenne.
+   • Achats du mois : livraisons confirmées (chambre froide et sec) au prix
+     d'achat du catalogue. Sans frais de port : c'est la marchandise seule.
+   -------------------------------------------------------------------------- */
+const CONSO = { semaines: 8, mois: 6, fenetreJours: 28, joursMin: 3,
+  moisCourts: ['janv.', 'févr.', 'mars', 'avr.', 'mai', 'juin', 'juil.', 'août', 'sept.', 'oct.', 'nov.', 'déc.'] };
+
+function lundiDe(jour) {
+  const p = String(jour).split('-');
+  return addD(jour, 1 - (new Date(+p[0], +p[1] - 1, +p[2]).getDay() || 7));
+}
+
+/* Litres d'un bac de glace, 0 pour tout le reste (macarons, sec…). */
+function litresGlace(cle, q) {
+  const a = litArticle(cle);
+  return a.famille === 'glace' && num(a.taille) > 0 ? num(q) * num(a.taille) : 0;
+}
+
+async function donneesConso() {
+  const j = today();
+  const debutMois = j.slice(0, 8) + '01';
+  /* Six mois en arrière couvrent aussi les huit semaines. */
+  const depuis = monthKey(addD(debutMois, -31 * (CONSO.mois - 1))) + '-01';
+  await chargerPrixAchat().catch(() => {});
+  const [mouv, s, secMv] = await Promise.all([
+    tousMouvements(depuis), stockReel(), DB.get(CLE_SEC_MV, []).catch(() => [])]);
+
+  const parJour = {};                       // litres ouverts par jour
+  const achats = { mois: 0, moisPrec: 0, sansPrix: 0, livraisons: new Set() };
+  const moisPrec = monthKey(addD(debutMois, -1));
+  const compterAchat = (cle, q, jour, bl) => {
+    const m = monthKey(jour);
+    if (m !== monthKey(j) && m !== moisPrec) return;
+    const p = prixArticle(cle);
+    if (m === monthKey(j)) {
+      achats.livraisons.add(bl ? 'bl:' + bl : 'j:' + jour);
+      if (p === null) achats.sansPrix++; else achats.mois += q * p;
+    } else if (p !== null) achats.moisPrec += q * p;
+  };
+  mouv.forEach(x => {
+    const m = litMouvement(x);
+    if (!m.cle || !m.jour) return;
+    if (m.type === 'ouverture') {
+      const l = litresGlace(m.cle, m.qte);
+      if (l) parJour[m.jour] = (parJour[m.jour] || 0) + l;
+    } else if (m.type === 'reception') compterAchat(m.cle, m.qte, m.jour, x.b || x.bl);
+  });
+  (secMv || []).forEach(m => {
+    if (!m || !m.cle || m.supprime || !m.at || isNaN(new Date(m.at).getTime())) return;
+    compterAchat(m.cle, num(m.q), isoOf(new Date(m.at)), m.bl);
+  });
+
+  /* Séries : la dernière barre est la période en cours. */
+  const semaines = [];
+  for (let i = CONSO.semaines - 1; i >= 0; i--) {
+    const lu = addD(lundiDe(j), -7 * i);
+    let v = 0;
+    for (let d = 0; d < 7; d++) v += parJour[addD(lu, d)] || 0;
+    semaines.push({ l: fmtDC(lu), titre: 'Semaine du ' + fmtDC(lu), v: v, encours: i === 0 });
+  }
+  const mois = [];
+  for (let i = CONSO.mois - 1; i >= 0; i--) {
+    const d = new Date(+debutMois.slice(0, 4), +debutMois.slice(5, 7) - 1 - i, 1);
+    const mk = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0');
+    let v = 0;
+    Object.keys(parJour).forEach(k => { if (monthKey(k) === mk) v += parJour[k]; });
+    mois.push({ l: CONSO.moisCourts[d.getMonth()], titre: MOIS[d.getMonth()] + ' ' + d.getFullYear(), v: v, encours: i === 0 });
+  }
+
+  /* Moyenne par jour d'ouverture, hier compris, aujourd'hui exclu (en cours).
+     Un bac ouvert un jour de fermeture (préparation) compte quand même. */
+  let litres = 0, ouverts = 0;
+  for (let i = 1; i <= CONSO.fenetreJours; i++) {
+    const d = addD(j, -i);
+    litres += parJour[d] || 0;
+    if (jourOuvert(d)) ouverts++;
+  }
+  const parJourMoy = ouverts ? litres / ouverts : 0;
+
+  /* Stock de glace fermé : chambre froide (un article négatif ne retire rien). */
+  let stockL = 0, stockBacs = 0;
+  Object.keys(s.articles || {}).forEach(c => {
+    const q = num(s.articles[c]);
+    if (q <= 0) return;
+    const l = litresGlace(c, q);
+    if (l) { stockL += l; stockBacs += q; }
+  });
+
+  return { semaines: semaines, mois: mois, parJourMoy: parJourMoy, ouverts: ouverts,
+           stockL: stockL, stockBacs: stockBacs, inventaire: !!s.inventaire,
+           achats: { mois: achats.mois, moisPrec: achats.moisPrec, sansPrix: achats.sansPrix,
+                     livraisons: achats.livraisons.size, nomMois: MOIS[+j.slice(5, 7) - 1],
+                     nomMoisPrec: MOIS[+moisPrec.slice(5, 7) - 1] } };
+}
+
+function nL(v) { return n1(v) + ' L'; }
+
+/* Barres en HTML pur : la barre en cours est hachurée, elle n'est pas finie. */
+function barresConso(serie) {
+  const max = Math.max(1, ...serie.map(x => x.v));
+  const resume = serie.map(x => x.titre + ' : ' + nL(x.v) + (x.encours ? ' (en cours)' : '')).join(', ');
+  return '<div role="img" aria-label="' + esc(resume) + '" style="display:flex;align-items:stretch;gap:6px;height:140px;margin-top:12px">' +
+    serie.map(x => {
+      const h = x.v > 0 ? Math.max(3, Math.round(x.v / max * 100)) : 0;
+      return '<div title="' + esc(x.titre + ' : ' + nL(x.v)) + '" style="flex:1;min-width:0;display:flex;flex-direction:column;align-items:center;gap:4px">' +
+        '<span class="mini" style="font-size:11px;white-space:nowrap">' + (x.v > 0 ? n1(x.v) : '') + '</span>' +
+        '<div style="flex:1;width:100%;display:flex;align-items:flex-end;justify-content:center">' +
+          '<div style="width:100%;max-width:36px;height:' + h + '%;border-radius:6px 6px 2px 2px;' +
+          (x.encours ? 'background:repeating-linear-gradient(135deg,var(--menthe-l) 0 5px,#fff 5px 9px);border:1.5px solid var(--menthe-d)'
+                     : 'background:var(--menthe-d)') + '"></div></div>' +
+        '<span class="mini" style="font-size:11px;white-space:nowrap">' + esc(x.l) + '</span></div>';
+    }).join('') + '</div>';
+}
+
+function texteCouverture(jours) {
+  if (jours >= 14) return '≈ ' + Math.round(jours / 7) + ' semaines';
+  const n = Math.max(0, Math.floor(jours));
+  return n + ' ' + accord(n, 'jour');
+}
+
+function htmlCarteConso(d, mode) {
+  const serie = mode === 'mois' ? d.mois : d.semaines;
+  const fini = serie[serie.length - 2], cours = serie[serie.length - 1];
+  const parPeriode = mode === 'mois' ? 'Mois dernier' : 'Semaine dernière';
+
+  let couv = '—', couvCls = '', couvD;
+  if (!d.inventaire) couvD = 'Inventaire de la chambre froide à faire';
+  else if (d.ouverts < CONSO.joursMin) couvD = 'Pas assez de jours d’ouverture sur 4 semaines';
+  else if (!(d.parJourMoy > 0)) couvD = 'Aucun bac ouvert sur 4 semaines';
+  else {
+    const jrs = d.stockL / d.parJourMoy;
+    couv = texteCouverture(jrs);
+    couvCls = jrs < 5 ? 'bad' : jrs < 10 ? 'warn' : 'ok';
+    couvD = nL(d.stockL) + ' en stock ÷ ' + nL(d.parJourMoy) + ' par jour d’ouverture';
+  }
+
+  const a = d.achats;
+  const achatsD = (a.livraisons ? a.livraisons + ' ' + accord(a.livraisons, 'livraison') : 'Aucune livraison') +
+    (a.sansPrix ? ' · ' + a.sansPrix + ' ' + accord(a.sansPrix, 'ligne') + ' sans prix' : '') +
+    (a.moisPrec > 0 ? ' · ' + a.nomMoisPrec + ' : ' + eur(a.moisPrec) : '');
+
+  return carte('<div class="ch" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">' +
+      '<h2 style="flex:1;min-width:0">Consommation de glace</h2>' +
+      '<div style="display:flex;gap:6px">' +
+      [['semaine', 'Semaine'], ['mois', 'Mois']].map(x =>
+        '<button class="btn ' + (x[0] === mode ? '' : 'fantome ') + 'sm" data-consomode="' + x[0] + '"' +
+        (x[0] === mode ? ' aria-pressed="true"' : ' aria-pressed="false"') + '>' + x[1] + '</button>').join('') +
+      '</div></div>' +
+    '<div class="grid g3" style="margin-top:8px">' +
+      kpi(parPeriode, nL(fini.v), '', 'En cours : ' + nL(cours.v)) +
+      kpi('Couverture du stock', couv, couvCls, couvD) +
+      kpi('Achats de ' + a.nomMois, eur(a.mois) + ' HT', '', achatsD) +
+    '</div>' +
+    barresConso(serie) +
+    '<div class="mini" style="margin-top:8px">Bacs de glace ouverts (traçabilité). Achats : livraisons confirmées au prix du catalogue, hors frais de port.</div>',
+    'plat');
+}
+
+/* Dessine ou redessine la carte sous les alertes de stock de la tour de
+   contrôle. Le choix Semaine / Mois est gardé le temps de la session. */
+async function carteConsommation(page) {
+  let d;
+  try { d = await donneesConso(); } catch (e) { console.warn('Consommation indisponible', e); return; }
+  if (STATE.view !== 'controle' || page !== $('#page')) return;
+  const vieille = $('#conso-stock'); if (vieille) vieille.remove();
+  const bc = document.createElement('div');
+  bc.id = 'conso-stock';
+  bc.style.marginTop = '14px';
+  const dessiner = () => {
+    bc.innerHTML = htmlCarteConso(d, STATE.consoMode === 'mois' ? 'mois' : 'semaine');
+    bc.querySelectorAll('[data-consomode]').forEach(b => b.onclick = () => {
+      STATE.consoMode = b.dataset.consomode; dessiner();
+    });
+  };
+  dessiner();
+  /* Sous les articles à commander, sinon sous les réceptions à confirmer. */
+  const apres = [$('#sous-seuil'), $('#rc-attente'), $('#ctl-meteo')].filter(x => x && x.parentNode === page)[0];
+  page.insertBefore(bc, apres ? apres.nextSibling : (page.firstChild ? page.firstChild.nextSibling : null));
+}
 
 /* -----------------------------------------------------------------------------
    ALERTES DE STOCK SUR LA TOUR DE CONTRÔLE
@@ -1772,6 +2041,7 @@ V.controle = async function () {
   if (recAttente.length && typeof bandeauReceptions === 'function' && page.firstChild) {
     const br = document.createElement('div');
     apresReceptions = br;
+    br.id = 'rc-attente';
     br.style.marginTop = '14px';
     br.innerHTML = bandeauReceptions(recAttente);
     page.insertBefore(br, page.firstChild.nextSibling);
@@ -1825,8 +2095,10 @@ V.controle = async function () {
           bm.style.marginTop = '14px';
           const liste = sous.slice(0, 8).map(x => esc(x.nom) + ' ' + nSeuil(x.q) + '/' + nSeuil(x.min)).join(', ') +
             (sous.length > 8 ? ' et ' + (sous.length - 8) + ' autre' + (sous.length > 9 ? 's' : '') : '');
+          const nMetro = sous.filter(x => x.metro).length, nCmd = sous.length - nMetro;
           bm.innerHTML = '<div class="alerte warn"><span class="ai">•</span><div style="flex:1;min-width:0"><b>' +
-            sous.length + ' ' + accord(sous.length, 'article à commander', 'articles à commander') + ' (au minimum ou en dessous)</b>' +
+            [nCmd ? nCmd + ' ' + accord(nCmd, 'article à commander', 'articles à commander') : '',
+             nMetro ? nMetro + ' à acheter chez Métro' : ''].filter(Boolean).join(', ') + ' (au minimum ou en dessous)</b>' +
             '<p>' + liste + '</p></div><button class="btn menthe sm" data-voirseuil>Voir</button></div>';
           /* Sous la valeur du stock, sinon sous les réceptions à confirmer. */
           const apres = $('#valeur-stock') && $('#valeur-stock').parentNode === page ? $('#valeur-stock') : $('#ctl-meteo');
@@ -1834,10 +2106,14 @@ V.controle = async function () {
             : apresReceptions && apresReceptions.parentNode === page ? apresReceptions : page.firstChild;
           page.insertBefore(bm, ancre ? ancre.nextSibling : null);
           bm.querySelector('[data-voirseuil]').onclick = () => {
-            STATE.stockPartie = 'commander'; rendre('stock'); };
+            STATE.stockPartie = sous.some(x => !x.metro) ? 'commander' : 'metro'; rendre('stock'); };
         }
       }
     } catch (e) {}
+
+    /* Consommation, couverture du stock et achats du mois : sans attendre,
+       pour ne pas retarder les anomalies signalées (plus bas). */
+    carteConsommation(page).catch(e => console.warn('Consommation indisponible', e));
   }
 
   /* -----------------------------------------------------------------------------
@@ -1941,6 +2217,11 @@ V.controle = async function () {
    Son stock n'est jamais effacé : il reste au dernier comptage.
    -------------------------------------------------------------------------- */
 let _catalogueSec = null;
+/* Fournisseur par référence du sec, sous sa propre clé « catalogue:fournisseurs » :
+   { id: 'metro' }. Absent = Amorino. À part de « catalogue:sec », que ✎ et ✕
+   réécrivent en entier depuis une copie lue à l'ouverture de l'écran. */
+const CLE_FOURNISSEURS = 'catalogue:fournisseurs';
+let _fournisseurs = {};
 
 function catalogueSecBrut() {
   return INVENTAIRE_SEC.map(r => typeof r === 'string'
@@ -1979,10 +2260,11 @@ function catalogueSec() {
 
 /* À appeler avant de dessiner un écran qui s'en sert. */
 async function chargerCatalogueSec() {
-  const [m] = await Promise.all([DB.get('catalogue:sec', null), chargerPrixAchat().catch(() => {}),
-    chargerCatalogueFroid().catch(() => {})]);
+  const [m, fo] = await Promise.all([DB.get('catalogue:sec', null), DB.get(CLE_FOURNISSEURS, null).catch(() => null),
+    chargerPrixAchat().catch(() => {}), chargerCatalogueFroid().catch(() => {})]);
+  _fournisseurs = (fo && typeof fo === 'object' && !Array.isArray(fo)) ? fo : {};
   const base = catalogueSecBrut();
-  if (!m) { _catalogueSec = base; return base; }
+  if (!m) { base.forEach(x => { if (_fournisseurs[x.id]) x.fournisseur = _fournisseurs[x.id]; }); _catalogueSec = base; return base; }
   const out = base.map(r => {
     const mod = (m.modifs || {})[r.id];
     const x = mod ? Object.assign({}, r, mod) : r;
@@ -2013,9 +2295,13 @@ async function chargerCatalogueSec() {
     /* Garde-fou (la fiche l'empêche) : tout retiré = référence retirée. */
     if (!x.variantes.length) { x.variantes = vs; x.masque = true; }
   });
+  out.forEach(x => { if (_fournisseurs[x.id]) x.fournisseur = _fournisseurs[x.id]; });
   _catalogueSec = out;
   return out;
 }
+
+/* Référence achetée chez Métro (et non commandée à Amorino). */
+const estMetro = r => !!r && r.fournisseur === 'metro';
 
 async function enregistrerCatalogueSec(m) {
   await DB.set('catalogue:sec', m);
@@ -2352,13 +2638,15 @@ V.catalogue = async function () {
      automatique de la vue. Annuler ou Enregistrer les vident. */
   const brouillon = STATE.catalogueBrouillon =
     STATE.catalogueBrouillon || { prix:{}, min:{}, actif:{} };
+  brouillon.metro = brouillon.metro || {};
   const noms = {};
   const nbBrouillon = () => Object.keys(brouillon.prix).length +
-    Object.keys(brouillon.min).length + Object.keys(brouillon.actif).length;
+    Object.keys(brouillon.min).length + Object.keys(brouillon.actif).length + Object.keys(brouillon.metro).length;
   /* Point décimal (2.5), comme la fiche : l'export le lit tel quel. */
   const prixInit = cp => { const p = corrige(cp) ? num(_prixAchat[cp]) : prixAchatDefaut(cp); return p > 0 ? String(p) : ''; };
   const minInit = k => num(seuils[k]) > 0 ? String(num(seuils[k])) : '';
   const actifInit = cr => !_froidRetires.has(cr);
+  const metroInit = id => estMetro(cat.filter(r => r.id === id)[0]);
   const val = (o, k, init) => o[k] !== undefined ? o[k] : init(k);
   const nrm = x => String(x || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
 
@@ -2405,7 +2693,9 @@ V.catalogue = async function () {
       '<b' + (r.masque ? ' style="text-decoration:line-through;opacity:.5"' : '') + '>' + esc(r.nom) + '</b>' +
       '<div class="mini">' + esc(r.unite) + (r.decimal === false ? ' · entiers' : ' · demi possible') +
       (nbRet ? ' · ' + nbRet + ' ' + accord(nbRet, 'déclinaison retirée', 'déclinaisons retirées') : '') +
-      (r.masque ? ' · retirée du catalogue' : '') + '</div></div>' +
+      (r.masque ? ' · retirée du catalogue' : '') + '</div>' +
+      (r.masque ? '' : '<label class="mini cat-metro"><input type="checkbox" data-metro="' + esc(r.id) + '"' +
+        (val(brouillon.metro, r.id, metroInit) ? ' checked' : '') + '> Acheté chez Métro</label>') + '</div>' +
       '<div class="duo compact">' +
       (avecDecl ? '<button class="btn clair" data-fiche="' + esc(r.id) + '" aria-label="Déclinaisons actives ou retirées" title="Déclinaisons actives ou retirées">☰</button>' : '') +
       '<button class="btn clair" data-edit="' + esc(r.id) + '" aria-label="Modifier" title="Nom, unité, déclinaisons">✎</button>' +
@@ -2490,6 +2780,11 @@ V.catalogue = async function () {
       i.closest('.cat-ligne').classList.toggle('off', !i.checked);
       majBarre();
     });
+    $$('[data-metro]').forEach(i => i.onchange = () => {
+      const k = i.dataset.metro;
+      if (i.checked === metroInit(k)) delete brouillon.metro[k]; else brouillon.metro[k] = i.checked;
+      majBarre();
+    });
     $('#ct-rech').oninput = e => {
       const q = nrm(e.target.value.trim());
       $$('#ct-corps [data-q]').forEach(r => { r.style.display = !q || r.dataset.q.indexOf(q) >= 0 ? '' : 'none'; });
@@ -2498,7 +2793,7 @@ V.catalogue = async function () {
       });
     };
     $('#ct-annul').onclick = () => {
-      brouillon.prix = {}; brouillon.min = {}; brouillon.actif = {};
+      brouillon.prix = {}; brouillon.min = {}; brouillon.actif = {}; brouillon.metro = {};
       enCours = false;
       dessiner();
     };
@@ -2534,6 +2829,7 @@ V.catalogue = async function () {
       if (mv !== (num(seuils[k]) > 0 ? num(seuils[k]) : 0)) mins[k] = mv;
     }
     const actifs = Object.assign({}, brouillon.actif);
+    const metros = Object.assign({}, brouillon.metro);
     if (Object.keys(actifs).length && !PARFUMS.some(p => val(actifs, 'glace|' + p, actifInit))) {
       return toast('Gardez au moins un parfum de glace actif', 'erreur');
     }
@@ -2556,6 +2852,17 @@ V.catalogue = async function () {
         seuils = frais;
         brouillon.min = {};
       }
+      if (Object.keys(metros).length) {
+        /* Relu juste avant, comme le froid : un autre manager garde ses réglages. */
+        const lu = await DB.get(CLE_FOURNISSEURS, null);
+        const fo = Object.assign({}, (lu && typeof lu === 'object' && !Array.isArray(lu)) ? lu : {});
+        Object.keys(metros).forEach(id => { if (metros[id]) fo[id] = 'metro'; else delete fo[id]; });
+        await DB.set(CLE_FOURNISSEURS, fo);
+        _fournisseurs = fo;
+        _catalogueSec = null;
+        cat.forEach(r => { if (metros[r.id] !== undefined) r.fournisseur = metros[r.id] ? 'metro' : ''; });
+        brouillon.metro = {};
+      }
       if (Object.keys(prix).length) await enregistrerPrixAchat(prix);
       brouillon.prix = {};
     } catch (e) {
@@ -2564,12 +2871,12 @@ V.catalogue = async function () {
       dessiner();
       return toast('Enregistrement incomplet, réessayez', 'erreur');
     }
-    const n = Object.keys(actifs).length + Object.keys(mins).length + Object.keys(prix).length;
+    const n = Object.keys(actifs).length + Object.keys(mins).length + Object.keys(prix).length + Object.keys(metros).length;
     if (n) {
       try {
         await feed('ok', STATE.user.prenom + ' a mis à jour le catalogue (' +
           [Object.keys(prix).length ? 'prix' : '', Object.keys(mins).length ? 'minimums' : '',
-           Object.keys(actifs).length ? 'produits actifs' : ''].filter(Boolean).join(', ') + ')');
+           Object.keys(actifs).length ? 'produits actifs' : '', Object.keys(metros).length ? 'liste Métro' : ''].filter(Boolean).join(', ') + ')');
       } catch (e) { /* le journal n'empêche pas l'enregistrement */ }
     }
     toast(n ? 'Catalogue enregistré' : 'Rien n’a changé');
@@ -3940,6 +4247,30 @@ V.lots = async function () {
   };
 };
 
+/* Bacs de glace encore en vitrine (clés « g_<parfum> » de « lots: »), lus sur
+   le mois en cours et le précédent comme calculFIFO : un bac fini sans que ce
+   soit dit y restait jusqu'à sa date limite, puis passait « périmé ». Même
+   règle de marque « jeté » que calculFIFO. */
+async function bacsVitrine() {
+  const m = monthKey(today());
+  const prec = isoOf(new Date(+m.slice(0, 4), +m.slice(5, 7) - 2, 15)).slice(0, 7);
+  const [rp, rm] = await Promise.all([DB.get('lots:' + prec, {}), DB.get('lots:' + m, {})]);
+  const rec = {}, src = {};
+  [[prec, rp], [m, rm]].forEach(([mo, r]) => Object.keys(r || {}).forEach(k => {
+    if (r[k]) { rec[k] = r[k]; src[k] = mo; }
+  }));
+  return Object.keys(rec).filter(k => k.indexOf('g_') === 0).map(k => {
+    const v = rec[k];
+    if (!v.lot || !v.ouv) return null;
+    if (v.jete && (!v.jeteLot || v.jeteLot === v.lot) && (!v.at || v.at <= v.jete)) return null;
+    /* Un bac dont la DLC est dépassée n'est pas proposé : il doit passer par
+       « Jeter » du Frigo (perte ou fini), pas disparaître en « fini ». */
+    const h = (DLC_RULES[regleDLC(k.slice(2), 'g')] || DLC_RULES.defaut).h;
+    if (new Date(v.ouv + 'T08:00:00').getTime() + h * 3600e3 < Date.now()) return null;
+    return { cle: k, parfum: k.slice(2), lot: v.lot, ouv: v.ouv, at: v.at || '', mois: src[k] };
+  }).filter(Boolean).sort((a, b) => a.parfum.localeCompare(b.parfum, 'fr'));
+}
+
 /* Feuille de confirmation après un scan : famille, parfum, taille, lot. */
 function confirmerOuverture(r) {
   return new Promise(resolve => {
@@ -3964,12 +4295,17 @@ function confirmerOuverture(r) {
        lequel des bacs de l'armoire, pour reprendre sa date de sortie du −20. */
     let dest = '', orig = '', bacId = '', jourM13 = '';
     let armoire = [];
+    /* Bac de la vitrine que le nouveau remplace (clé « g_<parfum> »), ou ''.
+       Le parfum remplacé est déclaré fini : il sort des produits ouverts. */
+    let remplace = '', vitrine = [];
+    const chargeVitrine = bacsVitrine().then(l => { vitrine = l; }).catch(() => {});
     /* Jeton propre à cette feuille : si elle a été refermée (voile, retour)
        ou remplacée par une autre, la liste qui arrive ne la redessine pas. */
     let fini = false, armoireChargee = false;
     const jeton = uid();
-    const chargement = bacsArmoire().then(l => { armoire = l; })
-      .catch(() => {}).then(() => {
+    const chargement = Promise.all([
+      bacsArmoire().then(l => { armoire = l; }).catch(() => {}), chargeVitrine
+    ]).then(() => {
         armoireChargee = true;
         const sh = $('#sheet');
         if (!fini && sh && !sh.hidden && $('#co-ok') && $('#co-ok').dataset.jeton === jeton) {
@@ -4007,6 +4343,21 @@ function confirmerOuverture(r) {
         if (!fini) { fini = true; resolve(false); }
       });
       veille.observe(sh, { attributes: true, attributeFilter: ['hidden'] });
+    };
+
+    /* Le même parfum n'est pas proposé : sa ligne est déjà remplacée par la
+       nouvelle ouverture. */
+    const candidatsVitrine = () => vitrine.filter(b => b.cle !== 'g_' + parfum);
+    const choixRemplace = () => {
+      const l = candidatsVitrine();
+      if (!l.some(b => b.cle === remplace)) remplace = '';
+      if (!l.length) return '';
+      return '<div class="champ" style="margin-top:14px"><label class="f">Remplace un bac de la vitrine ?</label>' +
+        '<div class="pastilles">' +
+        '<button type="button" class="pas' + (remplace ? '' : ' on') + '" data-remp="">Non</button>' +
+        l.map(b => '<button type="button" class="pas' + (b.cle === remplace ? ' on' : '') +
+          '" data-remp="' + esc(b.cle) + '">' + esc(b.parfum) + '</button>').join('') + '</div>' +
+        '<p class="mini" style="margin-top:6px">Le bac choisi est déclaré fini et sort de la vitrine, sans perte.</p></div>';
     };
 
     const dessiner = () => {
@@ -4050,7 +4401,8 @@ function confirmerOuverture(r) {
             ? '<div class="rappel" style="margin-top:12px">' + cands.length + ' ' + accord(cands.length, 'bac de ce parfum attend', 'bacs de ce parfum attendent') +
               ' déjà à l’armoire −13, depuis le ' + esc(fmtDC(cands[0].jour)) +
               '. Le plus ancien part d’abord.</div>'
-            : '');
+            : '') +
+          (dest === 'vitrine' ? choixRemplace() : '');
       const sousTitre = !glace ? 'Ce produit est ouvert et part en service.'
         : dest === 'm13' ? 'Le bac reste au stock. La date du jour est sa date de sortie du −20.'
         : dest === 'vitrine' ? 'Le bac monte en vitrine : il sort du stock.'
@@ -4133,6 +4485,9 @@ function confirmerOuverture(r) {
       });
       $$('[data-bac]').forEach(b => b.onclick = () => {
         garder(); bacId = b.dataset.bac; dessiner();
+      });
+      $$('[data-remp]').forEach(b => b.onclick = () => {
+        garder(); remplace = b.dataset.remp; dessiner();
       });
       const sp = $('#co-parfum');
       /* Le parfum change les bacs de l'armoire proposés : on redessine. */
@@ -4295,10 +4650,36 @@ function confirmerOuverture(r) {
                         famille: fam.id, taille: fam.parfums ? taille : null };
       await DB.set('lots:' + m, lots);
 
+      /* Bac remplacé : marqué fini comme « Bac fini » du Frigo (jete +
+         jeteLot + fini, sans perte), sous le mois où il a été ouvert. Après
+         l'écriture du nouveau bac : un échec ici ne bloque pas l'ouverture
+         (déjà déduite du stock) et ne pousse pas à la refaire. Relu juste
+         avant : on ne marque que le même bac (même lot, même ouverture). */
+      const rv = (fam.id === 'glace' && dest === 'vitrine' && remplace && remplace !== cleFifo)
+        ? vitrine.filter(b => b.cle === remplace)[0] || null : null;
+      let remplaceNom = '';
+      if (rv) {
+        try {
+          const recR = await DB.get('lots:' + rv.mois, {});
+          const e = recR[rv.cle];
+          const dejaFini = e && e.jete && (!e.jeteLot || e.jeteLot === e.lot) && (!e.at || e.at <= e.jete);
+          if (e && !dejaFini && e.lot === rv.lot && (e.at || '') === rv.at) {
+            recR[rv.cle] = Object.assign({}, e, { jete: nowISO(), jeteLot: rv.lot,
+                                                  jetePar: STATE.user.prenom, fini: true });
+            await DB.set('lots:' + rv.mois, recR);
+            remplaceNom = rv.parfum;
+          } else if (!dejaFini) {
+            toast('Le bac ' + rv.parfum + ' a changé entre-temps : déclarez-le fini depuis le Frigo', 'erreur');
+          }
+        } catch (err) {
+          toast('Le bac ' + rv.parfum + ' n’a pas pu être déclaré fini : faites-le depuis le Frigo', 'erreur');
+        }
+      }
+
       await feed('ok', STATE.user.prenom +
         (fam.id === 'glace' ? ' a mis en vitrine ' : ' a ouvert ') +
         (parfum || fam.libelle) + (bA || orig === 'm13' ? ' (depuis l’armoire −13)' : '') +
-        ' · lot ' + lot);
+        ' · lot ' + lot + (remplaceNom ? ' · remplace ' + remplaceNom + ' (bac fini)' : ''));
       fini = true;
       closeSheet();
       resolve(true);

@@ -4517,7 +4517,8 @@ function ouvrirPremierePeriode() {
              ' par ' + esc(f.par || '—') + ' · ' + Math.round(f.heures / 24 * 10) / 10 + ' j de vie</div></div>' +
              '<div class="fr"><b>' + resteLisible(f.resteH) + '</b>' +
              '<span>limite ' + fmtDC(f.limite) + '</span></div>' +
-             (f.c === 'rouge' ? '<button class="btn corail sm" data-jeter="' + esc(f.cle) + '">Jeter</button>' : '') +
+             (f.c === 'rouge' ? '<button class="btn corail sm" data-jeter="' + esc(f.cle) + '">Jeter</button>'
+               : (f.type === 'g' || f.famille === 'glace') ? '<button class="btn clair sm" data-fini="' + esc(f.cle) + '">Bac fini</button>' : '') +
              '</div>').join('') + '</div>').join('')
          : vide('🧊', 'Aucun lot ouvert ce mois. Les saisies de l’équipe apparaissent ici.'));
    
@@ -4526,7 +4527,7 @@ function ouvrirPremierePeriode() {
      /* perte faux : bac de glace fini (vendu) sans que sa fin ait été tracée.
         Il sort des produits ouverts sans entrer au registre des pertes : le
         compter jeté (3 ou 5 L pleins) gonflait le poids jeté de l'écart. */
-     const retirerLot = async (f, perte) => {
+     const retirerLot = async (f, perte, declare) => {
        /* Litrage réel du lot : sa taille de bac pour une glace (5 L par
           défaut si elle n'a pas été saisie), 0 pour le reste — une
           chantilly ou un coulis n'a pas de litrage de glace, et lui
@@ -4543,14 +4544,24 @@ function ouvrirPremierePeriode() {
        const moisLot = f.mois || mois;
        const rec = await DB.get('lots:' + moisLot, {});
        if (rec[f.cle]) {
-         rec[f.cle] = Object.assign({}, rec[f.cle], { jete:nowISO(), jeteLot:f.lot, jetePar:STATE.user.prenom });
+         rec[f.cle] = Object.assign({}, rec[f.cle], { jete:nowISO(), jeteLot:f.lot, jetePar:STATE.user.prenom,
+                                                   fini:!perte });
          await DB.set('lots:' + moisLot, rec);
        }
        await feed(perte ? 'warn' : 'ok', STATE.user.prenom + (perte ? ' a jeté ' + f.nom + ' (DLC dépassée)'
+         : declare ? ' a déclaré fini le bac ' + f.nom + ' (lot ' + f.lot + ')'
          : ' a retiré ' + f.nom + ' (bac fini, non tracé)'));
-       toast(perte ? 'Perte enregistrée' : 'Bac retiré, sans perte');
+       toast(perte ? 'Perte enregistrée' : declare ? 'Bac fini, retiré de la vitrine' : 'Bac retiré, sans perte');
        rendre('frigo');
      };
+     /* Bac de glace terminé avant sa date limite : il sort de la vitrine
+        (produits ouverts) sans perte, au lieu de passer « périmé » plus tard. */
+     $$('[data-fini]').forEach(b => b.onclick = () => {
+       const f = fifo.filter(x => x.cle === b.dataset.fini)[0];
+       if (!f) return;
+       confirmer('Bac ' + f.nom + ' fini ?',
+         'Le lot ' + f.lot + ' sort de la vitrine, sans perte.', 'Bac fini', () => retirerLot(f, false, true));
+     });
      $$('[data-jeter]').forEach(b => b.onclick = () => {
        const f = fifo.filter(x => x.cle === b.dataset.jeter)[0];
        if (f.type === 'g' || f.famille === 'glace') {
@@ -5149,9 +5160,13 @@ function ouvrirPremierePeriode() {
    async function blocagesCloture(per) {
      const B = [];
      const jours = joursEntre(per.debut, today() < per.fin ? today() : per.fin);
-     DB.prelire(['ecart:' + per.id, 'stock:inventaire', 'stock:sec']
+     DB.prelire(['ecart:' + per.id, 'stock:inventaire', 'stock:sec', 'horaires']
        .concat(...jours.map(clesEtatJour)));
      const e = await DB.get('ecart:' + per.id, {});
+     /* Horaires à jour (un autre appareil a pu ajouter une fermeture ou changer
+        les jours d'ouverture) : un jour fermé ne doit pas bloquer la clôture. */
+     const hz = await DB.get('horaires', null);
+     if (hz) Object.assign(HORAIRES, hz);
 
      /* L'inventaire est la condition première : sans comptage réel de fin, le
         stock est une invention et l'écart calculé ne veut rien dire.
@@ -5622,6 +5637,7 @@ function modifierPeriode(per) {
    
      for (const c of cles) {
        const j = c.replace(defs[onglet].p, '');
+       const avant = lignes.length;
        const v = onglet === 'clean'
          ? Object.assign({}, await DB.get(c, {}), await DB.get('hebdo:' + j, {}))
          : await DB.get(c);
@@ -5674,8 +5690,31 @@ function modifierPeriode(per) {
          (Array.isArray(v) ? v : []).slice().reverse().forEach(f =>
            lignes.push([fmtD(f.at ? isoOf(new Date(f.at)) : today()), f.type, f.texte, f.par, 'warn']));
        }
+       /* Date de la ligne, pour y ranger les fermetures (ci-dessous). */
+       for (let k = avant; k < lignes.length; k++) lignes[k].j = j;
      }
-   
+
+     /* Fermetures (Réglages › Horaires) : une ligne « Boutique fermée » par
+        période, à sa date, dans les registres tenus jour par jour. Sans elle,
+        un jour fermé ressemblait à un jour oublié. */
+     if (['caisse', 'temp', 'clean', 'reassort', 'pointage'].indexOf(onglet) >= 0) {
+       const hz = await DB.get('horaires', null);
+       const fz = hz && Array.isArray(hz.fermetures) ? hz.fermetures
+                : Array.isArray(HORAIRES.fermetures) ? HORAIRES.fermetures : [];
+       const auj = today(), dateOk = s => /^\d{4}-\d{2}-\d{2}$/.test(s);
+       const valides = fz.filter(f => f && dateOk(f.du) && dateOk(f.au) && f.du <= f.au && f.du <= auj);
+       /* Saisie faite un jour fermé : gardée, mais plus en rouge. */
+       lignes.forEach(l => { if (l.j && valides.some(f => f.du <= l.j && l.j <= f.au)) l[4] = 'n'; });
+       valides.forEach(f => {
+         const n = joursEntre(f.du, f.au).length;
+         const l = [(f.du === f.au ? fmtD(f.du) : 'Du ' + fmtDC(f.du) + ' au ' + fmtD(f.au)) + (f.motif ? ' · ' + f.motif : ''),
+                    n + ' ' + accord(n, 'jour'), 'Boutique fermée', '—', 'n'];
+         l.j = f.au < auj ? f.au : auj;
+         lignes.push(l);
+       });
+       lignes.sort((a, b) => String(b.j || '').localeCompare(String(a.j || '')));
+     }
+
      const entetes = onglet === 'pertes' ? ['Date · produit', 'Quantité', 'Motif', 'Par'] : ['Date', 'Volume', 'Résultat', 'Par'];
 
      /* L'historique ne montre que l'historique : le registre pour un contrôle
