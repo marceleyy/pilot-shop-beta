@@ -75,8 +75,9 @@ const tbCle = id => TACHES_B.prefixe + id;
 
 /* Historique trié par heure : une entrée rejouée au retour du réseau arrive
    en fin de liste, même si elle est plus ancienne. */
+const tbMs = x => { const n = Date.parse(x); return isNaN(n) ? 0 : n; };
 const tbHisto = t => (t.historique || []).filter(h => h && h.at)
-  .slice().sort((a, b) => (a.at < b.at ? -1 : a.at > b.at ? 1 : 0));
+  .slice().sort((a, b) => tbMs(a.at) - tbMs(b.at));
 
 /* Le statut affiché est celui de la DERNIÈRE entrée de l'historique, pas le
    champ « statut » : un « Démarrer » fait hors ligne à 10 h et rejoué à midi
@@ -114,7 +115,7 @@ async function ajouterTache(o) {
   const t = {
     /* Une relance a un id fixe : deux iPads qui terminent la même tâche hors
        ligne avec la même relance n'en créent qu'une. */
-    id: o.id || (o.relanceDe ? 'r-' + o.relanceDe + '-' + o.echeance : uid()),
+    id: o.id || (o.relanceDe && o.echeance ? 'r-' + o.relanceDe + '-' + o.echeance : uid()),
     titre: String(o.titre || '').trim(),
     detail: String(o.detail || '').trim(),
     categorie: tbCat(o.categorie).id,
@@ -416,18 +417,20 @@ V.accueil = async function () {
 
 /* Photos : la copie locale (40 à 80 Ko chacune) ne sert qu'à l'envoi. Une fois
    sur le serveur, elle est retirée de l'iPad pour ne pas remplir sa mémoire ;
-   elle se relit à la demande. Jamais une photo encore en file d'attente, trop
-   lourde pour la base, ou sans base configurée : ce serait la seule copie. */
-function tbOublierPhotos() {
+   elle se relit à la demande. Jamais une photo encore en file d'attente ou
+   trop lourde pour la base, et seulement après avoir vérifié que la base l'a
+   bien : la copie locale pourrait être la seule. */
+async function tbOublierPhotos() {
   try {
-    if (!(SUPABASE.url && SUPABASE.anonKey)) return;
+    if (!(SUPABASE.url && SUPABASE.anonKey) || !STATE.enLigne) return;
     const enFile = new Set(fileLire().map(x => x.cle));
-    DB._clesLocales().filter(k => k.indexOf('tache-photo:') === 0).forEach(k => {
-      if (enFile.has(k) || (DB._gros && DB._gros[k])) return;
+    for (const k of DB._clesLocales().filter(c => c.indexOf('tache-photo:') === 0)) {
+      if (enFile.has(k) || (DB._gros && DB._gros[k])) continue;
       const brut = DB._lire(k);
-      if (brut && brut.length > OFFLINE.tailleMaxOctets) return;
-      DB._oter(k);
-    });
+      if (brut && brut.length > OFFLINE.tailleMaxOctets) continue;
+      const l = await DB._appel(DB._table(k) + '?id=eq.' + encodeURIComponent(k) + '&select=id&limit=1');
+      if (l && l.length) DB._oter(k);
+    }
   } catch (e) { /* sans conséquence : réessayé au prochain démarrage */ }
 }
 setTimeout(tbOublierPhotos, 15000);
