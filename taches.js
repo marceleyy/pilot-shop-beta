@@ -3,21 +3,23 @@
    Tâches et réparations de la boutique, hors procédures Amorino : dégivrer la
    chambre froide, réparer un panneau, déco de Noël, changer le gaz… et les
    actions demandées par l'animateur lors d'une visite ou d'un contrôle
-   (catégorie « audit », reprise par le pré-audit). Remplace le Trello du gérant.
+   (catégorie « audit »). Remplace le Trello du gérant.
 
-   Stockage : un seul document « taches:boutique » = { <id>: tâche }. Chaque
-   écriture passe par DB.patch avec la seule tâche modifiée : deux iPads qui
-   touchent deux tâches différentes ne s'écrasent pas (relecture sous verrou).
-   Les photos vont à part (« tache-photo:<id> ») pour ne pas alourdir la liste.
+   Stockage : un document par tâche, « tache:<id> ». Chaque écriture passe par
+   DB.patch avec les SEULS champs modifiés, et l'historique en ajout : deux
+   iPads (ou une saisie rejouée au retour du réseau) qui touchent la même
+   tâche ne s'écrasent pas. Les photos vont à part (« tache-photo:<id> »).
 
    Tâche : { id, titre, detail, categorie, priorite, statut, echeance,
              assigne, assigneNom, aPhoto, par, employe, at, historique:[
-             { statut, par, at }], passage? }
-   Statuts : creee → en_cours → realisee (supprimee : marquée, jamais effacée,
-   sinon elle reviendrait d'un autre iPad).
+             { statut, par, at }], supprimee?, passage? }
+   Statuts : creee → en_cours → realisee. Une suppression pose
+   « supprimee: true », un champ que les changements de statut ne touchent
+   pas : une saisie rejouée plus tard ne la fait pas revenir.
 
-   API pour les autres modules (preaudit.js) : ajouterTache(obj),
-   lireTaches(), changerStatutTache(id, statut), ouvrirFormulaireTache(pre, apres).
+   API pour les autres modules (le pré-audit s'y branchera) : ajouterTache(obj),
+   lireTaches(), changerStatutTache(id, statut) (la tâche si elle a changé,
+   sinon null), ouvrirFormulaireTache(pre, apres).
    Chargé après app.js et modules.js.
    ============================================================================= */
 
@@ -27,7 +29,7 @@ PAGES.taches = { titre:'Tâches et réparations', sous:'À faire en boutique, ho
 if (MENU_PLUS.manager.indexOf('taches') < 0) MENU_PLUS.manager.unshift('taches');
 
 const TACHES_B = {
-  cle: 'taches:boutique',
+  prefixe: 'tache:',
   categories: [
     { id:'boutique',   libelle:'Boutique' },
     { id:'audit',      libelle:'Audit Amorino' },
@@ -65,23 +67,29 @@ function tbTrier(a, b) {
   if (p) return p;
   const ea = a.echeance || '9999', eb = b.echeance || '9999';
   if (ea !== eb) return ea < eb ? -1 : 1;
-  return String(a.at) < String(b.at) ? -1 : 1;
+  const aa = String(a.at), ab = String(b.at);
+  return aa === ab ? 0 : (aa < ab ? -1 : 1);
 }
+
+const tbCle = id => TACHES_B.prefixe + id;
 
 async function lireTaches() {
-  const d = await DB.get(TACHES_B.cle, {});
-  return Object.keys(d || {}).map(k => d[k])
-    .filter(t => t && t.id && t.titre && t.statut !== 'supprimee');
+  const cles = (await DB.list(TACHES_B.prefixe)).filter(k => k.indexOf(TACHES_B.prefixe) === 0);
+  DB.prelire(cles);   // une seule requête pour toutes les tâches (dans un dessin d'écran)
+  const l = await Promise.all(cles.map(k => DB.get(k, null)));
+  return l.filter(t => t && t.id && t.titre && !t.supprimee);
 }
 
-async function tbEcrire(t) {
-  await DB.patch(TACHES_B.cle, { [t.id]: t });
+/* Seuls les champs donnés partent ; l'entrée d'historique s'ajoute à celles
+   déjà en base au lieu de remplacer la liste. */
+async function tbEcrire(id, champs, entree) {
+  return DB.patch(tbCle(id), champs || {}, entree ? { historique:[entree] } : {});
 }
 
 /* Relue fraîche avant modification : la copie de l'écran peut dater. */
 async function tbLire(id) {
-  const d = await DB.get(TACHES_B.cle, {}, true);
-  return d && d[id] ? d[id] : null;
+  const t = await DB.get(tbCle(id), null, true);
+  return t && t.id && !t.supprimee ? t : null;
 }
 
 async function ajouterTache(o) {
@@ -106,7 +114,7 @@ async function ajouterTache(o) {
   if (o.passage) t.passage = o.passage;
   if (o.relanceDe) t.relanceDe = o.relanceDe;
   if (!t.titre) throw new Error('Tâche sans titre');
-  await tbEcrire(t);
+  await DB.patch(tbCle(t.id), t);
   await feed('ok', qui + ' a créé la tâche : ' + t.titre + (t.assigneNom ? ' (pour ' + t.assigneNom + ')' : ''));
   return t;
 }
@@ -114,11 +122,12 @@ async function ajouterTache(o) {
 async function changerStatutTache(id, statut) {
   if (!tbStat(statut) || tbStat(statut).id !== statut) return null;
   const t = await tbLire(id);
-  if (!t || t.statut === statut) return t;
+  if (!t || t.statut === statut) return null;   // déjà fait (autre iPad) : rien à tracer
   const qui = STATE.user ? STATE.user.prenom : '';
+  const e = { statut:statut, par:qui, at:nowISO() };
   t.statut = statut;
-  t.historique = (t.historique || []).concat([{ statut:statut, par:qui, at:nowISO() }]);
-  await tbEcrire(t);
+  t.historique = (t.historique || []).concat([e]);
+  await tbEcrire(id, { statut:statut }, e);
   await feed('ok', qui + ' a passé la tâche « ' + t.titre + ' » en : ' +
     tbStat(statut).libelle.toLowerCase());
   return t;
@@ -205,7 +214,12 @@ function feuilleRealisee(id, redessiner) {
   $('#tb-ok').onclick = async () => {
     $('#tb-ok').disabled = true;
     const t = await changerStatutTache(id, 'realisee');
-    if (t && relance) {
+    if (!t) {
+      closeSheet();
+      toast('Déjà réalisée ou introuvable : rien n’a changé', 'erreur');
+      return redessiner();
+    }
+    if (relance) {
       await ajouterTache({ titre:t.titre, detail:t.detail, categorie:t.categorie, priorite:t.priorite,
         assigne:t.assigne, assigneNom:t.assigneNom, echeance:addD(today(), relance), relanceDe:t.id });
     }
@@ -223,6 +237,13 @@ function ouvrirFormulaireTache(pre, apres) {
   const modif = !!(pre.id && pre.at);
   const f = { titre:pre.titre || '', detail:pre.detail || '', categorie:tbCat(pre.categorie).id,
               priorite:tbPrio(pre.priorite).id, echeance:pre.echeance || '', assigne:pre.assigne || '' };
+  /* Valeurs à l'ouverture : seules celles que l'on change partent en base,
+     pour ne pas écraser ce qu'un autre iPad a modifié entre-temps. */
+  const avant = Object.assign({}, f);
+  /* Personne assignée qui n'est plus dans l'équipe : gardée dans la liste,
+     sinon enregistrer une autre modification la retirait sans le dire. */
+  const horsEquipe = f.assigne && !EQUIPE.some(e => e.id === f.assigne)
+    ? { id:f.assigne, prenom:(pre.assigneNom || 'Ancien équipier') + ' (plus dans l’équipe)' } : null;
   let photo = null;
   const garder = () => {
     if ($('#tb-t')) f.titre = $('#tb-t').value.trim();
@@ -243,7 +264,7 @@ function ouvrirFormulaireTache(pre, apres) {
         '<button type="button" class="chip' + (f.priorite === p.id ? ' on' : '') + '" data-p="' + p.id + '">' + esc(p.libelle) + '</button>').join('') + '</div>' +
       '<div class="champ" style="margin-top:14px"><label class="f">Pour qui</label>' +
       '<select id="tb-a"><option value="">Personne pour l’instant</option>' +
-      EQUIPE.map(e => '<option value="' + esc(e.id) + '"' + (f.assigne === e.id ? ' selected' : '') + '>' +
+      (horsEquipe ? [horsEquipe] : []).concat(EQUIPE).map(e => '<option value="' + esc(e.id) + '"' + (f.assigne === e.id ? ' selected' : '') + '>' +
         esc(e.prenom) + '</option>').join('') + '</select></div>' +
       '<div class="champ" style="margin-top:14px"><label class="f">Avant le (facultatif)</label>' +
       '<input type="date" id="tb-e" value="' + esc(f.echeance) + '"></div>' +
@@ -252,24 +273,26 @@ function ouvrirFormulaireTache(pre, apres) {
       '<button class="btn ' + (photo ? 'menthe' : 'ciel') + ' bloc" id="tb-ph" style="margin-top:14px">' +
       (photo ? '✓ Photo jointe (en reprendre une)' : (pre.aPhoto ? 'Remplacer la photo' : 'Ajouter une photo')) + '</button>' +
       '<div class="actions">' +
-      (modif ? '<button class="btn fantome" id="tb-sup">Supprimer</button>' : '<button class="btn clair" data-fermer>Annuler</button>') +
+      (modif ? '<button class="btn fantome" id="tb-sup">Supprimer</button>' : '') +
+      '<button class="btn clair" data-fermer>Annuler</button>' +
       '<button class="btn menthe" id="tb-ok">Enregistrer</button></div>';
     $$('#sheet-corps [data-fermer]').forEach(b => b.onclick = closeSheet);
     $$('#tb-cat [data-c]').forEach(b => b.onclick = () => { garder(); f.categorie = b.dataset.c; dessiner(); });
     $$('#tb-pr [data-p]').forEach(b => b.onclick = () => { garder(); f.priorite = b.dataset.p; dessiner(); });
     $('#tb-ph').onclick = async () => { garder(); const p = await prendrePhoto(); if (p) photo = p.img; dessiner(); };
     const sup = $('#tb-sup');
-    if (sup) sup.onclick = () => confirmer('Supprimer cette tâche ?', '« ' + f.titre + ' » disparaîtra de la liste.',
+    if (sup) sup.onclick = () => { garder(); confirmer('Supprimer cette tâche ?', '« ' + f.titre + ' » disparaîtra de la liste.',
       'Supprimer', async () => {
         const t = await tbLire(pre.id);
         if (t) {
-          t.statut = 'supprimee';
-          t.historique = (t.historique || []).concat([{ statut:'supprimee', par:STATE.user.prenom, at:nowISO() }]);
-          await tbEcrire(t);
+          await tbEcrire(t.id, { supprimee:true }, { statut:'supprimee', par:STATE.user.prenom, at:nowISO() });
+          if (t.aPhoto) await DB.del('tache-photo:' + t.id);
           await feed('warn', STATE.user.prenom + ' a supprimé la tâche : ' + t.titre);
         }
         if (apres) apres();
-      });
+      },
+      /* « Annuler » revient au formulaire, avec ce qui était déjà tapé. */
+      () => { showSheet('<div class="vide">…</div>'); dessiner(); }); };
     $('#tb-ok').onclick = async () => {
       garder();
       if (!f.titre) return toast('Écrivez la tâche en quelques mots', 'erreur');
@@ -278,17 +301,20 @@ function ouvrirFormulaireTache(pre, apres) {
       if (modif) {
         const t = await tbLire(pre.id);
         if (!t) { closeSheet(); return toast('Tâche introuvable', 'erreur'); }
-        Object.assign(t, { titre:f.titre, detail:f.detail, categorie:f.categorie, priorite:f.priorite,
-          echeance:f.echeance, assigne:f.assigne, assigneNom:f.assigne ? tbNomEquipe(f.assigne) : '' });
-        if (photo) t.aPhoto = true;
-        await tbEcrire(t);
+        const champs = {};
+        Object.keys(f).forEach(k => { if (f[k] !== avant[k]) champs[k] = f[k]; });
+        if ('assigne' in champs) champs.assigneNom = f.assigne ? (tbNomEquipe(f.assigne) || pre.assigneNom || '') : '';
+        if (photo) champs.aPhoto = true;
+        if (Object.keys(champs).length) await tbEcrire(t.id, champs);
         id = t.id;
       } else {
         id = (await ajouterTache(Object.assign({}, pre, f, { aPhoto:!!photo }))).id;
       }
       if (photo) await DB.set('tache-photo:' + id, { img:photo, at:nowISO() });
       closeSheet();
-      toast(messageEnvoi(TACHES_B.cle, modif ? 'Tâche modifiée' : 'Tâche ajoutée'));
+      const fait = modif ? 'Tâche modifiée' : 'Tâche ajoutée';
+      const msg = messageEnvoi(tbCle(id), fait);
+      toast(msg !== fait || !photo ? msg : messageEnvoi('tache-photo:' + id, fait));
       if (apres) apres();
     };
   };

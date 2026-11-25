@@ -135,7 +135,7 @@
      /* Pré-audit Amorino (preaudit.js) : un document par pré-audit. */
      ['preaudit:',    'checklists'],
      /* Tâches et réparations (taches.js) : la liste, et les photos à part. */
-     ['taches:',      'checklists'],
+     ['tache:',       'checklists'],
      ['tache-photo:', 'checklists'],
      ['hebdo',        'reglages'],
      ['catalogue:',   'reglages'],
