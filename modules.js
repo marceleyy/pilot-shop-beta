@@ -2174,7 +2174,9 @@ V.parametres = async function () {
       '<button class="btn clair bloc" id="hb-ouvrir" style="margin-top:14px">Organiser la semaine</button>' +
       '<button class="btn clair bloc" id="hb-resp" style="margin-top:8px">Attribuer les responsables</button>', 'solide') +
 
-    carte(entete('🕐', 'Horaires', 'Bornes des phases de la journée dans « Ma journée ».') +
+    /* Horaires et fermeture temporaire dans la même carte : le manager cherchait
+       la fermeture à côté des horaires et ne voyait pas la carte suivante. */
+    carte(entete('🕐', 'Horaires et fermeture', 'Bornes des phases de la journée, congés et intersaison.') +
          '<div class="grid g2">' +
          '<div class="champ"><label class="f">Ouverture boutique</label><input type="time" id="h1" value="' + esc(HORAIRES.ouverture) + '"></div>' +
          '<div class="champ"><label class="f">Fermeture boutique</label><input type="time" id="h2" value="' + esc(HORAIRES.fermeture) + '"></div>' +
@@ -2182,10 +2184,13 @@ V.parametres = async function () {
          '<div class="champ"><label class="f">Fin phase ouverture</label><input type="time" id="h4" value="' + esc(HORAIRES.finOuverture) + '"></div>' +
          '<div class="champ"><label class="f">Début phase fermeture</label><input type="time" id="h5" value="' + esc(HORAIRES.debutFermeture) + '"></div>' +
          '<div class="champ"><label class="f">Fin phase fermeture</label><input type="time" id="h6" value="' + esc(HORAIRES.finFermeture) + '"></div></div>' +
-         '<button class="btn menthe bloc" id="hv" style="margin-top:14px">Enregistrer les horaires</button>', 'solide') +
+         '<button class="btn menthe bloc" id="hv" style="margin-top:14px">Enregistrer les horaires</button>' +
 
        /* Fermeture sur une période : plus rien n'est attendu ces jours-là. */
-       carte(entete('🔒', 'Fermeture de la boutique', 'Congés, travaux, fin de saison : aucune saisie attendue, aucune alerte.') +
+         '<div id="fermeture" style="margin-top:22px;padding-top:16px;border-top:1px solid var(--line)">' +
+         '<b>🔒 Fermeture temporaire</b>' +
+         '<p class="mini">Congés, travaux, intersaison : aucune saisie attendue, aucune alerte. ' +
+         'L’historique affiche « Boutique fermée » sur la période.</p>' +
          (fermetures.length
            ? '<div class="stack">' + fermetures.map((f, i) =>
                '<div class="tache"><span class="tx"><span class="tn">Du ' + esc(fmtD(f.du)) + ' au ' + esc(fmtD(f.au)) + '</span>' +
@@ -2197,7 +2202,7 @@ V.parametres = async function () {
          '<div class="champ"><label class="f">Au (inclus)</label><input type="date" id="fau"></div></div>' +
          '<div class="champ" style="margin-top:10px"><label class="f">Motif (facultatif)</label>' +
          '<input type="text" id="fmotif" maxlength="80" placeholder="Congés annuels"></div>' +
-         '<button class="btn menthe bloc" id="fajout" style="margin-top:12px">Fermer la boutique sur cette période</button>', 'solide') +
+         '<button class="btn menthe bloc" id="fajout" style="margin-top:12px">Fermer la boutique sur cette période</button></div>', 'solide') +
    
        carte(entete('❄️', 'Unités frigorifiques', 'Nom, cible et plage de boutons du relevé de températures.') +
          '<div class="stack">' + ENCEINTES.map((e, i) =>
@@ -2665,8 +2670,35 @@ V.clean = async function () {
 
   $('#vue-actions').innerHTML = '';
 
+  /* Fermeture datée (Réglages › Horaires et fermeture) : rien n'est dû, et
+     l'écran proposait quand même le tableau pendant l'intersaison. On affiche
+     « Boutique fermée » et on replie la liste, que l'équipe peut rouvrir pour
+     consigner un nettoyage fait malgré tout. Un jour hors semaine n'est pas
+     concerné : le manager peut y avoir placé un grand nettoyage. Si quelque
+     chose est déjà enregistré ce jour-là, la liste reste visible. Horaires
+     relus d'abord : une fermeture ajoutée ou retirée ailleurs compte tout de suite. */
+  const hz = await DB.get('horaires', null);
+  if (hz && Array.isArray(hz.fermetures)) HORAIRES.fermetures = hz.fermetures;
+  const fermeJ = fermetureDu(j);
+  const dejaSaisi = Object.keys(rec).length > 0 || preuves.length > 0;
+  const bandeauFerme = fermeJ
+    ? carte(entete('🔒', 'Boutique fermée', 'Du ' + fmtD(fermeJ.du) + ' au ' + fmtD(fermeJ.au)) +
+        (fermeJ.motif ? '<p class="mini">' + esc(fermeJ.motif) + '</p>' : '') +
+        '<p class="mini">Aucun nettoyage n’est attendu pendant la fermeture.</p>' +
+        (!dejaSaisi && STATE.cleanFermeVoir !== j && taches.length && peutModifier(j)
+          ? '<button class="btn clair sm" id="cl-voir" style="margin-top:10px">Afficher les tâches quand même</button>' : ''),
+        'solide')
+    : '';
+  if (fermeJ && !dejaSaisi && STATE.cleanFermeVoir !== j) {
+    $('#page').innerHTML = navJour(j) + bandeauFerme;
+    brancherNavJour('clean');
+    const bv = $('#cl-voir');
+    if (bv) bv.onclick = () => { STATE.cleanFermeVoir = j; rendre('clean'); };
+    return;
+  }
+
   $('#page').innerHTML =
-    navJour(j) +
+    navJour(j) + bandeauFerme +
     /* L'avancement tient dans une bande plutôt que dans une carte à moitié
        vide : une ligne de texte et une jauge ne justifiaient pas soixante
        pixels de hauteur à elles seules. */
@@ -3151,10 +3183,12 @@ function formulaireAnomalie() {
        await V.parametres();
        const p0 = $('#page');
        if (p0) p0.insertAdjacentHTML('afterbegin',
-         carte('<div class="rang"><div style="flex:1;min-width:0"><b>Catalogues</b>' +
-           '<div class="mini">Sec et chambre froide : produits utilisés ou non, prix, stock minimum. ' +
-           'L’inventaire, la réception, la valeur du stock et les écarts les lisent.</div></div>' +
-           '<button class="btn clair sm" data-go="catalogue">Ouvrir</button></div>', 'solide'));
+         /* Même gabarit que « Tâches hebdomadaires » et « Horaires » (entête,
+            texte, bouton pleine largeur). Le catalogue reste sur sa propre
+            page : déplié ici, il rallongeait trop les Réglages. */
+         carte(entete('📦', 'Catalogues', 'Sec et chambre froide : produits utilisés ou non, prix, stock minimum.') +
+           '<p class="mini">L’inventaire, la réception, la valeur du stock et les écarts les lisent.</p>' +
+           '<button class="btn clair bloc" data-go="catalogue" style="margin-top:14px">Ouvrir les catalogues</button>', 'solide'));
        $$('#page [data-go]').forEach(b => b.onclick = () => rendre(b.dataset.go));
      }
      const page = $('#page');
