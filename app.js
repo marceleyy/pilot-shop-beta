@@ -5719,7 +5719,8 @@ function modifierPeriode(per) {
 
      /* L'historique ne montre que l'historique : le registre pour un contrôle
         sanitaire reste sur la Tour de contrôle, il faisait doublon ici. */
-     $('#vue-actions').innerHTML = '<button class="btn clair sm" id="csv">CSV</button>';
+     $('#vue-actions').innerHTML = '<button class="btn clair sm" id="csv">CSV</button>' +
+       (lignes.length ? ' <button class="btn clair sm" id="hpdf">PDF</button>' : '');
    
      $('#page').innerHTML =
        '<div class="chips" style="margin-bottom:14px">' + Object.keys(defs).map(k =>
@@ -5772,6 +5773,31 @@ function modifierPeriode(per) {
        a.download = 'pilot-shop-' + onglet + (onglet === 'pertes' && perP !== 'tout' ? '-' + perP + 'j' : '') + '-' + today() + '.csv';
        a.click();
        toast('Export CSV téléchargé');
+     };
+     /* PDF : même tableau que le CSV, mis en page pour l'impression (zone
+        #printview, comme le registre sanitaire). Le navigateur propose
+        « Enregistrer au format PDF » ; le tableau tient en largeur sur A4 et
+        ses en-têtes se répètent à chaque page. */
+     const bPdf = $('#hpdf');
+     if (bPdf) bPdf.onclick = () => {
+       const sousTitre = onglet === 'pertes'
+         ? (perP === 'tout' ? 'toutes les pertes' : perP + ' derniers jours') + ' · ' + totPertes.n + ' ' + accord(totPertes.n, 'perte') +
+           ' · ' + n1(totPertes.l) + ' L de glace jetés' + (totPertes.inv ? ' · ' + n1(totPertes.inv) + ' L manquants à l’inventaire (à part)' : '')
+         : (n => n + ' ' + accord(n, 'enregistrement'))(lignes.filter(l => l[2] !== 'Boutique fermée').length);
+       /* Gras = ligne à surveiller, comme la pastille rouge ou orange à l'écran.
+          Sauf Pertes : toutes y sont orange, le gras n'y distinguerait rien. */
+       const enGras = l => onglet !== 'pertes' && (l[4] === 'bad' || l[4] === 'warn');
+       $('#printview').innerHTML =
+         '<div class="pv-h"><h1>Historique · ' + esc(defs[onglet].l) + ' · ' + esc(APP.nom) + '</h1>' +
+         '<div>' + esc(APP.site) + ' · ' + esc(sousTitre) +
+         '<br>Édité le ' + new Date().toLocaleString(APP.locale) + ' par ' + esc(STATE.user.prenom) + '</div></div>' +
+         '<table class="pv-histo"><thead><tr>' + entetes.map(e => '<th>' + esc(e) + '</th>').join('') + '</tr></thead><tbody>' +
+         lignes.map(l => '<tr' + (enGras(l) ? ' style="font-weight:700"' : '') + '>' +
+           l.slice(0, 4).map(x => '<td>' + esc(x) + '</td>').join('') + '</tr>').join('') +
+         '</tbody></table>' +
+         (lignes.some(enGras) ? '<div style="font-size:9.5px">Les lignes en gras sont à surveiller (rouge ou orange à l’écran).</div>' : '');
+       toast('Choisissez « Enregistrer au format PDF » dans la fenêtre d’impression');
+       setTimeout(() => window.print(), 200);
      };
    };
    

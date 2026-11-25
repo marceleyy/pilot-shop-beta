@@ -1327,6 +1327,10 @@ input[type="time"]:focus, input[type="date"]:focus{
 #printview th,#printview td{border:.5pt solid #666;padding:3px 5px;text-align:left}
 #printview th{background:#EEE;font-weight:700}
 #printview tr{page-break-inside:avoid}
+#printview thead{display:table-header-group}
+#printview th{-webkit-print-color-adjust:exact;print-color-adjust:exact}
+#printview .pv-histo td{overflow-wrap:anywhere}
+#printview .pv-histo td:first-child{width:34%}
 #printview .sign{margin-top:26px;font-size:10.5px}
 
 /* --- 22. Large écran ---------------------------------------------------- */
