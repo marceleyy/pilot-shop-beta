@@ -73,11 +73,27 @@ function tbTrier(a, b) {
 
 const tbCle = id => TACHES_B.prefixe + id;
 
+/* Historique trié par heure : une entrée rejouée au retour du réseau arrive
+   en fin de liste, même si elle est plus ancienne. */
+const tbHisto = t => (t.historique || []).filter(h => h && h.at)
+  .slice().sort((a, b) => (a.at < b.at ? -1 : a.at > b.at ? 1 : 0));
+
+/* Le statut affiché est celui de la DERNIÈRE entrée de l'historique, pas le
+   champ « statut » : un « Démarrer » fait hors ligne à 10 h et rejoué à midi
+   ne fait pas revenir une tâche réalisée à 11 h sur un autre iPad (l'historique
+   s'unit, le champ se remplace). */
+function tbNormaliser(t) {
+  if (!t || !t.id) return t;
+  const h = tbHisto(t).filter(x => TACHES_B.statuts.some(s => s.id === x.statut));
+  if (h.length) t.statut = h[h.length - 1].statut;
+  return t;
+}
+
 async function lireTaches() {
   const cles = (await DB.list(TACHES_B.prefixe)).filter(k => k.indexOf(TACHES_B.prefixe) === 0);
   DB.prelire(cles);   // une seule requête pour toutes les tâches (dans un dessin d'écran)
   const l = await Promise.all(cles.map(k => DB.get(k, null)));
-  return l.filter(t => t && t.id && t.titre && !t.supprimee);
+  return l.map(tbNormaliser).filter(t => t && t.id && t.titre && !t.supprimee);
 }
 
 /* Seuls les champs donnés partent ; l'entrée d'historique s'ajoute à celles
@@ -88,7 +104,7 @@ async function tbEcrire(id, champs, entree) {
 
 /* Relue fraîche avant modification : la copie de l'écran peut dater. */
 async function tbLire(id) {
-  const t = await DB.get(tbCle(id), null, true);
+  const t = tbNormaliser(await DB.get(tbCle(id), null, true));
   return t && t.id && !t.supprimee ? t : null;
 }
 
@@ -96,7 +112,9 @@ async function ajouterTache(o) {
   o = o || {};
   const qui = STATE.user ? STATE.user.prenom : '';
   const t = {
-    id: o.id || uid(),
+    /* Une relance a un id fixe : deux iPads qui terminent la même tâche hors
+       ligne avec la même relance n'en créent qu'une. */
+    id: o.id || (o.relanceDe ? 'r-' + o.relanceDe + '-' + o.echeance : uid()),
     titre: String(o.titre || '').trim(),
     detail: String(o.detail || '').trim(),
     categorie: tbCat(o.categorie).id,
@@ -153,12 +171,13 @@ function carteTache(t, compacte) {
   const boutons = [];
   if (agir && t.statut === 'creee') boutons.push('<button class="btn clair sm" data-tb-st="en_cours" data-tb="' + esc(t.id) + '">Démarrer</button>');
   if (agir && t.statut !== 'realisee') boutons.push('<button class="btn menthe sm" data-tb-fin="' + esc(t.id) + '">Réalisée</button>');
-  if (agir && t.statut === 'realisee' && STATE.user.role === 'manager') boutons.push('<button class="btn fantome sm" data-tb-st="creee" data-tb="' + esc(t.id) + '">Rouvrir</button>');
-  if (!compacte && STATE.user.role === 'manager') boutons.push('<button class="btn fantome sm" data-tb-mod="' + esc(t.id) + '">Modifier</button>');
+  const manager = !!STATE.user && STATE.user.role === 'manager';
+  if (agir && t.statut === 'realisee' && manager) boutons.push('<button class="btn fantome sm" data-tb-st="creee" data-tb="' + esc(t.id) + '">Rouvrir</button>');
+  if (!compacte && manager) boutons.push('<button class="btn fantome sm" data-tb-mod="' + esc(t.id) + '">Modifier</button>');
   if (t.aPhoto) boutons.push('<button class="btn fantome sm" data-tb-ph="' + esc(t.id) + '">Photo</button>');
-  const histo = (t.historique || []).map(h =>
-    '<div class="mini">' + esc(tbStat(h.statut).libelle) + ' · ' + esc(h.par || '—') + ' · ' +
-    (h.at ? fmtDC(String(h.at).slice(0, 10)) + ' ' + heure(h.at) : '') + '</div>').join('');
+  const histo = tbHisto(t).map(h =>
+    '<div class="mini">' + esc(h.statut === 'supprimee' ? 'Supprimée' : tbStat(h.statut).libelle) + ' · ' +
+    esc(h.par || '—') + ' · ' + fmtDC(isoOf(new Date(h.at))) + ' ' + heure(h.at) + '</div>').join('');
   return carte(
     '<div class="rang" style="align-items:flex-start">' +
     '<div style="flex:1;min-width:0"><b>' + esc(t.titre) + '</b>' +
@@ -185,6 +204,7 @@ function brancherTaches(redessiner) {
   });
   $$('#page [data-tb-ph]').forEach(b => b.onclick = async () => {
     const ph = await DB.get('tache-photo:' + b.dataset.tbPh, null);
+    tbOublierPhotos();
     if (!ph || !ph.img) return toast('Photo pas encore disponible sur cet iPad', 'erreur');
     const plein = document.createElement('div');
     plein.className = 'photo-plein';
@@ -333,9 +353,9 @@ V.taches = async function () {
   if (STATE.view !== 'taches') return;
   const parCat = toutes.filter(t => !vue._cat || t.categorie === vue._cat);
   const afaire = parCat.filter(t => t.statut !== 'realisee').sort(tbTrier);
-  const finie = t => { const h = (t.historique || []).slice(-1)[0]; return String((h && h.at) || t.at); };
+  const finie = t => { const h = tbHisto(t).filter(x => x.statut === 'realisee').pop(); return String((h && h.at) || t.at); };
   const faites = parCat.filter(t => t.statut === 'realisee')
-    .sort((a, b) => (finie(b) < finie(a) ? -1 : 1))
+    .sort((a, b) => (finie(a) === finie(b) ? 0 : finie(b) < finie(a) ? -1 : 1))
     .slice(0, TACHES_B.realiseesAffichees);
   const retard = afaire.filter(tbEnRetard).length;
   const liste = vue._onglet === 'afaire' ? afaire : faites;
@@ -393,3 +413,21 @@ V.accueil = async function () {
   if (haut && haut.nextSibling) page.insertBefore(bloc, haut.nextSibling); else page.prepend(bloc);
   brancherTaches(() => rendre('accueil'));
 };
+
+/* Photos : la copie locale (40 à 80 Ko chacune) ne sert qu'à l'envoi. Une fois
+   sur le serveur, elle est retirée de l'iPad pour ne pas remplir sa mémoire ;
+   elle se relit à la demande. Jamais une photo encore en file d'attente, trop
+   lourde pour la base, ou sans base configurée : ce serait la seule copie. */
+function tbOublierPhotos() {
+  try {
+    if (!(SUPABASE.url && SUPABASE.anonKey)) return;
+    const enFile = new Set(fileLire().map(x => x.cle));
+    DB._clesLocales().filter(k => k.indexOf('tache-photo:') === 0).forEach(k => {
+      if (enFile.has(k) || (DB._gros && DB._gros[k])) return;
+      const brut = DB._lire(k);
+      if (brut && brut.length > OFFLINE.tailleMaxOctets) return;
+      DB._oter(k);
+    });
+  } catch (e) { /* sans conséquence : réessayé au prochain démarrage */ }
+}
+setTimeout(tbOublierPhotos, 15000);
