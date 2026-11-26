@@ -8,7 +8,7 @@
    elle qui déclenche le re-téléchargement. Un appareil déjà installé garderait
    sinon l'ancien cache, et n'irait jamais chercher les fichiers ajoutés — le
    scan hors ligne ne marcherait que sur les appareils neufs. */
-const CACHE   = 'pilotshop-cache-v76';
+const CACHE   = 'pilotshop-cache-v77';
 /* Cache des ressources externes. Il ne sert plus : XLSX est désormais servi
    par l'application (vendor/). Son ancien contenu — la copie du CDN, gardée
    « cache d'abord » sous ce nom fixe et jamais revalidée — est purgé à
@@ -37,6 +37,8 @@ const PRECACHE = [
   /* Fiche allergènes : elle doit répondre au comptoir, réseau ou pas. */
   '/allergenes.js',
   '/preaudit.js',
+  /* Tâches et réparations : à cocher en boutique, réseau ou pas. */
+  '/taches.js',
   /* Fiches produit du sec (« ? ») : l'inventaire se fait en réserve, sans réseau. */
   '/produits/amarena.jpg',
   '/produits/baci-di-dama.jpg',

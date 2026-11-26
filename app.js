@@ -134,6 +134,9 @@
      ['hebdo:',       'checklists'],
      /* Pré-audit Amorino (preaudit.js) : un document par pré-audit. */
      ['preaudit:',    'checklists'],
+     /* Tâches et réparations (taches.js) : la liste, et les photos à part. */
+     ['tache:',       'checklists'],
+     ['tache-photo:', 'checklists'],
      ['hebdo',        'reglages'],
      ['catalogue:',   'reglages'],
      /* Mise en route d'une nouvelle boutique (guide.js). */
@@ -4270,6 +4273,11 @@ function ouvrirPremierePeriode() {
      if (typeof alertePreAudit === 'function') {
        const ap = await alertePreAudit();
        if (ap) A.push(ap);
+     }
+     /* Tâches et réparations en retard ou urgentes (taches.js). */
+     if (typeof alerteTaches === 'function') {
+       const at = await alerteTaches();
+       if (at) A.push(at);
      }
      /* Une alerte doit nommer le produit. « 2 ruptures non traitées » oblige le
         manager à ouvrir un autre écran pour savoir s'il s'agit de cornets ou
