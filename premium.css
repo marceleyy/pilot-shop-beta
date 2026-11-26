@@ -1245,3 +1245,119 @@ button.fr-ligne{cursor:pointer;border-radius:0}
 button.fr-ligne:active{background:var(--creme-2)}
 button.fr-ligne:focus-visible{outline:2px solid var(--cacao);outline-offset:-2px}
 .fr-va{flex:0 0 auto;font-weight:800;color:var(--brume);margin-left:-2px}
+
+/* =============================================================================
+   19. TABLEAU DE BORD (tableau.js) — en tête de la tour de contrôle
+   Compteurs, puis trois colonnes de cartes ; une seule sous 760 px.
+   ========================================================================== */
+#tdb{margin:14px 0 6px}
+.tdb-kpis{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:10px;margin-bottom:12px}
+.tdb-kpi{display:flex;flex-direction:column;align-items:flex-start;gap:6px;text-align:left;
+  background:var(--porcelaine);border:1px solid var(--filet);border-radius:var(--r-bloc);
+  padding:14px 14px 12px;box-shadow:var(--ombre);cursor:pointer;min-height:92px}
+.tdb-kpi:active{background:var(--creme-2)}
+.tdb-kpi:focus-visible{outline:2px solid var(--cacao);outline-offset:2px}
+.tdb-kv{font-family:var(--serif);font-size:30px;line-height:1;color:var(--framboise-d);font-variant-numeric:tabular-nums}
+.tdb-kpi.bad .tdb-kv{color:var(--framboise)}
+.tdb-kpi.warn .tdb-kv{color:var(--caramel-d)}
+.tdb-kl{font-size:var(--t-sur);font-weight:650;letter-spacing:.06em;text-transform:uppercase;color:var(--noisette);line-height:1.35}
+
+.tdb-grille{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;align-items:start}
+.tdb-col{display:flex;flex-direction:column;gap:12px;min-width:0}
+.tdb-col > .card + .card{margin-top:0}
+.tdb-carte{padding:16px}
+.tdb-titre{display:flex;align-items:center;gap:8px;font-family:var(--serif);font-weight:500;font-size:20px;margin:0 0 12px;color:var(--chocolat)}
+.tdb-titre .ic{color:var(--or-d);flex:0 0 auto}
+.tdb-vide{color:var(--noisette);font-size:var(--t-note);margin:4px 0 0}
+.tdb-bas{margin-top:12px}
+.tdb-note{margin-top:8px}
+
+/* Actions prioritaires */
+.tdb-liste{list-style:none;margin:0;padding:0}
+.tdb-tache{display:flex;gap:10px;align-items:flex-start;padding:10px 0;border-top:1px solid var(--filet)}
+.tdb-tache:first-child{border-top:0;padding-top:2px}
+.tdb-coche{flex:0 0 auto;width:22px;height:22px;margin-top:1px;border:1.5px solid var(--contour);border-radius:5px;background:var(--porcelaine);cursor:pointer;padding:0}
+.tdb-coche:active{background:var(--pistache-l)}
+.tdb-coche.off{opacity:.4;cursor:default}
+.tdb-tl{flex:1;min-width:0;text-align:left;background:none;border:0;padding:0;cursor:pointer;color:inherit}
+.tdb-tl b{display:block;font-size:14px;line-height:1.35;color:var(--chocolat)}
+.tdb-pills{display:flex;flex-wrap:wrap;gap:4px;margin-top:6px}
+.tdb-pills .pill{font-size:11px;padding:2px 8px;text-transform:uppercase;letter-spacing:.04em}
+
+/* Prochaine visite */
+.tdb-visite{display:flex;gap:12px;align-items:center}
+.tdb-date{flex:0 0 auto;width:64px;height:64px;border-radius:var(--r-bloc);background:var(--chocolat);color:var(--or-l);
+  display:flex;flex-direction:column;align-items:center;justify-content:center;font-size:12px;text-transform:uppercase;letter-spacing:.06em}
+.tdb-date span{font-family:var(--serif);font-size:28px;line-height:1;color:#FFFCF7;letter-spacing:0}
+.tdb-visite b{font-size:15px}
+.tdb-prep{display:block;width:100%;margin-top:14px;padding:10px 12px;text-align:left;background:var(--porcelaine);
+  border:1px solid var(--filet);border-radius:10px;cursor:pointer;color:inherit}
+.tdb-prep-l{display:flex;justify-content:space-between;font-size:13px;color:var(--cacao)}
+.tdb-barre{display:block;height:6px;border-radius:3px;background:var(--creme-2);margin-top:8px;overflow:hidden}
+.tdb-barre i{display:block;height:100%;background:var(--or);border-radius:3px;transition:width .4s}
+.tdb-barre i.ok{background:var(--pistache)}
+.tdb-barre i.warn{background:var(--caramel)}
+.tdb-barre i.bad{background:var(--framboise)}
+
+/* Accès rapides */
+.tdb-acces-l{display:flex;flex-direction:column;gap:8px}
+.tdb-acces{display:flex;align-items:center;gap:10px;width:100%;min-height:44px;padding:8px 12px;text-align:left;
+  background:var(--porcelaine);border:1px solid var(--filet-fort);border-radius:8px;cursor:pointer;color:var(--chocolat);font-size:14px}
+.tdb-acces:active{background:var(--creme-2)}
+.tdb-acces .ic{color:var(--cacao);flex:0 0 auto}
+
+/* Calendrier */
+.tdb-cal-tete{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px}
+.tdb-cal-tete b{font-size:14px}
+.tdb-nav{width:32px;height:32px;border:1px solid var(--filet-fort);border-radius:8px;background:var(--porcelaine);cursor:pointer;font-size:18px;line-height:1;color:var(--cacao)}
+.tdb-semaine{display:grid;grid-template-columns:repeat(7,1fr);gap:2px;text-align:center}
+.tdb-jour{display:flex;flex-direction:column;gap:3px;padding:6px 0;border-radius:8px;position:relative}
+.tdb-jour span{font-size:11px;color:var(--noisette)}
+.tdb-jour b{font-size:14px;font-variant-numeric:tabular-nums}
+.tdb-jour.auj{background:var(--chocolat)}
+.tdb-jour.auj span{color:var(--or-l)}
+.tdb-jour.auj b{color:var(--or-l)}
+.tdb-jour.ev::after{content:'';position:absolute;bottom:2px;left:50%;width:5px;height:5px;margin-left:-2.5px;border-radius:50%;background:var(--or)}
+.tdb-ev{list-style:none;margin:12px 0 0;padding:0;display:flex;flex-direction:column;gap:4px}
+.tdb-ev-l{display:flex;gap:10px;width:100%;padding:7px 10px;border:0;border-radius:6px;text-align:left;cursor:pointer;font-size:13px;color:var(--chocolat);background:var(--creme-2)}
+.tdb-ev-l.or{background:var(--pistache-l)}
+.tdb-ev-l.ciel{background:var(--myrtille-l)}
+.tdb-ev-l.warn{background:var(--caramel-l)}
+.tdb-ev-l.bad{background:var(--framboise-l)}
+.tdb-ev-d{flex:0 0 52px;color:var(--cacao);font-variant-numeric:tabular-nums}
+.tdb-ev-t{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+
+/* État des équipements */
+.tdb-equip{list-style:none;margin:0;padding:0}
+.tdb-equip li + li{border-top:1px solid var(--filet)}
+.tdb-equip button{display:flex;align-items:center;gap:10px;width:100%;min-height:42px;padding:6px 0;background:none;border:0;text-align:left;cursor:pointer;color:inherit;font-size:14px}
+.tdb-eq-i{flex:0 0 auto;width:10px;height:10px;border-radius:50%;background:var(--creme-3)}
+.tdb-eq-i.ok{background:var(--pistache)}
+.tdb-eq-i.warn{background:var(--caramel)}
+.tdb-eq-i.bad{background:var(--framboise)}
+.tdb-eq-n{flex:1;min-width:0}
+.tdb-eq-e{font-size:12.5px;font-weight:600;color:var(--noisette);white-space:nowrap}
+.tdb-eq-e.ok{color:var(--pistache-d)}
+.tdb-eq-e.warn{color:var(--caramel-d)}
+.tdb-eq-e.bad{color:var(--framboise-d)}
+
+/* Pertes */
+.tdb-gros{font-family:var(--serif);font-size:32px;line-height:1.1;color:var(--chocolat);font-variant-numeric:tabular-nums}
+.tdb-donut-l{display:flex;align-items:center;gap:14px;margin-top:14px}
+.tdb-donut{flex:0 0 auto;width:92px;height:92px;transform:none}
+.tdb-leg{list-style:none;margin:0;padding:0;font-size:12.5px;display:flex;flex-direction:column;gap:5px;min-width:0}
+.tdb-leg i{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:6px;vertical-align:0}
+.tdb-leg span{color:var(--noisette)}
+
+.tdb-suite{margin-top:22px}
+
+@media (max-width:760px){
+  .tdb-kpis{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .tdb-kpis .tdb-kpi:last-child{grid-column:1 / -1}
+  .tdb-grille{grid-template-columns:minmax(0,1fr)}
+}
+@media (min-width:761px) and (max-width:1000px){
+  .tdb-kpis{grid-template-columns:repeat(3,minmax(0,1fr))}
+  .tdb-grille{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .tdb-col:last-child{grid-column:1 / -1;display:grid;grid-template-columns:repeat(2,minmax(0,1fr))}
+}
