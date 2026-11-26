@@ -4488,6 +4488,16 @@ function ouvrirPremierePeriode() {
      });
      return out.sort((a, b) => a.resteH - b.resteH);
    }
+   /* Produits ouverts : même partage que la Traçabilité (articleEstSec). La
+      famille marquée lieu ou stock « sec » (chantilly, coulis, toppings) va aux
+      produits complémentaires ; glaces, macarons et autres surgelés à gauche.
+      Ancienne entrée sans famille : déduite de sa règle de DLC (« a_<règle> »),
+      une clé « g_ » restant une glace. */
+   function fifoEstSec(f) {
+     const rg = f.type === 'a' ? String(f.cle).slice(2).split('|')[0] : null;
+     const fam = FAMILLES_PRODUIT.filter(x => f.famille ? x.id === f.famille : (rg && x.dlc === rg))[0];
+     return !!(fam && (fam.lieu === 'sec' || fam.stock === 'sec'));
+   }
    const resteLisible = h => h < 0
      ? 'Dépassé de ' + (Math.abs(h) < 48 ? Math.abs(h) + ' h' : Math.round(Math.abs(h) / 24) + ' j')
      : h < 48 ? 'Encore ' + h + ' h' : 'Encore ' + Math.round(h / 24) + ' j';
@@ -4508,7 +4518,16 @@ function ouvrirPremierePeriode() {
        kpi('À écouler', o.length, o.length ? 'warn' : 'ok', 'Moins de 48 h') +
        kpi('Conformes', v.length, 'ok', 'Rien à signaler') + '</div>' +
    
-       (fifo.length ? [['rouge', 'Périmés, à retirer', r], ['orange', 'À vendre vite', o], ['vert', 'Conformes', v]]
+       /* Deux colonnes, jamais mélangées : glaces et macarons d'un côté, produits
+          complémentaires de l'autre, pour retrouver la chantilly ou un coulis
+          sans le chercher parmi les bacs. Chaque colonne garde l'ordre d'urgence. */
+       (fifo.length ? '<div class="fifo-cols">' + [['froid', 'Glaces et surgelés', 'Aucune glace ni aucun surgelé ouvert ce mois.'],
+                                                  ['sec', 'Produits complémentaires', 'Aucun produit complémentaire ouvert ce mois.']].map(col => {
+         const dansCol = f => (col[0] === 'sec') === fifoEstSec(f);
+         const n = fifo.filter(dansCol).length;
+         return '<section class="fifo-col"><div class="entete"><h2>' + col[1] + '</h2><span class="pousse mini num">' + n + '</span></div>' +
+           (n ? [['rouge', 'Périmés, à retirer', r], ['orange', 'À vendre vite', o], ['vert', 'Conformes', v]]
+         .map(g => [g[0], g[1], g[2].filter(dansCol)])
          .filter(g => g[2].length).map(g =>
            '<div class="entete"><h3>' + g[1] + '</h3><span class="pousse mini num">' + g[2].length + '</span></div>' +
            '<div class="stack">' + g[2].map(f =>
@@ -4520,6 +4539,8 @@ function ouvrirPremierePeriode() {
              (f.c === 'rouge' ? '<button class="btn corail sm" data-jeter="' + esc(f.cle) + '">Jeter</button>'
                : (f.type === 'g' || f.famille === 'glace') ? '<button class="btn clair sm" data-fini="' + esc(f.cle) + '">Bac fini</button>' : '') +
              '</div>').join('') + '</div>').join('')
+           : '<p class="cs">' + col[2] + '</p>') + '</section>';
+       }).join('') + '</div>'
          : vide('🧊', 'Aucun lot ouvert ce mois. Les saisies de l’équipe apparaissent ici.'));
    
      $('#mm').onchange = e => { STATE.moisFrigo = e.target.value || null; rendre('frigo'); };
