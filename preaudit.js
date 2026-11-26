@@ -1,260 +1,139 @@
 /* =============================================================================
    PILOT-SHOP — preaudit.js
-   Pré-audit Amorino : une grille d'auto-contrôle sur les thèmes de l'audit
-   trimestriel du réseau (hygiène, vitrine, quantités servies, affiches,
-   traçabilité, nettoyage des machines). Elle donne un score, un plan
-   d'actions avec un responsable et une échéance, et s'imprime en PDF.
-   Les registres déjà tenus dans l'appli (frigos, nettoyage, lots, réceptions,
-   pertes, calcul d'écart) sont lus et affichés comme preuves à côté des
-   points qu'ils concernent.
-   La grille officielle d'Amorino n'est pas publique : celle-ci reprend les
-   thèmes connus de l'audit. Les points se changent dans PREAUDIT.themes.
+   Pré-audit : contrôle automatique du contenu de l'appli, sans grille à
+   remplir. Chaque contrôle lit ce que l'équipe a déjà saisi (traçabilité,
+   ouvertures, relevés, nettoyage, caisse, écarts, inventaires, réceptions,
+   pertes) et sort en vert, orange ou rouge, avec le produit ou le jour en
+   cause et l'écran où corriger. Les jours de fermeture ne comptent pas.
+   L'audit Amorino lui-même se fait dans l'outil du réseau : ici, on vérifie
+   seulement que les registres de l'appli sont tenus.
+   La page garde aussi l'historique des passages de l'animateur réseau
+   (visite ou contrôle) et les tâches qu'il demande : celles-ci vivent dans le
+   module Tâches et réparations (taches.js), catégorie « audit ».
    Chargé après app.js, modules.js, stock.js et calcul.js.
    ============================================================================= */
 
    'use strict';
 
-PAGES.preaudit = { titre:'Pré-audit Amorino', sous:'Grille, score et plan d’actions' };
+PAGES.preaudit = { titre:'Pré-audit', sous:'Contrôle des données de l’appli' };
 if (MENU_PLUS.manager.indexOf('preaudit') < 0) {
   MENU_PLUS.manager.splice(MENU_PLUS.manager.indexOf('calcul') + 1, 0, 'preaudit');
 }
 
 const PREAUDIT = {
-  /* Fenêtre lue dans les registres pour les preuves. */
-  joursPreuves: 30,
-  /* Échéance proposée pour une action, en jours. */
-  delaiAction: 7,
-  /* Une fois le premier pré-audit fait, la tour de contrôle rappelle d'en
-     refaire un passé ce délai : quatre audits par an, un pré-audit par mois. */
-  rappelJours: 30,
+  /* Fenêtre contrôlée, en jours calendaires (les jours fermés n'y comptent pas). */
+  fenetre: 30,
   /* Score en % : vert au-dessus de ok, orange au-dessus de warn. */
   seuils: { ok:85, warn:70 },
-  reponses: [
-    { id:'c',  label:'Conforme',     court:'OK',  pill:'ok',   points:1 },
-    { id:'p',  label:'À reprendre',  court:'±',   pill:'warn', points:0.5 },
-    { id:'nc', label:'Non conforme', court:'NC',  pill:'bad',  points:0 },
-    { id:'na', label:'Sans objet',   court:'—',   pill:'n',    points:null }
+  /* Chantilly : une brique ouverte vit 48 h, il en faut une au moins tous les
+     2 jours ouverts. */
+  chantillyJours: 2,
+  /* Coulis et toppings en stock : au-delà de ce nombre de jours ouverts sans
+     ouverture tracée, le flacon entamé est gardé trop longtemps, ou ses
+     ouvertures ne sont pas notées. Rouge au double. */
+  sansOuverture: { coulis:30, topping:60 },
+  /* Historique des ouvertures lu pour les coulis et toppings. */
+  lectureJours: 120,
+  /* Inventaire chambre froide et sec : à refaire passé ce nombre de jours
+     ouverts. Rouge au double. */
+  inventaireJours: 31,
+  /* Un passage de l'animateur prévu dans ce délai remonte en tour de contrôle. */
+  alerteAvantPassage: 7,
+  /* Les résultats restent en mémoire ce temps-là (lecture de 30 jours de registres). */
+  cacheMs: 10 * 60 * 1000,
+  blocs: [
+    { id:'vitrine', nom:'Glaces et vitrine' },
+    { id:'compl',   nom:'Produits complémentaires' },
+    { id:'temp',    nom:'Températures' },
+    { id:'net',     nom:'Nettoyage et caisse' },
+    { id:'stock',   nom:'Stock et écarts' },
+    { id:'recep',   nom:'Réceptions et pertes' }
   ],
-  /* [id, libellé, preuve lue dans l'appli (facultatif)] */
-  themes: [
-    { id:'hyg', nom:'Hygiène et personnel', points:[
-      ['hyg1', 'Tenue propre et complète, cheveux attachés et couverts'],
-      ['hyg2', 'Pas de bijoux ni de montre, ongles courts et sans vernis'],
-      ['hyg3', 'Lave-mains équipé : savon, essuie-mains jetables, poubelle à pédale'],
-      ['hyg4', 'Mains lavées entre l’encaissement et le service'],
-      ['hyg5', 'Températures des frigos relevées matin et soir', 'temp']
-    ] },
-    { id:'vit', nom:'Vitrine et présentation', points:[
-      ['vit1', 'Bacs travaillés et lissés, bords propres'],
-      ['vit2', 'Étiquettes des parfums en place, dans l’ordre de la vitrine'],
-      ['vit3', 'Vitre, joints et plan de travail propres, sans traces de doigts'],
-      ['vit4', 'Tous les parfums de la carte présents, aucun bac vide', 'ruptures'],
-      ['vit5', 'Vitrine dans sa plage de température', 'vitrine']
-    ] },
-    { id:'por', nom:'Quantités servies', points:[
-      ['por1', 'Fleur faite selon le geste Amorino, nombre de pétales respecté'],
-      ['por2', 'Pesée de contrôle faite cette semaine, grammages respectés'],
-      ['por3', 'Écart glace du dernier calcul dans la fourchette', 'ecart'],
-      ['por4', 'Cornets, coppas et pots servis dans le bon format']
-    ] },
-    { id:'aff', nom:'Affiches et information client', points:[
-      ['aff1', 'Affiches de la saison en place, aucune affiche périmée'],
-      ['aff2', 'Prix à jour, affichés et lisibles depuis l’entrée'],
-      ['aff3', 'Tableau des allergènes affiché, dernière version Amorino'],
-      ['aff4', 'Menu et présentoirs propres, sans rature ni étiquette provisoire']
-    ] },
-    { id:'tra', nom:'Traçabilité', points:[
-      ['tra1', 'Numéro de lot noté à chaque ouverture de bac', 'lots'],
-      ['tra2', 'Aucun produit entamé au-delà de sa durée de vie', 'dlc'],
-      ['tra3', 'Livraisons réceptionnées avec contrôle de la température et des DLC', 'receptions'],
-      ['tra4', 'Produits entamés étiquetés avec leur date d’ouverture'],
-      ['tra5', 'Pertes enregistrées avec leur motif', 'pertes']
-    ] },
-    { id:'net', nom:'Nettoyage des machines et des locaux', points:[
-      ['net1', 'Plan de nettoyage tenu à jour', 'nettoyage'],
-      ['net2', 'Crêpière et gaufrier propres, sans résidus'],
-      ['net3', 'Machine à café et buse vapeur nettoyées'],
-      ['net4', 'Spatules dans une eau claire, changée régulièrement'],
-      ['net5', 'Chambre froide et congélateurs rangés, sans givre ni carton au sol'],
-      ['net6', 'Sols, poubelles et réserve propres']
-    ] }
+  typesPassage: [
+    { id:'visite',   label:'Visite' },
+    { id:'controle', label:'Contrôle' }
   ]
 };
 
-/* ---------------------------------------------------------------------------
-   Lecture et calculs
-   ------------------------------------------------------------------------ */
+/* Passages de l'animateur : un seul document, un champ « p:<id> » par passage,
+   écrit avec DB.patch (deux iPads ne s'écrasent pas). */
+const PA_PASSAGES = 'preaudit:passages';
+/* Pré-audits enregistrés (instantanés) : « preaudit:<jour>:<id> ». Les anciens
+   pré-audits de la grille Amorino gardent la même clé et restent listés. */
 const PA_RE = /^preaudit:\d{4}-\d{2}-\d{2}:/;
-const paPoints = () => [].concat(...PREAUDIT.themes.map(t => t.points.map(p => ({ id:p[0], libelle:p[1], preuve:p[2] || null, theme:t }))));
-const paReponse = id => PREAUDIT.reponses.filter(r => r.id === id)[0] || null;
-const paClasse = s => s === null ? 'n' : s >= PREAUDIT.seuils.ok ? 'ok' : s >= PREAUDIT.seuils.warn ? 'warn' : 'bad';
-const paScoreTxt = s => s === null ? '—' : s + ' %';
-/* Actions vivantes (ni supprimées), dans l'ordre des échéances. */
-const paActions = a => Object.keys(a.actions || {}).map(k => a.actions[k])
-  .filter(x => x && x.id && !x.supprime)
-  .sort((x, y) => String(x.echeance) < String(y.echeance) ? -1 : String(x.echeance) > String(y.echeance) ? 1 : 0);
-const paEnRetard = x => !x.fait && x.echeance && x.echeance < today();
 
-/* Stockage à plat : une réponse par champ « r:<point> », une action par champ
-   « a:<id> ». Chaque écriture est un DB.patch de ce seul champ, appliqué sur
-   la copie du serveur relue juste avant : deux iPads qui notent la même
-   grille, ou cochent des actions, ne s'écrasent pas, et le statut n'est
-   jamais renvoyé par une simple réponse. reponses et actions sont recomposés
-   ici, pour la lecture seulement : ils ne sont jamais écrits. */
-function paNormaliser(d) {
-  if (!d || typeof d !== 'object') return d;
-  const a = Object.assign({}, d, { reponses:{}, actions:{} });
-  Object.keys(d).forEach(k => {
-    if (k.indexOf('r:') === 0) a.reponses[k.slice(2)] = d[k];
-    else if (k.indexOf('a:') === 0) a.actions[k.slice(2)] = d[k];
-  });
-  return a;
-}
-async function paEcrire(a, champs) {
-  /* Un pré-audit figé (clôturé ou supprimé) n'accepte plus de RÉPONSE : seules
-     les actions restent à suivre après la clôture. On regarde d'abord le statut
-     local ; puis, pour une écriture de réponse en ligne, on relit le statut
-     FRAIS en base : un 2e iPad dont la copie mémoire est encore « en cours »
-     n'écrit alors plus sa réponse sur un audit clôturé entre-temps sur un autre
-     appareil. Sans ça, le score et le PDF divergeaient de la grille (F-02). La
-     clôture elle-même passe (a.statut vaut encore « en cours » à cet instant). */
-  const aDesReponses = Object.keys(champs).some(k => k.indexOf('r:') === 0);
-  let fige = !!(a.statut && a.statut !== 'en cours');
-  if (!fige && aDesReponses && STATE.enLigne) {
-    try {
-      const frais = paNormaliser(await DB.get(a.id, null, true));
-      if (frais && frais.statut && frais.statut !== 'en cours') { fige = true; Object.assign(a, frais); }
-    } catch (e) { /* relecture impossible : on laisse la garde locale décider */ }
-  }
-  if (fige) {
-    champs = Object.assign({}, champs);
-    Object.keys(champs).forEach(k => { if (k.indexOf('r:') === 0) delete champs[k]; });
-    if (!Object.keys(champs).length) return a;   // plus rien à écrire : on n'écrit pas sur un audit figé
-  }
-  const n = paNormaliser(await DB.patch(a.id, champs));
-  /* La copie relue ne porte pas encore les écritures qui attendent derrière
-     celle-ci (une réponse touchée juste après) : pour les réponses et les
-     actions, le local garde la main ; le serveur n'ajoute que ce qui vient
-     d'ailleurs. Statut, score… viennent du serveur. */
-  const reponses = Object.assign({}, n.reponses, a.reponses);
-  const actions = Object.assign({}, n.actions, a.actions);
-  Object.keys(champs).forEach(k => {
-    if (k.indexOf('r:') === 0) reponses[k.slice(2)] = champs[k];
-    else if (k.indexOf('a:') === 0) actions[k.slice(2)] = champs[k];
-  });
-  Object.assign(a, n, { reponses:reponses, actions:actions });
-  return a;
-}
+const paClasse = s => s === null || s === undefined ? 'n' : s >= PREAUDIT.seuils.ok ? 'ok' : s >= PREAUDIT.seuils.warn ? 'warn' : 'bad';
+const paScoreTxt = s => s === null || s === undefined ? '—' : s + ' %';
+const PA_POINTS = { ok:1, warn:0.5, bad:0 };
+const PA_ETAT = { ok:'OK', warn:'À surveiller', bad:'À corriger', n:'Sans objet' };
+/* Score saisi (94.81) affiché à la française : « 94,81 % ». */
+const paPct = v => v === null || v === undefined || v === '' ? '' : String(v).replace('.', ',') + ' %';
+const paTypeLabel = id => (PREAUDIT.typesPassage.filter(t => t.id === id)[0] || { label:'Passage' }).label;
+const paNorm = s => String(s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+/* Jours ouverts strictement après « de », jusqu'à « a » inclus. */
+const paOuvertsApres = (de, a) => de >= a ? 0 : joursEntre(addD(de, 1), a).filter(jourOuvert).length;
+const paListe = (l, n) => l.slice(0, n || 3).join(', ') + (l.length > (n || 3) ? '…' : '');
 
-async function lirePreAudits() {
-  const cles = (await DB.list('preaudit:')).filter(k => PA_RE.test(k));
-  DB.prelire(cles);
-  const l = (await Promise.all(cles.map(k => DB.get(k, null)))).map(paNormaliser);
-  /* Supprimé : marqué, pas effacé, sinon il revenait d'un autre iPad. */
-  return l.filter(a => a && a.id && a.jour && a.statut !== 'supprime')
-    .sort((x, y) => (x.jour < y.jour ? 1 : x.jour > y.jour ? -1 : String(x.at) < String(y.at) ? 1 : -1));
+/* Score d'une liste de contrôles : OK 1, à surveiller ½, à corriger 0,
+   sans objet hors du compte. null si rien n'est noté. */
+function scoreControles(l) {
+  let t = 0, n = 0;
+  (l || []).forEach(x => { if (x && x.c in PA_POINTS) { t += PA_POINTS[x.c]; n++; } });
+  return n ? Math.round(t / n * 100) : null;
 }
-
-/* Score d'un ensemble de points : conforme 1, à reprendre ½, non conforme 0,
-   sans objet hors du compte. null tant qu'aucun point n'est noté. */
-function scorePoints(a, points) {
-  let total = 0, n = 0;
-  points.forEach(p => {
-    const r = a.reponses && a.reponses[p.id];
-    const def = r && paReponse(r.r);
-    if (!def || def.points === null) return;
-    total += def.points; n++;
-  });
-  return n ? Math.round(total / n * 100) : null;
-}
-function scoresAudit(a) {
-  const pts = paPoints();
-  const themes = {};
-  PREAUDIT.themes.forEach(t => { themes[t.id] = scorePoints(a, pts.filter(p => p.theme.id === t.id)); });
-  const notes = pts.filter(p => a.reponses && a.reponses[p.id] && paReponse(a.reponses[p.id].r)).length;
-  return { global:scorePoints(a, pts), themes:themes, notes:notes, total:pts.length };
-}
-
-/* Pour la vue multi-boutiques et la tour de contrôle : dernier pré-audit
-   clôturé et actions encore ouvertes, tous pré-audits confondus. */
-async function resumePreAudit() {
-  const as = await lirePreAudits();
-  const clos = as.filter(a => a.statut === 'clos')[0] || null;
-  const ouvertes = [].concat(...as.map(paActions)).filter(x => !x.fait);
-  return {
-    score: clos ? clos.score : null,
-    jour: clos ? clos.jour : null,
-    enCours: !!as.filter(a => a.statut === 'en cours')[0],
-    actionsOuvertes: ouvertes.length,
-    actionsEnRetard: ouvertes.filter(paEnRetard).length
-  };
-}
-
-/* Dernier score publié sous « preaudit:dernier » : la vue multi-boutiques
-   (franchise.js) le lit dans le résumé de chaque boutique. Recalculé à chaque
-   clôture et à chaque suppression. */
-async function publierDernierPreAudit() {
-  const clos = (await lirePreAudits()).filter(a => a.statut === 'clos')[0] || null;
-  await DB.set('preaudit:dernier', clos
-    ? { score:clos.score, jour:clos.jour, scores:clos.scores || {}, par:clos.closPar || '', at:nowISO() }
-    : { score:null, jour:null, scores:{}, par:'', at:nowISO() });
-}
-
-/* Pour la tour de contrôle : [niveau, titre, texte, vue] ou null. Rien tant
-   qu'aucun pré-audit n'a été fait : pas d'alerte pour un outil pas encore
-   adopté. */
-async function alertePreAudit() {
-  const r = await resumePreAudit();
-  if (r.actionsEnRetard) {
-    return ['warn', r.actionsEnRetard + ' ' + accord(r.actionsEnRetard, 'action de pré-audit en retard', 'actions de pré-audit en retard'),
-      'Leur échéance est passée. À régler avant le prochain audit Amorino.', 'preaudit'];
-  }
-  if (r.jour && !r.enCours && addD(r.jour, PREAUDIT.rappelJours) <= today()) {
-    return ['warn', 'Pré-audit à refaire',
-      'Le dernier date du ' + fmtD(r.jour) + ' (' + paScoreTxt(r.score) + '). Un par mois évite les surprises le jour de l’audit.', 'preaudit'];
-  }
-  return null;
+function scoresPreAudit(controles) {
+  const blocs = {};
+  PREAUDIT.blocs.forEach(b => { blocs[b.id] = scoreControles(controles.filter(x => x.bloc === b.id)); });
+  return { global:scoreControles(controles), blocs:blocs };
 }
 
 /* ---------------------------------------------------------------------------
-   Preuves tirées des registres
-   Chaque preuve : { c:'ok'|'warn'|'bad'|'n', texte }. Elles sont recalculées
-   tant que le pré-audit est en cours, puis figées à sa clôture.
+   Contrôles
+   Chaque contrôle : { bloc, id, lib, c:'ok'|'warn'|'bad'|'n', texte, vue }.
    ------------------------------------------------------------------------ */
-async function preuvesPreAudit(fin) {
-  const debut = addD(fin, -(PREAUDIT.joursPreuves - 1));
-  const jours = joursEntre(debut, fin);
-  const P = {};
-  const sur = ' sur ' + PREAUDIT.joursPreuves + ' jours';
+async function controlesPreAudit(fin) {
+  /* Fermetures à jour avant de compter les jours attendus (config.js). */
+  const hz = await DB.get('horaires', null).catch(() => null);
+  if (hz && Array.isArray(hz.fermetures)) HORAIRES.fermetures = hz.fermetures;
 
-  /* Températures : moments relevés et dépassements critiques. */
+  const debut = addD(fin, -(PREAUDIT.fenetre - 1));
+  const jours = joursEntre(debut, fin);
+  const ouverts = jours.filter(jourOuvert);
+  const sur = ' en ' + PREAUDIT.fenetre + ' jours';
+  const C = [];
+  const add = (bloc, id, lib, c, texte, vue) => C.push({ bloc:bloc, id:id, lib:lib, c:c, texte:texte, vue:vue || '' });
+
+  /* Registres du jour, lus par paquets de cinq jours : tous d'un coup, 150
+     requêtes saturaient un Wi-Fi lent ; un par un, l'attente se comptait en
+     dizaines de secondes. */
+  if (typeof DB.prelire === 'function' && typeof clesEtatJour === 'function') {
+    DB.prelire([].concat(...jours.map(d => clesEtatJour(d).concat(['pertes:' + d, 'reception:' + d]))));
+  }
+  const lus = [];
+  for (let i = 0; i < jours.length; i += 5) {
+    lus.push(...await Promise.all(jours.slice(i, i + 5).map(d => Promise.all([
+      DB.get('temp:' + d, null).catch(() => null), DB.get('pertes:' + d, []).catch(() => []),
+      DB.get('reception:' + d, []).catch(() => []),
+      etatJour(d).catch(() => ({}))
+    ]))));
+  }
+
+  /* --- Températures, nettoyage, caisse, pertes, réceptions -------------- */
   let attendus = 0, faits = 0, crit = 0, critSansAction = 0, vitHors = 0, vitCrit = 0, vitMesures = 0;
   const vitrines = ENCEINTES.filter(e => /vitrine/i.test(e.nom));
   const pertes = [];
   let receptions = 0, refusees = 0;
-  let netFaits = 0, netTotal = 0, joursSansNet = 0;
-  /* Lus par paquets de cinq jours : l'un après l'autre, l'attente se comptait
-     en dizaines de secondes ; tous d'un coup, 150 requêtes saturaient un Wi-Fi
-     lent, et deux délais dépassés font passer l'appli hors ligne. */
-  const lus = [];
-  /* Dans un dessin d'écran, les cinq registres des 30 jours partent en
-     quelques requêtes groupées ; la boucle les reprend du lot. Hors dessin,
-     prelire ne fait rien et la lecture par paquets de cinq reste. */
-  DB.prelire([].concat(...jours.map(d => ['temp:' + d, 'pertes:' + d, 'reception:' + d, 'hebdo:' + d, 'clean:' + d])));
-  for (let i = 0; i < jours.length; i += 5) {
-    lus.push(...await Promise.all(jours.slice(i, i + 5).map(d => Promise.all([
-      DB.get('temp:' + d, null), DB.get('pertes:' + d, []), DB.get('reception:' + d, []), etatNettoyage(d)
-    ]))));
-  }
-  /* Jours de fermeture et relevé du soir pas encore dû : pas attendus. */
-  const ouverts = (typeof HORAIRES !== 'undefined' && HORAIRES.joursOuverture) || [1, 2, 3, 4, 5, 6, 7];
+  let netFaits = 0, netTotal = 0;
+  const joursSansNet = [], joursSansCaisse = [], joursCritSansAction = [];
   jours.forEach((d, i) => {
     const t = lus[i][0] || {};
-    const ouvert = typeof jourOuvert === 'function' ? jourOuvert(d) : ouverts.indexOf(jourISO(d)) >= 0;
+    const st = lus[i][3] || {};
+    const ouvert = jourOuvert(d);
     let critJour = false;
     RELEVES.moments.forEach(m => {
       const releve = releveMesure(t, m.id);
-      if (releve || (ouvert && !(d === fin && m.id === 's'))) attendus++;
+      /* Jour fermé, ou relevé d'aujourd'hui (pas forcément encore dû) : pas attendu. */
+      if (releve || (ouvert && d !== fin)) attendus++;
       if (releve) faits++;
       ENCEINTES.forEach(e => { if (etatTemp(e, t[m.id + '_' + e.id]) === 'crit') { crit++; critJour = true; } });
       vitrines.forEach(e => {
@@ -264,543 +143,632 @@ async function preuvesPreAudit(fin) {
         else if (s === 'rouge') vitHors++;
       });
     });
-    if (critJour && !String(t.obs || '').trim()) critSansAction++;
+    if (critJour && !String(t.obs || '').trim()) { critSansAction++; joursCritSansAction.push(fmtDC(d)); }
 
-    (Array.isArray(lus[i][1]) ? lus[i][1] : []).forEach(x => pertes.push(x));
+    (Array.isArray(lus[i][1]) ? lus[i][1] : []).forEach(x => { if (x && !x.supprime) pertes.push(x); });
     (Array.isArray(lus[i][2]) ? lus[i][2] : []).forEach(r => { receptions++; if (r && r.refuse) refusees++; });
 
-    const n = lus[i][3];
-    if (n.total && ouvert) { netFaits += n.faits; netTotal += n.total; if (!n.faits) joursSansNet++; }
+    if (!ouvert) return;
+    if (st.netTotal) { netFaits += num(st.net); netTotal += num(st.netTotal); if (!num(st.net)) joursSansNet.push(fmtDC(d)); }
+    /* La caisse du jour se ferme le soir : aujourd'hui n'est pas encore dû. */
+    if (d !== fin && !st.caisse) joursSansCaisse.push(fmtDC(d));
   });
 
-  const taux = attendus ? faits / attendus : 0;
-  P.temp = {
-    c: (critSansAction || taux < 0.8) ? 'bad' : (crit || taux < 0.95) ? 'warn' : 'ok',
-    texte: faits + ' relevés sur ' + attendus + sur +
-      (crit ? ' · ' + crit + ' ' + accord(crit, 'dépassement critique', 'dépassements critiques') +
-        (critSansAction ? ', dont ' + critSansAction + ' ' + accord(critSansAction, 'jour') + ' sans action corrective' : '') : ' · aucun dépassement')
-  };
+  if (!attendus) {
+    add('temp', 'releves', 'Relevés matin et soir', 'n', 'Aucun relevé attendu' + sur + ' (boutique fermée)', 'temp');
+  } else {
+    const taux = faits / attendus;
+    add('temp', 'releves', 'Relevés matin et soir',
+      taux < 0.8 ? 'bad' : taux < 0.95 ? 'warn' : 'ok',
+      faits + ' relevés faits sur ' + attendus + ' attendus' + sur, 'temp');
+  }
+  add('temp', 'crit', 'Dépassements critiques suivis d’une action',
+    critSansAction ? 'bad' : 'ok',
+    !crit ? 'Aucun dépassement critique' + sur
+      : crit + ' ' + accord(crit, 'dépassement critique', 'dépassements critiques') +
+        (critSansAction ? ', sans action corrective notée le ' + paListe(joursCritSansAction) : ', tous avec une action notée'), 'temp');
+  add('temp', 'vitrine', 'Vitrine dans sa plage',
+    !vitrines.length || !vitMesures ? 'n' : vitCrit ? 'bad' : vitHors ? 'warn' : 'ok',
+    !vitrines.length || !vitMesures ? 'Aucun relevé de vitrine' + sur
+      : vitMesures + ' ' + accord(vitMesures, 'relevé') + ' de vitrine' +
+        (vitCrit || vitHors ? ', dont ' + (vitCrit + vitHors) + ' hors de la plage' : ', tous dans la plage'), 'temp');
 
-  P.vitrine = !vitrines.length || !vitMesures
-    ? { c:'n', texte:'Aucun relevé de vitrine' + sur }
-    : { c: vitCrit ? 'bad' : vitHors ? 'warn' : 'ok',
-        texte: vitMesures + ' ' + accord(vitMesures, 'relevé') + ' de vitrine' + sur +
-          (vitCrit || vitHors ? ' · ' + (vitCrit + vitHors) + ' hors de la plage' : ', tous dans la plage') };
+  if (!netTotal) {
+    add('net', 'nettoyage', 'Tâches de nettoyage validées', 'n', 'Aucune tâche de nettoyage prévue' + sur, 'clean');
+  } else {
+    const tauxNet = netFaits / netTotal;
+    add('net', 'nettoyage', 'Tâches de nettoyage validées',
+      joursSansNet.length > 2 || tauxNet < 0.7 ? 'bad' : joursSansNet.length || tauxNet < 0.9 ? 'warn' : 'ok',
+      netFaits + ' ' + accord(netFaits, 'tâche validée', 'tâches validées') + ' sur ' + netTotal + ' prévues' + sur +
+        (joursSansNet.length ? ' · rien de validé le ' + paListe(joursSansNet) : ''), 'clean');
+  }
+  const ouvertsPasses = ouverts.filter(d => d !== fin).length;
+  add('net', 'caisse', 'Fermeture de caisse validée',
+    !ouvertsPasses ? 'n' : joursSansCaisse.length > 2 ? 'bad' : joursSansCaisse.length ? 'warn' : 'ok',
+    !ouvertsPasses ? 'Aucun jour ouvert' + sur
+      : joursSansCaisse.length
+        ? joursSansCaisse.length + ' ' + accord(joursSansCaisse.length, 'jour') + ' sans fermeture validée : ' + paListe(joursSansCaisse)
+        : 'Validée chaque jour ouvert (' + ouvertsPasses + ' ' + accord(ouvertsPasses, 'jour') + ')', 'caisse');
 
-  const rupt = (await DB.get('ruptures', [])).filter(r => r && (r.jour || '') >= debut);
-  const ruptOuvertes = rupt.filter(r => !r.traite);
-  P.ruptures = {
-    c: ruptOuvertes.length ? 'bad' : rupt.length > 3 ? 'warn' : 'ok',
-    texte: ruptOuvertes.length
-      ? ruptOuvertes.length + ' ' + accord(ruptOuvertes.length, 'rupture non traitée', 'ruptures non traitées') + ' : ' +
-        [...new Set(ruptOuvertes.map(r => r.article).filter(Boolean))].slice(0, 3).join(', ')
-      : rupt.length + ' ' + accord(rupt.length, 'rupture signalée', 'ruptures signalées') + sur + ', toutes traitées'
-  };
+  /* --- Glaces et vitrine -------------------------------------------------- */
+  const fifo = await calculFIFO(monthKey(fin)).catch(() => []);
+  const estGlace = f => f.type === 'g' || f.famille === 'glace';
+  const glaces = fifo.filter(estGlace), autres = fifo.filter(f => !estGlace(f));
+  const nomsDe = l => paListe([...new Set(l.map(f => f.nom).filter(Boolean))]);
+  const joursGelato = Math.round((DLC_RULES.gelato || DLC_RULES.defaut).h / 24);
+  const gR = glaces.filter(f => f.c === 'rouge'), gO = glaces.filter(f => f.c === 'orange');
+  add('vitrine', 'vit-dlc', 'Bacs en vitrine depuis moins de ' + joursGelato + ' jours',
+    gR.length ? 'bad' : gO.length ? 'warn' : glaces.length ? 'ok' : 'n',
+    gR.length ? gR.length + ' ' + accord(gR.length, 'bac ouvert', 'bacs ouverts') + ' depuis plus de ' + joursGelato +
+        ' jours : ' + nomsDe(gR) + '. À jeter, ou à déclarer fini s’il ne reste rien.'
+      : gO.length ? gO.length + ' ' + accord(gO.length, 'bac', 'bacs') + ' à écouler vite : ' + nomsDe(gO)
+      : glaces.length ? glaces.length + ' ' + accord(glaces.length, 'bac', 'bacs') + ' en vitrine, tous dans leur durée'
+      : 'Aucun bac de glace noté en vitrine', 'frigo');
 
-  /* Écart glace : dernier calcul clôturé (calcul.js). */
-  P.ecart = { c:'n', texte:'Aucun calcul d’écart clôturé' };
+  const armoire = typeof bacsArmoire === 'function' ? await bacsArmoire().catch(() => []) : [];
+  const seuilArm = seuilOrangeHeures((DLC_RULES.gelato || DLC_RULES.defaut).h);
+  const aR = armoire.filter(b => b.resteH < 0), aO = armoire.filter(b => b.resteH >= 0 && b.resteH <= seuilArm);
+  const parfumsArm = l => paListe(l.map(b => litArticle(b.cle).parfum || libelleArticle(b.cle)));
+  add('vitrine', 'armoire', 'Bacs de l’armoire −13 dans leur durée',
+    aR.length ? 'bad' : aO.length ? 'warn' : armoire.length ? 'ok' : 'n',
+    aR.length ? aR.length + ' ' + accord(aR.length, 'bac', 'bacs') + ' dépassé à l’armoire : ' + parfumsArm(aR)
+      : aO.length ? aO.length + ' ' + accord(aO.length, 'bac', 'bacs') + ' à monter vite en vitrine : ' + parfumsArm(aO)
+      : armoire.length ? armoire.length + ' ' + accord(armoire.length, 'bac', 'bacs') + ' à l’armoire, dans leur durée'
+      : 'Aucun bac noté à l’armoire −13', 'lots');
+
+  /* Journal des ouvertures (stock.js), sur une fenêtre plus longue pour les
+     coulis et toppings. */
+  const depuis = addD(fin, -PREAUDIT.lectureJours);
+  const mouv = ((typeof tousMouvements === 'function' ? await tousMouvements(depuis).catch(() => []) : []) || [])
+    .map(litMouvement).filter(m => m.type === 'ouverture' && m.jour && m.jour >= depuis && m.jour <= fin);
+  const famDe = m => litArticle(m.cle).famille;
+
+  const ouvGlace = mouv.filter(m => famDe(m) === 'glace' && m.jour >= debut);
+  const sansLot = ouvGlace.filter(m => !String(m.lot || '').trim());
+  add('vitrine', 'lots', 'Numéro de lot noté à l’ouverture des bacs',
+    !ouverts.length ? 'n' : !ouvGlace.length ? 'warn' : sansLot.length ? (sansLot.length > 2 ? 'bad' : 'warn') : 'ok',
+    !ouverts.length ? 'Aucun jour ouvert' + sur
+      : !ouvGlace.length ? 'Aucune ouverture de bac tracée' + sur + ' alors que la boutique était ouverte'
+      : sansLot.length ? sansLot.length + ' ' + accord(sansLot.length, 'bac ouvert', 'bacs ouverts') + ' sans numéro de lot sur ' + ouvGlace.length +
+          ' : ' + paListe([...new Set(sansLot.map(m => litArticle(m.cle).parfum).filter(Boolean))])
+      : ouvGlace.length + ' ' + accord(ouvGlace.length, 'bac ouvert', 'bacs ouverts') + sur + ', tous avec leur lot', 'lots');
+
+  /* --- Produits complémentaires ----------------------------------------- */
+  /* Chantilly : un jour ouvert est couvert si une brique a été ouverte moins
+     de 2 jours ouverts plus tôt (48 h de vie). */
+  const joursCh = [...new Set(mouv.filter(m => famDe(m) === 'chantilly').map(m => m.jour))].sort();
+  const derCh = joursCh.length ? joursCh[joursCh.length - 1] : null;
+  const nonCouverts = [];
+  ouverts.forEach(d => {
+    const avant = joursCh.filter(x => x <= d);
+    const der = avant.length ? avant[avant.length - 1] : null;
+    /* En jours calendaires : une brique ouverte samedi est périmée mardi, même
+       si la boutique a fermé dimanche et lundi. */
+    if (!der || joursEntre(der, d).length - 1 >= PREAUDIT.chantillyJours) nonCouverts.push(d);
+  });
+  add('compl', 'chantilly', 'Chantilly ouverte au moins tous les ' + PREAUDIT.chantillyJours + ' jours',
+    !ouverts.length ? 'n' : !derCh ? 'bad' : nonCouverts.length > 3 ? 'bad' : nonCouverts.length ? 'warn' : 'ok',
+    !ouverts.length ? 'Aucun jour ouvert' + sur
+      : !derCh ? 'Aucune ouverture de chantilly tracée depuis ' + PREAUDIT.lectureJours + ' jours'
+      : nonCouverts.length
+        ? nonCouverts.length + ' ' + accord(nonCouverts.length, 'jour ouvert', 'jours ouverts') + ' sans chantilly ouverte depuis moins de 48 h : ' +
+          paListe(nonCouverts.map(fmtDC), 4) + ' · dernière ouverture le ' + fmtDC(derCh)
+        : 'Une ouverture au moins tous les ' + PREAUDIT.chantillyJours + ' jours ouverts · dernière le ' + fmtDC(derCh), 'lots');
+
+  /* Coulis et toppings en stock : dernière ouverture de chaque saveur. */
+  const stock = (typeof stockReel === 'function' ? await stockReel().catch(() => null) : null) || { articles:{} };
+  ['coulis', 'topping'].forEach(fid => {
+    const fam = FAMILLES_PRODUIT.filter(f => f.id === fid)[0];
+    if (!fam) return;
+    const seuil = PREAUDIT.sansOuverture[fid];
+    const enStock = [], retards = [];
+    (fam.saveurs || []).forEach(sv => {
+      if (num((stock.articles || {})[cleArticle(fid, sv, '')]) <= 0) return;   // pas en stock : rien n'est attendu
+      enStock.push(sv);
+      const js = mouv.filter(m => famDe(m) === fid && paNorm(litArticle(m.cle).parfum) === paNorm(sv)).map(m => m.jour).sort();
+      const der = js.length ? js[js.length - 1] : null;
+      const n = der ? paOuvertsApres(der, fin) : null;
+      if (n === null || n > seuil) retards.push({ sv:sv, der:der, n:n });
+    });
+    const nomPluriel = fid === 'coulis' ? 'coulis' : 'toppings';
+    add('compl', fid, (fid === 'coulis' ? 'Coulis' : 'Toppings') + ' en stock ouverts depuis moins de ' + seuil + ' jours',
+      !enStock.length ? 'n' : !retards.length ? 'ok' : retards.some(r => r.n !== null && r.n > 2 * seuil) ? 'bad' : 'warn',
+      !enStock.length ? 'Aucun ' + (fid === 'coulis' ? 'coulis' : 'topping') + ' en stock'
+        : retards.length
+          ? retards.map(r => r.sv + (r.der ? ' : dernière ouverture le ' + fmtDC(r.der) + ' (' + r.n + ' jours ouverts)'
+              : ' : en stock, aucune ouverture depuis ' + PREAUDIT.lectureJours + ' jours')).join(' · ') +
+            '. Flacon gardé trop longtemps, ou ouverture pas notée ?'
+          : 'Tous les ' + nomPluriel + ' en stock ont une ouverture récente (' + enStock.length + ')', 'lots');
+  });
+
+  const xR = autres.filter(f => f.c === 'rouge'), xO = autres.filter(f => f.c === 'orange');
+  add('compl', 'dlc', 'Produits ouverts dans leur date limite',
+    xR.length ? 'bad' : xO.length ? 'warn' : 'ok',
+    xR.length ? xR.length + ' ' + accord(xR.length, 'produit dépassé', 'produits dépassés') + ' : ' + nomsDe(xR)
+      : xO.length ? xO.length + ' ' + accord(xO.length, 'produit', 'produits') + ' à écouler vite : ' + nomsDe(xO)
+      : 'Aucun produit ouvert dépassé', 'frigo');
+
+  /* --- Stock et écarts ---------------------------------------------------- */
+  /* Lue directement, pas par periodeCourante() : sans période, celle-ci ouvre
+     au manager la feuille bloquante « Définir la première période ». */
+  const per = await DB.get('periode:courante', null).catch(() => null);
+  const echue = !!(per && per.fin && fin > per.fin);
+  const depuisFin = echue ? joursEntre(addD(per.fin, 1), fin).length : 0;
+  add('stock', 'periode', 'Période d’écart clôturée à temps',
+    !per || !per.fin ? 'n' : echue ? 'bad' : 'ok',
+    !per || !per.fin ? 'Aucune période en cours'
+      : echue ? 'Période du ' + fmtDC(per.debut) + ' au ' + fmtDC(per.fin) + ' terminée depuis ' + depuisFin + ' ' +
+          accord(depuisFin, 'jour') + ', pas encore clôturée'
+      : 'Période en cours jusqu’au ' + fmtDC(per.fin), 'periodes');
+
+  let ecart = { c:'warn', texte:'Aucun calcul d’écart clôturé' };
   if (typeof lireCalculs === 'function' && typeof derniereCloture === 'function') {
-    const c = derniereCloture(await lireCalculs());
+    const c = derniereCloture(await lireCalculs().catch(() => []));
     if (c) {
       const r = resultatCalcul(c);
       const st = r.incoherent ? { c:'bad' } : etatEcart(r.pct);
-      P.ecart = { c:st.c, texte:'Calcul du ' + fmtDC(c.debut) + ' au ' + fmtDC(c.fin) + ' : ' + pctTxt(r) +
-        (r.incoherent ? '' : ' (' + (r.ecart > 0.05 ? '+' : r.ecart < -0.05 ? '−' : '') + kgTxt(Math.abs(r.ecart)) + ')') };
+      const vieux = paOuvertsApres(c.fin, fin) > PREAUDIT.inventaireJours;
+      ecart = { c: vieux && st.c === 'ok' ? 'warn' : st.c,
+        texte:'Dernier calcul du ' + fmtDC(c.debut) + ' au ' + fmtDC(c.fin) + ' : ' + pctTxt(r) +
+          (r.incoherent ? '' : ' (' + (r.ecart > 0.05 ? '+' : r.ecart < -0.05 ? '−' : '') + kgTxt(Math.abs(r.ecart)) + ')') +
+          (vieux ? ' · plus de ' + PREAUDIT.inventaireJours + ' jours ouverts sans nouveau calcul' : '') };
     }
   }
+  add('stock', 'ecart', 'Écart glace dans la fourchette', ecart.c, ecart.texte, 'calcul');
 
-  /* Lots ouverts sur la fenêtre, et produits entamés dépassés aujourd'hui. */
-  const mois = jours.map(monthKey).filter((m, i, a) => a.indexOf(m) === i);
-  let lots = 0;
-  for (const m of mois) {
-    const rec = await DB.get('lots:' + m, {});
-    Object.keys(rec || {}).forEach(k => { const v = rec[k]; if (v && v.lot && v.ouv && v.ouv >= debut && v.ouv <= fin) lots++; });
-  }
-  P.lots = { c: lots ? 'ok' : 'warn', texte: lots ? lots + ' ' + accord(lots, 'lot noté', 'lots notés') + ' à l’ouverture' + sur : 'Aucun lot noté' + sur };
+  const [invF, invS] = await Promise.all([
+    DB.get('stock:inventaire', null).catch(() => null), DB.get('stock:sec', null).catch(() => null)]);
+  const invTxt = [], invEtats = [];
+  [['Chambre froide', invF], ['Sec', invS]].forEach(([nom, inv]) => {
+    if (!inv || !inv.jour) { invTxt.push(nom + ' : jamais compté'); invEtats.push('bad'); return; }
+    const n = paOuvertsApres(inv.jour, fin);
+    invEtats.push(n > 2 * PREAUDIT.inventaireJours ? 'bad' : n > PREAUDIT.inventaireJours ? 'warn' : 'ok');
+    invTxt.push(nom + ' : ' + fmtDC(inv.jour) + ' (' + n + ' ' + accord(n, 'jour ouvert', 'jours ouverts') + ')');
+  });
+  add('stock', 'inventaire', 'Inventaire de moins de ' + PREAUDIT.inventaireJours + ' jours ouverts',
+    invEtats.indexOf('bad') >= 0 ? 'bad' : invEtats.indexOf('warn') >= 0 ? 'warn' : 'ok', invTxt.join(' · '), 'inventaire');
 
-  const fifo = await calculFIFO(monthKey(fin));
-  const depasses = fifo.filter(f => f.c === 'rouge');
-  P.dlc = depasses.length
-    ? { c:'bad', texte: depasses.length + ' ' + accord(depasses.length, 'produit dépassé', 'produits dépassés') + ' dans les produits ouverts : ' +
-        [...new Set(depasses.map(f => f.nom))].slice(0, 3).join(', ') }
-    : { c:'ok', texte:'Aucun produit dépassé dans les produits ouverts' };
+  const ruptures = (await DB.get('ruptures', []).catch(() => []) || []).filter(r => r && !r.traite);
+  add('stock', 'ruptures', 'Ruptures traitées',
+    ruptures.length ? 'bad' : 'ok',
+    ruptures.length ? ruptures.length + ' ' + accord(ruptures.length, 'rupture non traitée', 'ruptures non traitées') + ' : ' +
+        paListe([...new Set(ruptures.map(r => r.article).filter(Boolean))])
+      : 'Aucune rupture en attente', 'controle');
 
-  P.receptions = receptions
-    ? { c:'ok', texte: receptions + ' ' + accord(receptions, 'réception enregistrée', 'réceptions enregistrées') + sur +
-        ', DLC notées' + (refusees ? ' · ' + refusees + ' ' + accord(refusees, 'refusée', 'refusées') : '') }
-    : { c:'warn', texte:'Aucune réception enregistrée' + sur };
-
+  /* --- Réceptions et pertes ----------------------------------------------- */
+  add('recep', 'receptions', 'Livraisons réceptionnées dans l’appli',
+    receptions ? (refusees ? 'warn' : 'ok') : ouverts.length >= 7 ? 'warn' : 'n',
+    receptions ? receptions + ' ' + accord(receptions, 'réception enregistrée', 'réceptions enregistrées') + sur +
+        (refusees ? ', dont ' + refusees + ' ' + accord(refusees, 'refusée', 'refusées') : '')
+      : 'Aucune réception enregistrée' + sur, 'reception');
   const sansMotif = pertes.filter(x => x && !String(x.motif || x.raison || '').trim()).length;
-  P.pertes = pertes.length
-    ? { c: sansMotif ? 'warn' : 'ok', texte: pertes.length + ' ' + accord(pertes.length, 'perte enregistrée', 'pertes enregistrées') + sur +
-        (sansMotif ? ', ' + sansMotif + ' sans motif' : '') }
-    : { c:'warn', texte:'Aucune perte enregistrée' + sur + ' : rien jeté, ou rien noté ?' };
+  add('recep', 'pertes', 'Pertes enregistrées avec leur motif',
+    pertes.length ? (sansMotif ? 'warn' : 'ok') : ouverts.length >= 7 ? 'warn' : 'n',
+    pertes.length ? pertes.length + ' ' + accord(pertes.length, 'perte enregistrée', 'pertes enregistrées') + sur +
+        (sansMotif ? ', dont ' + sansMotif + ' sans motif' : ', toutes avec un motif')
+      : 'Aucune perte enregistrée' + sur + ' : rien jeté, ou rien noté ?', 'pertes');
 
-  const tauxNet = netTotal ? netFaits / netTotal : 0;
-  P.nettoyage = netTotal
-    ? { c: tauxNet >= 0.9 ? 'ok' : tauxNet >= 0.7 ? 'warn' : 'bad',
-        texte: netFaits + ' ' + accord(netFaits, 'tâche validée', 'tâches validées') + ' sur ' + netTotal + sur +
-          (joursSansNet ? ' · ' + joursSansNet + ' ' + accord(joursSansNet, 'jour') + ' sans rien' : '') }
-    : { c:'n', texte:'Aucune tâche de nettoyage prévue' + sur };
-
-  return P;
+  return { debut:debut, fin:fin, joursOuverts:ouverts.length, controles:C, at:nowISO() };
 }
 
-/* ---------------------------------------------------------------------------
-   Vue principale : en cours, plan d'actions, historique
-   ------------------------------------------------------------------------ */
-/* Redessin demandé par l'écran lui-même (V.preaudit._interne) : la grille
-   ouverte reste ouverte. Arrivée depuis le menu ou la tour de contrôle : on
-   repart de la liste, et rien n'est repris d'une copie en mémoire. */
-const paRedessiner = () => { V.preaudit._interne = true; return rendre('preaudit'); };
-V.preaudit = async function () {
-  if (!V.preaudit._interne) { V.preaudit._id = null; V.preaudit._doc = null; }
-  V.preaudit._interne = false;
-  if (V.preaudit._id) return ecranGrille(V.preaudit._id);
-  const as = await lirePreAudits();
-  if (STATE.view !== 'preaudit') return;
-  const enCours = as.filter(a => a.statut === 'en cours');
-  const clos = as.filter(a => a.statut === 'clos');
-  const dernier = clos[0] || null;
-  const actions = [].concat(...as.map(a => paActions(a).map(x => ({ x:x, a:a }))));
-  const ouvertes = actions.filter(o => !o.x.fait);
-  const retard = ouvertes.filter(o => paEnRetard(o.x));
-
-  if (!enCours.length) $('#vue-actions').innerHTML = '<button class="btn sm" id="pa-new">Nouveau</button>';
-
-  $('#page').innerHTML =
-    '<div class="grid g3">' +
-      '<div class="kpi ' + (dernier ? paClasse(dernier.score) : '') + '"><div class="k">Dernier score</div>' +
-        '<div class="v">' + (dernier ? esc(dernier.score) + '<span class="u">%</span>' : '—') + '</div>' +
-        '<div class="d">' + (dernier ? esc(fmtD(dernier.jour)) : 'Aucun pré-audit') + '</div></div>' +
-      '<div class="kpi"><div class="k">Actions ouvertes</div><div class="v">' + ouvertes.length + '</div>' +
-        '<div class="d">' + (actions.length - ouvertes.length) + ' ' + accord(actions.length - ouvertes.length, 'faite', 'faites') + '</div></div>' +
-      '<div class="kpi ' + (retard.length ? 'bad' : '') + '"><div class="k">En retard</div><div class="v">' + retard.length + '</div>' +
-        '<div class="d">échéance passée</div></div>' +
-    '</div>' +
-
-    '<div class="stack" style="margin-top:12px">' +
-    (enCours.length
-      ? enCours.map(a => {
-          const s = scoresAudit(a);
-          return carte(
-            '<div class="rang"><div style="flex:1"><h2>Pré-audit en cours</h2>' +
-            '<div class="cs">Commencé le ' + esc(fmtD(a.jour)) + ' par ' + esc(a.par || '—') + ' · ' + s.notes + ' points sur ' + s.total +
-            (s.global !== null ? ' · ' + s.global + ' % pour l’instant' : '') + '</div></div>' + pastille('ciel', 'EN COURS') + '</div>' +
-            '<div class="jauge" style="margin-top:12px"><i style="width:' + Math.round(s.notes / s.total * 100) + '%"></i></div>' +
-            '<div class="btn-row" style="margin-top:12px"><button class="btn fantome" data-pa-sup="' + esc(a.id) + '">Supprimer</button>' +
-            '<button class="btn menthe" data-pa-ouvrir="' + esc(a.id) + '">Reprendre</button></div>', 'solide');
-        }).join('')
-      : carte(entete('', 'Faire un pré-audit',
-          'La grille reprend les thèmes de l’audit trimestriel Amorino : hygiène, vitrine, quantités servies, affiches, ' +
-          'traçabilité et nettoyage des machines. Comptez un quart d’heure, en faisant le tour de la boutique.') +
-        '<p class="mini" style="margin-top:8px">Les relevés des frigos, le nettoyage, les lots, les réceptions, les pertes et le dernier ' +
-          'calcul d’écart des ' + PREAUDIT.joursPreuves + ' derniers jours s’affichent à côté des points qu’ils prouvent.</p>' +
-        '<button class="btn menthe bloc xl" id="pa-new2" style="margin-top:12px">Commencer le pré-audit</button>')) +
-    '</div>' +
-
-    '<div class="entete" style="margin-top:18px"><h3>Plan d’actions</h3></div>' +
-    (ouvertes.length
-      ? '<div class="stack">' + ouvertes.map(o => carteAction(o.x, o.a, true)).join('') + '</div>'
-      : vide('', actions.length ? 'Toutes les actions sont faites.' : 'Aucune action pour l’instant. Elles se créent depuis la grille, sur un point à reprendre ou non conforme.')) +
-
-    '<div class="entete" style="margin-top:18px"><h3>Pré-audits clôturés</h3></div>' +
-    (clos.length
-      ? '<div class="dense"><div class="dense-h"><span class="c1">Date</span><span class="c w">Actions</span><span class="c w">Score</span></div>' +
-        clos.slice(0, 24).map(a => {
-          const n = paActions(a).filter(x => !x.fait).length;
-          return '<div class="dl" data-pa-voir="' + esc(a.id) + '" role="button" tabindex="0" style="cursor:pointer">' +
-            '<span class="c1">' + esc(fmtD(a.jour)) + ' · ' + esc(a.closPar || a.par || '') + '</span>' +
-            '<span class="c w">' + (n ? n + ' ' + accord(n, 'ouverte', 'ouvertes') : '—') + '</span>' +
-            '<span class="c w">' + pastille(paClasse(a.score), paScoreTxt(a.score)) + '</span></div>';
-        }).join('') + '</div>'
-      : vide('', 'Aucun pré-audit clôturé pour l’instant.'));
-
-  /* Une seule création à la fois : un second tap pendant l'écriture créerait
-     un second pré-audit « en cours ». */
-  const nouveau = () => _paDemarrage ||
-    (_paDemarrage = Promise.resolve(demarrerPreAudit()).finally(() => { _paDemarrage = null; }));
-  if ($('#pa-new')) $('#pa-new').onclick = nouveau;
-  if ($('#pa-new2')) $('#pa-new2').onclick = nouveau;
-  const ouvrir = id => { V.preaudit._id = id; V.preaudit._doc = null; paRedessiner(); window.scrollTo(0, 0); };
-  $$('[data-pa-ouvrir]').forEach(b => b.onclick = () => ouvrir(b.dataset.paOuvrir));
-  $$('[data-pa-voir]').forEach(b => {
-    b.onclick = () => ouvrir(b.dataset.paVoir);
-    b.onkeydown = e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); ouvrir(b.dataset.paVoir); } };
-  });
-  $$('[data-pa-sup]').forEach(b => b.onclick = () => {
-    const a = as.filter(x => x.id === b.dataset.paSup)[0];
-    if (!a) return;
-    confirmer('Supprimer ce pré-audit ?', 'Commencé le ' + fmtD(a.jour) + '. Les réponses et ses actions seront perdues.',
-      'Supprimer', async () => {
-        const etaitClos = a.statut === 'clos';
-        await paEcrire(a, { statut:'supprime', suppPar:STATE.user.prenom, suppAt:nowISO() });
-        await feed('ok', STATE.user.prenom + ' a supprimé le pré-audit du ' + fmtD(a.jour));
-        if (etaitClos) await publierDernierPreAudit();
-        paRedessiner();
-      });
-  });
-  brancherActions(as);
-};
-
-function carteAction(x, a, avecOrigine) {
-  const pt = paPoints().filter(p => p.id === x.point)[0];
-  const etat = x.fait ? pastille('ok', 'Faite')
-    : paEnRetard(x) ? pastille('bad', 'En retard')
-    : x.echeance ? pastille('n', 'Pour le ' + fmtDC(x.echeance)) : pastille('n', 'Sans échéance');
-  return '<div class="card">' +
-    '<div class="rang"><div style="flex:1"><b>' + esc(x.texte) + '</b>' +
-    '<div class="cs">' + esc(x.resp || 'Sans responsable') +
-      (x.echeance ? ' · échéance ' + esc(fmtD(x.echeance)) : '') +
-      (avecOrigine && pt ? ' · ' + esc(pt.theme.nom) : '') +
-      (x.fait ? ' · faite par ' + esc(x.faitPar || '') + (x.faitAt ? ' le ' + esc(fmtDC(isoOf(new Date(x.faitAt)))) : '') : '') +
-    '</div></div>' + etat + '</div>' +
-    '<div class="btn-row" style="margin-top:10px">' +
-      '<button class="btn fantome sm" data-pa-act-modif="' + esc(a.id) + '|' + esc(x.id) + '">Modifier</button>' +
-      '<button class="btn ' + (x.fait ? 'clair' : 'menthe') + ' sm" data-pa-act-fait="' + esc(a.id) + '|' + esc(x.id) + '">' +
-        (x.fait ? 'Rouvrir' : 'C’est fait') + '</button>' +
-    '</div></div>';
-}
-
-/* Boutons des cartes d'action, sur la liste comme dans la grille. */
-function brancherActions(as) {
-  const trouver = v => {
-    const [aid, xid] = String(v).split('|');
-    const a = as.filter(y => y.id === aid)[0];
-    return a ? { a:a, x:(a.actions || {})[xid] } : null;
-  };
-  $$('[data-pa-act-fait]').forEach(b => b.onclick = async () => {
-    if (b.disabled) return;
-    const t = trouver(b.dataset.paActFait);
-    if (!t || !t.x) return;
-    b.disabled = true;
-    try {
-      const x = Object.assign({}, t.x, t.x.fait
-        ? { fait:false, faitPar:null, faitAt:null }
-        : { fait:true, faitPar:STATE.user.prenom, faitAt:nowISO() });
-      await ecrireAction(t.a, x);
-      if (x.fait) await feed('ok', STATE.user.prenom + ' a fait l’action de pré-audit « ' + x.texte + ' »');
-      toast(x.fait ? 'Action faite' : 'Action rouverte');
-      paRedessiner();
-    } finally { b.disabled = false; }
-  });
-  $$('[data-pa-act-modif]').forEach(b => b.onclick = () => {
-    const t = trouver(b.dataset.paActModif);
-    if (t && t.x) feuilleAction(t.a, t.x.point, t.x);
-  });
-}
-
-async function ecrireAction(a, x) {
-  await paEcrire(a, { ['a:' + x.id]:x });
-}
-
-/* ---------------------------------------------------------------------------
-   Démarrage
-   ------------------------------------------------------------------------ */
-let _paDemarrage = null;
-async function demarrerPreAudit() {
-  const as = await lirePreAudits();
-  const deja = as.filter(a => a.statut === 'en cours')[0];
-  if (deja) { V.preaudit._id = deja.id; return paRedessiner(); }
+/* Résultats gardés quelques minutes : la page, la tour de contrôle et le PDF
+   ne relisent pas 30 jours de registres chacun. */
+let _paCache = null;
+async function controlesEnCache(forcer) {
   const j = today();
-  const a = { id:'preaudit:' + j + ':' + uid(), jour:j, statut:'en cours',
-              par:STATE.user.prenom, at:nowISO() };
-  await DB.set(a.id, a);
-  await feed('ok', STATE.user.prenom + ' a commencé un pré-audit Amorino');
-  V.preaudit._id = a.id;
-  V.preaudit._doc = paNormaliser(a);
-  paRedessiner();
-  window.scrollTo(0, 0);
+  if (!forcer && _paCache && _paCache.jour === j && Date.now() - _paCache.t < PREAUDIT.cacheMs) return _paCache.res;
+  const res = await controlesPreAudit(j);
+  _paCache = { jour:j, t:Date.now(), res:res };
+  return res;
+}
+
+/* Pour la tour de contrôle et la vue multi-boutiques : score de conformité
+   du jour, global et par bloc. */
+async function scoreConformite(forcer) {
+  const r = await controlesEnCache(forcer);
+  const s = scoresPreAudit(r.controles);
+  return { score:s.global, classe:paClasse(s.global), at:r.at,
+           aCorriger:r.controles.filter(x => x.c === 'bad').length,
+           blocs:PREAUDIT.blocs.map(b => ({ id:b.id, nom:b.nom, score:s.blocs[b.id], classe:paClasse(s.blocs[b.id]) })) };
 }
 
 /* ---------------------------------------------------------------------------
-   Grille
+   Passages de l'animateur réseau
    ------------------------------------------------------------------------ */
-async function ecranGrille(id) {
-  /* Copie en mémoire, le temps des redessins de cet écran : chaque réponse
-     s'affiche tout de suite, sans attendre la relecture réseau (jusqu'à 8 s
-     sur le Wi-Fi de la boutique). Elle est relue à chaque arrivée sur l'écran. */
-  let a = (V.preaudit._doc && V.preaudit._doc.id === id) ? V.preaudit._doc : paNormaliser(await DB.get(id, null));
-  if (STATE.view !== 'preaudit') return;
-  if (!a || a.statut === 'supprime') { V.preaudit._id = null; V.preaudit._doc = null; return V.preaudit(); }
-  V.preaudit._doc = a;
-  const clos = a.statut === 'clos';
+async function lirePassages() {
+  const d = (await DB.get(PA_PASSAGES, {}).catch(() => ({}))) || {};
+  return Object.keys(d).filter(k => k.indexOf('p:') === 0).map(k => d[k])
+    .filter(p => p && p.id && p.jour && !p.supprime)
+    .sort((a, b) => (a.jour < b.jour ? 1 : a.jour > b.jour ? -1 : String(a.at) < String(b.at) ? 1 : -1));
+}
+const ecrirePassage = p => DB.patch(PA_PASSAGES, { ['p:' + p.id]:p });
+const paLibPassage = p => paTypeLabel(p.type) + ' du ' + fmtDC(p.jour);
 
-  $('#vue-titre').textContent = clos ? 'Pré-audit du ' + fmtDC(a.jour) : 'Pré-audit en cours';
-  $('#vue-sous').textContent = clos ? 'Clôturé par ' + (a.closPar || '—') : 'Commencé le ' + fmtD(a.jour) + ' par ' + (a.par || '—');
-  $('#vue-actions').innerHTML = '<button class="btn sm clair" id="pa-retour">Retour</button>';
-  $('#pa-retour').onclick = () => { V.preaudit._id = null; V.preaudit._doc = null; paRedessiner(); window.scrollTo(0, 0); };
+/* Tâches du module Tâches et réparations (taches.js), catégorie « audit ».
+   null tant que le module n'est pas chargé. */
+const paTachesDispo = () => typeof lireTaches === 'function';
+async function tachesAudit() {
+  if (!paTachesDispo()) return null;
+  try { return ((await lireTaches()) || []).filter(t => t && t.categorie === 'audit' && !t.supprime); }
+  catch (e) { return null; }
+}
+const paTacheEnRetard = t => t.statut !== 'realisee' && t.echeance && t.echeance < today();
 
-  /* Preuves : figées à la clôture ; sinon calculées une fois par pré-audit et
-     par jour, et recalculées au moment de clôturer. */
-  let P = clos ? (a.preuves || {}) : V.preaudit._preuves;
-  if (!clos && (!P || V.preaudit._preuvesDe !== a.id + '|' + today())) {
-    $('#page').innerHTML = '<div class="vide">Lecture des registres des ' + PREAUDIT.joursPreuves + ' derniers jours…</div>';
-    P = await preuvesPreAudit(today());
-    if (STATE.view !== 'preaudit' || V.preaudit._id !== id) return;
-    V.preaudit._preuves = P; V.preaudit._preuvesDe = a.id + '|' + today();
-  }
-
-  /* Un pré-audit clôturé affiche son score FIGÉ (a.score / a.scores), jamais un
-     recalcul : dans la course à deux iPad, l'écran recalculait 97 % alors que la
-     liste, « Mes boutiques » et le PDF gardaient le 100 % figé à la clôture (F-02). */
-  const sCalc = scoresAudit(a);
-  const s = (clos && a.score != null)
-    ? { global:a.score, themes:a.scores || sCalc.themes, notes:sCalc.total, total:sCalc.total }
-    : sCalc;
-  const parPoint = {};
-  paActions(a).forEach(x => { (parPoint[x.point] = parPoint[x.point] || []).push(x); });
-
-  const lignePoint = p => {
-    const r = a.reponses[p.id] || {};
-    const pr = p.preuve && P[p.preuve];
-    return '<div class="pa-pt" id="pa-' + esc(p.id) + '">' +
-      '<div class="pa-lib">' + esc(p.libelle) + '</div>' +
-      (pr ? '<div class="pa-preuve">' + pastille(pr.c, pr.c === 'ok' ? 'Registre OK' : pr.c === 'warn' ? 'À vérifier' : pr.c === 'bad' ? 'Écart' : 'Registre') +
-        ' <span class="mini">' + esc(pr.texte) + '</span></div>' : '') +
-      (r.note ? '<div class="mini" style="margin-top:6px">Constat : ' + esc(r.note) + '</div>' : '') +
-      (clos
-        ? '<div style="margin-top:8px">' + (paReponse(r.r) ? pastille(paReponse(r.r).pill, paReponse(r.r).label) : pastille('n', 'Non noté')) + '</div>'
-        : '<div class="chips pa-rep" style="margin-top:10px">' + PREAUDIT.reponses.map(d =>
-            '<button type="button" class="chip' + (d.id === 'c' ? ' menthe' : d.id === 'p' ? ' ambre' : d.id === 'nc' ? ' corail' : '') +
-            (r.r === d.id ? ' on' : '') + '" data-pa-r="' + esc(p.id) + '|' + d.id + '" aria-pressed="' + (r.r === d.id) + '">' +
-            esc(d.label) + '</button>').join('') +
-          ((r.r === 'p' || r.r === 'nc') ? '<button type="button" class="chip" data-pa-plus="' + esc(p.id) + '">+ Action</button>' : '') +
-          '</div>') +
-      ((parPoint[p.id] || []).length ? '<div class="stack" style="margin-top:10px">' + parPoint[p.id].map(x => carteAction(x, a, false)).join('') + '</div>' : '') +
-      '</div>';
-  };
-
-  $('#page').innerHTML =
-    '<div class="grid g3">' +
-      '<div class="kpi ' + paClasse(s.global) + '"><div class="k">' + (clos ? 'Score' : 'Score provisoire') + '</div>' +
-        '<div class="v">' + (s.global === null ? '—' : s.global + '<span class="u">%</span>') + '</div>' +
-        '<div class="d">' + s.notes + ' points notés sur ' + s.total + '</div></div>' +
-      '<div class="kpi"><div class="k">Non conformes</div><div class="v">' +
-        paPoints().filter(p => (a.reponses[p.id] || {}).r === 'nc').length + '</div>' +
-        '<div class="d">' + paPoints().filter(p => (a.reponses[p.id] || {}).r === 'p').length + ' à reprendre</div></div>' +
-      '<div class="kpi"><div class="k">Actions</div><div class="v">' + paActions(a).filter(x => !x.fait).length + '</div>' +
-        '<div class="d">ouvertes sur ' + paActions(a).length + '</div></div>' +
-    '</div>' +
-    (clos ? '' : '<p class="mini" style="margin:12px 2px 0">Faites le tour de la boutique et notez chaque point. Un point « À reprendre » ou ' +
-      '« Non conforme » propose une action, avec un responsable et une échéance. Les registres de l’appli sont rappelés sous les points qu’ils prouvent.</p>') +
-    '<div class="stack" style="margin-top:12px">' +
-    PREAUDIT.themes.map(t => {
-      const pts = paPoints().filter(p => p.theme.id === t.id);
-      const st = s.themes[t.id];
-      return carte('<div class="rang"><h2 style="flex:1">' + esc(t.nom) + '</h2>' + pastille(paClasse(st), paScoreTxt(st)) + '</div>' +
-        pts.map(lignePoint).join(''), 'solide');
-    }).join('') + '</div>' +
-    '<div class="btn-row" style="margin-top:16px">' +
-      (clos
-        ? '<button class="btn ciel bloc" id="pa-pdf">Exporter en PDF</button>'
-        : '<button class="btn clair" id="pa-pdf">Aperçu PDF</button>' +
-          '<button class="btn menthe" id="pa-clore">Clôturer le pré-audit</button>') +
-    '</div>';
-
-  $$('[data-pa-r]').forEach(b => b.onclick = () => {
-    const [pid, rid] = b.dataset.paR.split('|');
-    repondre(a, pid, rid);
-  });
-  $$('[data-pa-plus]').forEach(b => b.onclick = () => feuilleAction(a, b.dataset.paPlus, null));
-  $('#pa-pdf').onclick = () => imprimerPreAudit(a, P);
-  if ($('#pa-clore')) $('#pa-clore').onclick = () => cloturerPreAudit(a);
-  brancherActions([a]);
+/* ---------------------------------------------------------------------------
+   Pré-audits enregistrés (instantanés)
+   ------------------------------------------------------------------------ */
+async function lirePreAudits() {
+  const cles = (await DB.list('preaudit:')).filter(k => PA_RE.test(k));
+  /* Dans un dessin d'écran, les pré-audits partent en une requête groupée. */
+  if (typeof DB.prelire === 'function') DB.prelire(cles);
+  const l = await Promise.all(cles.map(k => DB.get(k, null)));
+  /* Supprimé : marqué, pas effacé, sinon il revenait d'un autre iPad. */
+  return l.filter(a => a && a.id && a.jour && a.statut === 'clos')
+    .sort((x, y) => (x.jour < y.jour ? 1 : x.jour > y.jour ? -1 : String(x.closAt || x.at) < String(y.closAt || y.at) ? 1 : -1));
 }
 
-/* Une réponse : écrite aussitôt, sans attendre. Un point à reprendre ou non
-   conforme ouvre la feuille d'action, une seule fois par point. */
-function repondre(a, pid, rid) {
-  /* Pré-audit clôturé ou supprimé : ses réponses sont figées (les actions, elles,
-     restent à suivre). On refuse et on le dit, plutôt que d'écrire une réponse
-     qui ne compterait pas dans le score figé (F-02). */
-  if (a.statut && a.statut !== 'en cours') {
-    toast('Ce pré-audit est ' + (a.statut === 'clos' ? 'clôturé' : 'supprimé') +
-      ' : les réponses ne changent plus.', 'erreur');
+/* Actions de l'ancienne grille (champs « a:<id> » des anciens pré-audits) :
+   celles qui restent ouvertes se suivent ici jusqu'à ce qu'on les coche. */
+async function anciennesActions() {
+  const cles = (await DB.list('preaudit:')).filter(k => PA_RE.test(k));
+  const docs = await Promise.all(cles.map(k => DB.get(k, null).catch(() => null)));
+  const out = [];
+  docs.forEach(d => {
+    if (!d || !d.id || d.statut === 'supprime') return;
+    Object.keys(d).forEach(k => {
+      const x = d[k];
+      if (k.indexOf('a:') === 0 && x && x.id && !x.supprime && !x.fait) out.push({ doc:d.id, jour:d.jour, x:x });
+    });
+  });
+  return out.sort((a, b) => String(a.x.echeance || '9999') < String(b.x.echeance || '9999') ? -1 : 1);
+}
+const paActionEnRetard = x => !x.fait && x.echeance && x.echeance < today();
+
+/* Dernier score publié sous « preaudit:dernier » : la vue multi-boutiques
+   (franchise.js) le lit dans le résumé de chaque boutique. */
+async function publierDernierPreAudit() {
+  const clos = (await lirePreAudits())[0] || null;
+  await DB.set('preaudit:dernier', clos
+    ? { score:clos.score, jour:clos.jour, scores:clos.scores || {}, par:clos.closPar || '', at:nowISO() }
+    : { score:null, jour:null, scores:{}, par:'', at:nowISO() });
+}
+
+/* Un seul enregistrement à la fois : la lecture des registres prend du
+   temps, et un second « Enregistrer » pendant ce temps créait un second
+   pré-audit du jour (nouvel id). */
+let _paEnregistrement = false;
+async function enregistrerPreAudit() {
+  if (_paEnregistrement) return;
+  _paEnregistrement = true;
+  try { await enregistrerPreAuditSansVerrou(); }
+  finally { _paEnregistrement = false; }
+}
+async function enregistrerPreAuditSansVerrou() {
+  toast('Lecture des registres…');
+  let r;
+  try { r = await controlesEnCache(true); }
+  catch (e) { toast('Lecture des registres impossible, réessayez', 'erreur'); return; }
+  const s = scoresPreAudit(r.controles);
+  const j = today();
+  const a = { id:'preaudit:' + j + ':' + uid(), version:2, jour:j, statut:'clos', score:s.global, scores:s.blocs,
+              controles:r.controles, debut:r.debut, fin:r.fin, par:STATE.user.prenom, closPar:STATE.user.prenom,
+              at:nowISO(), closAt:nowISO() };
+  await DB.set(a.id, a);
+  await publierDernierPreAudit();
+  await feed('ok', STATE.user.prenom + ' a enregistré le pré-audit : ' + paScoreTxt(s.global));
+  toast('Pré-audit enregistré : ' + paScoreTxt(s.global));
+  paRedessiner();
+}
+
+/* Pour la tour de contrôle : [niveau, titre, texte, vue] ou null. Un passage
+   de l'animateur prévu dans les jours qui viennent fait remonter le score. */
+async function alertePreAudit() {
+  const j = today();
+  const prochain = (await lirePassages()).filter(p => p.jour >= j && p.jour <= addD(j, PREAUDIT.alerteAvantPassage))
+    .sort((a, b) => (a.jour < b.jour ? -1 : 1))[0];
+  if (!prochain) {
+    const retard = (await anciennesActions().catch(() => [])).filter(o => paActionEnRetard(o.x));
+    return retard.length
+      ? ['warn', retard.length + ' ' + accord(retard.length, 'action de pré-audit en retard', 'actions de pré-audit en retard'),
+         'Actions de l’ancienne grille dont l’échéance est passée.', 'preaudit']
+      : null;
+  }
+  const s = await scoreConformite().catch(() => null);
+  return [s && s.classe === 'bad' ? 'bad' : 'warn',
+    paTypeLabel(prochain.type) + ' de l’animateur le ' + fmtD(prochain.jour),
+    'Pré-audit du jour : ' + paScoreTxt(s ? s.score : null) +
+      (s && s.aCorriger ? ', ' + s.aCorriger + ' ' + accord(s.aCorriger, 'point', 'points') + ' à corriger avant son passage.' : '.'),
+    'preaudit'];
+}
+
+/* ---------------------------------------------------------------------------
+   Vue principale
+   ------------------------------------------------------------------------ */
+const paRedessiner = () => rendre('preaudit');
+
+function lignesControles(controles, avecLien) {
+  return PREAUDIT.blocs.map(b => {
+    const l = controles.filter(x => x.bloc === b.id);
+    if (!l.length) return '';
+    const sb = scoreControles(l);
+    return carte('<div class="rang"><h2 style="flex:1">' + esc(b.nom) + '</h2>' + pastille(paClasse(sb), paScoreTxt(sb)) + '</div>' +
+      l.map(x => '<div class="pa-pt"><div class="rang" style="align-items:flex-start;gap:10px">' +
+        '<div style="flex:1"><div class="pa-lib">' + esc(x.lib) + '</div>' +
+        '<div class="mini" style="margin-top:4px">' + esc(x.texte) + '</div></div>' +
+        '<div style="text-align:right">' + pastille(x.c, PA_ETAT[x.c] || '—') +
+        (avecLien && x.vue && (x.c === 'bad' || x.c === 'warn')
+          ? '<div style="margin-top:6px"><button type="button" class="btn clair sm" data-go="' + esc(x.vue) + '">Ouvrir</button></div>' : '') +
+        '</div></div></div>').join(''), 'solide');
+  }).join('');
+}
+
+function carteTache(t, passages) {
+  const p = t.passage ? passages.filter(x => x.id === t.passage)[0] : null;
+  const etat = t.statut === 'realisee' ? pastille('ok', 'Fait')
+    : paTacheEnRetard(t) ? pastille('bad', 'En retard')
+    : t.statut === 'en_cours' ? pastille('ciel', 'En cours') : pastille('n', 'À faire');
+  return '<div class="card"><div class="rang"><div style="flex:1"><b>' + esc(t.titre || '') + '</b>' +
+    '<div class="cs">' + [p ? paLibPassage(p) : (t.passage ? 'Passage de l’animateur' : ''),
+      t.echeance ? 'échéance ' + fmtD(t.echeance) : '', t.assigneNom || ''].filter(Boolean).map(esc).join(' · ') +
+    (t.detail ? '<br>' + esc(t.detail) : '') + '</div></div>' + etat + '</div>' +
+    (t.statut === 'realisee' || typeof changerStatutTache !== 'function' ? '' :
+      '<div class="btn-row" style="margin-top:10px">' +
+      (t.statut === 'en_cours' ? '' : '<button class="btn clair sm" data-pa-t="' + esc(t.id) + '|en_cours">En cours</button>') +
+      '<button class="btn menthe sm" data-pa-t="' + esc(t.id) + '|realisee">C’est fait</button></div>') + '</div>';
+}
+
+V.preaudit = async function () {
+  $('#vue-actions').innerHTML = '<button class="btn sm clair" id="pa-maj">Actualiser</button>';
+  $('#page').innerHTML = '<div class="vide">Lecture des registres des ' + PREAUDIT.fenetre + ' derniers jours…</div>';
+  const forcer = !!V.preaudit._forcer;
+  V.preaudit._forcer = false;
+  $('#pa-maj').onclick = () => { V.preaudit._forcer = true; paRedessiner(); };
+  let r, passages, taches, histo, anciennes;
+  try {
+    [r, passages, taches, histo, anciennes] = await Promise.all([
+      controlesEnCache(forcer), lirePassages(), tachesAudit(), lirePreAudits().catch(() => []), anciennesActions().catch(() => [])]);
+  } catch (e) {
+    if (STATE.view !== 'preaudit') return;
+    $('#page').innerHTML = '<div class="vide">Lecture des registres impossible. Vérifiez la connexion, puis touchez « Actualiser ».</div>';
     return;
   }
-  const avant = a.reponses[pid] || {};
-  /* Toucher la réponse déjà choisie la retire. */
-  const r = avant.r === rid ? null : rid;
-  const val = Object.assign({}, avant, { r:r, par:STATE.user.prenom, at:nowISO() });
-  a.reponses = Object.assign({}, a.reponses, { [pid]:val });
-  paEcrire(a, { ['r:' + pid]:val }).then(d => {
-    /* Clôturé ou supprimé entre-temps sur un autre iPad. */
-    if (d.statut !== 'en cours' && STATE.view === 'preaudit' && V.preaudit._id === a.id) {
-      toast('Ce pré-audit a été ' + (d.statut === 'clos' ? 'clôturé' : 'supprimé') + ' sur un autre appareil', 'erreur');
-      paRedessiner();
-    }
+  if (STATE.view !== 'preaudit') return;
+  const s = scoresPreAudit(r.controles);
+  const j = today();
+  const passes = passages.filter(p => p.jour <= j), aVenir = passages.filter(p => p.jour > j).reverse();
+  const tOuvertes = (taches || []).filter(t => t.statut !== 'realisee');
+  const tFaites = (taches || []).filter(t => t.statut === 'realisee');
+  const tRetard = tOuvertes.filter(paTacheEnRetard);
+  const aCorriger = r.controles.filter(x => x.c === 'bad').length;
+
+  $('#page').innerHTML =
+    '<div class="grid g3">' +
+      '<div class="kpi ' + paClasse(s.global) + '"><div class="k">Conformité des registres</div>' +
+        '<div class="v">' + (s.global === null ? '—' : s.global + '<span class="u">%</span>') + '</div>' +
+        '<div class="d">' + (aCorriger ? aCorriger + ' ' + accord(aCorriger, 'point', 'points') + ' à corriger' : 'Rien à corriger') + '</div></div>' +
+      '<div class="kpi"><div class="k">' + (aVenir.length ? 'Prochain passage' : 'Dernier passage') + '</div>' +
+        '<div class="v" style="font-size:22px">' + (aVenir.length ? esc(fmtDC(aVenir[0].jour)) : passes.length ? esc(fmtDC(passes[0].jour)) : '—') + '</div>' +
+        '<div class="d">' + esc(aVenir.length ? paTypeLabel(aVenir[0].type) : passes.length ? paTypeLabel(passes[0].type) +
+          (paPct(passes[0].score) ? ' · ' + paPct(passes[0].score) : '') : 'Aucun noté') + '</div></div>' +
+      '<div class="kpi ' + (tRetard.length ? 'bad' : '') + '"><div class="k">Tâches d’audit</div>' +
+        '<div class="v">' + (taches ? tOuvertes.length : '—') + '</div>' +
+        '<div class="d">' + (taches ? (tRetard.length ? tRetard.length + ' en retard' : 'ouvertes') : 'Module à venir') + '</div></div>' +
+    '</div>' +
+    '<p class="mini" style="margin:12px 2px 0">Calculé sur ce que l’équipe a saisi du ' + esc(fmtDC(r.debut)) + ' au ' + esc(fmtDC(r.fin)) +
+      ' (' + r.joursOuverts + ' ' + accord(r.joursOuverts, 'jour ouvert', 'jours ouverts') + '). Les jours de fermeture ne comptent pas. ' +
+      'L’audit Amorino se fait dans l’outil du réseau : ici, on vérifie que les registres de l’appli sont tenus.</p>' +
+
+    '<div class="stack" style="margin-top:12px">' + lignesControles(r.controles, true) + '</div>' +
+
+    '<div class="entete" style="margin-top:18px"><h3>Passages de l’animateur</h3>' +
+      '<button class="btn sm pousse" id="pa-pass-new">Ajouter</button></div>' +
+    (passages.length
+      ? '<div class="dense"><div class="dense-h"><span class="c1">Date</span><span class="c w">Type</span><span class="c w">Tâches</span></div>' +
+        passages.slice(0, 30).map(p => {
+          const n = (taches || []).filter(t => t.passage === p.id);
+          const no = n.filter(t => t.statut !== 'realisee').length;
+          return '<div class="dl" data-pa-pass="' + esc(p.id) + '" role="button" tabindex="0" style="cursor:pointer">' +
+            '<span class="c1">' + esc(fmtD(p.jour)) + (p.jour > j ? ' · prévu' : '') +
+              (p.note ? '<br><span class="mini">' + esc(String(p.note).slice(0, 90)) + '</span>' : '') + '</span>' +
+            '<span class="c w">' + pastille(p.type === 'controle' ? 'ciel' : 'n', paTypeLabel(p.type) +
+              (p.score != null && p.score !== '' ? ' · ' + paPct(p.score) : '')) + '</span>' +
+            '<span class="c w">' + (taches ? (n.length ? no + ' / ' + n.length : '—') : '') + '</span></div>';
+        }).join('') + '</div>'
+      : vide('', 'Aucun passage noté. Ajoutez chaque visite ou contrôle de l’animateur, avec sa date.')) +
+
+    '<div class="entete" style="margin-top:18px"><h3>Tâches suite aux audits et visites</h3>' +
+      (taches && typeof ouvrirFormulaireTache === 'function' ? '<button class="btn sm pousse" id="pa-t-new">Ajouter</button>' : '') + '</div>' +
+    (!taches
+      ? vide('', 'Les tâches demandées par l’animateur arrivent avec le module Tâches et réparations.')
+      : tOuvertes.length
+        ? '<div class="stack">' + tOuvertes.sort((a, b) => String(a.echeance || '9999') < String(b.echeance || '9999') ? -1 : 1)
+            .map(t => carteTache(t, passages)).join('') + '</div>'
+        : vide('', tFaites.length ? 'Toutes les tâches d’audit sont faites.' : 'Aucune tâche d’audit pour l’instant.')) +
+    (tFaites.length ? '<p class="mini" style="margin:8px 2px 0">' + tFaites.length + ' ' + accord(tFaites.length, 'tâche faite, visible', 'tâches faites, visibles') +
+      ' dans Tâches et réparations.</p>' : '') +
+
+    (anciennes.length ? '<div class="entete" style="margin-top:18px"><h3>Actions de l’ancienne grille</h3></div>' +
+      '<div class="stack">' + anciennes.map(o => '<div class="card"><div class="rang"><div style="flex:1"><b>' + esc(o.x.texte || '') + '</b>' +
+        '<div class="cs">' + esc([o.x.resp || '', o.x.echeance ? 'échéance ' + fmtD(o.x.echeance) : '', 'pré-audit du ' + fmtDC(o.jour)]
+          .filter(Boolean).join(' · ')) + '</div></div>' +
+        (paActionEnRetard(o.x) ? pastille('bad', 'En retard') : pastille('n', 'À faire')) + '</div>' +
+        '<div class="btn-row" style="margin-top:10px"><button class="btn menthe sm" data-pa-old="' + esc(o.doc) + '|' + esc(o.x.id) + '">C’est fait</button></div></div>').join('') +
+      '</div>' : '') +
+
+    '<div class="entete" style="margin-top:18px"><h3>Pré-audits enregistrés</h3></div>' +
+    (histo.length
+      ? '<div class="dense"><div class="dense-h"><span class="c1">Date</span><span class="c w">Score</span></div>' +
+        histo.slice(0, 24).map(a => '<div class="dl"' + (a.version === 2 ? ' data-pa-voir="' + esc(a.id) + '" role="button" tabindex="0" style="cursor:pointer"' : '') + '>' +
+          '<span class="c1">' + esc(fmtD(a.jour)) + ' · ' + esc(a.closPar || a.par || '') + (a.version === 2 ? '' : ' · ancienne grille') + '</span>' +
+          '<span class="c w">' + pastille(paClasse(a.score), paScoreTxt(a.score)) + '</span></div>').join('') + '</div>'
+      : vide('', 'Aucun pré-audit enregistré. Enregistrez celui du jour pour garder une trace avant un passage.')) +
+
+    '<div class="btn-row" style="margin-top:16px">' +
+      '<button class="btn clair" id="pa-pdf">Exporter en PDF</button>' +
+      '<button class="btn menthe" id="pa-save">Enregistrer le pré-audit du jour</button></div>';
+
+  $$('#page [data-go]').forEach(b => b.onclick = () => rendre(b.dataset.go));
+  $('#pa-pass-new').onclick = () => feuillePassage(null);
+  $$('[data-pa-pass]').forEach(b => {
+    const ouvrir = () => feuillePassage(passages.filter(p => p.id === b.dataset.paPass)[0] || null, taches);
+    b.onclick = ouvrir;
+    b.onkeydown = e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); ouvrir(); } };
   });
-  paRedessiner();
-  const dejaUneAction = paActions(a).some(x => x.point === pid);
-  if ((r === 'p' || r === 'nc') && !dejaUneAction) feuilleAction(a, pid, null);
+  if ($('#pa-t-new')) $('#pa-t-new').onclick = () => nouvelleTacheAudit('');
+  $$('[data-pa-t]').forEach(b => b.onclick = async () => {
+    const [id, st] = b.dataset.paT.split('|');
+    try { await changerStatutTache(id, st); }
+    catch (e) { toast('Enregistrement impossible, réessayez', 'erreur'); return; }
+    toast(st === 'realisee' ? 'Tâche faite' : 'Tâche en cours');
+    paRedessiner();
+  });
+  $$('[data-pa-old]').forEach(b => b.onclick = async () => {
+    const [doc, xid] = b.dataset.paOld.split('|');
+    const o = anciennes.filter(y => y.doc === doc && y.x.id === xid)[0];
+    if (!o) return;
+    try { await DB.patch(doc, { ['a:' + xid]:Object.assign({}, o.x, { fait:true, faitPar:STATE.user.prenom, faitAt:nowISO() }) }); }
+    catch (e) { toast('Enregistrement impossible, réessayez', 'erreur'); return; }
+    await feed('ok', STATE.user.prenom + ' a fait l’action de pré-audit « ' + (o.x.texte || '') + ' »');
+    toast('Action faite');
+    paRedessiner();
+  });
+  $$('[data-pa-voir]').forEach(b => {
+    const ouvrir = () => voirPreAudit(histo.filter(a => a.id === b.dataset.paVoir)[0]);
+    b.onclick = ouvrir;
+    b.onkeydown = e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); ouvrir(); } };
+  });
+  $('#pa-pdf').onclick = () => imprimerPreAudit(r, s, passages, taches, null);
+  $('#pa-save').onclick = () => confirmer('Enregistrer le pré-audit du jour ?',
+    'Score : ' + paScoreTxt(s.global) + '. Les résultats sont recalculés puis figés, pour en garder une trace.',
+    'Enregistrer', enregistrerPreAudit);
+};
+
+function nouvelleTacheAudit(passageId) {
+  if (typeof ouvrirFormulaireTache !== 'function') { toast('Module Tâches indisponible', 'erreur'); return; }
+  ouvrirFormulaireTache({ categorie:'audit', passage:passageId || '' }, () => paRedessiner());
 }
 
-function feuilleAction(a, pid, x) {
-  const p = paPoints().filter(q => q.id === pid)[0];
-  if (!p) return;
-  const r = (a.reponses || {})[pid] || {};
-  const noms = (typeof EQUIPE !== 'undefined' ? EQUIPE : []).map(e => e && e.prenom).filter(Boolean);
-  const resp = x ? x.resp : STATE.user.prenom;
-  if (resp && noms.indexOf(resp) < 0) noms.unshift(resp);
+/* Feuille de saisie d'un passage : date, visite ou contrôle, score (contrôle),
+   note. */
+function feuillePassage(p, taches) {
+  let type = p ? p.type : 'visite';
+  const liees = p && taches ? taches.filter(t => t.passage === p.id) : [];
   showSheet(
-    '<h2 id="sheet-titre">' + (x ? 'Modifier l’action' : 'Que faut-il corriger ?') + '</h2>' +
-    '<p class="sub">' + esc(p.theme.nom) + ' · ' + esc(p.libelle) + '</p>' +
-    '<div class="champ" style="margin-top:14px"><label class="f" for="pa-note">Constat</label>' +
-      '<textarea id="pa-note" placeholder="Ce qui a été vu, en quelques mots">' + esc(r.note || '') + '</textarea></div>' +
-    '<div class="champ"><label class="f" for="pa-txt">Action à mener</label>' +
-      '<input type="text" id="pa-txt" data-autofocus value="' + esc(x ? x.texte : '') + '" placeholder="Ex. Racheter des essuie-mains jetables"></div>' +
+    '<h2 id="sheet-titre">' + (p ? paLibPassage(p) : 'Nouveau passage') + '</h2>' +
+    '<p class="sub">Visite d’animation ou contrôle de conformité de l’animateur réseau.</p>' +
+    '<div class="chips" style="margin-top:14px" id="pa-type">' + PREAUDIT.typesPassage.map(t =>
+      '<button type="button" class="chip' + (t.id === type ? ' on' : '') + '" data-pa-type="' + t.id + '" aria-pressed="' + (t.id === type) + '">' +
+      esc(t.label) + '</button>').join('') + '</div>' +
     '<div class="grid g2" style="margin-top:14px">' +
-      '<div class="champ"><label class="f" for="pa-resp">Responsable</label><select id="pa-resp">' +
-        noms.map(n => '<option' + (n === resp ? ' selected' : '') + '>' + esc(n) + '</option>').join('') + '</select></div>' +
-      '<div class="champ"><label class="f" for="pa-ech">Échéance</label>' +
-        '<input type="date" id="pa-ech" value="' + esc(x ? (x.echeance || '') : addD(today(), PREAUDIT.delaiAction)) + '"></div>' +
+      '<div class="champ"><label class="f" for="pa-jour">Date</label>' +
+        '<input type="date" id="pa-jour" value="' + esc(p ? p.jour : today()) + '"></div>' +
+      '<div class="champ" id="pa-score-champ"><label class="f" for="pa-score">Score conformité (%)</label>' +
+        '<input type="text" id="pa-score" inputmode="decimal" value="' + esc(p && p.score != null ? String(p.score).replace('.', ',') : '') + '" placeholder="Ex. 94,81"></div>' +
     '</div>' +
+    '<div class="champ"><label class="f" for="pa-note">Note</label>' +
+      '<textarea id="pa-note" placeholder="Objet du passage, points relevés">' + esc(p ? p.note || '' : '') + '</textarea></div>' +
+    '<p class="mini">' + esc(CONSIGNE_TEXTE_LIBRE) + '</p>' +
+    (p && liees.length ? '<p class="mini" style="margin-top:8px">' + liees.length + ' ' + accord(liees.length, 'tâche liée', 'tâches liées') +
+      ' à ce passage, dont ' + liees.filter(t => t.statut !== 'realisee').length + ' ouverte(s).</p>' : '') +
     '<div class="actions">' +
-      (x ? '<button class="btn fantome" id="pa-act-sup">Supprimer</button>' : '<button class="btn clair" id="pa-sans">Sans action</button>') +
-      '<button class="btn menthe" id="pa-act-ok">Enregistrer</button></div>');
+      (p ? '<button class="btn fantome" id="pa-pass-sup">Supprimer</button>' : '<button class="btn clair" data-fermer>Annuler</button>') +
+      (p && typeof ouvrirFormulaireTache === 'function' ? '<button class="btn clair" id="pa-pass-tache">+ Tâche</button>' : '') +
+      '<button class="btn menthe" id="pa-pass-ok">Enregistrer</button></div>');
 
-  const noter = () => {
-    const note = $('#pa-note').value.trim();
-    if (note === (r.note || '')) return;
-    const val = Object.assign({}, r, { note:note });
-    a.reponses = Object.assign({}, a.reponses, { [pid]:val });
-    paEcrire(a, { ['r:' + pid]:val });
+  const majType = () => {
+    $$('[data-pa-type]').forEach(b => { const on = b.dataset.paType === type; b.classList.toggle('on', on); b.setAttribute('aria-pressed', on); });
+    $('#pa-score-champ').style.display = type === 'controle' ? '' : 'none';
   };
-  if ($('#pa-sans')) $('#pa-sans').onclick = () => { noter(); closeSheet(); paRedessiner(); };
-  if ($('#pa-act-sup')) $('#pa-act-sup').onclick = async ev => {
-    if (ev.currentTarget.disabled) return;
-    ev.currentTarget.disabled = true;
-    await ecrireAction(a, Object.assign({}, x, { supprime:true, suppPar:STATE.user.prenom, suppAt:nowISO() }));
-    noter(); closeSheet(); toast('Action supprimée'); paRedessiner();
-  };
-  $('#pa-act-ok').onclick = async ev => {
-    const btn = ev.currentTarget;
-    if (btn.disabled) return;
-    const texte = $('#pa-txt').value.trim();
-    if (!texte) { toast('Décrivez l’action à mener', 'erreur'); return $('#pa-txt').focus(); }
-    /* Un second tap pendant l'écriture créerait une seconde action (nouvel id). */
-    btn.disabled = true;
-    noter();
-    const nx = Object.assign({ id:uid(), point:pid, fait:false, creePar:STATE.user.prenom, creeAt:nowISO() }, x || {},
-      { texte:texte, resp:$('#pa-resp').value, echeance:$('#pa-ech').value || '' });
-    await ecrireAction(a, nx);
+  $$('[data-pa-type]').forEach(b => b.onclick = () => { type = b.dataset.paType; majType(); });
+  majType();
+  if ($('#pa-pass-sup')) $('#pa-pass-sup').onclick = () => confirmer('Supprimer ce passage ?',
+    paLibPassage(p) + '. Ses tâches restent dans Tâches et réparations.', 'Supprimer', async () => {
+      await ecrirePassage(Object.assign({}, p, { supprime:true, suppPar:STATE.user.prenom, suppAt:nowISO() }));
+      closeSheet(); toast('Passage supprimé'); paRedessiner();
+    });
+  if ($('#pa-pass-tache')) $('#pa-pass-tache').onclick = () => { closeSheet(); nouvelleTacheAudit(p.id); };
+  $('#pa-pass-ok').onclick = async () => {
+    const jour = $('#pa-jour').value;
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(jour)) { toast('Indiquez la date du passage', 'erreur'); return $('#pa-jour').focus(); }
+    const brut = String($('#pa-score').value || '').replace(',', '.').trim();
+    const score = type === 'controle' && brut !== '' ? Math.round(Number(brut) * 100) / 100 : null;
+    if (score !== null && !(score >= 0 && score <= 100)) { toast('Score entre 0 et 100', 'erreur'); return $('#pa-score').focus(); }
+    const np = Object.assign({ id:uid(), par:STATE.user.prenom, at:nowISO() }, p || {},
+      { jour:jour, type:type, score:score, note:$('#pa-note').value.trim(), modifPar:STATE.user.prenom, modifAt:nowISO() });
+    try { await ecrirePassage(np); }
+    catch (e) { toast('Enregistrement impossible, réessayez', 'erreur'); return; }
+    if (!p) await feed('ok', STATE.user.prenom + ' a noté un passage de l’animateur : ' + paLibPassage(np));
     closeSheet();
-    toast(x ? 'Action modifiée' : 'Action ajoutée au plan');
+    toast(p ? 'Passage modifié' : 'Passage ajouté');
     paRedessiner();
   };
 }
 
-/* ---------------------------------------------------------------------------
-   Clôture
-   ------------------------------------------------------------------------ */
-function cloturerPreAudit(a) {
-  const s = scoresAudit(a);
-  const manque = s.total - s.notes;
-  if (manque) {
-    const premier = paPoints().filter(p => !paReponse((a.reponses[p.id] || {}).r))[0];
-    toast(manque + ' ' + accord(manque, 'point') + ' à noter avant de clôturer', 'erreur');
-    const el = premier && document.getElementById('pa-' + premier.id);
-    if (el) el.scrollIntoView({ behavior:'smooth', block:'center' });
-    return;
-  }
-  const sansAction = paPoints().filter(p => ['p', 'nc'].indexOf((a.reponses[p.id] || {}).r) >= 0 &&
-    !paActions(a).some(x => x.point === p.id)).length;
-  if (s.global === null) { toast('Tous les points sont « Sans objet » : aucun score possible', 'erreur'); return; }
-  confirmer('Clôturer le pré-audit ?',
-    'Score : ' + s.global + ' %. ' +
-    (sansAction ? sansAction + ' ' + accord(sansAction, 'point à corriger n’a', 'points à corriger n’ont') + ' pas d’action. ' : '') +
-    'Les réponses et les preuves des registres seront figées. Les actions restent à suivre.',
-    'Clôturer', async () => {
-      /* Une seule clôture à la fois : la lecture des registres prend du temps,
-         et une seconde confirmation passait aussi le contrôle « en cours ». */
-      if (_paCloture) return;
-      _paCloture = true;
-      try {
-      /* Preuves relues au moment de clôturer : celles de l'ouverture peuvent
-         dater de plusieurs jours. Score recalculé sur la copie relue. */
-      toast('Lecture des registres…');
-      const P = await preuvesPreAudit(today());
-      const frais = paNormaliser(await DB.get(a.id, null));
-      if (!frais || frais.statut !== 'en cours') { toast('Ce pré-audit n’est plus en cours', 'erreur'); return paRedessiner(); }
-      const sf = scoresAudit(frais);
-      await paEcrire(a, { statut:'clos', score:sf.global, scores:sf.themes, preuves:P,
-                          closPar:STATE.user.prenom, closAt:nowISO() });
-      s.global = sf.global;
-      await feed('ok', STATE.user.prenom + ' a clôturé le pré-audit Amorino : ' + s.global + ' %');
+/* Un pré-audit enregistré : ses contrôles figés. */
+function voirPreAudit(a) {
+  if (!a) return;
+  showSheet('<h2 id="sheet-titre">Pré-audit du ' + esc(fmtDC(a.jour)) + ' · ' + esc(paScoreTxt(a.score)) + '</h2>' +
+    '<p class="sub">Enregistré par ' + esc(a.closPar || a.par || '—') + ', registres du ' + esc(fmtDC(a.debut)) + ' au ' + esc(fmtDC(a.fin)) + '.</p>' +
+    '<div class="stack" style="margin-top:12px">' + lignesControles(a.controles || [], false) + '</div>' +
+    '<div class="actions"><button class="btn fantome" id="pa-voir-sup">Supprimer</button>' +
+    '<button class="btn ciel" id="pa-voir-pdf">Exporter en PDF</button></div>');
+  $('#pa-voir-sup').onclick = () => confirmer('Supprimer ce pré-audit ?', 'Enregistré le ' + fmtD(a.jour) + ' (' + paScoreTxt(a.score) + ').',
+    'Supprimer', async () => {
+      /* Marqué, pas effacé : sinon il revenait d'un autre iPad. */
+      await DB.patch(a.id, { statut:'supprime', suppPar:STATE.user.prenom, suppAt:nowISO() });
       await publierDernierPreAudit();
-      toast('Pré-audit clôturé : ' + s.global + ' %');
-      paRedessiner();
-      window.scrollTo(0, 0);
-      } finally { _paCloture = false; }
+      await feed('ok', STATE.user.prenom + ' a supprimé le pré-audit du ' + fmtD(a.jour));
+      closeSheet(); toast('Pré-audit supprimé'); paRedessiner();
     });
+  $('#pa-voir-pdf').onclick = () => {
+    closeSheet();
+    imprimerPreAudit({ debut:a.debut, fin:a.fin, controles:a.controles || [] }, { global:a.score, blocs:a.scores || {} }, null, null, a);
+  };
 }
-let _paCloture = false;
 
 /* ---------------------------------------------------------------------------
    Export PDF (fenêtre d'impression, comme le registre sanitaire)
    ------------------------------------------------------------------------ */
-async function imprimerPreAudit(a, P) {
-  const clos = a.statut === 'clos';
-  const sCalc = scoresAudit(a);
-  /* Un pré-audit clôturé imprime son score FIGÉ (a.score / a.scores enregistrés
-     à la clôture), jamais un recalcul : sinon une réponse écrite par erreur
-     après la clôture faisait afficher 97 % au PDF alors que la liste et « Mes
-     boutiques » gardaient 100 % (F-02). Tous les points étant notés à la
-     clôture, « points notés » vaut le total. */
-  const s = (clos && a.score != null)
-    ? { global:a.score, themes:a.scores || sCalc.themes, notes:sCalc.total, total:sCalc.total }
-    : sCalc;
-  const acts = paActions(a);
-  const rep = id => paReponse((a.reponses[id] || {}).r);
+async function imprimerPreAudit(r, s, passages, taches, fige) {
+  const fr = d => d ? String(d).split('-').reverse().join('/') : '';
+  const ouvertes = (taches || []).filter(t => t.statut !== 'realisee');
   $('#printview').innerHTML =
-    '<div class="pv-h"><h1>Pré-audit Amorino · ' + esc(APP.nom) + '</h1>' +
-    '<div>' + esc(APP.site) + ' · ' + (clos ? 'pré-audit du ' + esc(fmtD(a.jour)) + ', clôturé par ' + esc(a.closPar || '—')
-      : 'pré-audit en cours, commencé le ' + esc(fmtD(a.jour)) + ' (document provisoire)') +
+    '<div class="pv-h"><h1>Pré-audit des registres · ' + esc(APP.nom) + '</h1>' +
+    '<div>' + esc(APP.site) + ' · ' + (fige ? 'pré-audit enregistré le ' + esc(fmtD(fige.jour)) + ' par ' + esc(fige.closPar || '—')
+      : 'pré-audit du ' + fmtD(today())) + ' · registres du ' + esc(fr(r.debut)) + ' au ' + esc(fr(r.fin)) +
     '<br>Édité le ' + new Date().toLocaleString(APP.locale) + ' par ' + esc(STATE.user.prenom) + '</div></div>' +
 
     '<div class="pv-s">1. Score</div>' +
-    '<table><thead><tr><th>Thème</th><th>Points notés</th><th>Score</th></tr></thead><tbody>' +
-    PREAUDIT.themes.map(t => {
-      const pts = paPoints().filter(p => p.theme.id === t.id);
-      return '<tr><td>' + esc(t.nom) + '</td><td>' + pts.filter(p => rep(p.id)).length + ' / ' + pts.length + '</td>' +
-        '<td>' + esc(paScoreTxt(s.themes[t.id])) + '</td></tr>';
-    }).join('') +
-    '<tr><th>Score global</th><th>' + s.notes + ' / ' + s.total + '</th><th>' + esc(paScoreTxt(s.global)) + '</th></tr></tbody></table>' +
-    '<div style="font-size:9.5px">Conforme = 1 point, à reprendre = ½, non conforme = 0 ; « sans objet » ne compte pas. ' +
-    'Grille d’auto-contrôle inspirée des thèmes de l’audit trimestriel Amorino, pas la grille officielle.</div>' +
+    '<table><thead><tr><th>Bloc</th><th>Score</th></tr></thead><tbody>' +
+    PREAUDIT.blocs.map(b => '<tr><td>' + esc(b.nom) + '</td><td>' + esc(paScoreTxt((s.blocs || {})[b.id])) + '</td></tr>').join('') +
+    '<tr><th>Score global</th><th>' + esc(paScoreTxt(s.global)) + '</th></tr></tbody></table>' +
+    '<div style="font-size:9.5px">OK = 1 point, à surveiller = ½, à corriger = 0 ; « sans objet » ne compte pas. ' +
+    'Contrôle automatique des registres de l’appli, pas l’audit officiel Amorino.</div>' +
 
-    '<div class="pv-s">2. Grille</div>' +
-    '<table><thead><tr><th>Thème</th><th>Point contrôlé</th><th>Résultat</th><th>Constat</th></tr></thead><tbody>' +
-    PREAUDIT.themes.map(t => t.points.map((p, i) => {
-      const d = rep(p[0]);
-      return '<tr><td>' + (i ? '' : esc(t.nom)) + '</td><td>' + esc(p[1]) + '</td>' +
-        '<td' + (d && d.id === 'nc' ? ' style="font-weight:700"' : '') + '>' + (d ? esc(d.label) : '—') + '</td>' +
-        '<td>' + esc((a.reponses[p[0]] || {}).note || '') + '</td></tr>';
-    }).join('')).join('') + '</tbody></table>' +
-
-    '<div class="pv-s">3. Preuves tirées des registres (' + PREAUDIT.joursPreuves + ' jours avant le pré-audit)</div>' +
-    '<table><thead><tr><th>Point</th><th>Registre</th><th>État</th></tr></thead><tbody>' +
-    paPoints().filter(p => p.preuve && P && P[p.preuve]).map(p =>
-      '<tr><td>' + esc(p.libelle) + '</td><td>' + esc(P[p.preuve].texte) + '</td>' +
-      '<td>' + ({ ok:'Conforme', warn:'À vérifier', bad:'Écart', n:'—' }[P[p.preuve].c] || '—') + '</td></tr>').join('') +
+    '<div class="pv-s">2. Contrôles</div>' +
+    '<table><thead><tr><th>Bloc</th><th>Contrôle</th><th>Résultat</th><th>Détail</th></tr></thead><tbody>' +
+    PREAUDIT.blocs.map(b => r.controles.filter(x => x.bloc === b.id).map((x, i) =>
+      '<tr><td>' + (i ? '' : esc(b.nom)) + '</td><td>' + esc(x.lib) + '</td>' +
+      '<td' + (x.c === 'bad' ? ' style="font-weight:700"' : '') + '>' + esc(PA_ETAT[x.c] || '—') + '</td><td>' + esc(x.texte) + '</td></tr>').join('')).join('') +
     '</tbody></table>' +
 
-    '<div class="pv-s">4. Plan d’actions</div>' +
-    (acts.length
-      ? '<table><thead><tr><th>Action</th><th>Point</th><th>Responsable</th><th>Échéance</th><th>État</th></tr></thead><tbody>' +
-        acts.map(x => {
-          const p = paPoints().filter(q => q.id === x.point)[0];
-          return '<tr><td>' + esc(x.texte) + '</td><td>' + esc(p ? p.libelle : '') + '</td><td>' + esc(x.resp || '') + '</td>' +
-            '<td>' + (x.echeance ? esc(x.echeance.split('-').reverse().join('/')) : '') + '</td>' +
-            '<td>' + (x.fait ? 'Faite' + (x.faitAt ? ' le ' + isoOf(new Date(x.faitAt)).split('-').reverse().join('/') : '') : paEnRetard(x) ? 'EN RETARD' : 'À faire') + '</td></tr>';
-        }).join('') + '</tbody></table>'
-      : '<div>Aucune action.</div>') +
+    (passages ? '<div class="pv-s">3. Passages de l’animateur</div>' +
+      (passages.length ? '<table><thead><tr><th>Date</th><th>Type</th><th>Score</th><th>Note</th></tr></thead><tbody>' +
+        passages.slice(0, 12).map(p => '<tr><td>' + esc(fr(p.jour)) + '</td><td>' + esc(paTypeLabel(p.type)) + '</td><td>' +
+          esc(paPct(p.score)) + '</td><td>' + esc(p.note || '') + '</td></tr>').join('') + '</tbody></table>'
+        : '<div>Aucun passage noté.</div>') : '') +
 
-    '<div class="sign">Document généré à partir des réponses saisies dans ' + esc(APP.nom) + ' et des registres horodatés de la boutique.<br><br>' +
-    'Responsable de boutique : ____________________  Signature : ____________________<br><br>' +
-    'Franchisé : ____________________  Signature : ____________________  Date : ____ / ____ / ________</div>';
+    (taches ? '<div class="pv-s">4. Tâches d’audit ouvertes</div>' +
+      (ouvertes.length ? '<table><thead><tr><th>Tâche</th><th>Passage</th><th>Échéance</th><th>État</th></tr></thead><tbody>' +
+        ouvertes.map(t => {
+          const p = (passages || []).filter(x => x.id === t.passage)[0];
+          return '<tr><td>' + esc(t.titre || '') + '</td><td>' + (p ? esc(paLibPassage(p)) : '') + '</td><td>' + esc(fr(t.echeance)) + '</td>' +
+            '<td>' + (paTacheEnRetard(t) ? 'EN RETARD' : t.statut === 'en_cours' ? 'En cours' : 'À faire') + '</td></tr>';
+        }).join('') + '</tbody></table>' : '<div>Aucune tâche ouverte.</div>') : '') +
 
-  await feed('ok', STATE.user.prenom + ' a imprimé le pré-audit du ' + fmtD(a.jour));
+    '<div class="sign">Document généré à partir des registres horodatés de la boutique dans ' + esc(APP.nom) + '.<br><br>' +
+    'Responsable de boutique : ____________________  Signature : ____________________  Date : ____ / ____ / ________</div>';
+
+  await feed('ok', STATE.user.prenom + ' a imprimé le pré-audit');
   setTimeout(() => window.print(), 200);
 }
