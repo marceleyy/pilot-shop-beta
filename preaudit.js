@@ -91,8 +91,10 @@ function scoresPreAudit(controles) {
    Contrôles
    Chaque contrôle : { bloc, id, lib, c:'ok'|'warn'|'bad'|'n', texte, vue }.
    ------------------------------------------------------------------------ */
-async function controlesPreAudit(fin, nbJours) {
-  /* nbJours : fenêtre plus courte pour la tour de contrôle (7 jours). */
+async function controlesPreAudit(fin, nbJours, finDue) {
+  /* nbJours : fenêtre plus courte pour la tour de contrôle (7 jours).
+     finDue : le dernier jour est déjà écoulé (fenêtre arrêtée à hier), ses
+     relevés et sa caisse sont donc dus comme les autres jours. */
   const nbJ = nbJours || PREAUDIT.fenetre;
   /* Fermetures à jour avant de compter les jours attendus (config.js). */
   const hz = await DB.get('horaires', null).catch(() => null);
@@ -135,7 +137,7 @@ async function controlesPreAudit(fin, nbJours) {
     RELEVES.moments.forEach(m => {
       const releve = releveMesure(t, m.id);
       /* Jour fermé, ou relevé d'aujourd'hui (pas forcément encore dû) : pas attendu. */
-      if (releve || (ouvert && d !== fin)) attendus++;
+      if (releve || (ouvert && (finDue || d !== fin))) attendus++;
       if (releve) faits++;
       ENCEINTES.forEach(e => { if (etatTemp(e, t[m.id + '_' + e.id]) === 'crit') { crit++; critJour = true; } });
       vitrines.forEach(e => {
@@ -153,7 +155,7 @@ async function controlesPreAudit(fin, nbJours) {
     if (!ouvert) return;
     if (st.netTotal) { netFaits += num(st.net); netTotal += num(st.netTotal); if (!num(st.net)) joursSansNet.push(fmtDC(d)); }
     /* La caisse du jour se ferme le soir : aujourd'hui n'est pas encore dû. */
-    if (d !== fin && !st.caisse) joursSansCaisse.push(fmtDC(d));
+    if ((finDue || d !== fin) && !st.caisse) joursSansCaisse.push(fmtDC(d));
   });
 
   if (!attendus) {
@@ -184,7 +186,7 @@ async function controlesPreAudit(fin, nbJours) {
       netFaits + ' ' + accord(netFaits, 'tâche validée', 'tâches validées') + ' sur ' + netTotal + ' prévues' + sur +
         (joursSansNet.length ? ' · rien de validé le ' + paListe(joursSansNet) : ''), 'clean');
   }
-  const ouvertsPasses = ouverts.filter(d => d !== fin).length;
+  const ouvertsPasses = ouverts.filter(d => finDue || d !== fin).length;
   add('net', 'caisse', 'Fermeture de caisse validée',
     !ouvertsPasses ? 'n' : joursSansCaisse.length > 2 ? 'bad' : joursSansCaisse.length ? 'warn' : 'ok',
     !ouvertsPasses ? 'Aucun jour ouvert' + sur
@@ -792,7 +794,7 @@ async function htmlConformite() {
   const j = today();
   /* Fenêtre arrêtée à hier : le relevé du matin et les tâches du jour ne
      sont pas encore dus, ils faisaient passer la carte à l'orange chaque matin. */
-  const C = (await controlesPreAudit(addD(j, -1), CONFORMITE.jours)).controles;
+  const C = (await controlesPreAudit(addD(j, -1), CONFORMITE.jours, true)).controles;
   const ctl = id => C.filter(x => x.id === id)[0] || { c:'n', texte:'' };
   const releves = ctl('releves'), crit = ctl('crit');
   const temp = { c: pireCouleur([releves.c, crit.c]), texte: releves.texte + ' · ' + crit.texte };
