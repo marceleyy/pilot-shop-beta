@@ -4349,6 +4349,8 @@ function ouvrirPremierePeriode() {
          kpi('Jours couverts', jours.length, '', 'Depuis le ' + fmtDC(per.debut)) +
          kpi('Ruptures', ruptures.length, ruptures.length ? 'bad' : 'ok', 'Non traitées') +
          kpi('Périmés', perimes, perimes ? 'bad' : 'ok', 'En vitrine ou réserve') + '</div>', 'plat') +
+       /* Rempli par preaudit.js : conformité des registres et tâches de la semaine. */
+       '<div id="ctl-conformite"></div>' +
    
        (A.length ? '<div class="entete"><h3>Alertes</h3></div><div class="stack">' + A.map(a =>
          '<div class="alerte ' + a[0] + '"><span class="ai">' + (a[0] === 'bad' ? '▲' : '●') + '</span>' +

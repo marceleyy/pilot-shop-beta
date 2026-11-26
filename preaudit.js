@@ -91,15 +91,19 @@ function scoresPreAudit(controles) {
    Contrôles
    Chaque contrôle : { bloc, id, lib, c:'ok'|'warn'|'bad'|'n', texte, vue }.
    ------------------------------------------------------------------------ */
-async function controlesPreAudit(fin) {
+async function controlesPreAudit(fin, nbJours, finDue) {
+  /* nbJours : fenêtre plus courte pour la tour de contrôle (7 jours).
+     finDue : le dernier jour est déjà écoulé (fenêtre arrêtée à hier), ses
+     relevés et sa caisse sont donc dus comme les autres jours. */
+  const nbJ = nbJours || PREAUDIT.fenetre;
   /* Fermetures à jour avant de compter les jours attendus (config.js). */
   const hz = await DB.get('horaires', null).catch(() => null);
   if (hz && Array.isArray(hz.fermetures)) HORAIRES.fermetures = hz.fermetures;
 
-  const debut = addD(fin, -(PREAUDIT.fenetre - 1));
+  const debut = addD(fin, -(nbJ - 1));
   const jours = joursEntre(debut, fin);
   const ouverts = jours.filter(jourOuvert);
-  const sur = ' en ' + PREAUDIT.fenetre + ' jours';
+  const sur = ' en ' + nbJ + ' jours';
   const C = [];
   const add = (bloc, id, lib, c, texte, vue) => C.push({ bloc:bloc, id:id, lib:lib, c:c, texte:texte, vue:vue || '' });
 
@@ -133,7 +137,7 @@ async function controlesPreAudit(fin) {
     RELEVES.moments.forEach(m => {
       const releve = releveMesure(t, m.id);
       /* Jour fermé, ou relevé d'aujourd'hui (pas forcément encore dû) : pas attendu. */
-      if (releve || (ouvert && d !== fin)) attendus++;
+      if (releve || (ouvert && (finDue || d !== fin))) attendus++;
       if (releve) faits++;
       ENCEINTES.forEach(e => { if (etatTemp(e, t[m.id + '_' + e.id]) === 'crit') { crit++; critJour = true; } });
       vitrines.forEach(e => {
@@ -151,7 +155,7 @@ async function controlesPreAudit(fin) {
     if (!ouvert) return;
     if (st.netTotal) { netFaits += num(st.net); netTotal += num(st.netTotal); if (!num(st.net)) joursSansNet.push(fmtDC(d)); }
     /* La caisse du jour se ferme le soir : aujourd'hui n'est pas encore dû. */
-    if (d !== fin && !st.caisse) joursSansCaisse.push(fmtDC(d));
+    if ((finDue || d !== fin) && !st.caisse) joursSansCaisse.push(fmtDC(d));
   });
 
   if (!attendus) {
@@ -182,7 +186,7 @@ async function controlesPreAudit(fin) {
       netFaits + ' ' + accord(netFaits, 'tâche validée', 'tâches validées') + ' sur ' + netTotal + ' prévues' + sur +
         (joursSansNet.length ? ' · rien de validé le ' + paListe(joursSansNet) : ''), 'clean');
   }
-  const ouvertsPasses = ouverts.filter(d => d !== fin).length;
+  const ouvertsPasses = ouverts.filter(d => finDue || d !== fin).length;
   add('net', 'caisse', 'Fermeture de caisse validée',
     !ouvertsPasses ? 'n' : joursSansCaisse.length > 2 ? 'bad' : joursSansCaisse.length ? 'warn' : 'ok',
     !ouvertsPasses ? 'Aucun jour ouvert' + sur
@@ -772,3 +776,113 @@ async function imprimerPreAudit(r, s, passages, taches, fige) {
   await feed('ok', STATE.user.prenom + ' a imprimé le pré-audit');
   setTimeout(() => window.print(), 200);
 }
+
+/* ---------------------------------------------------------------------------
+   TOUR DE CONTRÔLE : CONFORMITÉ ET TÂCHES DE LA SEMAINE
+   Le manager voit d'un coup d'œil, en vert, orange ou rouge, si les registres
+   que l'audit regarde sont tenus (nettoyage, températures, ouvertures), puis
+   les tâches hebdomadaires de la semaine : faites, en retard, à venir.
+   Mêmes contrôles que le pré-audit (controlesPreAudit), sur 7 jours au lieu de 30.
+   ------------------------------------------------------------------------ */
+const CONFORMITE = { jours:7, libelles:{ ok:'Conforme', warn:'À surveiller', bad:'Non conforme', n:'Pas de données' } };
+const JOURS_LETTRE = ['L', 'M', 'M', 'J', 'V', 'S', 'D'];
+
+/* La pire des couleurs, « n » (sans données) ne comptant pas. */
+const pireCouleur = cs => cs.indexOf('bad') >= 0 ? 'bad' : cs.indexOf('warn') >= 0 ? 'warn' : cs.indexOf('ok') >= 0 ? 'ok' : 'n';
+
+async function htmlConformite() {
+  const j = today();
+  /* Fenêtre arrêtée à hier : le relevé du matin et les tâches du jour ne
+     sont pas encore dus, ils faisaient passer la carte à l'orange chaque matin. */
+  const C = (await controlesPreAudit(addD(j, -1), CONFORMITE.jours, true)).controles;
+  const ctl = id => C.filter(x => x.id === id)[0] || { c:'n', texte:'' };
+  const releves = ctl('releves'), crit = ctl('crit');
+  const temp = { c: pireCouleur([releves.c, crit.c]), texte: releves.texte + ' · ' + crit.texte };
+  /* Les DLC se lisent aujourd'hui (produits ouverts en ce moment). Une
+     semaine sans lot ouvert n'est pas un défaut : le nombre reste en texte. */
+  const fifo = await calculFIFO(monthKey(j));
+  const depasses = fifo.filter(f => f.c === 'rouge');
+  const ouv = { c: depasses.length ? 'bad' : 'ok',
+    texte: ctl('lots').texte + ' · ' + (depasses.length
+      ? depasses.length + ' ' + accord(depasses.length, 'produit dépassé', 'produits dépassés') + ' : ' +
+        [...new Set(depasses.map(f => f.nom))].slice(0, 3).join(', ')
+      : 'aucun produit ouvert dépassé') };
+  const lignes = [
+    ['Nettoyages', ctl('nettoyage'), 'clean'],
+    ['Températures', temp, 'temp'],
+    ['Ouvertures et DLC', ouv, 'frigo']
+  ];
+  const glob = pireCouleur(lignes.map(l => l[1].c));
+
+  /* Semaine en cours, du lundi au dimanche. */
+  const lundi = addD(j, 1 - jourISO(j));
+  const semaine = [];
+  for (let i = 0; i < 7; i++) {
+    const d = addD(lundi, i);
+    const n = await etatNettoyage(d);
+    const ferme = typeof jourOuvert === 'function' && !jourOuvert(d);
+    const c = !n.total || ferme ? 'n'
+      : d > j ? 'n'
+      : n.faits >= n.total ? 'ok'
+      : d === j ? 'n'
+      : n.faits ? 'warn' : 'bad';
+    semaine.push({ d:d, n:n, ferme:ferme, c:c });
+  }
+  const auj = semaine.filter(s => s.d === j)[0];
+
+  return carte(
+    '<div class="rang"><div style="flex:1;min-width:0"><h2>Conformité audit</h2>' +
+    '<div class="cs">Registres des ' + CONFORMITE.jours + ' derniers jours, jusqu’à hier</div></div>' +
+    pastille(glob, CONFORMITE.libelles[glob]) + '</div>' +
+    '<div class="conf-lignes">' + lignes.map(l =>
+      '<button type="button" class="conf-l ' + l[1].c + '" data-go="' + l[2] + '">' +
+      '<span class="conf-p" aria-hidden="true"></span>' +
+      '<span class="conf-t"><b>' + esc(l[0]) + '</b><span class="mini">' + esc(l[1].texte.split(' en ' + CONFORMITE.jours + ' jours').join('')) + '</span></span>' +
+      '<span class="conf-e">' + esc(CONFORMITE.libelles[l[1].c]) + '</span></button>').join('') + '</div>', 'plat') +
+
+    carte(
+    '<div class="rang"><div style="flex:1;min-width:0"><h2>Tâches de la semaine</h2>' +
+    '<div class="cs">Semaine du ' + fmtD(lundi) + '</div></div>' +
+    (() => {
+      /* Jours passés seulement : couleur et compte sur les mêmes jours. */
+      const passes = semaine.filter(s => s.d < j && !s.ferme && s.n.total);
+      if (!passes.length) return '';
+      const f = passes.reduce((a, s) => a + s.n.faits, 0), t = passes.reduce((a, s) => a + s.n.total, 0);
+      return pastille(pireCouleur(passes.map(s => s.c)), f + '/' + t + ' faites');
+    })() + '</div>' +
+    '<div class="sem7">' + semaine.map((s, i) =>
+      '<button type="button" class="sem-j ' + s.c + (s.d === j ? ' auj' : '') + '"' +
+      (s.d <= j ? ' data-go="clean" data-jour="' + s.d + '"' : ' disabled') +
+      ' aria-label="' + esc(fmtD(s.d) + ' : ' + (s.ferme ? 'fermé' : s.n.faits + ' sur ' + s.n.total)) + '">' +
+      '<span class="sem-l">' + JOURS_LETTRE[i] + '</span>' +
+      '<span class="sem-v">' + (s.ferme ? '—' : s.n.total ? s.n.faits + '/' + s.n.total : '0') + '</span></button>').join('') + '</div>' +
+    (auj && auj.n.total && !auj.ferme
+      ? '<div class="conf-taches">' + auj.n.liste.map(t => {
+          const v = auj.n.rec[t.id] || {};
+          const qui = t.assignee ? (EQUIPE.filter(e => e.id === t.assignee)[0] || {}).prenom : null;
+          return '<div class="conf-tache' + (v.ok ? ' fait' : '') + '">' +
+            '<span class="conf-coche" aria-hidden="true">' + (v.ok ? '✓' : '') + '</span>' +
+            '<span class="conf-t"><b>' + esc(t.libelle || t.nom || '') + '</b>' +
+            '<span class="mini">' + (v.ok ? 'Fait par ' + esc(v.par || '—') + (v.at ? ' à ' + heure(v.at) : '')
+              : 'À faire aujourd’hui' + (qui ? ' · ' + esc(qui) : '')) + '</span></span></div>';
+        }).join('') + '</div>'
+      : '<p class="mini" style="margin-top:10px">' + (auj && auj.ferme ? 'Boutique fermée aujourd’hui.' : 'Aucune tâche hebdomadaire prévue aujourd’hui.') + '</p>'),
+    'plat');
+}
+
+const V_controle_avantConformite = V.controle;
+V.controle = async function () {
+  await V_controle_avantConformite.apply(this, arguments);
+  const slot = $('#ctl-conformite');
+  if (!slot || !STATE.user || STATE.user.role !== 'manager') return;
+  /* Sans attendre : sept jours de registres à lire, la page reste utilisable. */
+  /* Un lot de lectures (DB.prelire) : une clé relue n'est demandée qu'une fois. */
+  const lot = DB.ouvrirLot();
+  htmlConformite().then(html => {
+    if (STATE.view !== 'controle' || !document.body.contains(slot)) return;
+    slot.className = 'grid g2 conf-grille';
+    slot.innerHTML = html;
+    slot.querySelectorAll('[data-go]').forEach(b => b.onclick = () => rendre(b.dataset.go, false, b.dataset.jour));
+  }).catch(e => console.warn('Conformité indisponible', e))
+    .finally(() => DB.fermerLot(lot));
+};
