@@ -50,7 +50,8 @@ const OCR = {
   cadreBL:       { largeur: 0.92, ratio: 0.707 }, // A4 portrait : 210/297
   margeCadre:    0.05,         // tolérance ajoutée autour du cadre au recadrage
   _worker: null,
-  _minuteur: null
+  _minuteur: null,
+  _file: null                  // file d’attente des lectures (voir avecMoteur)
 };
 
 /* =============================================================================
@@ -377,9 +378,26 @@ function reporterArret() {
   clearTimeout(OCR._minuteur);
   OCR._minuteur = setTimeout(async () => {
     if (!OCR._worker) return;
-    try { await OCR._worker.terminate(); } catch (e) {}
-    OCR._worker = null;
+    /* Détaché d'abord : un scan lancé pendant l'arrêt crée un worker neuf
+       au lieu de recevoir celui qui s'éteint. */
+    const w = OCR._worker; OCR._worker = null;
+    try { await w.terminate(); } catch (e) {}
   }, OCR.inactiviteMs);
+}
+
+/* Le worker est partagé et ses réglages (liste de caractères, mode de page)
+   restent posés entre deux appels. Deux lectures en même temps (feuille
+   d'attente fermée puis nouveau scan) entrelaçaient leurs setParameters et
+   recognize : l'une lisait avec la liste de l'autre. Chaque séquence
+   « réglages + lectures » passe donc à son tour, dans l'ordre d'arrivée. */
+function avecMoteur(travail) {
+  const tour = (OCR._file || Promise.resolve()).then(async () => {
+    clearTimeout(OCR._minuteur);
+    try { return await travail(await obtenirWorker()); }
+    finally { reporterArret(); }
+  });
+  OCR._file = tour.catch(() => {});
+  return tour;
 }
 
 const MAJUSCULES = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
@@ -403,9 +421,6 @@ async function lireMeilleur(canvasNB, canvasGris, profil) {
 }
 
 async function lire(canvas, profil) {
-  /* Le minuteur d'inactivité pourrait arrêter le worker en pleine lecture. */
-  clearTimeout(OCR._minuteur);
-  const w = await obtenirWorker();
   /* Profil « bl » : une page entière, tableau compris. Aucune liste de
      caractères (la liste vide efface celle de la passe précédente, le worker
      étant partagé) ; psm 6 lit chaque rangée du tableau comme une ligne, psm 4
@@ -426,13 +441,14 @@ async function lire(canvas, profil) {
         preserve_interword_spaces: '1' };
 
   const page = profil === 'bl' || profil === 'bl4';
-  let r;
-  try {
+  /* Le minuteur d'inactivité (relancé par avecMoteur) ne peut plus arrêter le
+     worker en pleine lecture. */
+  const r = await avecMoteur(async w => {
     await w.setParameters(params);
     /* Pour un bon, on garde aussi la position de chaque ligne et de chaque
        mot : elle sert à relire la colonne Quantité case par case. */
-    r = page ? await w.recognize(canvas, {}, { text: true, blocks: true }) : await w.recognize(canvas);
-  } finally { reporterArret(); }
+    return page ? await w.recognize(canvas, {}, { text: true, blocks: true }) : await w.recognize(canvas);
+  });
   const lignes = [];
   if (page) (r.data.blocks || []).forEach(b => (b.paragraphs || []).forEach(p => (p.lines || []).forEach(l =>
     lignes.push({ texte: l.text || '', bbox: l.bbox, mots: (l.words || []).map(m => ({ t: m.text, bbox: m.bbox })) }))));
@@ -806,6 +822,21 @@ function ouvrirViseur(aide, type) {
   });
 }
 
+/* Feuille refermée sans ses boutons (retour du téléphone, voile) : personne
+   ne répondait, et l'appelant attendait pour toujours — en mode chaîne, la
+   liste des lots ne se redessinait plus. On répond « rien » à la fermeture.
+   Chaque bouton de la feuille lâche d'abord cette écoute, pour que sa propre
+   fermeture (ou « Reprendre la photo ») ne réponde pas à sa place. */
+function surFermetureFeuille(siFermee) {
+  const sheet = document.getElementById('sheet');
+  if (!sheet || typeof MutationObserver === 'undefined') return () => {};
+  const obs = new MutationObserver(() => {
+    if (sheet.hidden) { obs.disconnect(); siFermee(); }
+  });
+  obs.observe(sheet, { attributes: true, attributeFilter: ['hidden'] });
+  return () => obs.disconnect();
+}
+
 /* Repli : rappel de cadrage avant d'ouvrir l'appareil photo natif, puisqu'on
    ne pourra rien afficher par-dessus. */
 function rappelCadrage(type) {
@@ -820,8 +851,9 @@ function rappelCadrage(type) {
       'éviter le reflet de l’inox.</p></div></div>' +
       '<div class="actions"><button class="btn clair" id="rc-x">Annuler</button>' +
       '<button class="btn ciel" id="rc-ok">Ouvrir l’appareil photo</button></div>');
-    document.getElementById('rc-x').onclick = () => { closeSheet(); resolve(false); };
-    document.getElementById('rc-ok').onclick = () => { closeSheet(); resolve(true); };
+    const lacher = surFermetureFeuille(() => resolve(false));
+    document.getElementById('rc-x').onclick = () => { lacher(); closeSheet(); resolve(false); };
+    document.getElementById('rc-ok').onclick = () => { lacher(); closeSheet(); resolve(true); };
   });
 }
 
@@ -1057,24 +1089,23 @@ async function lireQuantitesBL(canvas, res, lignesLues) {
     }
     cases.forEach(c => { c.nb = copierCanvas(c.gris); binariserOtsu(c.nb); });
 
-    clearTimeout(OCR._minuteur);
-    const w = await obtenirWorker();
-    for (const [source, psm] of [['gris', '7'], ['gris', '6'], ['nb', '7']]) {
-      await w.setParameters({ tessedit_char_whitelist: '0123456789,.', tessedit_pageseg_mode: psm });
-      for (let i = 0; i < cases.length; i++) {
-        const r = await w.recognize(cases[i][source]);
-        const v = valeurQuantite(r.data.text);
-        if (v) { cases[i].votes.push(v.v); if (v.rogne) cases[i].rogne = true; }
+    await avecMoteur(async w => {
+      for (const [source, psm] of [['gris', '7'], ['gris', '6'], ['nb', '7']]) {
+        await w.setParameters({ tessedit_char_whitelist: '0123456789,.', tessedit_pageseg_mode: psm });
+        for (let i = 0; i < cases.length; i++) {
+          const r = await w.recognize(cases[i][source]);
+          const v = valeurQuantite(r.data.text);
+          if (v) { cases[i].votes.push(v.v); if (v.rogne) cases[i].rogne = true; }
+        }
       }
-    }
-    if (caseTotal) {
-      await w.setParameters({ tessedit_char_whitelist: '0123456789,.=', tessedit_pageseg_mode: '7' });
-      const r = await w.recognize(caseTotal);
-      const m = String(r.data.text || '').replace(/\s+/g, '').match(/=?(\d{1,4})[.,](\d{2})$/);
-      if (m && +m[1] > 0 && +m[1] <= 5000) res.total = +m[1];
-    }
+      if (caseTotal) {
+        await w.setParameters({ tessedit_char_whitelist: '0123456789,.=', tessedit_pageseg_mode: '7' });
+        const r = await w.recognize(caseTotal);
+        const m = String(r.data.text || '').replace(/\s+/g, '').match(/=?(\d{1,4})[.,](\d{2})$/);
+        if (m && +m[1] > 0 && +m[1] <= 5000) res.total = +m[1];
+      }
+    });
   } finally {
-    reporterArret();
     cases.forEach(c => { libererCanvas(c.gris); if (c.nb) libererCanvas(c.nb); });
     if (caseTotal) libererCanvas(caseTotal);
   }
@@ -1115,22 +1146,22 @@ async function lireNumeroBL(canvas, res, lignesLues) {
   const h = Math.max(1, m.bbox.y1 - m.bbox.y0);
   const cv = decouper(canvas, Math.max(0, m.bbox.x0 - h * 0.6), Math.max(0, m.bbox.y0 - h * 0.35),
                       Math.min(canvas.width, m.bbox.x1 + h * 0.6), Math.min(canvas.height, m.bbox.y1 + h * 0.35), 60);
-  clearTimeout(OCR._minuteur);
-  const w = await obtenirWorker();
   try {
-    for (const psm of ['7', '6']) {
-      await w.setParameters({ tessedit_char_whitelist: 'BL0123456789', tessedit_pageseg_mode: psm });
-      const r = await w.recognize(cv);
-      /* Exactement six chiffres : un numéro client plus long n'en donne pas six. */
-      const t = String(r.data.text || '').replace(/\s+/g, '').match(/^(?:BL|8L|B1|L)?(\d{6})$/);
-      if (t) {
-        res.bl = 'BL' + t[1];
-        /* Le lot qui portait ce numéro n'en est pas un. */
-        res.lignes.forEach(l => { if (l.lot === t[1]) l.lot = ''; });
-        return;
+    await avecMoteur(async w => {
+      for (const psm of ['7', '6']) {
+        await w.setParameters({ tessedit_char_whitelist: 'BL0123456789', tessedit_pageseg_mode: psm });
+        const r = await w.recognize(cv);
+        /* Exactement six chiffres : un numéro client plus long n'en donne pas six. */
+        const t = String(r.data.text || '').replace(/\s+/g, '').match(/^(?:BL|8L|B1|L)?(\d{6})$/);
+        if (t) {
+          res.bl = 'BL' + t[1];
+          /* Le lot qui portait ce numéro n'en est pas un. */
+          res.lignes.forEach(l => { if (l.lot === t[1]) l.lot = ''; });
+          return;
+        }
       }
-    }
-  } finally { reporterArret(); libererCanvas(cv); }
+    });
+  } finally { libererCanvas(cv); }
 }
 
 /* Mot d'ancrage d'une ligne : le lot s'il est lu, sinon le dernier mot
@@ -1238,14 +1269,17 @@ function confirmerBL(r, apercu, resolve) {
     '<button class="btn menthe" id="ob-ok">Continuer</button></div>' +
     '<button class="btn clair bloc" id="ob-annuler" style="margin-top:10px">Annuler</button>');
 
-  document.getElementById('ob-annuler').onclick = () => { closeSheet(); resolve(null); };
+  /* Fermée par le voile ou le retour : le scan répond « rien » au lieu de
+     laisser l'appelant attendre pour toujours. */
+  const lacher = surFermetureFeuille(() => resolve(null));
+  document.getElementById('ob-annuler').onclick = () => { lacher(); closeSheet(); resolve(null); };
   document.getElementById('ob-x').onclick = () => {
-    closeSheet();
+    lacher(); closeSheet();
     scannerPhoto('bl').then(resolve, () => resolve(null));
   };
   document.getElementById('ob-ok').onclick = () => {
     const numero = document.getElementById('ob-num').value.trim().toUpperCase();
-    closeSheet();
+    lacher(); closeSheet();
     resolve(Object.assign({}, r, { numero: numero, valide: true, par: STATE.user ? STATE.user.prenom : null }));
   };
 }
@@ -1337,7 +1371,7 @@ function scannerPhotoNatif(type) {
           ? { lot: batch ? batch.code : '', ouv: today(), parfum: trouve ? trouve.parfum : '',
               confiance: confiance, corrige: !!(batch && batch.corrige),
               texte: (code.texte + '\n' + parfum.texte).trim() }
-          : { fournisseur: FOURNISSEUR.nom, numero: batch ? batch.code : '', date: today(),
+          : { fournisseur: FOURNISSEUR.nom, numero: batch ? batch.code : '', lot: batch ? batch.code : '', date: today(),
               /* La lecture des lignes d'un bon de livraison n'est pas implémentée :
                  l'OCR ne sait extraire qu'un code lot, pas un tableau de références.
                  On le déclare, au lieu de renvoyer un tableau vide qui s'ajouterait
@@ -1654,7 +1688,10 @@ function extraireCarton(texte) {
   const valide = d => {
     if (!/^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/.test(d)) return false;
     const an = +d.slice(0, 4);
-    return an >= 2020 && an <= 2040;
+    if (an < 2020 || an > 2040) return false;
+    /* 31/02 passait le contrôle de forme : on exige un jour qui existe. */
+    const j = new Date(an, +d.slice(5, 7) - 1, +d.slice(8, 10));
+    return j.getMonth() === +d.slice(5, 7) - 1;
   };
   const brutes = [];
   (T.match(/\b\d{1,2}[\/.\-]\d{1,2}[\/.\-]\d{4}\b/g) || []).forEach(d => brutes.push(iso(d)));
@@ -1686,11 +1723,18 @@ function extraireCarton(texte) {
   const mB = T.match(/(?:BBD|BEST\s*(?:USED\s*)?BEFORE|DLUO|CONSOMMER\s+DE\s+PRÉFÉRENCE[^\d]{0,40}|CONSUMARSI[^\d]{0,40})[^\d]{0,20}(\d{1,2}[\/.\-]\d{1,2}[\/.\-]\d{4})/);
   const mP = T.match(/(?:PRODUCTION\s*DATE|DATA\s*PRODUZIONE|DATE\s+DE\s+PRODUCTION|DATE\s+CONDITIONNEMENT)[^\d]{0,24}(\d{1,2}[\/.\-]\d{1,2}[\/.\-]\d{4})/);
 
-  const expiration = mB ? iso(mB[1])
-    : (dates.length >= 2 ? dates[dates.length - 1]
-    : (dates.length === 1 ? dates[0] : null));
-  const production = mP ? iso(mP[1])
-    : (dates.length >= 2 ? dates[0] : null);
+  /* Une date ancrée passe le même contrôle que les autres : « BBD 27/66/2028 »
+     (chiffre mal lu) donnait 2028-66-27, une DLC qui ne déclenchait jamais
+     d'alerte. Invalide, on retombe sur les dates validées. */
+  const ancree = m => { if (!m) return null; const d = iso(m[1]); return valide(d) ? d : null; };
+  const bAncree = ancree(mB), pAncree = ancree(mP);
+  /* BBD présent mais illisible : pas de repli sur une date seule, qui serait
+     souvent la date de production — une DLC passée, présentée comme lue. */
+  const expiration = bAncree
+    || (dates.length >= 2 ? dates[dates.length - 1]
+    : (dates.length === 1 && !mB && dates[0] !== pAncree ? dates[0] : null));
+  const production = pAncree
+    || (dates.length >= 2 ? dates[0] : null);
 
   return {
     parBac:    mC ? +mC[1] : null,     // nombre de bacs dans le carton
@@ -1771,6 +1815,8 @@ function confirmerLecture(type, r, apercu, resolve) {
     (OCR._chaine ? '<button class="btn ciel bloc" id="oc-suite" style="margin-top:10px">' +
     '✅ Valider et scanner le suivant</button>' : ''));
 
+  const lacher = surFermetureFeuille(() => resolve(null));
+
   const recolter = () => {
     const lot = document.getElementById('oc-lot').value.trim().toUpperCase();
     if (!lot) { toast('Le numéro de lot est obligatoire', 'erreur'); return null; }
@@ -1788,12 +1834,12 @@ function confirmerLecture(type, r, apercu, resolve) {
      il fallait retoucher « Scanner une étiquette ». La nouvelle lecture
      répond à l'appelant d'origine. */
   document.getElementById('oc-x').onclick  = () => {
-    closeSheet();
+    lacher(); closeSheet();
     scannerPhoto(type, { enchainer: OCR._chaine }).then(resolve, () => resolve(null));
   };
   document.getElementById('oc-ok').onclick = () => {
     const v = recolter(); if (!v) return;
-    closeSheet(); resolve(v);
+    lacher(); closeSheet(); resolve(v);
   };
   /* Mode chaîne : on enregistre et l'appareil photo repart immédiatement.
      Une livraison, c'est cinquante étiquettes — refermer la fiche et rouvrir
@@ -1801,7 +1847,7 @@ function confirmerLecture(type, r, apercu, resolve) {
   const suite = document.getElementById('oc-suite');
   if (suite) suite.onclick = () => {
     const v = recolter(); if (!v) return;
-    closeSheet(); resolve(Object.assign(v, { enchainer: true }));
+    lacher(); closeSheet(); resolve(Object.assign(v, { enchainer: true }));
   };
 }
 
@@ -1828,12 +1874,13 @@ function saisieManuelle(type, raison, resolve) {
     (OCR._chaine ? '<button class="btn ciel bloc" id="sm-suite" style="margin-top:10px">' +
     '✅ Enregistrer et scanner le suivant</button>' : ''));
 
-  document.getElementById('sm-x').onclick  = () => { closeSheet(); resolve(null); };
+  const lacher = surFermetureFeuille(() => resolve(null));
+  document.getElementById('sm-x').onclick  = () => { lacher(); closeSheet(); resolve(null); };
   const valider = enchainer => {
     const lot = document.getElementById('sm-lot').value.trim().toUpperCase();
     if (!lot) return toast(type === 'bl' ? 'Saisissez le numéro du bon' : 'Saisissez le numéro de lot', 'erreur');
     const pf = document.getElementById('sm-parfum');
-    closeSheet();
+    lacher(); closeSheet();
     resolve({ lot: lot, numero: lot, ouv: today(), date: today(),
               parfum: pf ? pf.value : '', fournisseur: FOURNISSEUR.nom,
               lignes: [], lignesNonLues: true,

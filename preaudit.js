@@ -399,6 +399,8 @@ const paTacheEnRetard = t => t.statut !== 'realisee' && t.echeance && t.echeance
    ------------------------------------------------------------------------ */
 async function lirePreAudits() {
   const cles = (await DB.list('preaudit:')).filter(k => PA_RE.test(k));
+  /* Dans un dessin d'écran, les pré-audits partent en une requête groupée. */
+  if (typeof DB.prelire === 'function') DB.prelire(cles);
   const l = await Promise.all(cles.map(k => DB.get(k, null)));
   /* Supprimé : marqué, pas effacé, sinon il revenait d'un autre iPad. */
   return l.filter(a => a && a.id && a.jour && a.statut === 'clos')
@@ -431,7 +433,17 @@ async function publierDernierPreAudit() {
     : { score:null, jour:null, scores:{}, par:'', at:nowISO() });
 }
 
+/* Un seul enregistrement à la fois : la lecture des registres prend du
+   temps, et un second « Enregistrer » pendant ce temps créait un second
+   pré-audit du jour (nouvel id). */
+let _paEnregistrement = false;
 async function enregistrerPreAudit() {
+  if (_paEnregistrement) return;
+  _paEnregistrement = true;
+  try { await enregistrerPreAuditSansVerrou(); }
+  finally { _paEnregistrement = false; }
+}
+async function enregistrerPreAuditSansVerrou() {
   toast('Lecture des registres…');
   let r;
   try { r = await controlesEnCache(true); }
@@ -642,7 +654,7 @@ function feuillePassage(p, taches) {
   let type = p ? p.type : 'visite';
   const liees = p && taches ? taches.filter(t => t.passage === p.id) : [];
   showSheet(
-    '<h2 id="sheet-titre">' + (p ? paLibPassage(p) : 'Nouveau passage') + '</h2>' +
+    '<h2 id="sheet-titre">' + (p ? esc(paLibPassage(p)) : 'Nouveau passage') + '</h2>' +
     '<p class="sub">Visite d’animation ou contrôle de conformité de l’animateur réseau.</p>' +
     '<div class="chips" style="margin-top:14px" id="pa-type">' + PREAUDIT.typesPassage.map(t =>
       '<button type="button" class="chip' + (t.id === type ? ' on' : '') + '" data-pa-type="' + t.id + '" aria-pressed="' + (t.id === type) + '">' +
@@ -722,14 +734,14 @@ async function imprimerPreAudit(r, s, passages, taches, fige) {
   const ouvertes = (taches || []).filter(t => t.statut !== 'realisee');
   $('#printview').innerHTML =
     '<div class="pv-h"><h1>Pré-audit des registres · ' + esc(APP.nom) + '</h1>' +
-    '<div>' + esc(APP.site) + ' · ' + (fige ? 'pré-audit enregistré le ' + fmtD(fige.jour) + ' par ' + esc(fige.closPar || '—')
-      : 'pré-audit du ' + fmtD(today())) + ' · registres du ' + fr(r.debut) + ' au ' + fr(r.fin) +
+    '<div>' + esc(APP.site) + ' · ' + (fige ? 'pré-audit enregistré le ' + esc(fmtD(fige.jour)) + ' par ' + esc(fige.closPar || '—')
+      : 'pré-audit du ' + fmtD(today())) + ' · registres du ' + esc(fr(r.debut)) + ' au ' + esc(fr(r.fin)) +
     '<br>Édité le ' + new Date().toLocaleString(APP.locale) + ' par ' + esc(STATE.user.prenom) + '</div></div>' +
 
     '<div class="pv-s">1. Score</div>' +
     '<table><thead><tr><th>Bloc</th><th>Score</th></tr></thead><tbody>' +
-    PREAUDIT.blocs.map(b => '<tr><td>' + esc(b.nom) + '</td><td>' + paScoreTxt((s.blocs || {})[b.id]) + '</td></tr>').join('') +
-    '<tr><th>Score global</th><th>' + paScoreTxt(s.global) + '</th></tr></tbody></table>' +
+    PREAUDIT.blocs.map(b => '<tr><td>' + esc(b.nom) + '</td><td>' + esc(paScoreTxt((s.blocs || {})[b.id])) + '</td></tr>').join('') +
+    '<tr><th>Score global</th><th>' + esc(paScoreTxt(s.global)) + '</th></tr></tbody></table>' +
     '<div style="font-size:9.5px">OK = 1 point, à surveiller = ½, à corriger = 0 ; « sans objet » ne compte pas. ' +
     'Contrôle automatique des registres de l’appli, pas l’audit officiel Amorino.</div>' +
 
@@ -742,15 +754,15 @@ async function imprimerPreAudit(r, s, passages, taches, fige) {
 
     (passages ? '<div class="pv-s">3. Passages de l’animateur</div>' +
       (passages.length ? '<table><thead><tr><th>Date</th><th>Type</th><th>Score</th><th>Note</th></tr></thead><tbody>' +
-        passages.slice(0, 12).map(p => '<tr><td>' + fr(p.jour) + '</td><td>' + esc(paTypeLabel(p.type)) + '</td><td>' +
-          paPct(p.score) + '</td><td>' + esc(p.note || '') + '</td></tr>').join('') + '</tbody></table>'
+        passages.slice(0, 12).map(p => '<tr><td>' + esc(fr(p.jour)) + '</td><td>' + esc(paTypeLabel(p.type)) + '</td><td>' +
+          esc(paPct(p.score)) + '</td><td>' + esc(p.note || '') + '</td></tr>').join('') + '</tbody></table>'
         : '<div>Aucun passage noté.</div>') : '') +
 
     (taches ? '<div class="pv-s">4. Tâches d’audit ouvertes</div>' +
       (ouvertes.length ? '<table><thead><tr><th>Tâche</th><th>Passage</th><th>Échéance</th><th>État</th></tr></thead><tbody>' +
         ouvertes.map(t => {
           const p = (passages || []).filter(x => x.id === t.passage)[0];
-          return '<tr><td>' + esc(t.titre || '') + '</td><td>' + (p ? esc(paLibPassage(p)) : '') + '</td><td>' + fr(t.echeance) + '</td>' +
+          return '<tr><td>' + esc(t.titre || '') + '</td><td>' + (p ? esc(paLibPassage(p)) : '') + '</td><td>' + esc(fr(t.echeance)) + '</td>' +
             '<td>' + (paTacheEnRetard(t) ? 'EN RETARD' : t.statut === 'en_cours' ? 'En cours' : 'À faire') + '</td></tr>';
         }).join('') + '</tbody></table>' : '<div>Aucune tâche ouverte.</div>') : '') +
 
