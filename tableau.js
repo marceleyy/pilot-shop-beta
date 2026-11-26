@@ -19,7 +19,6 @@
 
 const TDB = {
   actions: 5,          // tâches montrées dans « Actions prioritaires »
-  horizon: 30,         // jours comptés dans « Échéances à 30 jours »
   evenements: 6,       // lignes sous le calendrier
   evenementsJours: 60, // jusqu'où le calendrier cherche les échéances
   couleurs: ['var(--chocolat)', 'var(--framboise)', 'var(--caramel)', 'var(--myrtille)', 'var(--pistache)', 'var(--or)']
@@ -57,14 +56,16 @@ async function tdbDonnees() {
   const j = today(), mois = j.slice(0, 7);
   const clesPertes = (await DB.list('pertes:')).filter(k => k.slice(7, 14) === mois);
   DB.prelire(['ruptures', 'temp:' + j, 'temp:' + addD(j, -1)].concat(clesPertes));
-  const [taches, passages, ruptures, tAuj, tVeille, per, pertes] = await Promise.all([
+  const [taches, passages, ruptures, tAuj, tVeille, per, pertes, fifo] = await Promise.all([
     typeof lireTaches === 'function' ? lireTaches().catch(() => []) : [],
     typeof lirePassages === 'function' ? lirePassages().catch(() => []) : [],
     DB.get('ruptures', []).catch(() => []),
     DB.get('temp:' + j, null).catch(() => null),
     DB.get('temp:' + addD(j, -1), null).catch(() => null),
     DB.get('periode:courante', null).catch(() => null),
-    Promise.all(clesPertes.map(k => DB.get(k, []).catch(() => [])))
+    Promise.all(clesPertes.map(k => DB.get(k, []).catch(() => []))),
+    /* Produits ouverts (frigo virtuel) : dépassés ou à vendre vite. */
+    typeof calculFIFO === 'function' ? calculFIFO(mois).catch(() => []) : []
   ]);
   const ouvertes = (taches || []).filter(t => t.statut !== 'realisee').sort(tbTrier);
   const equipements = ENCEINTES.map(en => Object.assign({ nom:en.nom }, tdbEtatEnceinte(en, tAuj, tVeille)));
@@ -95,7 +96,8 @@ async function tdbDonnees() {
   ev.sort((a, b) => (a.jour < b.jour ? -1 : a.jour > b.jour ? 1 : 0));
 
   return { j:j, ouvertes:ouvertes, passages:passages || [], equipements:equipements, ev:ev,
-           ruptures:(ruptures || []).filter(r => !r.traite), parMotif:parMotif, litres:litres, lignes:lignes, mois:mois };
+           ruptures:(ruptures || []).filter(r => !r.traite),
+           perimes:(fifo || []).filter(f => f.c === 'rouge').length, aEcouler:(fifo || []).filter(f => f.c === 'orange').length, parMotif:parMotif, litres:litres, lignes:lignes, mois:mois };
 }
 
 /* --- Cartes ---------------------------------------------------------------- */
@@ -106,8 +108,6 @@ const tdbCarte = (icone, titre, corps, id) =>
 function tdbCompteurs(d) {
   const urg = d.ouvertes.filter(t => tbEnRetard(t) || t.priorite === 'urgente').length;
   const equip = d.equipements.filter(e => e.c === 'bad' || e.c === 'warn').length;
-  const limite = addD(d.j, TDB.horizon);
-  const ech = d.ev.filter(e => e.jour >= d.j && e.jour <= limite && e.go !== 'reglages').length;
   const k = (v, lib, cls, go) => '<button type="button" class="tdb-kpi ' + cls + '" data-tdb-go="' + go + '">' +
     '<span class="tdb-kv">' + v + '</span><span class="tdb-kl">' + esc(lib) + '</span></button>';
   return '<div class="tdb-kpis">' +
@@ -115,7 +115,8 @@ function tdbCompteurs(d) {
     k(urg, 'Urgentes / en retard', urg ? 'bad' : '', 'taches') +
     k(equip, 'Équipements à vérifier', equip ? 'bad' : '', 'temp') +
     k(d.ruptures.length, 'Ruptures signalées', d.ruptures.length ? 'warn' : '', 'controle#urgences') +
-    k(ech, 'Échéances à ' + TDB.horizon + ' jours', '', 'taches') + '</div>';
+    k(d.perimes + d.aEcouler, d.perimes ? 'Produits dépassés / à écouler' : 'Produits à écouler vite',
+      d.perimes ? 'bad' : d.aEcouler ? 'warn' : '', 'frigo') + '</div>';
 }
 
 function tdbActions(d) {
@@ -223,7 +224,7 @@ function tdbPertes(d) {
       }).join('') + '</svg>';
   }
   const titreMois = tdbMoisLong[+d.mois.slice(5, 7) - 1] + ' ' + d.mois.slice(0, 4);
-  return tdbCarte('anomalie', 'Pertes — aperçu',
+  return tdbCarte('anomalie', 'Pertes du mois',
     '<div class="tdb-gros">' + tdbNombre(d.litres) + ' L</div>' +
     '<div class="mini">Glace jetée en ' + esc(titreMois) + ' · ' + d.lignes + ' ' + accord(d.lignes, 'déclaration') + '</div>' +
     (tot > 0

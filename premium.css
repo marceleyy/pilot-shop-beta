@@ -1257,7 +1257,7 @@ button.fr-ligne:focus-visible{outline:2px solid var(--cacao);outline-offset:-2px
   padding:14px 14px 12px;box-shadow:var(--ombre);cursor:pointer;min-height:92px}
 .tdb-kpi:active{background:var(--creme-2)}
 .tdb-kpi:focus-visible{outline:2px solid var(--cacao);outline-offset:2px}
-.tdb-kv{font-family:var(--serif);font-size:30px;line-height:1;color:var(--framboise-d);font-variant-numeric:tabular-nums}
+.tdb-kv{font-family:var(--serif);font-size:30px;line-height:1;color:var(--chocolat);font-variant-numeric:tabular-nums}
 .tdb-kpi.bad .tdb-kv{color:var(--framboise)}
 .tdb-kpi.warn .tdb-kv{color:var(--caramel-d)}
 .tdb-kl{font-size:var(--t-sur);font-weight:650;letter-spacing:.06em;text-transform:uppercase;color:var(--noisette);line-height:1.35}
