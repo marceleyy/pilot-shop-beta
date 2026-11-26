@@ -27,6 +27,8 @@ const TDB = {
 
 /* Semaine affichée par le calendrier (décalage en semaines depuis la courante). */
 let _tdbSemaine = 0;
+/* Numéro du dernier dessin : un dessin plus lent, dépassé, ne remplace pas le suivant. */
+let _tdbRendu = 0;
 
 const tdbMois = ['janv.', 'févr.', 'mars', 'avr.', 'mai', 'juin', 'juil.', 'août', 'sept.', 'oct.', 'nov.', 'déc.'];
 const tdbMoisLong = ['janvier', 'février', 'mars', 'avril', 'mai', 'juin', 'juillet', 'août', 'septembre', 'octobre', 'novembre', 'décembre'];
@@ -71,7 +73,8 @@ async function tdbDonnees() {
   const parMotif = {};
   let litres = 0, lignes = 0;
   [].concat(...pertes).forEach(w => {
-    if (!w || w.supprime) return;
+    /* Ajustements d'inventaire et lignes hors écart : pas des pertes déclarées. */
+    if (!w || w.supprime || w.motif === 'inventaire' || w.horsEcart) return;
     const l = typeof litresJetes === 'function' ? litresJetes(w) : 0;
     const m = MOTIFS_PERTE.filter(x => x.id === w.motif)[0];
     const cle = m ? m.label : 'Autre';
@@ -87,7 +90,7 @@ async function tdbDonnees() {
     c:tbEnRetard(t) ? 'bad' : t.priorite === 'urgente' ? 'warn' : 'ciel', go:'taches' }));
   if (per && per.fin) ev.push({ jour:per.fin, txt:'Fin de la période d’écart', c:'n', go:'periodes' });
   (Array.isArray(HORAIRES.fermetures) ? HORAIRES.fermetures : []).forEach(f => {
-    if (f && f.du && f.au) ev.push({ jour:f.du, txt:'Fermeture jusqu’au ' + tdbJourCourt(f.au), c:'n', go:'reglages' });
+    if (f && f.du && f.au && f.au >= j) ev.push({ jour:f.du < j ? j : f.du, txt:'Fermeture jusqu’au ' + tdbJourCourt(f.au), c:'n', go:'reglages' });
   });
   ev.sort((a, b) => (a.jour < b.jour ? -1 : a.jour > b.jour ? 1 : 0));
 
@@ -194,7 +197,7 @@ function tdbEquipements(d) {
       '<span class="tdb-eq-e ' + e.c + '">' + esc(e.txt) + '</span></button></li>').join('') +
     '<li><button type="button" data-tdb-go="taches"><span class="tdb-eq-i ' + (rep ? 'warn' : 'ok') + '" aria-hidden="true"></span>' +
       '<span class="tdb-eq-n">Réparations</span><span class="tdb-eq-e ' + (rep ? 'warn' : 'ok') + '">' +
-      (rep ? rep + ' en cours' : 'Aucune') + '</span></button></li></ul>');
+      (rep ? rep + ' ' + accord(rep, 'ouverte') : 'Aucune') + '</span></button></li></ul>');
 }
 
 function tdbPertes(d) {
@@ -234,8 +237,9 @@ function tdbPertes(d) {
 
 /* --- Dessin et branchements ----------------------------------------------- */
 async function tdbDessiner(page) {
+  const n = ++_tdbRendu;
   const d = await tdbDonnees();
-  if (STATE.view !== 'controle' || page !== $('#page')) return;
+  if (n !== _tdbRendu || STATE.view !== 'controle' || page !== $('#page')) return;
   const ancien = $('#tdb'); if (ancien) ancien.remove();
   const bloc = document.createElement('div');
   bloc.id = 'tdb';
@@ -291,6 +295,8 @@ function tdbBrancherCal(bloc, d) {
 
 const V_controle_avantTableau = V.controle;
 V.controle = async function () {
+  /* Arrivée depuis un autre écran : le calendrier revient à la semaine en cours. */
+  if (STATE.view !== 'controle' || !document.getElementById('tdb')) _tdbSemaine = 0;
   await V_controle_avantTableau.apply(this, arguments);
   const page = $('#page');
   if (!page || STATE.view !== 'controle' || !STATE.user || STATE.user.role !== 'manager') return;
