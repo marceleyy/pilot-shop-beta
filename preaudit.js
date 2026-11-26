@@ -654,7 +654,7 @@ function feuillePassage(p, taches) {
   let type = p ? p.type : 'visite';
   const liees = p && taches ? taches.filter(t => t.passage === p.id) : [];
   showSheet(
-    '<h2 id="sheet-titre">' + (p ? paLibPassage(p) : 'Nouveau passage') + '</h2>' +
+    '<h2 id="sheet-titre">' + (p ? esc(paLibPassage(p)) : 'Nouveau passage') + '</h2>' +
     '<p class="sub">Visite d’animation ou contrôle de conformité de l’animateur réseau.</p>' +
     '<div class="chips" style="margin-top:14px" id="pa-type">' + PREAUDIT.typesPassage.map(t =>
       '<button type="button" class="chip' + (t.id === type ? ' on' : '') + '" data-pa-type="' + t.id + '" aria-pressed="' + (t.id === type) + '">' +
