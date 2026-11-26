@@ -442,15 +442,20 @@ const FICHES = [
     validite: 'Traçabilité dans le registre nettoyage.'
   },
   {
-    id: 'f03', cat: 'Produit', titre: 'Chantilly : montage et conservation', icone: '🥛', duree: '5 min',
-    resume: 'Durée de vie 48 h après ouverture, sans exception.',
+    /* Recette donnée par la boutique (19/11) : 1 L de crème + un pot de sucre
+       glace à ras, mélangés. Les règles de conservation de l'ancienne fiche
+       (0 à +4 °C, 48 h, pas de reste mêlé à du neuf) sont gardées. */
+    id: 'f03', cat: 'Produit', titre: 'Chantilly : recette et conservation', icone: '🥛', duree: '5 min',
+    resume: '1 litre de crème pour un pot de sucre glace à ras. Durée de vie 48 h.',
     etapes: [
-      'Vérifier la température de la machine, entre 0 et +4 °C.',
-      'Verser la crème froide, ne jamais mélanger un reste avec une brique neuve.',
-      'Noter la date et l’heure d’ouverture sur l’étiquette.',
-      'Saisir le lot dans l’application au moment du remplissage.'
+      'Prendre 1 L de crème liquide bien froide, sortie du frigo au dernier moment.',
+      'Remplir un pot de sucre glace à ras, sans tasser.',
+      'Verser la crème et le sucre glace dans un récipient propre, mélanger au fouet jusqu’à ce que le sucre soit dissous.',
+      'Vérifier la température de la machine à chantilly, entre 0 et +4 °C.',
+      'Verser le mélange dans la cuve vide et propre : ne jamais ajouter un reste à une préparation neuve.',
+      'Noter la date et l’heure de préparation sur l’étiquette, et saisir le lot de crème dans l’application.'
     ],
-    securite: 'Au-delà de 48 h, jeter et enregistrer la perte.',
+    securite: 'Au-delà de 48 h, jeter et enregistrer la perte. Allergène : lait.',
     validite: '48 heures'
   },
   {
@@ -484,20 +489,104 @@ const FICHES = [
   },
   {
     id: 'f06', cat: 'Caisse', titre: 'Clôture de caisse', icone: '💶', duree: '10 min',
-    resume: 'Ordre imposé pour que l’écart soit exploitable.',
+    /* Alignée sur l'écran Caisse › Fermeture (modules.js, V.caisse) : cinq
+       montants dans l'ordre du tiroir, puis deux contrôles automatiques
+       (carte : caisse contre TPE ; espèces : fond du matin + recettes −
+       retrait contre fond final). L'ancienne fiche parlait de « compter les
+       espèces, fonds de caisse déduit », alors que l'écran demande le retrait
+       et le fond laissé, et non un total d'espèces net. */
+    resume: 'Cinq montants à saisir, dans l’ordre du tiroir.',
     etapes: [
-      'Éditer le ticket Z de la caisse.',
+      'Éditer le ticket Z de la caisse : il donne les recettes CB et les recettes espèces.',
       'Éditer le totalisateur du TPE.',
-      'Compter les espèces, fonds de caisse déduit.',
-      'Saisir CB, espèces et TPE dans l’application.',
-      /* Le seuil annoncé ici était de 10 € alors que l'application alerte à
-         partir de 5 € : la fiche autorisait donc à ne pas expliquer un écart
-         que l'écran signale en rouge. Deux consignes contradictoires sur le
-         même geste, et c'est celle du papier qu'on retient. */
-      'Expliquer tout écart supérieur à 5 € dans le commentaire.'
+      'Dans Caisse, onglet Fermeture, saisir les recettes CB et espèces du ticket Z, puis le total du TPE.',
+      'Retirer uniquement des billets, pour un montant rond (50, 55, 60 €…), et saisir ce retrait. La monnaie reste dans le tiroir.',
+      'Compter ce qui reste dans le tiroir et le saisir en fond de caisse final.',
+      /* Même seuil que l'écran (SEUILS.ecartFondEur, comparaison >=) : le
+         rouge apparaît dès 5 €, pas au-delà. */
+      'Un écart de 5 € ou plus s’affiche en rouge : l’expliquer dans le commentaire, puis valider le comptage de fermeture.'
     ],
-    securite: 'Aucun retrait d’espèces sans le noter.',
+    securite: 'Aucun retrait d’espèces sans le saisir. Une fois validé, seul le manager peut corriger le comptage.',
     validite: 'Chaque soir'
+  },
+  /* Cafétéria : dosages et volumes proposés par défaut, À VALIDER par la
+     boutique (seule la recette du chocolat chaud a été donnée : 1 L de lait
+     + un sachet de 220 g). Produits repris du catalogue du sec : capsules
+     simple, double et déca, thés en sachet, chocolat en poudre 220 g. Le
+     matcha n'y figure pas : il n'existe que comme ligne ajoutée par un
+     manager (m_matcha_a17). Une fiche par boisson, pour qu'on la suive
+     pas à pas au comptoir. */
+  {
+    id: 'f07', cat: 'Cafétéria', titre: 'Expresso, double, déca et allongé', icone: '☕', duree: '1 min',
+    resume: 'Une capsule par café, préparé à la commande.',
+    etapes: [
+      'À l’ouverture, allumer la machine et faire couler un cycle à vide pour la chauffer.',
+      'Poser le gobelet sous la tête : expresso pour un simple ou un déca, petit pour un double ou un allongé.',
+      'Insérer la capsule : simple pour l’expresso et l’allongé, double pour le double, déca pour le déca.',
+      'Lancer la touche courte (environ 40 ml) ; pour un double, environ 80 ml.',
+      'Allongé : compléter avec de l’eau chaude jusqu’à environ 120 ml.',
+      'Éjecter la capsule, servir avec une bûchette de sucre et une serviette.'
+    ],
+    securite: 'Gobelet brûlant : le tenir par la bague. Vider le bac à capsules et l’égouttoir chaque soir.',
+    validite: 'À la commande, jamais à l’avance.'
+  },
+  {
+    id: 'f09', cat: 'Cafétéria', titre: 'Cappuccino', icone: '☕', duree: '2 min',
+    resume: 'Un tiers de café, deux tiers de lait mousseux.',
+    etapes: [
+      'Verser environ 120 ml de lait froid dans le pichet propre.',
+      'Faire mousser le lait jusqu’à une mousse fine et brillante, sans le faire bouillir.',
+      'Couler un expresso (1 capsule simple) dans le gobelet moyen.',
+      'Verser le lait sur le café en retenant la mousse, puis finir par la mousse sur le dessus.',
+      'Saupoudrer de chocolat en poudre si le client le souhaite.',
+      'Rincer et essuyer aussitôt le mousseur ou la buse vapeur.'
+    ],
+    securite: 'Allergène : lait. Ne jamais remousser un lait déjà chauffé.',
+    validite: 'À la commande, jamais à l’avance.'
+  },
+  {
+    id: 'f10', cat: 'Cafétéria', titre: 'Café latte', icone: '☕', duree: '2 min',
+    resume: 'Plus de lait que le cappuccino, une fine couche de mousse.',
+    etapes: [
+      'Verser environ 200 ml de lait froid dans le pichet propre.',
+      'Chauffer le lait avec peu de mousse, sans le faire bouillir.',
+      'Couler un expresso (1 capsule simple) dans le grand gobelet.',
+      'Verser le lait chaud sur le café, puis une fine couche de mousse.',
+      'Topping sur demande, à ajouter avant le lait.',
+      'Rincer et essuyer aussitôt le mousseur ou la buse vapeur.'
+    ],
+    securite: 'Allergène : lait. Ne jamais remousser un lait déjà chauffé.',
+    validite: 'À la commande, jamais à l’avance.'
+  },
+  {
+    id: 'f11', cat: 'Cafétéria', titre: 'Thé et matcha latte', icone: '🍵', duree: '4 min',
+    resume: 'Un sachet par thé ; 2 g de poudre par matcha.',
+    etapes: [
+      'Thé : poser 1 sachet dans le gobelet petit et verser l’eau chaude, non bouillante.',
+      'Infuser 3 min pour le thé vert, 4 min pour les thés noirs et le rooibos, puis retirer le sachet.',
+      'Matcha : mettre 2 g de poudre (1 cuillère doseuse) dans le grand gobelet.',
+      'Ajouter un fond d’eau à 80 °C et fouetter jusqu’à ne plus voir de grumeaux.',
+      'Compléter avec environ 200 ml de lait chauffé et légèrement moussé.',
+      'Servir avec une bûchette de sucre et une serviette ; rincer et essuyer aussitôt le mousseur.'
+    ],
+    securite: 'Gobelet brûlant : le tenir par la bague. Allergène lait pour le matcha latte. Ne jamais remousser un lait déjà chauffé.',
+    validite: 'À la commande, jamais à l’avance.'
+  },
+  {
+    id: 'f08', cat: 'Cafétéria', titre: 'Chocolat chaud à la chocolatière', icone: '🍫', duree: '30 min',
+    resume: 'Un sachet de 220 g pour un litre de lait, cuve préparée le jour même.',
+    etapes: [
+      'Vérifier que la cuve est propre et sèche, couvercle et robinet en place.',
+      'Verser 1 L de lait entier froid, puis 1 sachet de 220 g de chocolat en poudre (noir, lait ou noisette).',
+      'Mettre en chauffe avec le malaxeur, couvercle fermé, environ 25 min, jusqu’à ce que le chocolat nappe la cuillère.',
+      'Noter l’heure de préparation et le parfum sur l’étiquette de la cuve.',
+      'Laisser en maintien au chaud (au moins 63 °C) pendant le service, malaxeur en marche.',
+      'Servir au robinet dans le gobelet petit, moyen ou grand ; chantilly sur demande.',
+      'Ne jamais compléter une cuve entamée : la terminer, ou la vider avant d’en refaire une.',
+      'En fin de journée : vider, laver cuve et malaxeur à l’eau chaude savonneuse, désinfecter au Bactalim 1 %, rincer, sécher.'
+    ],
+    securite: 'Cuve et robinet brûlants : ne pas ouvrir le couvercle en chauffe. Allergènes : lait, et fruits à coque pour le chocolat noisette.',
+    validite: 'Le jour même. Le reste en cuve le soir se jette et se déclare en perte.'
   }
 ];
 

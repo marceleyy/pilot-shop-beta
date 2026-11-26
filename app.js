@@ -134,6 +134,9 @@
      ['hebdo:',       'checklists'],
      /* Pré-audit Amorino (preaudit.js) : un document par pré-audit. */
      ['preaudit:',    'checklists'],
+     /* Tâches et réparations (taches.js) : la liste, et les photos à part. */
+     ['tache:',       'checklists'],
+     ['tache-photo:', 'checklists'],
      ['hebdo',        'reglages'],
      ['catalogue:',   'reglages'],
      /* Mise en route d'une nouvelle boutique (guide.js). */
@@ -4271,6 +4274,11 @@ function ouvrirPremierePeriode() {
        const ap = await alertePreAudit();
        if (ap) A.push(ap);
      }
+     /* Tâches et réparations en retard ou urgentes (taches.js). */
+     if (typeof alerteTaches === 'function') {
+       const at = await alerteTaches();
+       if (at) A.push(at);
+     }
      /* Une alerte doit nommer le produit. « 2 ruptures non traitées » oblige le
         manager à ouvrir un autre écran pour savoir s'il s'agit de cornets ou
         de lait — et donc s'il doit appeler le fournisseur maintenant. */
@@ -4490,6 +4498,16 @@ function ouvrirPremierePeriode() {
      });
      return out.sort((a, b) => a.resteH - b.resteH);
    }
+   /* Produits ouverts : même partage que la Traçabilité (articleEstSec). La
+      famille marquée lieu ou stock « sec » (chantilly, coulis, toppings) va aux
+      produits complémentaires ; glaces, macarons et autres surgelés à gauche.
+      Ancienne entrée sans famille : déduite de sa règle de DLC (« a_<règle> »),
+      une clé « g_ » restant une glace. */
+   function fifoEstSec(f) {
+     const rg = f.type === 'a' ? String(f.cle).slice(2).split('|')[0] : null;
+     const fam = FAMILLES_PRODUIT.filter(x => f.famille ? x.id === f.famille : (rg && x.dlc === rg))[0];
+     return !!(fam && (fam.lieu === 'sec' || fam.stock === 'sec'));
+   }
    const resteLisible = h => h < 0
      ? 'Dépassé de ' + (Math.abs(h) < 48 ? Math.abs(h) + ' h' : Math.round(Math.abs(h) / 24) + ' j')
      : h < 48 ? 'Encore ' + h + ' h' : 'Encore ' + Math.round(h / 24) + ' j';
@@ -4510,7 +4528,16 @@ function ouvrirPremierePeriode() {
        kpi('À écouler', o.length, o.length ? 'warn' : 'ok', 'Moins de 48 h') +
        kpi('Conformes', v.length, 'ok', 'Rien à signaler') + '</div>' +
    
-       (fifo.length ? [['rouge', 'Périmés, à retirer', r], ['orange', 'À vendre vite', o], ['vert', 'Conformes', v]]
+       /* Deux colonnes, jamais mélangées : glaces et macarons d'un côté, produits
+          complémentaires de l'autre, pour retrouver la chantilly ou un coulis
+          sans le chercher parmi les bacs. Chaque colonne garde l'ordre d'urgence. */
+       (fifo.length ? '<div class="fifo-cols">' + [['froid', 'Glaces et surgelés', 'Aucune glace ni aucun surgelé ouvert ce mois.'],
+                                                  ['sec', 'Produits complémentaires', 'Aucun produit complémentaire ouvert ce mois.']].map(col => {
+         const dansCol = f => (col[0] === 'sec') === fifoEstSec(f);
+         const n = fifo.filter(dansCol).length;
+         return '<section class="fifo-col"><div class="entete"><h2>' + col[1] + '</h2><span class="pousse mini num">' + n + '</span></div>' +
+           (n ? [['rouge', 'Périmés, à retirer', r], ['orange', 'À vendre vite', o], ['vert', 'Conformes', v]]
+         .map(g => [g[0], g[1], g[2].filter(dansCol)])
          .filter(g => g[2].length).map(g =>
            '<div class="entete"><h3>' + g[1] + '</h3><span class="pousse mini num">' + g[2].length + '</span></div>' +
            '<div class="stack">' + g[2].map(f =>
@@ -4522,6 +4549,8 @@ function ouvrirPremierePeriode() {
              (f.c === 'rouge' ? '<button class="btn corail sm" data-jeter="' + esc(f.cle) + '">Jeter</button>'
                : (f.type === 'g' || f.famille === 'glace') ? '<button class="btn clair sm" data-fini="' + esc(f.cle) + '">Bac fini</button>' : '') +
              '</div>').join('') + '</div>').join('')
+           : '<p class="cs">' + col[2] + '</p>') + '</section>';
+       }).join('') + '</div>'
          : vide('🧊', 'Aucun lot ouvert ce mois. Les saisies de l’équipe apparaissent ici.'));
    
      $('#mm').onchange = e => { STATE.moisFrigo = e.target.value || null; rendre('frigo'); };
@@ -5721,7 +5750,8 @@ function modifierPeriode(per) {
 
      /* L'historique ne montre que l'historique : le registre pour un contrôle
         sanitaire reste sur la Tour de contrôle, il faisait doublon ici. */
-     $('#vue-actions').innerHTML = '<button class="btn clair sm" id="csv">CSV</button>';
+     $('#vue-actions').innerHTML = '<button class="btn clair sm" id="csv">CSV</button>' +
+       (lignes.length ? ' <button class="btn clair sm" id="hpdf">PDF</button>' : '');
    
      $('#page').innerHTML =
        '<div class="chips" style="margin-bottom:14px">' + Object.keys(defs).map(k =>
@@ -5774,6 +5804,31 @@ function modifierPeriode(per) {
        a.download = 'pilot-shop-' + onglet + (onglet === 'pertes' && perP !== 'tout' ? '-' + perP + 'j' : '') + '-' + today() + '.csv';
        a.click();
        toast('Export CSV téléchargé');
+     };
+     /* PDF : même tableau que le CSV, mis en page pour l'impression (zone
+        #printview, comme le registre sanitaire). Le navigateur propose
+        « Enregistrer au format PDF » ; le tableau tient en largeur sur A4 et
+        ses en-têtes se répètent à chaque page. */
+     const bPdf = $('#hpdf');
+     if (bPdf) bPdf.onclick = () => {
+       const sousTitre = onglet === 'pertes'
+         ? (perP === 'tout' ? 'toutes les pertes' : perP + ' derniers jours') + ' · ' + totPertes.n + ' ' + accord(totPertes.n, 'perte') +
+           ' · ' + n1(totPertes.l) + ' L de glace jetés' + (totPertes.inv ? ' · ' + n1(totPertes.inv) + ' L manquants à l’inventaire (à part)' : '')
+         : (n => n + ' ' + accord(n, 'enregistrement'))(lignes.filter(l => l[2] !== 'Boutique fermée').length);
+       /* Gras = ligne à surveiller, comme la pastille rouge ou orange à l'écran.
+          Sauf Pertes : toutes y sont orange, le gras n'y distinguerait rien. */
+       const enGras = l => onglet !== 'pertes' && (l[4] === 'bad' || l[4] === 'warn');
+       $('#printview').innerHTML =
+         '<div class="pv-h"><h1>Historique · ' + esc(defs[onglet].l) + ' · ' + esc(APP.nom) + '</h1>' +
+         '<div>' + esc(APP.site) + ' · ' + esc(sousTitre) +
+         '<br>Édité le ' + new Date().toLocaleString(APP.locale) + ' par ' + esc(STATE.user.prenom) + '</div></div>' +
+         '<table class="pv-histo"><thead><tr>' + entetes.map(e => '<th>' + esc(e) + '</th>').join('') + '</tr></thead><tbody>' +
+         lignes.map(l => '<tr' + (enGras(l) ? ' style="font-weight:700"' : '') + '>' +
+           l.slice(0, 4).map(x => '<td>' + esc(x) + '</td>').join('') + '</tr>').join('') +
+         '</tbody></table>' +
+         (lignes.some(enGras) ? '<div style="font-size:9.5px">Les lignes en gras sont à surveiller (rouge ou orange à l’écran).</div>' : '');
+       toast('Choisissez « Enregistrer au format PDF » dans la fenêtre d’impression');
+       setTimeout(() => window.print(), 200);
      };
    };
    
