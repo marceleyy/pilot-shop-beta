@@ -272,11 +272,11 @@ function tdbJauge(part, txt, id) {
 function tdbSurveiller(d) {
   const l = [];
   d.equipements.filter(e => e.c === 'bad').forEach(e => l.push({ t:'Frigo', d:e.txt.split(' · ')[0], txt:e.nom, g:'g1', go:'temp' }));
+  if (d.ruptures.length) l.push({ t:'Rupture', d:d.ruptures.length + ' ' + accord(d.ruptures.length, 'produit'), txt:d.ruptures.map(r => r.article || '').filter(Boolean).slice(0, 2).join(', ') || 'Ruptures signalées', g:'g2', go:'controle#urgences' });
   d.ouvertes.filter(t => tbEnRetard(t) || t.priorite === 'urgente').forEach(t => l.push({ t:tbEnRetard(t) ? 'En retard' : 'Urgent',
     d:t.echeance ? tdbJourCourt(t.echeance) : '', txt:t.titre, g:tbEnRetard(t) ? 'g1' : 'g2', go:'taches' }));
-  if (d.ruptures.length) l.push({ t:'Rupture', d:d.ruptures.length + ' ' + accord(d.ruptures.length, 'produit'), txt:d.ruptures.map(r => r.article || '').filter(Boolean).slice(0, 2).join(', ') || 'Ruptures signalées', g:'g2', go:'controle#urgences' });
   const v = l.slice(0, 3);
-  return '<div class="tdb-v-col"><div class="tdb-v-t">À surveiller<small>' + (v.length ? v.length + ' ' + accord(v.length, 'élément') : '') + '</small></div>' +
+  return '<div class="tdb-v-col"><div class="tdb-v-t">À surveiller<small>' + (l.length ? l.length + ' ' + accord(l.length, 'élément') : '') + '</small></div>' +
     (v.length ? v.map((x, i) => '<button type="button" class="tdb-mini tdb-' + x.g + '" style="animation-delay:' + (0.1 + i * 0.06).toFixed(2) + 's" data-tdb-go="' + x.go + '">' +
       '<span class="tdb-etiq"><span>' + esc(x.t) + '</span><span>' + esc(x.d) + '</span></span><b>' + esc(x.txt) + '</b></button>').join('')
       : '<div class="card tdb-carte tdb-vide">Rien d’urgent : frigos, tâches et stock sont à jour.</div>') + '</div>';
@@ -306,10 +306,10 @@ function tdbZones(d) {
   const z = (g, t, v, s, viz, go, i) => '<button type="button" class="tdb-zone tdb-' + g + '" style="animation-delay:' + (0.15 + i * 0.05).toFixed(2) + 's" data-tdb-go="' + go + '">' +
     '<span class="tdb-z-t">' + esc(t) + '</span><b>' + esc(v) + '</b><span class="tdb-z-s">' + esc(s) + '</span><span class="tdb-viz">' + viz + '</span></button>';
   return '<p class="tdb-v-sec">Zones à surveiller</p><div class="tdb-zones">' +
-    z('g4', 'Frigos', tot ? ok + ' sur ' + tot + ' OK' : 'Aucun frigo', tot - ok ? (tot - ok) + ' à vérifier' : 'tout est conforme', tdbAnneau(tot ? ok / tot : 0, tot ? ok + '/' + tot : '–'), 'temp', 0) +
+    z('g4', 'Frigos', tot ? ok + ' sur ' + tot + ' OK' : 'Aucun frigo', !tot ? 'à configurer' : tot - ok ? (tot - ok) + ' à vérifier' : 'tout est conforme', tdbAnneau(tot ? ok / tot : 0, tot ? ok + '/' + tot : '–'), 'temp', 0) +
     z('g5', 'Tâches ouvertes', d.ouvertes.length + ' ' + accord(d.ouvertes.length, 'tâche'), urg ? urg + ' urgente' + (urg > 1 ? 's' : '') + ' ou en retard' : 'aucune en retard', tdbAnneau(d.ouvertes.length ? 1 - urg / d.ouvertes.length : 1, String(urg)), 'taches', 1) +
     z('g6', 'Produits ouverts', ouv ? ouv + ' à surveiller' : 'Rien à écouler', d.perimes ? d.perimes + ' ' + accord(d.perimes, 'dépassé') : d.aEcouler ? 'à vendre vite' : 'tout est dans les temps', tdbAnneau(ouv ? 0.3 : 1, ouv ? String(ouv) : 'OK'), 'frigo', 2) +
-    z('g7', p ? 'Visite le ' + tdbJourCourt(p.jour) : 'Prochaine visite', 'Pré-audit', p ? 'préparation en cours' : 'aucun passage prévu', tdbJauge(0, '…', 'tdb-z-pa'), 'preaudit', 3) +
+    z('g7', p ? 'Visite le ' + tdbJourCourt(p.jour) : 'Prochaine visite', 'Pré-audit', p ? 'préparation en cours' : 'aucun passage prévu', tdbJauge(0, p && typeof scoreConformite === 'function' ? '…' : '—', p ? 'tdb-z-pa' : null), 'preaudit', 3) +
     '</div>';
 }
 
