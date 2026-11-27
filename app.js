@@ -3483,7 +3483,7 @@ function majBoutonCompte() {
   if (!bc || !STATE.user) return bc;
   const ini = STATE.user.initiales || '';
   bc.textContent = ini;
-  bc.style.background = STATE.user.couleur || 'var(--encre)';
+  bc.style.background = STATE.user.couleur || '#5A463A';
   bc.setAttribute('aria-label', (ini ? ini + ', ' : '') + 'compte de ' + STATE.user.prenom);
   return bc;
 }

@@ -32,7 +32,7 @@
 /* --- Fond : brun profond, taches floutées (comme la vidéo) ------------------ */
 html{background:#1c1416}
 body,body:not(#x){background:transparent;color:var(--chocolat)}
-body::before{inset:-80px;filter:blur(50px);
+body::before{content:"";display:block!important;position:fixed;z-index:-1;pointer-events:none;inset:-80px;filter:blur(50px);
   background:radial-gradient(28% 40% at 12% 18%,#a5835f,transparent 70%),radial-gradient(30% 50% at 88% 30%,#6b4a34,transparent 70%),
   radial-gradient(40% 35% at 70% 92%,#3c4a2c,transparent 70%),radial-gradient(22% 60% at 4% 80%,#6b4a34,transparent 70%),
   linear-gradient(160deg,#6b4a34,#2e211b)!important}
@@ -52,7 +52,7 @@ body::before{inset:-80px;filter:blur(50px);
 .guide-apercu span{background:rgba(255,255,255,.12)}
 
 /* --- Aplats : boutons pleins clairs, texte foncé ---------------------------- */
-.btn,.btn.menthe,.jbtn.on,.chip.on,.pas.on,.chev:active,.invp-h.depliable:active .chev,.inv-total{color:var(--encre-sur-clair)}
+.btn,.btn.menthe,.jbtn.on,.chev:active,.invp-h.depliable:active .chev,.inv-total{color:var(--encre-sur-clair)}
 .btn.clair,.chip,.qui button{background:rgba(255,255,255,.08);color:var(--chocolat);border-color:var(--verre-b)}
 .btn.menthe{background:var(--pistache)}
 .pave button{background:rgba(255,255,255,.09);box-shadow:inset 0 1px 0 rgba(255,255,255,.12);color:var(--chocolat)}
@@ -79,7 +79,7 @@ option,optgroup{background:#241a1c;color:var(--chocolat)}
 #toast.erreur::before{background:#2a1f21}
 
 /* --- Écrans d'accès : fenêtre de verre ------------------------------------ */
-#login,#rattach,#amorcage{background:transparent}
+#login,#rattach,#amorcage{background:linear-gradient(160deg,#3a2a22,#1c1416)}
 #login .card,#rattach .card,#amorcage .card{background:var(--verre);border:1px solid var(--verre-b)}
 
 /* --- Tableau de bord : variante fumée --------------------------------------- */
@@ -93,7 +93,17 @@ option,optgroup{background:#241a1c;color:var(--chocolat)}
 .tdb-btn.gh{background:rgba(255,255,255,.12);color:#F4EDE7}
 
 /* --- L'impression reste sur fond blanc ------------------------------------- */
-@media print{html,body{background:#fff;color:#000}body::before{display:none}}
+@media print{html,body{background:#fff;color:#000}body::before{display:none!important}#printview,#printview *{color:#000!important}}
 #printview{color:#111}
 .tdb-jour.auj{background:#F4EDE7}
 .tdb-jour.auj span,.tdb-jour.auj b{color:#1c1416}
+
+/* --- Suites de la relecture ------------------------------------------------ */
+#toast.erreur{background:#3a1f26}
+.tdb-date{color:#8C6A2E}.tdb-date span,.tdb-date b{color:#1c1416}
+.tm-off.on{color:#1c1416}
+.btn:active,.btn.menthe:active{background:#E3D8CE}
+.cat-barre{background:rgba(40,30,32,.92);-webkit-backdrop-filter:blur(18px);backdrop-filter:blur(18px)}
+/* Aplats de statut : texte foncé sur les teintes éclaircies */
+.tache.on .box,.duo .ok.on,.btn.ambre,.tligne.valide .tl-etat{color:#1c1416}
+.alerte.warn::before,.alerte.ok::before,.alerte.info::before{color:#1c1416}
