@@ -1,0 +1,110 @@
+/* =============================================================================
+   PILOT-SHOP — fume.css
+   Thème « verre fumé » (style de la vidéo) pour TOUTE l'application.
+   Chargée après premium.css : elle redéfinit les jetons en sombre, pose le
+   fond flouté et reprend les quelques règles qui écrivent une couleur claire
+   en dur. Aucun changement de structure, aucune donnée touchée.
+   ========================================================================== */
+
+:root,:root:root{
+  color-scheme:dark;
+  /* Toile et surfaces : verre fumé sur fond brun flouté */
+  --creme:#1c1416; --creme-2:rgba(255,255,255,.07); --creme-3:rgba(255,255,255,.13);
+  --porcelaine:rgba(255,255,255,.08);
+  --filet:rgba(255,255,255,.12); --filet-fort:rgba(255,255,255,.22); --contour:rgba(255,255,255,.42);
+  /* Encres claires */
+  --chocolat:#F4EDE7; --chocolat-2:#EDE3DA; --cacao:#D2C5BA; --noisette:#B3A498; --brume-2:#8E8178;
+  /* Statuts, éclaircis pour le fond sombre */
+  --pistache:#7DB04A; --pistache-d:#B5DB8A; --pistache-l:rgba(125,176,74,.18); --pistache-c:rgba(125,176,74,.45);
+  --framboise:#E0567C; --framboise-d:#FF9DB5; --framboise-l:rgba(224,86,124,.18); --framboise-c:rgba(224,86,124,.45);
+  --caramel:#D8963A; --caramel-d:#F2C27A; --caramel-l:rgba(216,150,58,.18); --caramel-c:rgba(216,150,58,.45);
+  --myrtille:#8EA6D8; --myrtille-l:rgba(142,166,216,.18); --myrtille-c:rgba(142,166,216,.45);
+  --or:#D4B06A; --or-d:#E2C58A; --or-l:rgba(212,176,106,.22);
+  --menthe:#7DB04A; --corail:#E0567C; --ciel:#8EA6D8; --sable:#8E7457; --sable-l:rgba(255,255,255,.05);
+  --voile:rgba(28,20,22,.72); --voile-fort:rgba(28,20,22,.86); --voile-nuit:rgba(12,8,10,.62);
+  --ombre:0 1px 0 rgba(0,0,0,.15),0 14px 30px -18px rgba(0,0,0,.6);
+  --ombre-lev:0 2px 6px rgba(0,0,0,.25),0 28px 56px -20px rgba(0,0,0,.7);
+  --ombre-btn:inset 0 1px 0 rgba(255,255,255,.35),0 8px 18px -10px rgba(0,0,0,.6);
+  --halo:0 0 0 4px rgba(212,176,106,.35);
+  --verre:rgba(58,44,38,.42); --verre-b:rgba(255,255,255,.14); --encre-sur-clair:#1c1416;
+}
+
+/* --- Fond : brun profond, taches floutées (comme la vidéo) ------------------ */
+html{background:#1c1416}
+body,body:not(#x){background:transparent;color:var(--chocolat)}
+body::before{content:"";display:block!important;position:fixed;z-index:-1;pointer-events:none;inset:-80px;filter:blur(50px);
+  background:radial-gradient(28% 40% at 12% 18%,#a5835f,transparent 70%),radial-gradient(30% 50% at 88% 30%,#6b4a34,transparent 70%),
+  radial-gradient(40% 35% at 70% 92%,#3c4a2c,transparent 70%),radial-gradient(22% 60% at 4% 80%,#6b4a34,transparent 70%),
+  linear-gradient(160deg,#6b4a34,#2e211b)!important}
+
+/* --- Cartes et blocs : verre fumé ------------------------------------------- */
+.card,.kpi,.dense,.tache,.menu-item,.deg,.tseg button,.tligne,.tm-pas,.tm-val,.tm-off,.phase-nav button{
+  background:var(--porcelaine);border-color:var(--verre-b);
+  -webkit-backdrop-filter:blur(18px) saturate(1.2);backdrop-filter:blur(18px) saturate(1.2)}
+.card.plat{background:rgba(255,255,255,.05)}
+.card.menthe{background:var(--pistache-l)} .card.corail{background:var(--framboise-l)}
+.card.ambre{background:var(--caramel-l)}   .card.ciel{background:var(--myrtille-l)}
+.card.sable{background:rgba(255,255,255,.05)}
+.card.nuit{background:rgba(12,8,10,.55);color:#F4EDE7}
+.dl:nth-child(even){background:rgba(255,255,255,.04)}
+.tache.on{background:var(--pistache-l)}
+.tache .box{background:rgba(255,255,255,.1)}
+.guide-apercu span{background:rgba(255,255,255,.12)}
+
+/* --- Aplats : boutons pleins clairs, texte foncé ---------------------------- */
+.btn,.btn.menthe,.jbtn.on,.chev:active,.invp-h.depliable:active .chev,.inv-total{color:var(--encre-sur-clair)}
+.btn.clair,.chip,.qui button{background:rgba(255,255,255,.08);color:var(--chocolat);border-color:var(--verre-b)}
+.btn.menthe{background:var(--pistache)}
+.pave button{background:rgba(255,255,255,.09);box-shadow:inset 0 1px 0 rgba(255,255,255,.12);color:var(--chocolat)}
+
+/* --- Champs ------------------------------------------------------------------ */
+input,select,textarea,
+input[type=text],input[type=number],input[type=date],input[type=month],input[type=password],input[type=email],input[type=search],input[type=tel],input[type=time]{
+  background-color:rgba(255,255,255,.07);color:var(--chocolat);border-color:var(--contour)}
+input:focus,select:focus,textarea:focus{background-color:rgba(255,255,255,.12)}
+input::placeholder,textarea::placeholder{color:rgba(244,237,231,.45)}
+option,optgroup{background:#241a1c;color:var(--chocolat)}
+
+/* --- Pastilles et verdicts ------------------------------------------------- */
+.pill.ok,.verdict.ok{background:var(--pistache-l)} .pill.warn{background:var(--caramel-l)}
+.pill.bad,.verdict.bad{background:var(--framboise-l)} .pill.n{background:rgba(255,255,255,.08)}
+
+/* --- Barres : verre sombre --------------------------------------------------- */
+#topbar,#tabbar{background:var(--voile)!important;border-color:var(--verre-b);
+  -webkit-backdrop-filter:blur(24px) saturate(1.3);backdrop-filter:blur(24px) saturate(1.3)}
+#sheet > .box{background:rgba(40,30,32,.9);border-color:var(--verre-b);
+  -webkit-backdrop-filter:blur(26px);backdrop-filter:blur(26px)}
+#toast{background:#2a1f21;color:#F4EDE7;border:1px solid var(--verre-b)}
+#toast.erreur{border-color:var(--framboise-c)}
+#toast.erreur::before{background:#2a1f21}
+
+/* --- Écrans d'accès : fenêtre de verre ------------------------------------ */
+#login,#rattach,#amorcage{background:linear-gradient(160deg,#3a2a22,#1c1416)}
+#login .card,#rattach .card,#amorcage .card{background:var(--verre);border:1px solid var(--verre-b)}
+
+/* --- Tableau de bord : variante fumée --------------------------------------- */
+#tdb.tdb-verre::before{display:none}
+.tdb-fenetre{background:var(--verre);border-color:var(--verre-b);box-shadow:inset 0 1px 0 rgba(255,255,255,.18),0 30px 60px -30px rgba(0,0,0,.5)}
+#tdb .card,#tdb .tdb-kpi{background:rgba(255,255,255,.07);border-color:var(--verre-b)}
+#tdb .card:hover,#tdb .tdb-kpi:hover{background:rgba(255,255,255,.12)}
+#tdb .tdb-kpi:active{background:rgba(255,255,255,.16)}
+#tdb .tdb-prep,#tdb .tdb-acces,#tdb .tdb-nav{background:rgba(255,255,255,.07)}
+.tdb-btn{background:#F4EDE7;color:#1c1416}
+.tdb-btn.gh{background:rgba(255,255,255,.12);color:#F4EDE7}
+
+/* --- L'impression reste sur fond blanc ------------------------------------- */
+@media print{html,body{background:#fff;color:#000}body::before{display:none!important}#printview,#printview *{color:#000!important}}
+#printview{color:#111}
+.tdb-jour.auj{background:#F4EDE7}
+.tdb-jour.auj span,.tdb-jour.auj b{color:#1c1416}
+
+/* --- Suites de la relecture ------------------------------------------------ */
+#toast.erreur{background:#3a1f26}
+.tdb-date{color:#8C6A2E}.tdb-date span,.tdb-date b{color:#1c1416}
+.tm-off.on{color:#1c1416}
+.btn:active,.btn.menthe:active{background:#E3D8CE}
+.cat-barre{background:rgba(40,30,32,.92);-webkit-backdrop-filter:blur(18px);backdrop-filter:blur(18px)}
+/* Aplats de statut : texte foncé sur les teintes éclaircies */
+.tache.on .box,.duo .ok.on,.btn.ambre,.tligne.valide .tl-etat{color:#1c1416}
+.alerte.warn::before,.alerte.ok::before,.alerte.info::before{color:#1c1416}
+#page .tache.on .box,#page .tache.liee.on .box,.duo.compact .btn.ok.on{color:#1c1416}
