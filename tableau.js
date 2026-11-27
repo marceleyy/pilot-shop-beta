@@ -73,6 +73,13 @@ async function tdbDonnees() {
   /* Pertes du mois par motif : litres de glace, et lignes pour le reste. */
   const parMotif = {};
   let litres = 0, lignes = 0;
+  /* Litres jetés par jour du mois (courbe de la carte « Pertes »), à partir des mêmes registres. */
+  const litresJour = {};
+  pertes.forEach((l, i) => (l || []).forEach(w => {
+    if (!w || w.supprime || w.motif === 'inventaire' || w.horsEcart) return;
+    const jj = clesPertes[i].slice(7, 17);
+    litresJour[jj] = (litresJour[jj] || 0) + (typeof litresJetes === 'function' ? litresJetes(w) : 0);
+  }));
   [].concat(...pertes).forEach(w => {
     /* Ajustements d'inventaire et lignes hors écart : pas des pertes déclarées. */
     if (!w || w.supprime || w.motif === 'inventaire' || w.horsEcart) return;
@@ -97,7 +104,7 @@ async function tdbDonnees() {
 
   return { j:j, ouvertes:ouvertes, passages:passages || [], equipements:equipements, ev:ev,
            ruptures:(ruptures || []).filter(r => !r.traite),
-           perimes:(fifo || []).filter(f => f.c === 'rouge').length, aEcouler:(fifo || []).filter(f => f.c === 'orange').length, parMotif:parMotif, litres:litres, lignes:lignes, mois:mois };
+           perimes:(fifo || []).filter(f => f.c === 'rouge').length, aEcouler:(fifo || []).filter(f => f.c === 'orange').length, parMotif:parMotif, litres:litres, lignes:lignes, mois:mois, litresJour:litresJour };
 }
 
 /* --- Cartes ---------------------------------------------------------------- */
@@ -236,6 +243,76 @@ function tdbPertes(d) {
     '<button type="button" class="btn clair sm tdb-bas" data-tdb-go="pertes">Déclarer une perte</button>');
 }
 
+/* --- Verre : à surveiller, carte principale, zones colorées -------------- */
+/* Courbe SVG d'une série (échelle propre à la série). */
+function tdbCourbe(v, cls) {
+  if (!v || v.length < 2) return '';
+  const W = 600, H = 220, m = 10, mn = Math.min.apply(null, v), mx = Math.max.apply(null, v), r = mx - mn || 1;
+  const p = v.map((x, i) => [m + i * (W - 2 * m) / (v.length - 1), H - m - (x - mn) / r * (H - 2 * m)]);
+  const d = p.map((q, i) => (i ? 'L' : 'M') + q[0].toFixed(1) + ' ' + q[1].toFixed(1)).join(' ');
+  return '<svg class="' + cls + '" viewBox="0 0 ' + W + ' ' + H + '" preserveAspectRatio="none" aria-hidden="true">' +
+    '<defs><linearGradient id="tdbg" x1="0" x2="0" y1="0" y2="1"><stop offset="0" stop-color="#FFD9C2" stop-opacity=".45"/><stop offset="1" stop-color="#FFD9C2" stop-opacity="0"/></linearGradient></defs>' +
+    '<path d="' + d + ' L' + p[p.length - 1][0] + ' ' + H + ' L' + p[0][0] + ' ' + H + 'Z" fill="url(#tdbg)"/>' +
+    '<path class="tdb-trace" d="' + d + '" fill="none" stroke="#FFD9C2" stroke-width="2.5" vector-effect="non-scaling-stroke" stroke-linecap="round"/></svg>';
+}
+function tdbAnneau(part, txt) {
+  const C = 2 * Math.PI * 22, x = Math.max(0, Math.min(1, part || 0));
+  return '<svg viewBox="0 0 60 60" width="66" height="66" aria-hidden="true"><circle cx="30" cy="30" r="22" fill="none" stroke="rgba(255,255,255,.25)" stroke-width="7"/>' +
+    '<circle cx="30" cy="30" r="22" fill="none" stroke="#fff" stroke-width="7" stroke-linecap="round" stroke-dasharray="' + C.toFixed(2) + '" stroke-dashoffset="' + (C * (1 - x)).toFixed(2) + '" transform="rotate(-90 30 30)"/>' +
+    '<text x="30" y="35" text-anchor="middle" fill="#fff" font-size="12.5" font-weight="800">' + esc(txt) + '</text></svg>';
+}
+function tdbJauge(part, txt, id) {
+  const L = Math.PI * 24, x = Math.max(0, Math.min(1, part || 0));
+  return '<svg viewBox="0 0 64 40" width="96" height="60" aria-hidden="true"><path d="M8 34a24 24 0 0 1 48 0" fill="none" stroke="rgba(255,255,255,.25)" stroke-width="7" stroke-linecap="round"/>' +
+    '<path' + (id ? ' id="' + id + '-arc"' : '') + ' d="M8 34a24 24 0 0 1 48 0" fill="none" stroke="#fff" stroke-width="7" stroke-linecap="round" stroke-dasharray="' + L.toFixed(2) + '" stroke-dashoffset="' + (L * (1 - x)).toFixed(2) + '"/>' +
+    '<text' + (id ? ' id="' + id + '-txt"' : '') + ' x="32" y="34" text-anchor="middle" fill="#fff" font-size="10.5" font-weight="800">' + esc(txt) + '</text></svg>';
+}
+
+/* À surveiller : équipements critiques, tâches en retard ou urgentes, ruptures. */
+function tdbSurveiller(d) {
+  const l = [];
+  d.equipements.filter(e => e.c === 'bad').forEach(e => l.push({ t:'Frigo', d:e.txt.split(' · ')[0], txt:e.nom, g:'g1', go:'temp' }));
+  d.ouvertes.filter(t => tbEnRetard(t) || t.priorite === 'urgente').forEach(t => l.push({ t:tbEnRetard(t) ? 'En retard' : 'Urgent',
+    d:t.echeance ? tdbJourCourt(t.echeance) : '', txt:t.titre, g:tbEnRetard(t) ? 'g1' : 'g2', go:'taches' }));
+  if (d.ruptures.length) l.push({ t:'Rupture', d:d.ruptures.length + ' ' + accord(d.ruptures.length, 'produit'), txt:d.ruptures.map(r => r.article || '').filter(Boolean).slice(0, 2).join(', ') || 'Ruptures signalées', g:'g2', go:'controle#urgences' });
+  const v = l.slice(0, 3);
+  return '<div class="tdb-v-col"><div class="tdb-v-t">À surveiller<small>' + (v.length ? v.length + ' ' + accord(v.length, 'élément') : '') + '</small></div>' +
+    (v.length ? v.map((x, i) => '<button type="button" class="tdb-mini tdb-' + x.g + '" style="animation-delay:' + (0.1 + i * 0.06).toFixed(2) + 's" data-tdb-go="' + x.go + '">' +
+      '<span class="tdb-etiq"><span>' + esc(x.t) + '</span><span>' + esc(x.d) + '</span></span><b>' + esc(x.txt) + '</b></button>').join('')
+      : '<div class="card tdb-carte tdb-vide">Rien d’urgent : frigos, tâches et stock sont à jour.</div>') + '</div>';
+}
+
+/* Carte principale : pertes du mois, avec la courbe des litres cumulés jour après jour. */
+function tdbHero(d) {
+  const n = +d.j.slice(8, 10), serie = [];
+  let cumul = 0;
+  for (let i = 1; i <= n; i++) { cumul += d.litresJour[d.mois + '-' + String(i).padStart(2, '0')] || 0; serie.push(cumul); }
+  const titreMois = tdbMoisLong[+d.mois.slice(5, 7) - 1];
+  return '<section class="tdb-hero" aria-label="Pertes du mois">' +
+    '<div class="tdb-flags"><span>Pertes de ' + esc(titreMois) + '</span><span>' + d.lignes + ' ' + accord(d.lignes, 'déclaration') + '</span></div>' +
+    (d.litres > 0 ? tdbCourbe(serie, 'tdb-courbe') : '') +
+    '<h2>' + (d.litres > 0 ? tdbNombre(d.litres) + ' L de glace jetés ce mois' : 'Aucune glace jetée ce mois') + '</h2>' +
+    '<p>' + (d.litres > 0 ? 'Litres cumulés depuis le 1er ' + esc(titreMois) + '. Le détail par motif est dans la carte « Pertes du mois ».' : 'Déclarez chaque perte pour suivre les écarts de la période.') + '</p>' +
+    '<div class="tdb-hero-a"><button type="button" class="tdb-btn" data-tdb-go="pertes">Déclarer une perte</button>' +
+    '<button type="button" class="tdb-btn gh" data-tdb-go="temp">Relever les frigos</button></div></section>';
+}
+
+/* Zones colorées : frigos, tâches, produits ouverts, préparation de la visite. */
+function tdbZones(d) {
+  const ok = d.equipements.filter(e => e.c === 'ok').length, tot = d.equipements.length;
+  const urg = d.ouvertes.filter(t => tbEnRetard(t) || t.priorite === 'urgente').length;
+  const ouv = d.perimes + d.aEcouler;
+  const p = d.passages.filter(x => x.jour >= d.j).sort((a, b) => (a.jour < b.jour ? -1 : 1))[0];
+  const z = (g, t, v, s, viz, go, i) => '<button type="button" class="tdb-zone tdb-' + g + '" style="animation-delay:' + (0.15 + i * 0.05).toFixed(2) + 's" data-tdb-go="' + go + '">' +
+    '<span class="tdb-z-t">' + esc(t) + '</span><b>' + esc(v) + '</b><span class="tdb-z-s">' + esc(s) + '</span><span class="tdb-viz">' + viz + '</span></button>';
+  return '<p class="tdb-v-sec">Zones à surveiller</p><div class="tdb-zones">' +
+    z('g4', 'Frigos', tot ? ok + ' sur ' + tot + ' OK' : 'Aucun frigo', tot - ok ? (tot - ok) + ' à vérifier' : 'tout est conforme', tdbAnneau(tot ? ok / tot : 0, tot ? ok + '/' + tot : '–'), 'temp', 0) +
+    z('g5', 'Tâches ouvertes', d.ouvertes.length + ' ' + accord(d.ouvertes.length, 'tâche'), urg ? urg + ' urgente' + (urg > 1 ? 's' : '') + ' ou en retard' : 'aucune en retard', tdbAnneau(d.ouvertes.length ? 1 - urg / d.ouvertes.length : 1, String(urg)), 'taches', 1) +
+    z('g6', 'Produits ouverts', ouv ? ouv + ' à surveiller' : 'Rien à écouler', d.perimes ? d.perimes + ' ' + accord(d.perimes, 'dépassé') : d.aEcouler ? 'à vendre vite' : 'tout est dans les temps', tdbAnneau(ouv ? 0.3 : 1, ouv ? String(ouv) : 'OK'), 'frigo', 2) +
+    z('g7', p ? 'Visite le ' + tdbJourCourt(p.jour) : 'Prochaine visite', 'Pré-audit', p ? 'préparation en cours' : 'aucun passage prévu', tdbJauge(0, '…', 'tdb-z-pa'), 'preaudit', 3) +
+    '</div>';
+}
+
 /* --- Dessin et branchements ----------------------------------------------- */
 async function tdbDessiner(page) {
   const n = ++_tdbRendu;
@@ -244,11 +321,13 @@ async function tdbDessiner(page) {
   const ancien = $('#tdb'); if (ancien) ancien.remove();
   const bloc = document.createElement('div');
   bloc.id = 'tdb';
-  bloc.innerHTML = tdbCompteurs(d) +
+  bloc.className = 'tdb-verre';
+  bloc.innerHTML = '<div class="tdb-fenetre">' + tdbCompteurs(d) +
+    '<div class="tdb-haut">' + tdbSurveiller(d) + tdbHero(d) + '</div>' + tdbZones(d) +
     '<div class="tdb-grille">' +
     '<div class="tdb-col">' + tdbActions(d) + tdbEquipements(d) + '</div>' +
     '<div class="tdb-col">' + tdbVisite(d) + tdbPertes(d) + '</div>' +
-    '<div class="tdb-col">' + tdbAcces() + tdbCalendrier(d) + '</div></div>' +
+    '<div class="tdb-col">' + tdbAcces() + tdbCalendrier(d) + '</div></div></div>' +
     '<div class="entete tdb-suite"><h3>Suivi du jour</h3></div>';
   /* Après le rappel « Mise en route » s'il est là, avant tout le reste. */
   const guide = page.firstChild && page.firstChild.querySelector && page.firstChild.querySelector('#gd-rep') ? page.firstChild : null;
@@ -273,14 +352,17 @@ async function tdbDessiner(page) {
   o('tdb-bl', () => scannerBL());
 
   /* Score de préparation : lecture des registres, sans retenir l'écran. */
-  if (bloc.querySelector('#tdb-score') && typeof scoreConformite === 'function') {
+  if ((bloc.querySelector('#tdb-score') || bloc.querySelector('#tdb-z-pa-txt')) && typeof scoreConformite === 'function') {
     scoreConformite().then(s => {
       const sc = bloc.querySelector('#tdb-score'), br = bloc.querySelector('#tdb-barre');
-      if (!sc || !document.body.contains(sc)) return;
+      if (!document.body.contains(bloc)) return;
       const v = s && s.score !== null && s.score !== undefined ? s.score : null;
-      sc.textContent = v === null ? '—' : v + ' %';
+      if (sc) sc.textContent = v === null ? '—' : v + ' %';
       if (br) { br.style.width = (v || 0) + '%'; br.className = s ? s.classe : ''; }
-    }).catch(() => { const sc = bloc.querySelector('#tdb-score'); if (sc) sc.textContent = '—'; });
+      const za = bloc.querySelector('#tdb-z-pa-arc'), zt = bloc.querySelector('#tdb-z-pa-txt');
+      if (za) za.setAttribute('stroke-dashoffset', (Math.PI * 24 * (1 - (v || 0) / 100)).toFixed(2));
+      if (zt) zt.textContent = v === null ? '—' : v + ' %';
+    }).catch(() => { const sc = bloc.querySelector('#tdb-score'); if (sc) sc.textContent = '—'; const zt = bloc.querySelector('#tdb-z-pa-txt'); if (zt) zt.textContent = '—'; });
   }
 }
 /* Après un changement de semaine : seuls les boutons du calendrier redessiné. */
