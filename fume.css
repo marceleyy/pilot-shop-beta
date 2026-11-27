@@ -107,3 +107,4 @@ option,optgroup{background:#241a1c;color:var(--chocolat)}
 /* Aplats de statut : texte foncé sur les teintes éclaircies */
 .tache.on .box,.duo .ok.on,.btn.ambre,.tligne.valide .tl-etat{color:#1c1416}
 .alerte.warn::before,.alerte.ok::before,.alerte.info::before{color:#1c1416}
+#page .tache.on .box,#page .tache.liee.on .box,.duo.compact .btn.ok.on{color:#1c1416}
