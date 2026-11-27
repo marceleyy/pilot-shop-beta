@@ -182,7 +182,7 @@ V.miseenroute = async function () {
       '<div class="rang" style="margin-top:12px"><b class="num">' + n + ' / ' + ETAPES_GUIDE.length + '</b>' +
       '<span class="mini">' + (n === ETAPES_GUIDE.length ? 'Tout est prêt.' :
         'Prochaine étape : ' + esc(prochaine.titre)) + '</span></div>' +
-      '<div style="height:6px;border-radius:3px;background:rgba(255,255,255,.1);margin-top:10px;overflow:hidden">' +
+      '<div style="height:6px;border-radius:3px;background:rgba(15,32,39,.08);margin-top:10px;overflow:hidden">' +
       '<div style="height:100%;width:' + Math.round(n * 100 / ETAPES_GUIDE.length) + '%;background:var(--menthe-d)"></div></div>',
       'solide') +
     '<div class="stack" style="margin-top:14px">' +
@@ -194,7 +194,7 @@ V.miseenroute = async function () {
         '<div class="rang" style="align-items:flex-start;flex-wrap:nowrap">' +
         '<span class="num" style="flex:0 0 auto;width:28px;height:28px;border-radius:50%;display:inline-flex;' +
         'align-items:center;justify-content:center;font-weight:600;' +
-        (ok ? 'background:var(--menthe-d);color:#1c1416' : 'background:rgba(255,255,255,.1)') + '">' +
+        (ok ? 'background:var(--menthe-d);color:#fff' : 'background:rgba(15,32,39,.08)') + '">' +
         (ok ? '✓' : (i + 1)) + '</span>' +
         '<div style="flex:1;min-width:0"><b>' + esc(e.titre) + '</b>' +
         '<p class="mini" style="margin-top:3px">' + esc(e.texte) + '</p>' +

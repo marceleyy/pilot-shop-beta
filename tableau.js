@@ -109,7 +109,7 @@ async function tdbDonnees() {
 
 /* --- Cartes ---------------------------------------------------------------- */
 const tdbCarte = (icone, titre, corps, id) =>
-  '<section class="card tdb-carte"' + (id ? ' id="' + id + '"' : '') + '>' +
+  '<section class="card tdb-carte tdb-c-' + icone + '"' + (id ? ' id="' + id + '"' : '') + '>' +
   '<h2 class="tdb-titre">' + ic(icone, 20) + '<span>' + esc(titre) + '</span></h2>' + corps + '</section>';
 
 function tdbCompteurs(d) {
