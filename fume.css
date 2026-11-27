@@ -60,6 +60,7 @@ body::before{content:"";display:block!important;position:fixed;z-index:-1;pointe
 #tdb .tdb-c-temperature{background:rgba(238,243,224,.85)}
 #tdb .tdb-c-periodes{background:rgba(233,216,194,.6)}
 #tdb .tdb-c-controle{background:rgba(234,219,188,.6)}
+#tdb .tdb-c-valide:hover{background:rgba(251,239,200,.95)} #tdb .tdb-c-temperature:hover{background:rgba(238,243,224,.95)} #tdb .tdb-c-periodes:hover{background:rgba(233,216,194,.75)} #tdb .tdb-c-controle:hover{background:rgba(234,219,188,.75)}
 
 /* --- L'impression reste sur fond blanc ------------------------------------- */
 @media print{html,body{background:#fff}body::before{display:none!important}}
